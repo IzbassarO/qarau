@@ -2,6 +2,21 @@
 
 Newest first. Keep it short.
 
+## 2026-10-14 — M2 prep started (`feat/m2-prep`)
+
+**Done**
+- PR #1 (M0 + M1) merged into `main` after owner review; CI green.
+- Task `docs/tasks/M2.md` and plan `docs/notes/m2-plan.md` (bundle v2 + findings contract,
+  `Segmenter`/`Densifier` interfaces, five parallel parts R/D/S/V/T). `ml` dependency group
+  (torch, transformers) kept out of default `uv sync`.
+
+**In progress (Sonnet agents, coordinator reviews before merge)**
+- R: reconstruction eval (loop detection / overlap / global mapper) on all four runs, ADR 0007; PostGIS test + CI.
+- D: densification without CUDA, commercial-licence models only, ≥ 1 M points on Orono, ADR 0008.
+- S: segmenters (manual, local dev-only, SAM 3.1 API stub), mask → 3D projection, voting, findings, ADR 0009.
+- V: through-camera roll, initial view on the object, bundle v2 reader, findings UI.
+- T: CC-licensed defect footage + segmentation dataset, `docs/notes/datasets.md`.
+
 ## 2026-10-14 — Part B (pipeline) merged; M0 + M1 complete on public data
 
 **Done**
