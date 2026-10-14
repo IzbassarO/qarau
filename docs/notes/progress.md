@@ -2,6 +2,17 @@
 
 Newest first. Keep it short.
 
+## 2026-10-14 — Part A (M0) merged
+
+- `make up` brings up Postgres 16 + PostGIS 3.6 + pgvector 0.8 and Versity S3 Gateway, both
+  healthy. `/health` returns 200 with both ok, and 503 within 0.02 s when storage is stopped.
+- Runs API serves the South Building bundle; path traversal returns 404. Backend: 10 tests,
+  ruff and mypy clean.
+- Deviations: Postgres image is `pgvector/pgvector:0.8.0-pg16` + PostGIS from apt, because
+  `postgis/postgis` has no arm64 image. Host port 5433 for Postgres. `make api API_PORT=8001`
+  on this Mac, because port 8000 is taken by an unrelated container.
+- Known: CI not yet run on GitHub; no S3 bucket created yet (nothing writes to S3 in M1).
+
 ## 2026-10-14 — resume after usage limit
 
 - First A/B/C subagents stopped at their first step (model usage limit). Their worktrees had
