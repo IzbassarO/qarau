@@ -2,6 +2,19 @@
 
 Newest first. Keep it short.
 
+## 2026-10-14 — Part C (viewer) merged
+
+- `/viewer/:runId` loads the bundle from the real API (via Vite proxy) and from the dev
+  middleware. Verified with Playwright on Metal: South Building, the church video and the
+  Aegviidu water tower video all load in about 1.5 s and render at 60 fps (vsync cap).
+  Synthetic 5 M points: 4.9 s load, 60 fps.
+- Screenshots checked by eye: build-up along the video, "seen now" highlight, camera path
+  and frustums, view through the video camera matches the real frame, point → frames list.
+- Fixed during review: crash on unregistered frames (panel read a field those frames do not
+  have), oversized points in close-up views, frustum lines across the through-camera view.
+- Known: through-camera view ignores camera roll; XYZ gizmo has no letters; CPU picking and
+  no LOD (both marked `ponytail:`); Kazakh strings need a native speaker's review.
+
 ## 2026-10-14 — Part A (M0) merged
 
 - `make up` brings up Postgres 16 + PostGIS 3.6 + pgvector 0.8 and Versity S3 Gateway, both
