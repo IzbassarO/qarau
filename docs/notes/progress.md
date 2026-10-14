@@ -2,6 +2,17 @@
 
 Newest first. Keep it short.
 
+## 2026-10-14 — New direction: MVP plan; Step 1 room test (`feat/room-test`)
+
+- Owner's brief arrived **without the plan text** (placeholder `<paste the plan here>`):
+  `docs/plan/mvp.md`, roadmap update and `docs/tasks/phase1.md` wait for it.
+- Room video (`IMG_8315.MOV`, iPhone HDR portrait): M1 registered 14 of 111 frames. Fixed in
+  the frames/reconstruction stages (HDR→SDR, long-side cap, 6 fps, exhaustive matching ≤ 300)
+  → 244 of 269, 26 k points. Details: `docs/notes/room-test.md`, `docs/notes/benchmark.md`.
+- No A4 visible in the video → scale check needs a re-shoot.
+- "Original colours" toggle already existed in the viewer; checked on the room.
+- R and D agent worktrees from M2 prep left as they are (D has the dense stage, unmerged).
+
 ## 2026-10-14 — M2 prep resumed after the session stopped
 
 - Merged: V (roll-exact camera view, object-focused initial view, bundle v2 reader,
