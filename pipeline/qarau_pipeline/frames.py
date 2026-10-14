@@ -15,6 +15,8 @@ from .interfaces import StageError
 
 MIN_FRAMES, MAX_FRAMES, FRAMES_PER_S = 60, 300, 2.5
 BLUR_RATIO, MAX_DROP = 0.35, 0.30
+# sky legitimately saturates ~40-45 % of drone frames; only near-white frames are exposure failures
+CLIP_HIGH_MAX = 0.7
 
 
 def probe(video: Path) -> dict[str, Any]:
@@ -59,7 +61,12 @@ def decide_drops(blur: list[float], expo: list[dict[str, float]]) -> list[str | 
     med = float(np.median(blur))
     reasons: list[str | None] = []
     for b, e in zip(blur, expo, strict=True):
-        if e["mean"] < 20 or e["mean"] > 235 or e["clip_low"] > 0.4 or e["clip_high"] > 0.4:
+        if (
+            e["mean"] < 20
+            or e["mean"] > 235
+            or e["clip_low"] > 0.4
+            or e["clip_high"] > CLIP_HIGH_MAX
+        ):
             reasons.append("exposure")
         elif b < BLUR_RATIO * med:
             reasons.append("blur")
