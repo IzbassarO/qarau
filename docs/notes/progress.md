@@ -2,6 +2,17 @@
 
 Newest first. Keep it short.
 
+## 2026-10-14 — M2 prep resumed after the session stopped
+
+- Merged: V (roll-exact camera view, object-focused initial view, bundle v2 reader,
+  findings UI) and T (datasets, `docs/notes/datasets.md`, Raketa shipwreck drone video).
+- R, D, S agents had stopped mid-way; relaunched in their own worktrees from where they were:
+  - R: PostGIS test committed; recon eval done on notre-dame (global mapper + loop +
+    overlap 20 registers 54/54 vs 52/54), Aegviidu baseline only (6 models, 127/177).
+  - D: Depth Anything V2 Small (Apache-2.0) scaled to sparse COLMAP points → 7.1 M points on
+    Orono (held-out depth error median 4.3 %); export to bundle v2 and viewer check pending.
+  - S: segmenters + projection committed; real-footage run (Raketa) and ADR pending.
+
 ## 2026-10-14 — M2 prep started (`feat/m2-prep`)
 
 **Done**
