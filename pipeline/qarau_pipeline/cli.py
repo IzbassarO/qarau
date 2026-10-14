@@ -1,4 +1,4 @@
-"""CLI: python -m qarau_pipeline {run,export} ..."""
+"""CLI: python -m qarau_pipeline {run,export,segment,project} ..."""
 
 from __future__ import annotations
 
@@ -14,7 +14,9 @@ import pycolmap
 from . import frames as frames_stage
 from .export import export_bundle, frames_from_images, frames_from_json
 from .interfaces import StageError, run_stage
+from .projection import project_stage
 from .reconstruction import ColmapReconstructor
+from .segmentation import GroundedSam2, ManualMasks, SamApiSegmenter, parse_prompt, segment_stage
 
 
 def _ffmpeg_version() -> str:
@@ -85,6 +87,22 @@ def cmd_run(a: argparse.Namespace) -> None:
     _export(out, out / "colmap/sparse/0", frames_from_json(out), fj["source"])
 
 
+def cmd_segment(a: argparse.Namespace) -> None:
+    run = Path(a.run).resolve()
+    if a.segmenter == "manual":
+        if not a.masks:
+            raise StageError("--segmenter manual needs --masks DIR")
+        seg: Any = ManualMasks(a.masks)
+    else:
+        seg = GroundedSam2() if a.segmenter == "grounded-sam2" else SamApiSegmenter()
+    prompts = [parse_prompt(p) for p in a.prompt]
+    print("segment:", segment_stage(run, seg, prompts, a.frames, a.stride))
+
+
+def cmd_project(a: argparse.Namespace) -> None:
+    print("project:", project_stage(Path(a.run).resolve(), a.scale))
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="qarau_pipeline")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -103,6 +121,18 @@ def main(argv: list[str] | None = None) -> None:
     e.add_argument("--images", help="image dir (image-set input); omit to use <out>/frames.json")
     e.add_argument("--out", required=True)
     e.set_defaults(fn=cmd_export)
+    sg = sub.add_parser("segment", help="masks for the bundle's frames -> <run>/segmentation/")
+    sg.add_argument("--run", required=True)
+    sg.add_argument("--segmenter", choices=["manual", "grounded-sam2", "sam-api"], required=True)
+    sg.add_argument("--masks", help="manual: directory with masks")
+    sg.add_argument("--prompt", action="append", required=True, metavar="TEXT[:CLASS[:SEVERITY]]")
+    sg.add_argument("--frames", choices=["registered", "all", "stride"], default="registered")
+    sg.add_argument("--stride", type=int, default=5)
+    sg.set_defaults(fn=cmd_segment)
+    pj = sub.add_parser("project", help="masks -> labelled 3D points -> <run>/findings/")
+    pj.add_argument("--run", required=True)
+    pj.add_argument("--scale", type=float, help="metres per world unit (area in m2 only with it)")
+    pj.set_defaults(fn=cmd_project)
     a = p.parse_args(argv)
     try:
         a.fn(a)
