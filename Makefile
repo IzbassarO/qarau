@@ -1,3 +1,4 @@
+API_PORT ?= 8000
 COMPOSE = docker compose --env-file .env -f infra/docker-compose.yml
 
 .PHONY: up down api web test lint sample
@@ -9,7 +10,7 @@ down:
 	$(COMPOSE) down
 
 api:
-	cd backend && set -a && . ../.env && set +a && uv run uvicorn app.main:app --reload --port 8000
+	cd backend && set -a && . ../.env && set +a && uv run uvicorn app.main:app --reload --port $(API_PORT)
 
 web:
 	cd web && pnpm dev

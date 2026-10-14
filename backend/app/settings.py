@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore")
 
-    database_url: str = "postgresql+psycopg://qarau:qarau_dev@localhost:5432/qarau"
+    database_url: str = "postgresql+psycopg://qarau:qarau_dev@localhost:5433/qarau"
     s3_endpoint: str = "http://localhost:7070"
     s3_access_key: str = ""
     s3_secret_key: str = ""

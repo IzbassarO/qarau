@@ -3,7 +3,7 @@ name: qarau
 services:
   postgres:
     build: ./postgres
-    image: qarau/postgres:16-3.5-pgvector
+    image: qarau/postgres:16-postgis-pgvector
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
