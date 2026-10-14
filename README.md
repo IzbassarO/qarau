@@ -31,9 +31,19 @@ See [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Local development
 
-Requirements (added as milestones land): Python 3.12, Node.js 22, Docker, COLMAP, FFmpeg.
+Requirements: Docker, [uv](https://docs.astral.sh/uv/) (Python 3.12), Node.js 22 + pnpm
+(for `web/`), FFmpeg and COLMAP (for `pipeline/`).
 
 ```bash
-cp .env.example .env
-docker compose -f infra/docker-compose.yml up -d   # Postgres + MinIO (from M0)
+cp .env.example .env          # safe dev defaults; never commit .env
+make up                       # Postgres 16 + PostGIS + pgvector, Versity S3 Gateway (waits until healthy)
+make api                      # FastAPI on :8000 (use `make api API_PORT=8001` if 8000 is taken)
+curl -s localhost:8000/health # {"status":"ok","db":"ok","storage":"ok"}
+make test lint                # backend always; pipeline/ and web/ when present
+make down
 ```
+
+Ports: Postgres `5433` (host), S3 `7070`, API `8000`, web `5173`. Object storage is any
+S3-compatible server ([ADR 0006](docs/decisions/0006-object-storage-after-minio.md)); the API only
+needs `S3_ENDPOINT` and keys from `.env`. The pipeline output in `data/runs/` is served by the
+API under `/api/runs`.

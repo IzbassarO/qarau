@@ -1,0 +1,43 @@
+name: qarau
+
+services:
+  postgres:
+    build: ./postgres
+    image: qarau/postgres:16-postgis-pgvector
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # S3-compatible storage: Versity S3 Gateway, POSIX backend (ADR 0006).
+  # The image is Alpine/busybox, so the healthcheck uses wget against the gateway's --health path.
+  s3:
+    image: versity/versitygw:v1.9.0
+    environment:
+      ROOT_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      ROOT_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      VGW_BACKEND: posix
+      VGW_BACKEND_ARG: /data
+      VGW_HEALTH: /health
+    ports:
+      - "${S3_PORT:-7070}:7070"
+    volumes:
+      - s3data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7070/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  s3data:

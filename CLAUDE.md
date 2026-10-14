@@ -59,7 +59,7 @@ server; only storage addresses and the LLM backend change via config.
 
 1. **Capture** — drone video (+ GPS/telemetry from SRT/metadata), phone app, desktop app
    import from SD card.
-2. **Storage** — S3-compatible object storage (MinIO on-prem, S3 in cloud) for video,
+2. **Storage** — S3-compatible object storage (Versity S3 Gateway in dev, ADR 0006; S3 in cloud) for video,
    frames, point clouds (LAZ for exchange, Potree octree for viewing); PostgreSQL 16 with
    PostGIS (geo) and pgvector (similar-defect search).
 3. **Processing** — GPU workers, jobs from a durable queue. Stages are idempotent and
@@ -121,7 +121,7 @@ Create folders when the first real file needs them, not before.
 | API | FastAPI, Pydantic v2, SQLAlchemy 2, Alembic |
 | Queue | Redis + a durable task runner (start with RQ or Celery; Temporal later if needed) |
 | DB | PostgreSQL 16 + PostGIS + pgvector |
-| Storage | MinIO (local and on-prem), S3 in cloud |
+| Storage | S3-compatible: Versity S3 Gateway (dev, ADR 0006), S3 in cloud |
 | 3D | COLMAP, Open3D, laspy, PotreeConverter |
 | Vision | SAM 3.1, OpenCV, FFmpeg |
 | LLM | provider interface: Meta Model API, local vLLM, Anthropic API for dev |
@@ -202,7 +202,7 @@ modes; security-sensitive defaults. Everything else — decide, document, contin
 
 | | Goal | Done when |
 | --- | --- | --- |
-| M0 | Repo, docs, dev environment | `docker compose up` starts Postgres + MinIO + API health check |
+| M0 | Repo, docs, dev environment | `docker compose up` starts Postgres + S3 storage + API health check |
 | M1 | Video → point cloud → web viewer | A phone video becomes a black-background point cloud viewable and rotatable in the browser |
 | M2 | Defects on the map | SAM 3.1 masks projected onto 3D points; click a red point → frames + mask + confidence |
 | M3 | Quick Scan complete | Coverage states, quality check, measurement, ranked list, PDF report, decision log |

@@ -1,0 +1,33 @@
+# 0003 — Viewer bundle: manifest.json + raw typed arrays
+
+- Status: accepted
+- Date: 2026-10-14
+
+## Context
+
+The viewer needs, per point: position, colour, the first frame that observed it, and the
+set of frames that observed it; per frame: pose, intrinsics, timecode, and the set of
+points it observed. Standard cloud formats (PLY, LAZ, Potree) carry geometry well but not
+these cross-references, and parsing them in the browser costs time and code.
+
+## Decision
+
+The pipeline's `export` stage writes `<run>/web/manifest.json` plus little-endian typed
+arrays with no header (`points.position.f32`, `points.first_seen.u16`,
+`tracks.*_offsets.u32`, `tracks.*.u16/u32`). Frame ↔ point correspondence is stored as two
+CSR index structures taken directly from COLMAP tracks. Poses are COLMAP `cam_from_world`
+after a rigid alignment that makes +Z up; the applied transform is stored in the manifest.
+Frame indices refer to the time-ordered `frames` array, never to COLMAP image ids.
+Full field list: `docs/notes/m1-plan.md` §3.
+
+LAZ remains the exchange format for engineers and other tools; Potree octrees are added
+only when point counts require LOD (ADR 0005).
+
+## Consequences
+
+- `fetch().arrayBuffer()` → `BufferAttribute`: zero parsing, a few hundred ms for millions
+  of points.
+- Any later stage (segmentation labels, coverage states) adds one more array and one
+  manifest key without changing existing ones; `version` is bumped on breaking changes.
+- The bundle is plain files, so it can live in a run directory, in object storage, or in a
+  desktop app without conversion.
