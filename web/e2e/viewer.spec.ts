@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- test hook on window */
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
