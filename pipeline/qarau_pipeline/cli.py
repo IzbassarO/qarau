@@ -9,13 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import pycolmap
-
 from . import frames as frames_stage
-from .export import export_bundle, frames_from_images, frames_from_json
 from .interfaces import StageError, run_stage
-from .projection import project_stage
-from .reconstruction import ColmapReconstructor
 from .segmentation import GroundedSam2, ManualMasks, SamApiSegmenter, parse_prompt, segment_stage
 
 
@@ -27,7 +22,15 @@ def _ffmpeg_version() -> str:
         return "unknown"
 
 
+# pycolmap is imported inside the commands that need it: it bundles its own libomp, which makes
+# torch abort in the same process (segment stage), so the segment path must not load it.
+
+
 def _export(out: Path, sparse: Path, frames: list[dict[str, Any]], source: dict[str, Any]) -> None:
+    import pycolmap
+
+    from .export import export_bundle
+
     def go() -> dict[str, Any]:
         rec = pycolmap.Reconstruction(str(sparse))
         return export_bundle(rec, frames, out, source, out.name)
@@ -37,6 +40,10 @@ def _export(out: Path, sparse: Path, frames: list[dict[str, Any]], source: dict[
 
 
 def cmd_export(a: argparse.Namespace) -> None:
+    import pycolmap
+
+    from .export import frames_from_images, frames_from_json
+
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     if a.images:
@@ -57,6 +64,11 @@ def cmd_export(a: argparse.Namespace) -> None:
 
 
 def cmd_run(a: argparse.Namespace) -> None:
+    import pycolmap
+
+    from .export import frames_from_json
+    from .reconstruction import ColmapReconstructor
+
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     if a.video:
@@ -100,6 +112,8 @@ def cmd_segment(a: argparse.Namespace) -> None:
 
 
 def cmd_project(a: argparse.Namespace) -> None:
+    from .projection import project_stage
+
     print("project:", project_stage(Path(a.run).resolve(), a.scale))
 
 
