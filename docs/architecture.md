@@ -39,6 +39,7 @@ failure local.
 | frames | video (or image set) | `frames/000000.jpg…` (≤ 1920 px wide, adaptive rate: `clamp(duration·2.5, 60, 300)` frames), `frames.json` (`source`; per frame `i`, `file`, `t` from ffmpeg `showinfo`, `blur`, `exposure{mean,clip_low,clip_high}`, `kept`, `drop_reason`; GPS later) |
 | quality | frames.json | `quality.json`: usable frames, re-shoot list (time ranges + reason) |
 | reconstruction | kept frames | `colmap/database.db`, `colmap/sparse/0/*.bin` (largest model; pycolmap in-process, `Reconstructor` interface); metrics: registered images, points, mean track length, mean reprojection error, seconds per step |
+| dense | reconstruction, frames | `dense/points.npy`, `colors.npy`, `tracks.npy` (N x T uint16, PAD = 65535), `dense.json` (`Densifier` interface; Depth Anything V2 Small scaled to the sparse points, multi-view consistency, voxel fusion; ADR 0008). Optional; `export --dense` merges it into bundle v2 (capped, see ADR 0008) |
 | export | `colmap/sparse/0`, `frames.json` | `cloud.laz` (xyz+rgb), `cloud.ply`, `web/` viewer bundle: `manifest.json` + raw typed arrays + `thumbs/` (format: ADR 0003, `docs/notes/m1-plan.md` §3); world is Z-up, centroid at origin, `world_from_colmap` stored |
 | segmentation | usable frames, prompts | `masks/<frame>.png`, `observations.json` (class, confidence, bbox) |
 | projection | masks, poses, depth | `labels.npy` (per-point class/finding id) |
