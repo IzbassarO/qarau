@@ -106,7 +106,8 @@ def cmd_segment(a: argparse.Namespace) -> None:
             raise StageError("--segmenter manual needs --masks DIR")
         seg: Any = ManualMasks(a.masks)
     else:
-        seg = GroundedSam2() if a.segmenter == "grounded-sam2" else SamApiSegmenter()
+        seg = (GroundedSam2(box_threshold=a.box_threshold) if a.segmenter == "grounded-sam2"
+               else SamApiSegmenter())  # fmt: skip
     prompts = [parse_prompt(p) for p in a.prompt]
     print("segment:", segment_stage(run, seg, prompts, a.frames, a.stride))
 
@@ -142,6 +143,7 @@ def main(argv: list[str] | None = None) -> None:
     sg.add_argument("--prompt", action="append", required=True, metavar="TEXT[:CLASS[:SEVERITY]]")
     sg.add_argument("--frames", choices=["registered", "all", "stride"], default="registered")
     sg.add_argument("--stride", type=int, default=5)
+    sg.add_argument("--box-threshold", type=float, default=0.3, help="grounded-sam2 only")
     sg.set_defaults(fn=cmd_segment)
     pj = sub.add_parser("project", help="masks -> labelled 3D points -> <run>/findings/")
     pj.add_argument("--run", required=True)
