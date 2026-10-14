@@ -5,6 +5,7 @@ import {
   CanvasTexture,
   Color,
   Line,
+  OrthographicCamera,
   LineBasicMaterial,
   LineDashedMaterial,
   LineSegments,
@@ -131,7 +132,7 @@ export class ViewerEngine {
   private dot: Points;
   private pickMark: Points;
   private gizmoScene = new Scene();
-  private gizmoCam = new PerspectiveCamera(40, 1, 0.1, 10);
+  private gizmoCam = new OrthographicCamera(-1.7, 1.7, 1.7, -1.7, 0.1, 10); // ortho: labels same size
   private dirty = true;
   private raf = 0;
   private tween: null | {
