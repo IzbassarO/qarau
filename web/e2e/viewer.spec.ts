@@ -9,7 +9,10 @@ const OUT = 'test-results';
 const runs = fs
   .readdirSync(runsDir)
   .filter((r) => fs.existsSync(path.join(runsDir, r, 'web/manifest.json')))
-  .filter((r) => !r.startsWith('synthetic-') || r === process.env.QARAU_PERF_RUN);
+  .filter(
+    (r) =>
+      !r.startsWith('synthetic-') || r === 'synthetic-findings' || r === process.env.QARAU_PERF_RUN,
+  );
 
 for (const run of runs) {
   test(`viewer: ${run}`, async ({ page }) => {
@@ -25,6 +28,8 @@ for (const run of runs) {
     const loadMs = Date.now() - t0;
     await page.waitForTimeout(1500);
     await page.screenshot({ path: `${OUT}/${run}-1-initial.png` });
+    const focus = await page.evaluate(() => (window as any).__qarau.engine.focus);
+    console.log(`FOCUS ${run}: ${focus.method} r=${focus.radius.toFixed(2)}`);
 
     // scrub to the middle
     const slider = page.getByRole('slider', { name: /Позиция|Position/ });
@@ -39,6 +44,15 @@ for (const run of runs) {
     await page.screenshot({ path: `${OUT}/${run}-2b-last.png` });
     await slider.fill(String(Math.floor(max / 2)));
     await page.waitForTimeout(300);
+
+    // through-camera on a rolled frame (synthetic-findings rolls every 8th frame by 30 deg)
+    if (run === 'synthetic-findings') {
+      await slider.fill('59');
+      await page.getByRole('button', { name: 'Смотреть глазами камеры' }).click();
+      await page.waitForTimeout(1200);
+      await page.screenshot({ path: `${OUT}/${run}-3a-camera-rolled.png` });
+      await slider.fill(String(Math.floor(max / 2)));
+    }
 
     // view through the current camera
     await page.getByRole('button', { name: 'Смотреть глазами камеры' }).click();
@@ -62,6 +76,30 @@ for (const run of runs) {
     await page.waitForTimeout(500);
     await page.screenshot({ path: `${OUT}/${run}-4-picked.png` });
 
+    // findings (v2 bundles): list, selection, ticks, timecodes, jump
+    const items = page.getByTestId('finding-item');
+    if ((await items.count()) > 0) {
+      await slider.fill('100');
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: `${OUT}/${run}-5-findings.png` });
+      await items.first().click();
+      await expect(page.getByTestId('finding-detail')).toBeVisible();
+      const ticks = page.getByTestId('finding-tick');
+      expect(await ticks.count()).toBeGreaterThan(0);
+      await expect(ticks.first()).toBeVisible();
+      const codes = page.getByTestId('finding-timecode');
+      expect(await codes.count()).toBeGreaterThan(0);
+      await codes.nth(Math.min(5, (await codes.count()) - 1)).click();
+      await page.waitForTimeout(1200);
+      await page.screenshot({ path: `${OUT}/${run}-6-finding-jump.png` });
+      // a low-evidence finding is marked, not hidden
+      if (run === 'synthetic-findings') {
+        await items.nth(2).click();
+        await expect(page.getByText(/мало данных|low evidence/i).first()).toBeVisible();
+        await page.screenshot({ path: `${OUT}/${run}-7-low-evidence.png` });
+      }
+    }
+
     // perf: orbit continuously and read the rAF-based fps
     await page.evaluate(() => (window as any).__qarau.bench(true));
     await page.waitForTimeout(4000);
@@ -72,6 +110,20 @@ for (const run of runs) {
     expect(errors).toEqual([]);
   });
 }
+
+test('missing or broken findings file says so plainly', async ({ page }) => {
+  test.skip(!runs.includes('synthetic-findings'), 'needs the synthetic-findings run');
+  for (const [status, body] of [
+    [404, 'nope'],
+    [200, '{not json'],
+  ] as const) {
+    await page.route('**/files/findings/findings.json', (r) => r.fulfill({ status, body }));
+    await page.goto('/viewer/synthetic-findings');
+    await expect(page.getByRole('alert')).toBeVisible({ timeout: 60_000 });
+    await page.screenshot({ path: `${OUT}/findings-error-${status}.png` });
+    await page.unroute('**/files/findings/findings.json');
+  }
+});
 
 test('missing run says so plainly', async ({ page }) => {
   await page.goto('/viewer/does-not-exist');

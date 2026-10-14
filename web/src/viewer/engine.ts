@@ -105,7 +105,7 @@ function axisLabel(text: string, color: string, at: number[]) {
   g.fillText(text, 32, 34);
   const sp = new Sprite(new SpriteMaterial({ map: new CanvasTexture(c), depthTest: false }));
   sp.position.set(at[0], at[1], at[2]);
-  sp.scale.setScalar(0.45);
+  sp.scale.setScalar(0.6);
   return sp;
 }
 

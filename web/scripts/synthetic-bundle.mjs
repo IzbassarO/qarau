@@ -1,6 +1,8 @@
 // Writes a viewer bundle v1 (docs/notes/m1-plan.md section 3) for a synthetic scene:
 // a tower, a ground plane and a ring of cameras orbiting the tower.
-// usage: node scripts/synthetic-bundle.mjs [--points 200000] [--frames 120] [--out ../data/runs/synthetic]
+// usage: node scripts/synthetic-bundle.mjs [--points 200000] [--frames 120] [--out ../data/runs/synthetic] [--findings]
+// --findings writes a v2 bundle: rolled cameras (every 8th frame, 30 deg), points.source, and
+// findings/ with a confirmed critical, a confirmed watch and a low-evidence finding.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -13,6 +15,7 @@ const args = Object.fromEntries(
     .filter(Boolean)
     .map((s) => s.trim().split(/\s+/)),
 );
+const FIND = 'findings' in args;
 const N = Number(args.points ?? 200000);
 const F = Number(args.frames ?? 120);
 const outDir = path.resolve(args.out ?? '../data/runs/synthetic');
@@ -68,7 +71,12 @@ for (let i = 0; i < F; i++) {
   const C = [r * Math.cos(a), r * Math.sin(a), 6 + (i / F) * 18];
   const tgt = [0, 0, 12];
   const f = norm(sub(tgt, C));
-  const x = norm(cross(f, [0, 0, 1])); // right
+  let x = norm(cross(f, [0, 0, 1])); // right
+  if (FIND && i % 8 === 3) {
+    const a = Math.PI / 6; // roll about the optical axis
+    const fx = cross(f, x);
+    x = x.map((v, k) => v * Math.cos(a) + fx[k] * Math.sin(a));
+  }
   const y = cross(f, x); // down
   const R = [x, y, f]; // rows: world -> cam
   const tvec = R.map((row) => -dot(row, C));
@@ -148,6 +156,65 @@ for (let p = 0; p < N; p++) {
   numObs[p] = Math.min(255, n);
 }
 
+// ---- findings (v2): three patches on the tower, projected like the real stage will
+const pointFinding = new Uint16Array(N);
+const findings = [];
+if (FIND) {
+  const patches = [
+    { cls: 'corrosion', severity: 'critical', a: 0, z: 20, low: false },
+    { cls: 'crack', severity: 'watch', a: 2.1, z: 10, low: false },
+    { cls: 'corrosion', severity: 'watch', a: 4.2, z: 25.5, low: true },
+  ];
+  patches.forEach((pt, k) => {
+    const idx = [];
+    for (let p = 0; p < N; p++) {
+      if (nrm[p * 2] === 0 && nrm[p * 2 + 1] === 0) continue;
+      let da = Math.atan2(nrm[p * 2 + 1], nrm[p * 2]) - pt.a;
+      da = Math.atan2(Math.sin(da), Math.cos(da));
+      if (
+        Math.abs(da) < 0.25 &&
+        Math.abs(pos[p * 3 + 2] - pt.z) < 1.5 &&
+        pointOffsets[p + 1] > pointOffsets[p]
+      )
+        idx.push(p);
+    }
+    const count = new Map();
+    for (const p of idx) {
+      pointFinding[p] = k + 1;
+      for (let j = pointOffsets[p]; j < pointOffsets[p + 1]; j++)
+        count.set(pointFrames[j], (count.get(pointFrames[j]) ?? 0) + 1);
+    }
+    let fr = [...count]
+      .filter(([, c]) => c >= 5)
+      .map(([i]) => i)
+      .sort((a, b) => a - b);
+    if (pt.low) fr = [[...count].sort((a, b) => b[1] - a[1])[0][0]]; // seen in one frame only
+    const mn = [Infinity, Infinity, Infinity],
+      mx = [-Infinity, -Infinity, -Infinity];
+    const c = [0, 0, 0];
+    for (const p of idx)
+      for (let d = 0; d < 3; d++) {
+        c[d] += pos[p * 3 + d] / idx.length;
+        mn[d] = Math.min(mn[d], pos[p * 3 + d]);
+        mx[d] = Math.max(mx[d], pos[p * 3 + d]);
+      }
+    findings.push({
+      id: k + 1,
+      class: pt.cls,
+      prompt: pt.cls === 'crack' ? 'crack' : 'rust',
+      severity: pt.severity,
+      status: pt.low ? 'low_evidence' : 'confirmed',
+      confidence: pt.low ? 0.52 : 0.81,
+      n_points: idx.length,
+      centroid: c,
+      bbox: { min: mn, max: mx },
+      size: { value: 0.01 * (k + 1), unit: 'rel' },
+      frames: fr,
+      max_angle_deg: pt.low ? 0 : 34,
+    });
+  });
+}
+
 // ---- write
 const w = (name, arr) =>
   fs.writeFileSync(
@@ -162,6 +229,30 @@ w('tracks.frame_offsets.u32', frameOffsets);
 w('tracks.frame_points.u32', frameP);
 w('tracks.point_offsets.u32', pointOffsets);
 w('tracks.point_frames.u16', pointFrames);
+if (FIND) {
+  // pretend the ground is the dense part: source 1 = dense
+  w(
+    'points.source.u8',
+    Uint8Array.from({ length: N }, (_, p) => (nrm[p * 2] === 0 && nrm[p * 2 + 1] === 0 ? 1 : 0)),
+  );
+  fs.mkdirSync(path.join(outDir, 'findings'), { recursive: true });
+  fs.writeFileSync(
+    path.join(outDir, 'findings/points.finding.u16'),
+    Buffer.from(pointFinding.buffer),
+  );
+  fs.writeFileSync(
+    path.join(outDir, 'findings/findings.json'),
+    JSON.stringify({
+      version: 1,
+      segmenter: { name: 'synthetic', version: '0', licence: 'n/a', dev_only: true },
+      prompts: [],
+      scale: { source: 'none', m_per_unit: null },
+      point_finding: 'findings/points.finding.u16',
+      params: { min_frames: 2, min_angle_deg: 15 },
+      findings,
+    }),
+  );
+}
 
 // placeholder thumbnails: 320x180 PNG, flat colour per frame + a marker bar at the frame's position
 for (const fr of frames) {
@@ -191,7 +282,7 @@ for (let p = 0; p < N; p++)
   }
 const reg = frames.filter((f) => f.registered).length;
 const manifest = {
-  version: 1,
+  version: FIND ? 2 : 1,
   run_id: runId,
   source: {
     kind: 'video',
@@ -213,7 +304,11 @@ const manifest = {
     color: 'web/points.color.u8',
     first_seen: 'web/points.first_seen.u16',
     num_obs: 'web/points.num_obs.u8',
+    ...(FIND ? { source: 'web/points.source.u8' } : {}),
   },
+  ...(FIND
+    ? { dense: { method: 'synthetic', points: N }, findings: 'findings/findings.json' }
+    : {}),
   tracks: {
     frame_offsets: 'web/tracks.frame_offsets.u32',
     frame_points: 'web/tracks.frame_points.u32',
