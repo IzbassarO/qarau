@@ -143,3 +143,14 @@ def test_outputs_exist(bundle) -> None:
 
     las = laspy.read(out / "cloud.laz")
     assert len(las.x) == N and (out / "cloud.ply").stat().st_size > 0
+
+
+def test_reexport_drops_findings(bundle, tmp_path: Path) -> None:
+    out, m, _, rec, _ = bundle
+    mp = out / "web/manifest.json"
+    mp.write_text(json.dumps({**m, "version": 2, "findings": "findings/findings.json"}))
+    frames = [{"i": i, "name": f"f{i}.jpg", "file": f"frames/{i:06d}.jpg", "t": 0.0,
+               "kept": i != 2, "drop_reason": None, "blur": 1.0} for i in range(F)]  # fmt: skip
+    export_bundle(rec, frames, out, m["source"], "run")
+    again = json.loads(mp.read_text())
+    assert "findings" not in again and again["version"] == 1
