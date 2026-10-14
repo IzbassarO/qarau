@@ -344,7 +344,10 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
             )}
             <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[13px]">
               <Row k={t('panel.cameraHeight')} v={f.center ? f.center[2].toFixed(2) : '—'} />
-              <Row k={t('panel.visible')} v={f.n_points.toLocaleString()} />
+              <Row
+                k={t('panel.visible')}
+                v={(bundle.frameOffsets[frame + 1] - bundle.frameOffsets[frame]).toLocaleString()}
+              />
               <Row
                 k={t('panel.assembled')}
                 v={`${Math.round((bundle.assembled[frame] / m.points.count) * 100)}%`}

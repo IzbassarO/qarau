@@ -3,14 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
-const runsDir = path.resolve(process.env.QARAU_RUNS_DIR ?? '../../../../data/runs');
+const runsDir = path.resolve(process.env.QARAU_RUNS_DIR ?? '../data/runs');
 const OUT = 'test-results';
-const runs = [
-  'synthetic',
-  'south-building',
-  'notre-dame',
-  ...(process.env.QARAU_PERF_RUN ? [process.env.QARAU_PERF_RUN] : []),
-].filter((r) => fs.existsSync(path.join(runsDir, r, 'web/manifest.json')));
+// Every run with a manifest; large synthetic perf bundles only when asked for.
+const runs = fs
+  .readdirSync(runsDir)
+  .filter((r) => fs.existsSync(path.join(runsDir, r, 'web/manifest.json')))
+  .filter((r) => !r.startsWith('synthetic-') || r === process.env.QARAU_PERF_RUN);
 
 for (const run of runs) {
   test(`viewer: ${run}`, async ({ page }) => {
@@ -33,6 +32,13 @@ for (const run of runs) {
     await slider.fill(String(Math.floor(max / 2)));
     await page.waitForTimeout(800);
     await page.screenshot({ path: `${OUT}/${run}-2-scrub.png` });
+
+    // the last frame is often unregistered (no pose); the panel must still render
+    await slider.fill(String(max));
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${OUT}/${run}-2b-last.png` });
+    await slider.fill(String(Math.floor(max / 2)));
+    await page.waitForTimeout(300);
 
     // view through the current camera
     await page.getByRole('button', { name: 'Смотреть глазами камеры' }).click();

@@ -20,6 +20,6 @@ export default defineConfig({
     command: 'pnpm exec vite --port 5199 --strictPort',
     url: 'http://localhost:5199',
     reuseExistingServer: true,
-    env: { QARAU_RUNS_DIR: process.env.QARAU_RUNS_DIR ?? '../../../../data/runs' },
+    env: { QARAU_RUNS_DIR: process.env.QARAU_RUNS_DIR ?? '../data/runs' },
   },
 });

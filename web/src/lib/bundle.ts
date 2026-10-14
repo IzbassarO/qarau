@@ -9,10 +9,11 @@ export interface FrameInfo {
   drop_reason: string | null;
   blur: number | null;
   registered: boolean;
-  camera: { width: number; height: number; model: string; params: number[]; K: number[] };
+  // camera, pose, center and n_points exist only for registered frames (plan §3)
+  camera?: { width: number; height: number; model: string; params: number[]; K: number[] };
   pose?: { qvec: number[]; tvec: number[] };
   center?: number[];
-  n_points: number;
+  n_points?: number;
 }
 
 export interface Stats {

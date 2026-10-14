@@ -245,7 +245,7 @@ export class ViewerEngine {
   private writeFrustum(out: Float32Array, o: number, fi: number, d: number) {
     const f = this.b.manifest.frames[fi];
     const R = quatToMat3(f.pose!.qvec);
-    const [fx, fy, cx, cy] = f.camera.K;
+    const [fx, fy, cx, cy] = f.camera!.K;
     const c = f.center!;
     const corner = (u: number, v: number) => {
       const x = ((u - cx) / fx) * d,
@@ -258,8 +258,8 @@ export class ViewerEngine {
         c[2] + R[2] * x + R[5] * y + R[8] * z,
       ];
     };
-    const W = f.camera.width,
-      H = f.camera.height;
+    const W = f.camera!.width,
+      H = f.camera!.height;
     const q = [corner(0, 0), corner(W, 0), corner(W, H), corner(0, H)];
     const seg: number[][] = [];
     for (let k = 0; k < 4; k++) seg.push(c, q[k]);
@@ -356,7 +356,7 @@ export class ViewerEngine {
   /** Fly into the pose of frame i (position = centre, FOV from fy, looking at median visible depth). */
   viewThroughFrame(i: number, animate = true) {
     const f = this.b.manifest.frames[i];
-    if (!f.registered || !f.pose || !f.center) return;
+    if (!f.registered || !f.pose || !f.center || !f.camera) return;
     const { position, forward } = colmapPoseToThree(f.pose.qvec, f.pose.tvec);
     const sl = csrSlice(this.b.frameOffsets, this.b.frameInPoints, i);
     const step = Math.max(1, Math.floor(sl.length / 5000));
@@ -490,7 +490,15 @@ export class ViewerEngine {
     r.setViewport(0, 0, w, h);
     r.setScissorTest(false);
     r.clear();
+    // Looking through the video camera: frustum lines would cut across the view, hide them.
+    const c = (this.dot.geometry.getAttribute('position') as BufferAttribute).array;
+    const atCam =
+      this.dot.visible &&
+      this.camera.position.distanceTo(new Vector3(c[0], c[1], c[2])) < this.bounds.radius * 0.02;
+    const shown = [this.frustumAll.visible, this.frustumNow.visible, this.dot.visible];
+    if (atCam) this.frustumAll.visible = this.frustumNow.visible = this.dot.visible = false;
     r.render(this.scene, this.camera);
+    [this.frustumAll.visible, this.frustumNow.visible, this.dot.visible] = shown;
     // axis gizmo, bottom-left, second viewport via scissor
     const s = 96;
     r.setViewport(12, 12, s, s);
