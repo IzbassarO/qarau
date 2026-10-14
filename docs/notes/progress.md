@@ -2,6 +2,15 @@
 
 Newest first. Keep it short.
 
+## 2026-10-14 — resume after usage limit
+
+- First A/B/C subagents stopped at their first step (model usage limit). Their worktrees had
+  no changes and were removed. Relaunched A, B, C on Sonnet; this session coordinates and
+  reviews before merging into `feat/m1`.
+- Owner approved: the M1 plan as written; Versity S3 Gateway for development (ADR 0006).
+  On-prem object store stays open until M5.
+- `git ls-files data` is empty: no samples or runs are tracked.
+
 ## 2026-10-14 — M0 + M1 started
 
 **Done**
@@ -22,5 +31,5 @@ Newest first. Keep it short.
 - No CUDA on Mac → sparse clouds only in M1 (ADR 0004).
 
 **Open questions for the owner**
-- Confirm Versity S3 Gateway (Apache-2.0) as the on-prem object store, or name a preference.
+- On-prem object store (decide by M5).
 - No money spent; nothing paid is proposed.

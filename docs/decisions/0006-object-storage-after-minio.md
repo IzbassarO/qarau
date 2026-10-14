@@ -1,6 +1,6 @@
 # 0006 — Object storage: S3 API only; Versity S3 Gateway replaces MinIO for dev and on-prem
 
-- Status: accepted for development; on-prem choice to be confirmed by the owner
+- Status: accepted for development (approved by the owner 2026-10-14); on-prem choice open until M5
 - Date: 2026-10-14
 
 ## Context
@@ -23,5 +23,5 @@ source (AGPL) is possible but means shipping an unmaintained AGPL component to c
 ## Consequences
 
 - `docker compose up` needs no MinIO; `CLAUDE.md` and `docs/architecture.md` are updated.
-- Open question for the owner before M5: confirm Versity for customer installs or pick
-  another Apache-licensed server. Switching costs one compose service and one env var.
+- The on-prem object store stays an open decision until M5: Versity or another
+  Apache-licensed server. Switching costs one compose service and one env var.

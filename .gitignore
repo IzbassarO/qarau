@@ -59,3 +59,6 @@ test-results/
 
 # --- Docker volumes (if bind-mounted locally) ---
 infra/volumes/
+
+# --- Claude Code agent worktrees ---
+.claude/worktrees/
