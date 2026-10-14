@@ -64,3 +64,6 @@ infra/volumes/
 
 # --- Claude Code agent worktrees ---
 .claude/worktrees/
+
+# --- devteam runtime state (checkpoints, worktrees, packets, costs) ---
+devteam/.state/
