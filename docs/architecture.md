@@ -36,9 +36,10 @@ failure local.
 
 | Stage | Inputs | Outputs |
 | --- | --- | --- |
-| frames | video | keyframes (JPEG), `frames.json` (timestamp, GPS, blur score, exposure score) |
+| frames | video (or image set) | `frames/000000.jpg…` (≤ 1920 px wide, adaptive rate: `clamp(duration·2.5, 60, 300)` frames), `frames.json` (`source`; per frame `i`, `file`, `t` from ffmpeg `showinfo`, `blur`, `exposure{mean,clip_low,clip_high}`, `kept`, `drop_reason`; GPS later) |
 | quality | frames.json | `quality.json`: usable frames, re-shoot list (time ranges + reason) |
-| reconstruction | usable frames | `sparse/` (COLMAP model), `cloud.laz`, `poses.json`, `potree/` |
+| reconstruction | kept frames | `colmap/database.db`, `colmap/sparse/0/*.bin` (largest model; pycolmap in-process, `Reconstructor` interface); metrics: registered images, points, mean track length, mean reprojection error, seconds per step |
+| export | `colmap/sparse/0`, `frames.json` | `cloud.laz` (xyz+rgb), `cloud.ply`, `web/` viewer bundle: `manifest.json` + raw typed arrays + `thumbs/` (format: ADR 0003, `docs/notes/m1-plan.md` §3); world is Z-up, centroid at origin, `world_from_colmap` stored |
 | segmentation | usable frames, prompts | `masks/<frame>.png`, `observations.json` (class, confidence, bbox) |
 | projection | masks, poses, depth | `labels.npy` (per-point class/finding id) |
 | measurement | labelled points, scale | `findings.json` (area m², extent, centroid) |
