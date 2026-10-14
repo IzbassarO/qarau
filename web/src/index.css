@@ -1,0 +1,47 @@
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --color-bg: #0b0c0e;
+  --color-surface: #0e1013;
+  --color-raised: #181b20;
+  --color-line: #23272d;
+  --color-line-strong: #2f3540;
+  --color-ink: #e8eaed;
+  --color-ink-2: #a1a7b0;
+  --color-link: #8ab6ff;
+  --color-critical: #f0565c;
+  --color-watch: #f2a33a;
+  --color-inspected: #5b9bff;
+  --color-notseen: #6b727d;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+input[type='range'] {
+  accent-color: var(--color-inspected);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-inspected);
+  outline-offset: 2px;
+}

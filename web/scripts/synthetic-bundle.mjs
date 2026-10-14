@@ -31,13 +31,16 @@ const rnd = () => {
 };
 
 // ---- scene: tower (radius 4, height 30, 40% of points) + ground (120 x 120, rest)
-const TR = 4, TH = 30, G = 60;
+const TR = 4,
+  TH = 30,
+  G = 60;
 const pos = new Float32Array(N * 3);
 const col = new Uint8Array(N * 3);
 const nrm = new Float32Array(N * 2); // outward xy normal for tower points, 0 for ground
 for (let i = 0; i < N; i++) {
   if (rnd() < 0.4) {
-    const a = rnd() * Math.PI * 2, z = rnd() * TH;
+    const a = rnd() * Math.PI * 2,
+      z = rnd() * TH;
     pos.set([TR * Math.cos(a), TR * Math.sin(a), z], i * 3);
     nrm.set([Math.cos(a), Math.sin(a)], i * 2);
     const band = Math.floor(z / 3) % 2 ? 40 : 0;
@@ -50,7 +53,12 @@ for (let i = 0; i < N; i++) {
 }
 
 // ---- cameras: ring around the tower, slowly climbing
-const W = 1280, H = 720, FX = 900, FY = 900, CX = W / 2, CY = H / 2;
+const W = 1280,
+  H = 720,
+  FX = 900,
+  FY = 900,
+  CX = W / 2,
+  CY = H / 2;
 const MAXD = Number(args.range ?? 38);
 const frames = [];
 const cams = [];
@@ -77,7 +85,11 @@ for (let i = 0; i < F; i++) {
     blur: Math.round((80 + rnd() * 120) * 10) / 10,
     registered,
     camera: {
-      width: W, height: H, model: 'SIMPLE_RADIAL', params: [FX, CX, CY, 0], K: [FX, FY, CX, CY],
+      width: W,
+      height: H,
+      model: 'SIMPLE_RADIAL',
+      params: [FX, CX, CY, 0],
+      K: [FX, FY, CX, CY],
     },
     ...(registered ? { pose: { qvec: quat(R), tvec }, center: C } : {}),
     n_points: 0,
@@ -95,7 +107,9 @@ for (let i = 0; i < F; i++) {
   const { C, R } = cams[i];
   const [r0, r1, r2] = R;
   for (let p = 0; p < N; p++) {
-    const dx = pos[p * 3] - C[0], dy = pos[p * 3 + 1] - C[1], dz = pos[p * 3 + 2] - C[2];
+    const dx = pos[p * 3] - C[0],
+      dy = pos[p * 3 + 1] - C[1],
+      dz = pos[p * 3 + 2] - C[2];
     const zc = r2[0] * dx + r2[1] * dy + r2[2] * dz;
     if (zc < 1 || zc > MAXD) continue;
     const u = FX * ((r0[0] * dx + r0[1] * dy + r0[2] * dz) / zc) + CX;
@@ -103,7 +117,8 @@ for (let i = 0; i < F; i++) {
     const v = FY * ((r1[0] * dx + r1[1] * dy + r1[2] * dz) / zc) + CY;
     if (v < 0 || v >= H) continue;
     // tower surface faces away from the camera on the far side: cheap self-occlusion
-    if ((nrm[p * 2] !== 0 || nrm[p * 2 + 1] !== 0) && nrm[p * 2] * dx + nrm[p * 2 + 1] * dy > 0) continue;
+    if ((nrm[p * 2] !== 0 || nrm[p * 2 + 1] !== 0) && nrm[p * 2] * dx + nrm[p * 2 + 1] * dy > 0)
+      continue;
     if (nfp === cap) {
       cap *= 2;
       const n = new Uint32Array(cap);
@@ -134,7 +149,11 @@ for (let p = 0; p < N; p++) {
 }
 
 // ---- write
-const w = (name, arr) => fs.writeFileSync(path.join(webDir, name), Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength));
+const w = (name, arr) =>
+  fs.writeFileSync(
+    path.join(webDir, name),
+    Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength),
+  );
 w('points.position.f32', pos);
 w('points.color.u8', col);
 w('points.first_seen.u16', firstSeen);
@@ -156,11 +175,15 @@ for (const fr of frames) {
       px[o + 1] = bar ? 230 : 50 + y * 0.3;
       px[o + 2] = bar ? 230 : 80 + (x / 320) * 60;
     }
-  fs.writeFileSync(path.join(webDir, 'thumbs', `${String(fr.i).padStart(6, '0')}.png`), png(320, 180, px));
+  fs.writeFileSync(
+    path.join(webDir, 'thumbs', `${String(fr.i).padStart(6, '0')}.png`),
+    png(320, 180, px),
+  );
 }
 
 const zs = Float32Array.from({ length: N }, (_, p) => pos[p * 3 + 2]).sort();
-const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+const mn = [Infinity, Infinity, Infinity],
+  mx = [-Infinity, -Infinity, -Infinity];
 for (let p = 0; p < N; p++)
   for (let k = 0; k < 3; k++) {
     mn[k] = Math.min(mn[k], pos[p * 3 + k]);
@@ -170,7 +193,14 @@ const reg = frames.filter((f) => f.registered).length;
 const manifest = {
   version: 1,
   run_id: runId,
-  source: { kind: 'video', name: 'synthetic_tower.mp4', duration_s: F * 0.5, fps: 2, width: W, height: H },
+  source: {
+    kind: 'video',
+    name: 'synthetic_tower.mp4',
+    duration_s: F * 0.5,
+    fps: 2,
+    width: W,
+    height: H,
+  },
   world: {
     up: [0, 0, 1],
     world_from_colmap: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
@@ -202,13 +232,24 @@ const manifest = {
   },
 };
 fs.writeFileSync(path.join(webDir, 'manifest.json'), JSON.stringify(manifest));
-console.log(`${outDir}: ${N} points, ${F} frames (${reg} registered), ${nfp} observations, ${(Date.now() - t0) / 1000}s`);
+console.log(
+  `${outDir}: ${N} points, ${F} frames (${reg} registered), ${nfp} observations, ${(Date.now() - t0) / 1000}s`,
+);
 
 // ---- helpers
-function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
-function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
-function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
-function norm(a) { const l = Math.hypot(...a); return a.map((v) => v / l); }
+function sub(a, b) {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+function dot(a, b) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+function cross(a, b) {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+function norm(a) {
+  const l = Math.hypot(...a);
+  return a.map((v) => v / l);
+}
 // rotation matrix (rows) -> quaternion [w,x,y,z]
 function quat(m) {
   const tr = m[0][0] + m[1][1] + m[2][2];

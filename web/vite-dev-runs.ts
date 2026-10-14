@@ -16,7 +16,12 @@ export function devRuns(): Plugin {
     apply: 'serve',
     configureServer(server) {
       const root = path.resolve(process.env.QARAU_RUNS_DIR ?? '../data/runs');
-      const send = (res: ServerResponse, code: number, body: string | Buffer, type = 'text/plain') => {
+      const send = (
+        res: ServerResponse,
+        code: number,
+        body: string | Buffer,
+        type = 'text/plain',
+      ) => {
         res.statusCode = code;
         res.setHeader('Content-Type', type);
         res.end(body);
@@ -55,7 +60,12 @@ export function devRuns(): Plugin {
         else return send(res, 404, 'not found');
         if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile())
           return send(res, 404, 'not found');
-        send(res, 200, fs.readFileSync(file), TYPES[path.extname(file)] ?? 'application/octet-stream');
+        send(
+          res,
+          200,
+          fs.readFileSync(file),
+          TYPES[path.extname(file)] ?? 'application/octet-stream',
+        );
       });
     },
   };
