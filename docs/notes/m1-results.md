@@ -44,3 +44,43 @@ Not run with the old rule, so no attempt 1.
 - Coordinates are COLMAP-arbitrary scale (no metric scale until GPS / reference object).
 - Sparse clouds only (15k-100k points); dense needs CUDA (ADR 0004).
 - Image-set `source.duration_s`/`fps` are synthetic (`n-1`, 1.0) since t = index.
+
+## Viewer (Part C), verified 2026-10-14
+
+Playwright (Chromium, `--use-angle=metal`, real GPU) through the real API (`make api`), all runs:
+
+| run | points | load | fps while orbiting |
+| --- | --- | --- | --- |
+| south-building | 61 514 | 0.4 s | 60 |
+| notre-dame | 15 239 | 0.3 s | 60 |
+| aegviidu | 47 397 | 0.7 s | 60 |
+| orono | 101 189 | 0.5 s | 60 |
+| synthetic-5m | 5 000 000 | 4.9 s | 60 |
+
+60 fps is the vsync cap. The 5 M bundle is 644 MB, mostly the per-frame visibility index of a
+worst-case synthetic scene; real sparse runs are 1–5 MB. Headless SwiftShader (CI default) is
+software rendering and only good for screenshots.
+
+Screenshots: `docs/notes/m1/` (built from the Playwright run). View through the video camera
+lines up with the real extracted frame on every run (horizon, facade windows, field edges).
+
+## Acceptance vs `docs/tasks/M1.md`
+
+The task asks for three phone videos shot by us. The owner has no footage yet and asked for
+public data only, so the three test videos are public drone videos (below). Phone footage of a
+pipe, a railing and a building corner is still needed before M1 can be called done on our own
+data.
+
+## Test data and licences
+
+Nothing here is committed; all lives in `data/samples/` (gitignored).
+
+| file | source | licence |
+| --- | --- | --- |
+| south-building | COLMAP sample dataset, github.com/colmap/colmap/releases/download/3.11.1/south-building.zip | COLMAP sample data |
+| notre_dame_oubiels.webm | Wikimedia Commons, "Notre Dame des Oubiels drone.webm", by Lothur | CC0 |
+| aegviidu_water_tower.ogv | Wikimedia Commons, "Aegviidu veetorn (Aegviidu water tower).ogv", by Sillerkiil | CC0 |
+| orono_water_tower.webm | Wikimedia Commons, "Orono Leaning Water Tower Drone Video (2022-07-10).webm", by Drozwik Drones | CC BY 3.0 |
+
+Screenshots in `docs/notes/m1/` that show the Orono frame are derived from Drozwik Drones'
+video (CC BY 3.0).

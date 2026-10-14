@@ -2,6 +2,29 @@
 
 Newest first. Keep it short.
 
+## 2026-10-14 — Part B (pipeline) merged; M0 + M1 complete on public data
+
+**Done**
+- `python -m qarau_pipeline run --video …` runs frames → COLMAP → export end to end.
+  Re-run by the coordinator on the church video: 21 s, 52/54 frames registered,
+  15 215 points, bundle reprojection check mean 0.39 px.
+- Three public drone videos and South Building processed; numbers in `docs/notes/m1-results.md`.
+- `make lint` and `make test` green for backend, pipeline and web. e2e: 7 Playwright tests
+  pass through the real API.
+- Deviation: the exposure rule drops on clipped white only above 70 % (was 40 %); bright sky
+  made the old rule drop a whole stretch of the Aegviidu orbit.
+
+**Next**
+- Open the PR; CI on GitHub runs for the first time.
+- M1 on our own phone footage when the owner has it (pipe, railing, building corner).
+- Aegviidu splits into 5 models (127 of 177 frames in the largest): try loop detection or
+  merging models.
+- Default view frames the whole landscape on drone videos; frame the orbited object instead.
+
+**Open questions for the owner**
+- On-prem object store (decide by M5).
+- Kazakh UI strings need a native speaker's review.
+
 ## 2026-10-14 — Part C (viewer) merged
 
 - `/viewer/:runId` loads the bundle from the real API (via Vite proxy) and from the dev
