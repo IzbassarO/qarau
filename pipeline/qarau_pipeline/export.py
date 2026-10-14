@@ -133,6 +133,51 @@ def frames_from_json(out: Path) -> list[dict[str, Any]]:
     ]  # fmt: skip
 
 
+# ---------------------------------------------------------------- tracks (CSR)
+
+MAX_DENSE = 2_000_000  # dense points kept in a bundle (ADR 0008)
+MAX_TRACK = 4  # frames kept per dense point
+
+
+def bound_dense(
+    xyz: np.ndarray, rgb: np.ndarray, trk: np.ndarray, max_points: int, max_track: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Uniform random subsample to max_points; keep the first max_track frames per point.
+
+    tracks.npy rows are sorted ascending with padding last, so [:, :k] keeps the earliest k.
+    """
+    if len(xyz) > max_points:
+        keep = np.sort(np.random.default_rng(0).choice(len(xyz), max_points, replace=False))
+        xyz, rgb, trk = xyz[keep], rgb[keep], trk[keep]
+    return xyz, rgb, trk[:, :max_track]
+
+
+def dense_pairs(tracks: np.ndarray, first: int, pad: int = NEVER) -> tuple[np.ndarray, np.ndarray]:
+    """Dense (N x T, padded) frame lists -> (point index, frame) pairs; points start at `first`."""
+    k, j = np.nonzero(tracks != pad)
+    return k + first, tracks[k, j].astype(np.int64)
+
+
+def build_csr(pt: np.ndarray, fr: np.ndarray, N: int, F: int) -> dict[str, np.ndarray]:
+    """(point, frame) pairs -> both CSR directions (deduplicated, sorted) and per-point stats."""
+    kp = np.unique(pt * F + fr)  # point-major, frames ascending, deduplicated
+    pf_pt, pf_fr = kp // F, kp % F
+    point_offsets = np.concatenate([[0], np.cumsum(np.bincount(pf_pt, minlength=N))])
+    point_frames = pf_fr.astype(np.uint16)
+    kf = np.unique(pf_fr * N + pf_pt)  # frame-major, points ascending
+    fp_fr, frame_points = kf // N, (kf % N).astype(np.uint32)
+    frame_offsets = np.concatenate([[0], np.cumsum(np.bincount(fp_fr, minlength=F))])
+    counts = np.diff(point_offsets)
+    first_seen = np.full(N, NEVER, dtype=np.uint16)
+    has = counts > 0
+    first_seen[has] = point_frames[point_offsets[:-1][has]]
+    return {
+        "point_offsets": point_offsets, "point_frames": point_frames,
+        "frame_offsets": frame_offsets, "frame_points": frame_points,
+        "first_seen": first_seen, "num_obs": np.minimum(counts, 255).astype(np.uint8),
+    }  # fmt: skip
+
+
 # ---------------------------------------------------------------- export
 
 
@@ -142,6 +187,9 @@ def export_bundle(
     out: Path,
     source: dict[str, Any],
     run_id: str,
+    dense: Path | None = None,
+    max_dense: int = MAX_DENSE,
+    max_track: int = MAX_TRACK,
 ) -> dict[str, Any]:
     t0 = time.perf_counter()
     web = out / "web"
@@ -187,18 +235,25 @@ def export_bundle(
                 pt_l.append(k)
                 fr_l.append(fi)
     pt_a, fr_a = np.array(pt_l, dtype=np.int64), np.array(fr_l, dtype=np.int64)
-    kp = np.unique(pt_a * F + fr_a)  # point-major, frames ascending, deduplicated
-    pf_pt, pf_fr = kp // F, kp % F
-    point_offsets = np.concatenate([[0], np.cumsum(np.bincount(pf_pt, minlength=N))])
-    point_frames = pf_fr.astype(np.uint16)
-    kf = np.unique(pf_fr * N + pf_pt)  # frame-major, points ascending
-    fp_fr, frame_points = kf // N, (kf % N).astype(np.uint32)
-    frame_offsets = np.concatenate([[0], np.cumsum(np.bincount(fp_fr, minlength=F))])
-    counts = np.diff(point_offsets)
-    first_seen = np.full(N, NEVER, dtype=np.uint16)
-    has = counts > 0
-    first_seen[has] = point_frames[point_offsets[:-1][has]]
-    num_obs = np.minimum(counts, 255).astype(np.uint8)
+    # dense points (bundle v2): appended after the sparse ones, same alignment
+    N_sparse, dense_info, psrc = N, None, None
+    if dense is not None:
+        dxyz, drgb, dtrk = bound_dense(
+            np.load(dense / "points.npy"), np.load(dense / "colors.npy"),
+            np.load(dense / "tracks.npy"), max_dense, max_track,
+        )  # fmt: skip
+        dxyz = dxyz.astype(np.float64)
+        pd_, fd_ = dense_pairs(dtrk, N_sparse, 65535)
+        dense_info = json.loads((dense / "dense.json").read_text())
+        pt_a, fr_a = np.concatenate([pt_a, pd_]), np.concatenate([fr_a, fd_])
+        xyz_a = np.concatenate([xyz_a, dxyz @ A.T - c])
+        rgb = np.concatenate([rgb, drgb])
+        N = len(xyz_a)
+        psrc = np.concatenate([np.zeros(N_sparse, np.uint8), np.ones(N - N_sparse, np.uint8)])
+    csr = build_csr(pt_a, fr_a, N, F)
+    point_offsets, point_frames = csr["point_offsets"], csr["point_frames"]
+    frame_offsets, frame_points = csr["frame_offsets"], csr["frame_points"]
+    first_seen, num_obs = csr["first_seen"], csr["num_obs"]
 
     def w(name: str, arr: np.ndarray, dtype: str) -> str:
         rel = f"web/{name}"
@@ -244,7 +299,7 @@ def export_bundle(
     mean_err = float(rec.compute_mean_reprojection_error())
     secs = stage_seconds(out)
     manifest: dict[str, Any] = {
-        "version": 1,
+        "version": 2,
         "run_id": run_id,
         "source": source,
         "world": {
@@ -277,6 +332,13 @@ def export_bundle(
         },
     }  # fmt: skip
 
+    if psrc is not None and dense_info is not None:
+        manifest["points"]["source"] = w("points.source.u8", psrc, "u1")
+        manifest["dense"] = {
+            "method": dense_info["method"], "frames_used": dense_info["frames_used"],
+            "points": N - N_sparse,
+        }  # fmt: skip
+        manifest["stats"]["points_sparse"] = N_sparse
     write_laz_ply(out, xyz_a, rgb)
     manifest["stats"]["processing_s"]["export"] = round(time.perf_counter() - t0, 2)
     (web / "manifest.json").write_text(json.dumps(manifest))
