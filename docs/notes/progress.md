@@ -15,7 +15,7 @@ Newest first. Keep it short.
   made the old rule drop a whole stretch of the Aegviidu orbit.
 
 **Next**
-- Open the PR; CI on GitHub runs for the first time.
+- PR #1 opened (M0 + M1); CI green on GitHub. Waiting for owner review.
 - M1 on our own phone footage when the owner has it (pipe, railing, building corner).
 - Aegviidu splits into 5 models (127 of 177 frames in the largest): try loop detection or
   merging models.
