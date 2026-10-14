@@ -1,0 +1,30 @@
+[project]
+name = "qarau-pipeline"
+version = "0.1.0"
+description = "Qarau Vision processing pipeline: video -> frames -> COLMAP -> viewer bundle"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "pycolmap==4.2.1",
+  "numpy>=2",
+  "opencv-python-headless>=4.10",
+  "laspy[lazrs]>=2.5",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not slow'"
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = ["slow: end-to-end tests on real videos (deselected by default)"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
