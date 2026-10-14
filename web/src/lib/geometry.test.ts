@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { Matrix4, PerspectiveCamera, Vector3 } from 'three';
 import {
   colmapPoseToThree,
+  computeFocus,
+  convergePoint,
   csrSlice,
   cumulativeAssembled,
   heightRamp,
@@ -38,6 +40,18 @@ describe('colmapPoseToThree', () => {
     const { forward, quaternion } = colmapPoseToThree([s, s, 0, 0], [0, 0, 0]);
     close(forward, [0, 1, 0]);
     close(new Vector3(0, 1, 0).applyQuaternion(quaternion), [0, 0, 1]);
+  });
+
+  it('keeps roll about the optical axis: image-up in world = -row 1 of R', () => {
+    const a = (30 * Math.PI) / 180; // 30 deg roll about the optical axis (COLMAP +z)
+    const { forward, quaternion } = colmapPoseToThree(
+      [Math.cos(a / 2), 0, 0, Math.sin(a / 2)],
+      [0, 0, 0],
+    );
+    close(forward, [0, 0, 1]);
+    // R = Rz(a): row 1 = (sin a, cos a, 0); three's +Y (image up) is world -row1
+    close(new Vector3(0, 1, 0).applyQuaternion(quaternion), [-Math.sin(a), -Math.cos(a), 0]);
+    close(new Vector3(1, 0, 0).applyQuaternion(quaternion), [Math.cos(a), -Math.sin(a), 0]);
   });
 
   it('a world point in front of the camera projects inside the view', () => {
@@ -96,4 +110,43 @@ it('robustBounds ignores outliers but includes camera centres', () => {
   const b = robustBounds(pos, [[-3, 0, 0]]);
   expect(b.max[0]).toBeLessThan(1.01);
   expect(b.min[0]).toBe(-3);
+});
+
+// ---- initial view focus
+function scene(n: number, tower: number[]) {
+  // ground plane 100 x 100 plus a dense column at `tower` (x, y), 20 high
+  const pos = new Float32Array(n * 3);
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let p = 0; p < n; p++) {
+    if (p % 2) pos.set([tower[0] + rnd() * 4 - 2, tower[1] + rnd() * 4 - 2, rnd() * 20], p * 3);
+    else pos.set([(rnd() - 0.5) * 100, (rnd() - 0.5) * 100, 0], p * 3);
+  }
+  return pos;
+}
+const bnd = { min: [-50, -50, 0], max: [50, 50, 20], radius: Math.hypot(100, 100, 20) / 2 };
+
+it('focus: orbit cameras converge on the tower', () => {
+  const rays = Array.from({ length: 40 }, (_, k) => {
+    const a = (k / 40) * 2 * Math.PI;
+    const c = [20 + 30 * Math.cos(a), -10 + 30 * Math.sin(a), 8];
+    const d = [20 - c[0], -10 - c[1], 10 - c[2]];
+    const l = Math.hypot(...d);
+    return { center: c, forward: d.map((v) => v / l) };
+  });
+  const f = computeFocus(scene(20000, [20, -10]), rays, bnd);
+  expect(f.method).toBe('converge');
+  expect(Math.hypot(f.center[0] - 20, f.center[1] + 10)).toBeLessThan(1);
+  expect(f.radius).toBeLessThan(bnd.radius * 0.6);
+});
+
+it('focus: forward-moving cameras (parallel axes) fall back to the density peak', () => {
+  const rays = Array.from({ length: 30 }, (_, k) => ({
+    center: [-45 + k, -10, 2],
+    forward: [1, 0, 0],
+  }));
+  expect(convergePoint(rays)).toBeNull();
+  const f = computeFocus(scene(20000, [20, 15]), rays, bnd);
+  expect(f.method).toBe('density');
+  expect(Math.hypot(f.center[0] - 20, f.center[1] - 15)).toBeLessThan(5);
 });

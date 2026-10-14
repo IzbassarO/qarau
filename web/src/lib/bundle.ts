@@ -43,8 +43,18 @@ export interface Manifest {
     up: number[];
     bounds: { min: number[]; max: number[] };
     z_range: [number, number];
+    focus?: { center: number[]; radius: number; method?: string };
   };
-  points: { count: number; position: string; color: string; first_seen: string; num_obs: string };
+  points: {
+    count: number;
+    position: string;
+    color: string;
+    first_seen: string;
+    num_obs: string;
+    source?: string;
+  };
+  dense?: { method: string; frames_used?: number; points?: number };
+  findings?: string;
   tracks: {
     frame_offsets: string;
     frame_points: string;
@@ -53,6 +63,29 @@ export interface Manifest {
   };
   frames: FrameInfo[];
   stats: Stats;
+}
+
+export type Severity = 'critical' | 'watch';
+
+export interface Finding {
+  id: number;
+  class: string;
+  prompt?: string;
+  severity: Severity;
+  status: 'confirmed' | 'low_evidence';
+  confidence?: number;
+  n_points: number;
+  centroid: number[];
+  bbox: { min: number[]; max: number[] };
+  size?: { value: number; unit: 'm2' | 'rel' };
+  frames: number[];
+  max_angle_deg?: number;
+}
+
+export interface FindingsFile {
+  version: number;
+  findings: Finding[];
+  point_finding: string;
 }
 
 export interface Bundle {
@@ -67,6 +100,11 @@ export interface Bundle {
   pointFrames: Uint16Array;
   /** cumulative[i] = points with first_seen <= i */
   assembled: Uint32Array;
+  /** v2, optional: findings and the per-point finding id (0 = none) */
+  findings?: Finding[];
+  pointFinding?: Uint16Array;
+  /** set when the manifest lists findings but they could not be read */
+  findingsError?: 'missing' | 'broken';
 }
 
 export class BundleError extends Error {
@@ -86,7 +124,8 @@ export async function loadManifest(runId: string): Promise<Manifest> {
   if (res.status === 404) throw new BundleError('noManifest', 'manifest.json not found');
   if (!res.ok) throw new BundleError('generic', `manifest: HTTP ${res.status}`);
   const m = (await res.json()) as Manifest;
-  if (m.version !== 1) throw new BundleError('badVersion', `manifest version ${m.version}`);
+  if (m.version !== 1 && m.version !== 2)
+    throw new BundleError('badVersion', `manifest version ${m.version}`);
   return m;
 }
 
@@ -111,6 +150,30 @@ async function fetchBuffer(url: string, onBytes: (loaded: number, total: number)
     o += c.length;
   }
   return out.buffer;
+}
+
+/** Never throws: a missing or broken findings file becomes `findingsError`, shown in the UI. */
+async function loadFindings(
+  m: Manifest,
+  get: (rel: string) => Promise<ArrayBuffer>,
+): Promise<Pick<Bundle, 'findings' | 'pointFinding' | 'findingsError'>> {
+  let file: FindingsFile;
+  try {
+    file = JSON.parse(new TextDecoder().decode(await get(m.findings!))) as FindingsFile;
+  } catch (e) {
+    // a 404 is "missing"; HTTP errors elsewhere and bad JSON are "broken"
+    return { findingsError: String(e).includes('HTTP 404') ? 'missing' : 'broken' };
+  }
+  try {
+    const pf = new Uint16Array(await get(file.point_finding));
+    const ok =
+      Array.isArray(file.findings) &&
+      pf.length === m.points.count &&
+      file.findings.every((f) => Array.isArray(f.frames) && Array.isArray(f.centroid));
+    return ok ? { findings: file.findings, pointFinding: pf } : { findingsError: 'broken' };
+  } catch (e) {
+    return { findingsError: String(e).includes('HTTP 404') ? 'missing' : 'broken' };
+  }
 }
 
 /** Download manifest + all typed arrays; progress is 0..1 over bytes. */
@@ -145,7 +208,9 @@ export async function loadBundle(
     get(k.point_frames),
   ]);
   const firstSeen = new Uint16Array(fs);
+  const fnd = manifest.findings ? await loadFindings(manifest, get) : {};
   return {
+    ...fnd,
     runId,
     manifest,
     position: new Float32Array(pos),
