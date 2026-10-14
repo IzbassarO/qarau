@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Qarau — находка: коррозия стенки</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+a{color:#8AB6FF;text-decoration:none}a:hover{color:#B5D0FF}
+button,textarea{font-family:inherit}
+</style>
+</helmet>
+<div style="min-height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; background: #0B0C0E; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 14px; line-height: 20px;">
+
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid #23272D; background: #0E1013;">
+    <a href="Inspections.dc.html" style="display: flex; align-items: center; gap: 10px; color: #E8EAED;" aria-label="Qarau, к списку инспекций">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><circle cx="11" cy="11" r="9" fill="none" stroke="#E8EAED" stroke-width="1.6"></circle><circle cx="11" cy="11" r="3.2" fill="#E8EAED"></circle></svg>
+      <span style="font-weight: 600; font-size: 16px; letter-spacing: -0.01em;">qarau</span>
+    </a>
+    <a href="Main.dc.html" style="font-size: 14px;">← Карта инспекции 14 окт 2026</a>
+  </header>
+
+  <div style="box-sizing: border-box; width: 100%; max-width: 1360px; margin: 0 auto; padding: 24px 20px 40px; display: flex; flex-direction: column; gap: 20px;">
+
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
+      <span style="width: 28px; height: 28px; border-radius: 999px; background: #F0565C; color: #0B0C0E; font-weight: 600; display: inline-flex; align-items: center; justify-content: center;">1</span>
+      <h1 style="margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.01em;">Коррозия стенки</h1>
+      <span style="padding: 2px 10px; border-radius: 999px; background: rgba(240,86,92,0.14); color: #FF8A8E; font-size: 13px;">Критично</span>
+      <span style="color: #A1A7B0;">Резервуар Р-7 · юго-восточная стенка, высота 4,2 м</span>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start;">
+
+      <section style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 12px;" aria-label="Доказательства">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <h2 style="margin: 0; font-size: 16px; font-weight: 600;">Где это видно</h2>
+          <span style="color: #A1A7B0; font-size: 13px;">7 кадров · 3 ракурса</span>
+          <div style="flex-grow: 1;"></div>
+          <button type="button" aria-pressed="{{maskPressed}}" onClick="{{toggleMask}}" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2F3540; background: {{maskBg}}; color: #E8EAED; font-size: 13px; cursor: pointer;">Маска дефекта</button>
+        </div>
+
+        <figure style="margin: 0; position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; border: 1px solid #23272D; background: #15181C;">
+          <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" role="img" aria-label="{{frame.alt}}" style="position: absolute; inset: 0; width: 100%; height: 100%;">
+            <rect x="0" y="0" width="1600" height="900" fill="#1B1F24"></rect>
+            <path d="{{frame.wall}}" fill="#2A2F36"></path>
+            <path d="{{frame.seams}}" fill="none" stroke="#3A4049" stroke-width="3"></path>
+            <path d="{{frame.rust}}" fill="#5A3A2A" opacity="0.85"></path>
+            <sc-if value="{{showMask}}" hint-placeholder-val="{{true}}">
+              <path d="{{frame.rust}}" fill="rgba(240,86,92,0.28)" stroke="#F0565C" stroke-width="4"></path>
+            </sc-if>
+          </svg>
+          <span style="position: absolute; left: 12px; top: 12px; padding: 4px 8px; border-radius: 6px; background: rgba(11,12,14,0.8); font-size: 12px; color: #C9CED6; font-family: 'IBM Plex Mono', monospace;">{{frame.caption}}</span>
+          <span style="position: absolute; right: 12px; top: 12px; padding: 4px 8px; border-radius: 6px; background: rgba(11,12,14,0.8); font-size: 12px; color: #A1A7B0;">кадр из видео клиента</span>
+        </figure>
+
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+          <sc-for list="{{frames}}" as="fr" hint-placeholder-count="3">
+            <button type="button" onClick="{{fr.pick}}" aria-pressed="{{fr.pressed}}" aria-label="{{fr.alt}}" style="padding: 0; border-radius: 10px; border: 2px solid {{fr.ring}}; background: #15181C; cursor: pointer; overflow: hidden; display: flex; flex-direction: column; text-align: left; color: #E8EAED;">
+              <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="display: block; width: 100%; aspect-ratio: 16 / 9;">
+                <rect x="0" y="0" width="1600" height="900" fill="#1B1F24"></rect>
+                <path d="{{fr.wall}}" fill="#2A2F36"></path>
+                <path d="{{fr.rust}}" fill="rgba(240,86,92,0.35)" stroke="#F0565C" stroke-width="8"></path>
+              </svg>
+              <span style="padding: 8px 10px; font-size: 12px; font-family: 'IBM Plex Mono', monospace; color: #C9CED6;">{{fr.short}}</span>
+            </button>
+          </sc-for>
+        </div>
+
+        <div style="margin-top: 8px; border: 1px solid #23272D; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; align-items: baseline; gap: 12px;">
+            <h2 style="margin: 0; font-size: 16px; font-weight: 600;">История этой точки</h2>
+            <span style="color: #A1A7B0; font-size: 13px;">площадь поражения по инспекциям</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 180px minmax(0, 1fr) 90px; gap: 10px 16px; align-items: center; font-size: 13px;">
+            <span style="color: #A1A7B0;">12 мар 2026 · базовая</span>
+            <span style="height: 10px; border-radius: 999px; background: #23272D;"></span>
+            <span style="font-family: 'IBM Plex Mono', monospace; color: #A1A7B0;">не найдено</span>
+            <span style="color: #A1A7B0;">12 июл 2026</span>
+            <span style="height: 10px; border-radius: 999px; background: #23272D; overflow: hidden; display: flex;"><span style="width: 50%; background: #F2A33A;"></span></span>
+            <span style="font-family: 'IBM Plex Mono', monospace;">0,21 м²</span>
+            <span>14 окт 2026 · текущая</span>
+            <span style="height: 10px; border-radius: 999px; background: #23272D; overflow: hidden; display: flex;"><span style="width: 100%; background: #F0565C;"></span></span>
+            <span style="font-family: 'IBM Plex Mono', monospace;">0,42 м²</span>
+          </div>
+          <p style="margin: 0; font-size: 13px; color: #A1A7B0;">Рост ×2 за 94 дня. Порог шума измерения для этого типа объекта: ±0,03 м².</p>
+        </div>
+      </section>
+
+      <aside style="flex: 1 1 360px; max-width: 460px; display: flex; flex-direction: column; gap: 16px;">
+        <section style="border: 1px solid #23272D; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+          <h2 style="margin: 0 0 4px; font-size: 16px; font-weight: 600;">Измерения</h2>
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; font-size: 13px;">
+            <span style="color: #A1A7B0;">Площадь</span><span style="font-family: 'IBM Plex Mono', monospace;">0,42 м² ± 0,03</span>
+            <span style="color: #A1A7B0;">Размер</span><span style="font-family: 'IBM Plex Mono', monospace;">0,9 × 0,6 м</span>
+            <span style="color: #A1A7B0;">Высота от основания</span><span style="font-family: 'IBM Plex Mono', monospace;">4,2 м</span>
+            <span style="color: #A1A7B0;">Источник масштаба</span><span>GPS дрона</span>
+            <span style="color: #A1A7B0;">Уверенность модели</span><span style="font-family: 'IBM Plex Mono', monospace;">0,93</span>
+            <span style="color: #A1A7B0;">Как найдено</span><span>SAM 3.1 · «corrosion»</span>
+          </div>
+        </section>
+
+        <section style="border: 1px solid #23272D; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h2 style="margin: 0; font-size: 16px; font-weight: 600;">Почему критично</h2>
+            <span style="margin-left: auto; font-size: 12px; color: #A1A7B0;">вывод AI · проверьте</span>
+          </div>
+          <p style="margin: 0; font-size: 14px; line-height: 21px; color: #C9CED6;">Площадь удвоилась за три месяца. Участок на высоте 4,2 м попадает в зону переменного уровня продукта, где коррозия обычно развивается быстрее. Рекомендуется ультразвуковой замер толщины стенки в течение 14 дней.</p>
+        </section>
+
+        <section style="border: 1px solid #3A414C; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: #0E1013;">
+          <h2 style="margin: 0; font-size: 16px; font-weight: 600;">Ваше решение</h2>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <sc-for list="{{choices}}" as="c" hint-placeholder-count="3">
+              <button type="button" aria-pressed="{{c.pressed}}" onClick="{{c.pick}}" style="height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid {{c.border}}; background: {{c.bg}}; color: {{c.ink}}; font-size: 14px; cursor: pointer;">{{c.label}}</button>
+            </sc-for>
+          </div>
+          <label for="note" style="font-size: 13px; color: #A1A7B0;">Комментарий для журнала</label>
+          <textarea id="note" rows="3" value="{{note}}" onChange="{{setNote}}" placeholder="Например: назначить УЗТ, бригада №2" style="box-sizing: border-box; width: 100%; resize: vertical; padding: 10px 12px; border-radius: 8px; border: 1px solid #2F3540; background: #0B0C0E; color: #E8EAED; font-size: 14px; line-height: 20px;"></textarea>
+          <button type="button" onClick="{{save}}" style="height: 40px; border-radius: 8px; border: 0; background: {{saveBg}}; color: {{saveInk}}; font-size: 14px; font-weight: 500; cursor: pointer;">Сохранить в журнал</button>
+        </section>
+
+        <section style="display: flex; flex-direction: column; gap: 8px;">
+          <h2 style="margin: 0; font-size: 14px; font-weight: 600;">Журнал решений</h2>
+          <sc-for list="{{log}}" as="e" hint-placeholder-count="2">
+            <div style="border-left: 0; padding: 10px 12px; border: 1px solid #23272D; border-radius: 8px; display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-size: 13px;"><span style="font-weight: 500;">{{e.verdict}}</span> · {{e.who}}</span>
+              <span style="font-size: 12px; color: #A1A7B0; font-family: 'IBM Plex Mono', monospace;">{{e.when}}</span>
+              <span style="font-size: 13px; color: #C9CED6;">{{e.note}}</span>
+            </div>
+          </sc-for>
+        </section>
+      </aside>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { frame: 0, mask: true, choice: null, note: '', log: [
+      { verdict: 'Подтверждено', who: 'А. Сейткали, инженер по надёжности', when: '12 июл 2026, 16:40', note: '«Следить. Повторить съёмку в октябре.»' }
+    ] };
+  }
+  renderVals() {
+    const st = this.state;
+    const F = [
+      { caption: '01:42 · юго-восток · увер. 0,93', short: '01:42 · юго-восток', alt: 'Кадр 01:42, ракурс юго-восток, дефект выделен',
+        wall: 'M0 120 L1600 60 L1600 900 L0 900 Z', seams: 'M0 380 L1600 330 M0 640 L1600 600 M520 100 L520 900 M1120 80 L1120 900',
+        rust: 'M640 360 C700 300 820 310 880 350 C960 330 1010 400 990 470 C1030 540 960 610 880 600 C820 650 720 640 690 590 C620 580 590 500 620 450 C590 410 600 380 640 360 Z' },
+      { caption: '01:51 · юг · увер. 0,90', short: '01:51 · юг', alt: 'Кадр 01:51, ракурс юг, дефект выделен',
+        wall: 'M0 160 L1600 160 L1600 900 L0 900 Z', seams: 'M0 420 L1600 420 M0 680 L1600 680 M360 160 L360 900 M980 160 L980 900',
+        rust: 'M1040 380 C1100 340 1200 350 1240 400 C1300 420 1310 500 1260 540 C1250 600 1160 620 1110 590 C1050 600 1000 550 1010 500 C980 460 1000 400 1040 380 Z' },
+      { caption: '03:05 · восток · увер. 0,88', short: '03:05 · восток', alt: 'Кадр 03:05, ракурс восток, дефект выделен',
+        wall: 'M0 40 L1600 140 L1600 900 L0 900 Z', seams: 'M0 300 L1600 380 M0 580 L1600 640 M700 60 L700 900 M1300 120 L1300 900',
+        rust: 'M300 420 C350 380 430 390 460 430 C520 440 530 500 490 540 C480 590 410 600 370 570 C320 570 280 530 290 490 C270 460 280 430 300 420 Z' }
+    ];
+    const C = [
+      { id: 'ok', label: 'Подтвердить', on: '#F0565C', onInk: '#0B0C0E', verdict: 'Подтверждено' },
+      { id: 'no', label: 'Отклонить', on: '#E8EAED', onInk: '#0B0C0E', verdict: 'Отклонено' },
+      { id: 'site', label: 'Нужен осмотр на месте', on: '#E8EAED', onInk: '#0B0C0E', verdict: 'Назначен осмотр на месте' }
+    ];
+    const chosen = C.find((c) => c.id === st.choice);
+    return {
+      frame: F[st.frame],
+      frames: F.map((f, i) => Object.assign({}, f, { ring: i === st.frame ? '#E8EAED' : '#23272D', pressed: i === st.frame ? 'true' : 'false', pick: () => this.setState({ frame: i }) })),
+      showMask: st.mask, maskPressed: st.mask ? 'true' : 'false', maskBg: st.mask ? '#181B20' : 'transparent',
+      toggleMask: () => this.setState({ mask: !st.mask }),
+      choices: C.map((c) => {
+        const on = st.choice === c.id;
+        return { label: c.label, pressed: on ? 'true' : 'false', bg: on ? c.on : 'transparent', ink: on ? c.onInk : '#E8EAED', border: on ? c.on : '#2F3540', pick: () => this.setState({ choice: c.id }) };
+      }),
+      note: st.note,
+      setNote: (e) => this.setState({ note: e.target.value }),
+      saveBg: chosen ? '#E8EAED' : '#23272D', saveInk: chosen ? '#0B0C0E' : '#7C838D',
+      save: () => {
+        if (!chosen) return;
+        const entry = { verdict: chosen.verdict, who: 'Вы', when: '14 окт 2026, только что', note: st.note ? '«' + st.note + '»' : 'Без комментария' };
+        this.setState({ log: [entry].concat(st.log), choice: null, note: '' });
+      },
+      log: st.log
+    };
+  }
+}
+</script>
+</body>
+</html>

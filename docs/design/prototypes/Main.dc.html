@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Qarau — карта инспекции</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+a{color:#8AB6FF;text-decoration:none}a:hover{color:#B5D0FF}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="min-height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; background: #0B0C0E; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 14px; line-height: 20px;">
+
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid #23272D; background: #0E1013;">
+    <a href="Inspections.dc.html" style="display: flex; align-items: center; gap: 10px; color: #E8EAED;" aria-label="Qarau, к списку инспекций">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><circle cx="11" cy="11" r="9" fill="none" stroke="#E8EAED" stroke-width="1.6"></circle><circle cx="11" cy="11" r="3.2" fill="#E8EAED"></circle></svg>
+      <span style="font-weight: 600; font-size: 16px; letter-spacing: -0.01em;">qarau</span>
+    </a>
+    <nav aria-label="Путь" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: #A1A7B0;">
+      <span>Резервуарный парк №3</span>
+      <span aria-hidden="true">/</span>
+      <span style="color: #E8EAED;">Инспекция 14 окт 2026</span>
+    </nav>
+    <span style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border: 1px solid #2F3540; border-radius: 999px; color: #C9CED6; font-size: 12px;">
+      <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="4" fill="#5B9BFF"></circle></svg>
+      Мониторинг
+    </span>
+    <div style="flex-grow: 1;"></div>
+    <button type="button" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #2F3540; background: transparent; color: #E8EAED; font-size: 14px; cursor: pointer;">Сравнить с 12 июл</button>
+    <button type="button" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 0; background: #E8EAED; color: #0B0C0E; font-size: 14px; font-weight: 500; cursor: pointer;">Сформировать отчёт</button>
+  </header>
+
+  <div style="display: flex; flex-wrap: wrap; flex-grow: 1; min-height: 0;">
+
+    <aside style="flex: 1 1 232px; max-width: 280px; box-sizing: border-box; padding: 20px; border-right: 1px solid #23272D; display: flex; flex-direction: column; gap: 28px; background: #0E1013;">
+      <section style="display: flex; flex-direction: column; gap: 8px;">
+        <h2 style="margin: 0 0 4px; font-size: 12px; font-weight: 500; color: #A1A7B0; text-transform: uppercase; letter-spacing: 0.06em;">Слои</h2>
+        <sc-for list="{{layers}}" as="layer" hint-placeholder-count="5">
+          <button type="button" aria-pressed="{{layer.pressed}}" onClick="{{layer.toggle}}" style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: {{layer.bg}}; color: #E8EAED; font-size: 14px; text-align: left; cursor: pointer;">
+            <span style="width: 16px; height: 16px; border-radius: 4px; box-sizing: border-box; border: 1.5px solid {{layer.box}}; background: {{layer.fill}}; display: inline-flex; align-items: center; justify-content: center;">
+              <sc-if value="{{layer.on}}" hint-placeholder-val="{{true}}">
+                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.2 4 7.5 8.5 2.5" fill="none" stroke="#0B0C0E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              </sc-if>
+            </span>
+            <span>{{layer.label}}</span>
+          </button>
+        </sc-for>
+      </section>
+
+      <section style="display: flex; flex-direction: column; gap: 10px;">
+        <h2 style="margin: 0 0 2px; font-size: 12px; font-weight: 500; color: #A1A7B0; text-transform: uppercase; letter-spacing: 0.06em;">Легенда</h2>
+        <div style="display: flex; align-items: center; gap: 10px;"><span style="width: 10px; height: 10px; border-radius: 999px; background: #F0565C;"></span><span>Критично</span></div>
+        <div style="display: flex; align-items: center; gap: 10px;"><span style="width: 10px; height: 10px; border-radius: 999px; background: #F2A33A;"></span><span>Следить</span></div>
+        <div style="display: flex; align-items: center; gap: 10px;"><span style="width: 10px; height: 10px; border-radius: 999px; background: #5B9BFF;"></span><span>Осмотрено, в норме</span></div>
+        <div style="display: flex; align-items: center; gap: 10px;"><span style="width: 10px; height: 10px; border-radius: 999px; background: #6B727D;"></span><span>Не было в кадре</span></div>
+        <p style="margin: 2px 0 0; font-size: 12px; line-height: 18px; color: #A1A7B0;">Высота точек: от тёмно-синего (земля) к белому (верх сооружений).</p>
+      </section>
+
+      <section style="display: flex; flex-direction: column; gap: 10px;">
+        <h2 style="margin: 0 0 2px; font-size: 12px; font-weight: 500; color: #A1A7B0; text-transform: uppercase; letter-spacing: 0.06em;">Покрытие</h2>
+        <div style="display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: #23272D;" role="img" aria-label="Осмотрено 86 процентов, не в кадре 14 процентов">
+          <span style="width: 86%; background: #5B9BFF;"></span>
+          <span style="width: 14%; background: #6B727D;"></span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 13px;"><span>Осмотрено</span><span style="font-family: 'IBM Plex Mono', monospace;">86%</span></div>
+        <div style="display: flex; justify-content: space-between; font-size: 13px; color: #A1A7B0;"><span>Не в кадре</span><span style="font-family: 'IBM Plex Mono', monospace;">14%</span></div>
+      </section>
+
+      <section style="display: flex; flex-direction: column; gap: 10px;">
+        <h2 style="margin: 0 0 2px; font-size: 12px; font-weight: 500; color: #A1A7B0; text-transform: uppercase; letter-spacing: 0.06em;">Качество съёмки</h2>
+        <div style="padding: 10px 12px; border: 1px solid #2F3540; border-radius: 8px; display: flex; flex-direction: column; gap: 4px;">
+          <span style="font-size: 13px;">02:10–02:24 · размытие</span>
+          <span style="font-size: 12px; line-height: 18px; color: #A1A7B0;">Дрон летел 9 м/с. Переснять опоры ТП-118…124 медленнее.</span>
+        </div>
+        <div style="padding: 10px 12px; border: 1px solid #2F3540; border-radius: 8px; display: flex; flex-direction: column; gap: 4px;">
+          <span style="font-size: 13px;">05:02–05:15 · засветка</span>
+          <span style="font-size: 12px; line-height: 18px; color: #A1A7B0;">Солнце в объективе. Северную сторону Р-8 снять утром.</span>
+        </div>
+      </section>
+    </aside>
+
+    <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: #A1A7B0; font-size: 13px;">
+        <span style="font-family: 'IBM Plex Mono', monospace;">1 842 кадра · 4,1 млн точек · масштаб по GPS дрона</span>
+        <div style="flex-grow: 1;"></div>
+        <button type="button" aria-pressed="{{pathPressed}}" onClick="{{togglePath}}" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2F3540; background: {{pathBg}}; color: #E8EAED; font-size: 13px; cursor: pointer;">Путь камеры</button>
+        <button type="button" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2F3540; background: transparent; color: #E8EAED; font-size: 13px; cursor: pointer;">Вид сверху</button>
+        <button type="button" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2F3540; background: transparent; color: #E8EAED; font-size: 13px; cursor: pointer;">Сбросить вид</button>
+      </div>
+
+      <div style="position: relative; width: 100%; aspect-ratio: 16 / 10; background: #000; border: 1px solid #23272D; border-radius: 12px; overflow: hidden;">
+        <canvas ref="{{cvRef}}" role="img" aria-label="3D-карта резервуарного парка: облако точек, отмеченные находки и неосмотренные участки" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%;"></canvas>
+        <sc-for list="{{findings}}" as="f" hint-placeholder-count="4">
+          <button type="button" onClick="{{f.select}}" aria-label="{{f.pinLabel}}" style="position: absolute; left: {{f.left}}; top: {{f.top}}; transform: translate(-50%, -50%); width: 26px; height: 26px; border-radius: 999px; border: 2px solid {{f.ring}}; background: {{f.color}}; color: #0B0C0E; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;">{{f.n}}</button>
+        </sc-for>
+        <div style="position: absolute; left: 12px; bottom: 12px; padding: 6px 10px; border-radius: 6px; background: rgba(11,12,14,0.8); color: #A1A7B0; font-size: 12px;">Левая кнопка — вращать · правая — сдвигать · колесо — масштаб</div>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+        <span style="font-size: 12px; color: #A1A7B0; text-transform: uppercase; letter-spacing: 0.06em; margin-right: 4px;">История</span>
+        <button type="button" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2F3540; background: transparent; color: #C9CED6; font-size: 13px; cursor: pointer;">Базовая карта · 12 мар 2026</button>
+        <button type="button" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2F3540; background: transparent; color: #C9CED6; font-size: 13px; cursor: pointer;">12 июл 2026</button>
+        <button type="button" aria-current="true" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #5B9BFF; background: rgba(91,155,255,0.12); color: #E8EAED; font-size: 13px; cursor: pointer;">14 окт 2026 · текущая</button>
+      </div>
+    </main>
+
+    <aside style="flex: 1 1 320px; max-width: 400px; box-sizing: border-box; padding: 20px; border-left: 1px solid #23272D; display: flex; flex-direction: column; gap: 16px; background: #0E1013;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between;">
+        <h2 style="margin: 0; font-size: 16px; font-weight: 600;">Находки</h2>
+        <span style="font-size: 13px; color: #A1A7B0;">4 · по риску</span>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <sc-for list="{{findings}}" as="f" hint-placeholder-count="4">
+          <div style="border: 1px solid {{f.border}}; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; background: {{f.rowBg}};">
+            <button type="button" onClick="{{f.select}}" style="all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 6px;">
+              <span style="display: flex; align-items: center; gap: 8px;">
+                <span style="width: 20px; height: 20px; border-radius: 999px; background: {{f.color}}; color: #0B0C0E; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center;">{{f.n}}</span>
+                <span style="font-weight: 500;">{{f.title}}</span>
+                <span style="margin-left: auto; font-size: 12px; color: {{f.sevInk}};">{{f.sev}}</span>
+              </span>
+              <span style="font-size: 13px; color: #A1A7B0;">{{f.where}}</span>
+              <span style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; font-family: 'IBM Plex Mono', monospace;">
+                <span>{{f.metric}}</span>
+                <span style="color: {{f.deltaInk}};">{{f.delta}}</span>
+                <span style="color: #A1A7B0;">увер. {{f.conf}}</span>
+              </span>
+            </button>
+            <sc-if value="{{f.showLink}}" hint-placeholder-val="{{false}}">
+              <a href="Finding.dc.html" style="font-size: 13px;">Открыть кадры и решение →</a>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="border-top: 1px solid #23272D; padding-top: 16px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="width: 10px; height: 10px; border-radius: 999px; background: #6B727D;"></span>
+          <h3 style="margin: 0; font-size: 14px; font-weight: 600;">Не осмотрено · 3 участка</h3>
+        </div>
+        <p style="margin: 0; font-size: 13px; line-height: 19px; color: #A1A7B0;">Отсутствие находок здесь не значит, что всё в норме: эти места не попали в кадр.</p>
+        <ul style="margin: 0; padding-left: 18px; font-size: 13px; line-height: 22px;">
+          <li>Резервуар Р-8, северная сторона</li>
+          <li>Трубопровод №2, участок 96–107 м</li>
+          <li>Площадка к северо-востоку от Р-8</li>
+        </ul>
+        <button type="button" style="align-self: flex-start; height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid #2F3540; background: transparent; color: #E8EAED; font-size: 13px; cursor: pointer;">Добавить в план переснятия</button>
+      </div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":920}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { terrain: true, structures: true, pipe: true, marks: true, coverage: true, path: false, sel: 1 };
+    this.cvRef = (el) => {
+      if (this.ro) { this.ro.disconnect(); this.ro = null; }
+      this.cv = el;
+      if (el) {
+        if (window.ResizeObserver) { this.ro = new ResizeObserver(() => this.draw()); this.ro.observe(el); }
+        this.draw();
+      }
+    };
+  }
+  componentDidUpdate() { this.draw(); }
+  componentWillUnmount() { if (this.ro) this.ro.disconnect(); }
+
+  scene() {
+    if (this._scene) return this._scene;
+    let s = 1234567;
+    const rnd = () => { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const g = (x, y) => 0.7 * Math.sin(x / 11) + 0.5 * Math.cos(y / 8) + 0.012 * x;
+    const pts = [];
+    for (let i = 0; i < 11000; i++) { const x = -52 + rnd() * 120, y = -26 + rnd() * 68; pts.push([x, y, g(x, y), 0]); }
+    const tank = (cx, cy, r, h, n) => {
+      const b = g(cx, cy);
+      for (let i = 0; i < n; i++) { const a = rnd() * Math.PI * 2, z = rnd() * h; pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a), b + z, 1]); }
+      for (let i = 0; i < n / 3; i++) { const a = rnd() * Math.PI * 2, rr = Math.sqrt(rnd()) * r; pts.push([cx + rr * Math.cos(a), cy + rr * Math.sin(a), b + h + 0.8 * (1 - rr / r), 1]); }
+    };
+    tank(28, 18, 7, 10, 3200);
+    tank(50, 27, 5, 8, 2000);
+    const bx = -26, by = 14, bw = 14, bd = 9, bh = 6, bg = g(bx, by);
+    for (let i = 0; i < 2200; i++) {
+      const side = Math.floor(rnd() * 5), u = rnd(), v = rnd(); let x, y, z;
+      if (side === 0) { x = bx + u * bw; y = by; z = v * bh; }
+      else if (side === 1) { x = bx + u * bw; y = by + bd; z = v * bh; }
+      else if (side === 2) { x = bx; y = by + u * bd; z = v * bh; }
+      else if (side === 3) { x = bx + bw; y = by + u * bd; z = v * bh; }
+      else { x = bx + u * bw; y = by + v * bd; z = bh; }
+      pts.push([x, y, bg + z, 1]);
+    }
+    const p0 = [-46, -12], p1 = [64, 3], L = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+    const dx = (p1[0] - p0[0]) / L, dy = (p1[1] - p0[1]) / L;
+    const onPipe = (t) => { const x = p0[0] + dx * t, y = p0[1] + dy * t; return [x, y, g(x, y) + 2.4]; };
+    for (let i = 0; i < 3200; i++) { const t = rnd() * L, a = rnd() * Math.PI * 2, r = 0.55, c = onPipe(t); pts.push([c[0] - dy * r * Math.cos(a), c[1] + dx * r * Math.cos(a), c[2] + r * Math.sin(a), 2]); }
+    for (let k = 4; k <= L; k += 8) { const c = onPipe(k); for (let i = 0; i < 60; i++) pts.push([c[0] + (rnd() - 0.5) * 0.4, c[1] + (rnd() - 0.5) * 0.4, c[2] - 2.4 + rnd() * 2.1, 2]); }
+
+    const f1 = [28 + 7 * Math.cos(-0.75), 18 + 7 * Math.sin(-0.75), g(28, 18) + 4.2];
+    const s2 = onPipe(60); const f2 = [s2[0], s2[1], s2[2] - 1.0];
+    const f3 = onPipe(84);
+    const f4 = [50 + 5 * Math.cos(-2.4), 27 + 5 * Math.sin(-2.4), g(50, 27) + 3];
+    const marks = [
+      { c: f1, r: 1.6, col: [240, 86, 92] },
+      { c: f2, r: 0.9, col: [242, 163, 58] },
+      { c: f3, r: 0.9, col: [242, 163, 58] },
+      { c: f4, r: 1.2, col: [242, 163, 58] }
+    ];
+    const notSeen = (p) => {
+      if (p[3] === 1 && Math.hypot(p[0] - 50, p[1] - 27) < 6.5 && p[1] > 28.5) return true;
+      if (p[3] === 2) { const t = (p[0] - p0[0]) * dx + (p[1] - p0[1]) * dy; if (t > 96 && t < 107) return true; }
+      if (p[3] === 0 && p[0] > 56 && p[1] > 24) return true;
+      return false;
+    };
+    const path = [];
+    for (let i = 0; i <= 40; i++) { const t = i / 40; path.push([-48 + t * 110, -30 + 6 * Math.sin(t * Math.PI), 16]); }
+    for (let i = 1; i <= 16; i++) { const t = i / 16; path.push([62 + 6 * t, -24 + t * 58, 16 + 2 * t]); }
+
+    const raw = pts.map((p) => this.proj(p));
+    const pr = path.map((p) => this.proj(p));
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    raw.concat(pr).forEach((q) => { if (q[0] < minX) minX = q[0]; if (q[0] > maxX) maxX = q[0]; if (q[1] < minY) minY = q[1]; if (q[1] > maxY) maxY = q[1]; });
+    const A = 1.6, pad = 0.05, rx = maxX - minX, ry = maxY - minY;
+    const k = Math.min(((1 - 2 * pad) * A) / rx, (1 - 2 * pad) / ry);
+    const ox = (A - rx * k) / 2, oy = (1 - ry * k) / 2;
+    const norm = (q) => [((q[0] - minX) * k + ox) / A, (q[1] - minY) * k + oy, q[2]];
+
+    const ramp = [[14, 42, 92], [46, 111, 216], [156, 195, 255], [234, 242, 255]];
+    const color = (z) => { const v = Math.max(0, Math.min(0.999, (z + 1) / 13)) * 3, i = Math.floor(v), f = v - i, a = ramp[i], b = ramp[i + 1]; return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]; };
+
+    const items = pts.map((p, i) => {
+      let mark = null;
+      if (p[3] !== 0) for (const m of marks) { if (Math.hypot(p[0] - m.c[0], p[1] - m.c[1], p[2] - m.c[2]) < m.r) { mark = m.col; break; } }
+      return { n: norm(raw[i]), kind: p[3], base: color(p[2]), mark, ns: notSeen(p) };
+    });
+    items.sort((a, b) => b.n[2] - a.n[2]);
+    this._scene = { items, path: pr.map(norm), pins: [f1, f2, f3, f4].map((c) => norm(this.proj(c))) };
+    return this._scene;
+  }
+
+  proj(p) {
+    const a = -0.5, t = 0.62, ca = Math.cos(a), sa = Math.sin(a);
+    const xr = p[0] * ca - p[1] * sa, yr = p[0] * sa + p[1] * ca;
+    const d = yr * Math.cos(t) - p[2] * Math.sin(t);
+    const sc = 1 / (1 + (d + 40) / 240);
+    return [xr * sc, (-yr * Math.sin(t) - p[2] * Math.cos(t)) * sc, d];
+  }
+
+  draw() {
+    const el = this.cv; if (!el) return;
+    const w = el.clientWidth, h = el.clientHeight; if (!w || !h) return;
+    const dpr = window.devicePixelRatio || 1;
+    if (el.width !== Math.round(w * dpr) || el.height !== Math.round(h * dpr)) { el.width = Math.round(w * dpr); el.height = Math.round(h * dpr); }
+    const ctx = el.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
+    const st = this.state, sc = this.scene(), size = Math.max(1.2, w / 700);
+    for (const it of sc.items) {
+      if (it.kind === 0 && !st.terrain) continue;
+      if (it.kind === 1 && !st.structures) continue;
+      if (it.kind === 2 && !st.pipe) continue;
+      let c = it.base, alpha = it.kind === 0 ? 0.55 : 0.9;
+      if (st.coverage && it.ns) { c = [107, 114, 125]; alpha = 0.5; }
+      if (st.marks && it.mark) { c = it.mark; alpha = 1; }
+      ctx.fillStyle = 'rgba(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ',' + alpha + ')';
+      const s = it.mark && st.marks ? size * 1.6 : size;
+      ctx.fillRect(it.n[0] * w - s / 2, it.n[1] * h - s / 2, s, s);
+    }
+    if (st.path) {
+      ctx.strokeStyle = 'rgba(232,234,237,0.7)'; ctx.lineWidth = 1.2; ctx.setLineDash([5, 5]);
+      ctx.beginPath(); sc.path.forEach((q, i) => { const x = q[0] * w, y = q[1] * h; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#E8EAED';
+      sc.path.forEach((q, i) => { if (i % 4 === 0) ctx.fillRect(q[0] * w - 2, q[1] * h - 2, 4, 4); });
+    }
+  }
+
+  renderVals() {
+    const st = this.state, sc = this.scene();
+    const layer = (key, label) => ({
+      label, on: st[key], pressed: st[key] ? 'true' : 'false',
+      bg: st[key] ? '#181B20' : 'transparent', box: st[key] ? '#E8EAED' : '#5A616B', fill: st[key] ? '#E8EAED' : 'transparent',
+      toggle: () => this.setState({ [key]: !st[key] })
+    });
+    const data = [
+      { n: 1, title: 'Коррозия стенки', where: 'Резервуар Р-7 · юго-восточная стенка, 4 м', metric: '0,42 м²', delta: '+0,21 м² с 12 июл', conf: '0,93', sev: 'Критично', color: '#F0565C', sevInk: '#FF8A8E', deltaInk: '#FF8A8E' },
+      { n: 2, title: 'Трещина сварного шва', where: 'Опора ТП-112 · трубопровод №2', metric: '8 см', delta: 'новая', conf: '0,81', sev: 'Следить', color: '#F2A33A', sevInk: '#F6BE6E', deltaInk: '#F6BE6E' },
+      { n: 3, title: 'Повреждение покрытия', where: 'Резервуар Р-8 · западная стенка', metric: '0,15 м²', delta: '+0,02 м²', conf: '0,72', sev: 'Следить', color: '#F2A33A', sevInk: '#F6BE6E', deltaInk: '#A1A7B0' },
+      { n: 4, title: 'Следы подтёка', where: 'Фланец Ф-14 · трубопровод №2', metric: '0,06 м²', delta: 'без изменений', conf: '0,77', sev: 'Следить', color: '#F2A33A', sevInk: '#F6BE6E', deltaInk: '#A1A7B0' }
+    ];
+    const pinIdx = [0, 1, 3, 2];
+    const findings = data.map((f, i) => {
+      const p = sc.pins[pinIdx[i]], on = st.sel === f.n;
+      return Object.assign({}, f, {
+        left: (p[0] * 100).toFixed(2) + '%', top: (p[1] * 100).toFixed(2) + '%',
+        ring: on ? '#FFFFFF' : '#0B0C0E',
+        rowBg: on ? '#181B20' : 'transparent', border: on ? '#3A414C' : '#23272D',
+        showLink: on && f.n === 1,
+        pinLabel: 'Находка ' + f.n + ': ' + f.title,
+        select: () => this.setState({ sel: f.n })
+      });
+    });
+    return {
+      cvRef: this.cvRef,
+      layers: [layer('terrain', 'Рельеф'), layer('structures', 'Сооружения'), layer('pipe', 'Трубопроводы'), layer('marks', 'Находки'), layer('coverage', 'Покрытие съёмки')],
+      findings,
+      pathPressed: st.path ? 'true' : 'false', pathBg: st.path ? '#181B20' : 'transparent',
+      togglePath: () => this.setState({ path: !st.path })
+    };
+  }
+}
+</script>
+</body>
+</html>

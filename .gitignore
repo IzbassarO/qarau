@@ -1,0 +1,61 @@
+# --- never commit: data, media, point clouds, model weights, secrets ---
+data/
+scratch/
+.env
+.env.*
+!.env.example
+*.mp4
+*.MP4
+*.mov
+*.MOV
+*.avi
+*.mkv
+*.webm
+*.ogv
+*.m4v
+*.ply
+*.las
+*.laz
+*.pcd
+*.e57
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
+*.h5
+*.db
+*.sqlite
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+htmlcov/
+.coverage
+
+# --- Node / web ---
+node_modules/
+web/dist/
+desktop/src-tauri/target/
+.vite/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# --- Docker volumes (if bind-mounted locally) ---
+infra/volumes/
