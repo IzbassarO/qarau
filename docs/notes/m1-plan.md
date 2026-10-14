@@ -111,16 +111,16 @@ python -m qarau_pipeline export --sparse dir/sparse --images dir/images --out da
   "world": {"up": [0,0,1], "world_from_colmap": [16 numbers, row-major 4×4],
             "bounds": {"min": [x,y,z], "max": [x,y,z]}, "z_range": [p2, p98]},
   "points": {"count": N,
-             "position": "points.position.f32",     // N×3 xyz interleaved
-             "color": "points.color.u8",            // N×3 rgb from COLMAP
-             "first_seen": "points.first_seen.u16", // frame index; 65535 = never observed
-             "num_obs": "points.num_obs.u8"},       // track length, clamped to 255
-  "tracks": {"frame_offsets": "tracks.frame_offsets.u32",  // n_frames+1
-             "frame_points": "tracks.frame_points.u32",    // point indices, ascending per frame
-             "point_offsets": "tracks.point_offsets.u32",  // n_points+1
-             "point_frames": "tracks.point_frames.u16"},   // frame indices, ascending per point
+             "position": "web/points.position.f32", // N×3 xyz interleaved
+             "color": "web/points.color.u8",        // N×3 rgb from COLMAP
+             "first_seen": "web/points.first_seen.u16", // frame index; 65535 = never observed
+             "num_obs": "web/points.num_obs.u8"},   // track length, clamped to 255
+  "tracks": {"frame_offsets": "web/tracks.frame_offsets.u32", // n_frames+1
+             "frame_points": "web/tracks.frame_points.u32",   // point indices, ascending per frame
+             "point_offsets": "web/tracks.point_offsets.u32", // n_points+1
+             "point_frames": "web/tracks.point_frames.u16"},  // frame indices, ascending per point
   "frames": [ // one entry per extracted frame, ascending t, index == position in array
-    {"i": 0, "t": 0.0, "image": "frames/000000.jpg", "thumb": "thumbs/000000.jpg",
+    {"i": 0, "t": 0.0, "image": "frames/000000.jpg", "thumb": "web/thumbs/000000.jpg",
      "kept": true, "drop_reason": null, "blur": 142.1,
      "registered": true,
      "camera": {"width": 1920, "height": 1080, "model": "SIMPLE_RADIAL",
@@ -135,12 +135,13 @@ python -m qarau_pipeline export --sparse dir/sparse --images dir/images --out da
 ```
 
 Conventions the viewer relies on:
+- **All paths in the manifest are relative to the run directory** (`data/runs/<run_id>/`), and
+  the API serves that directory: viewer URL = `/api/runs/{run_id}/files/` + path.
 - Pose is COLMAP `cam_from_world`: `x_cam = R(q)·x_world + t`; camera centre `C = −Rᵀt`.
   COLMAP camera axes: +x right, +y down, +z forward. three.js camera: +x right, +y up,
   −z forward → `R_three = Rᵀ · diag(1, −1, −1)`; vertical FOV = `2·atan(H / (2·fy))`.
 - Unregistered or dropped frames have `registered: false`, no pose, empty CSR range.
 - Frame indices everywhere are indices into `frames` (time order), never COLMAP image ids.
-- The bundle is served as static files by the API: `GET /api/runs/{run_id}/files/{path}`.
 
 Why raw arrays and not PLY/LAZ/Potree for the viewer: `fetch().arrayBuffer()` →
 `BufferAttribute` with zero parsing, supports our per-point attributes (`first_seen`),
