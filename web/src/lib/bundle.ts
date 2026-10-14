@@ -7,7 +7,7 @@ export interface FrameInfo {
   thumb: string;
   kept: boolean;
   drop_reason: string | null;
-  blur: number;
+  blur: number | null;
   registered: boolean;
   camera: { width: number; height: number; model: string; params: number[]; K: number[] };
   pose?: { qvec: number[]; tvec: number[] };

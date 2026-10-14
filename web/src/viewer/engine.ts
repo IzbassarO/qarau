@@ -60,7 +60,7 @@ void main() {
   vColor = c;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mv;
-  gl_PointSize = clamp(uPointSize * k * uPixelRatio * uRefDist / max(-mv.z, 1e-6), 1.5 * uPixelRatio, 16.0 * uPixelRatio);
+  gl_PointSize = clamp(uPointSize * k * uPixelRatio * uRefDist / max(-mv.z, 1e-6), 1.5 * uPixelRatio, 10.0 * uPixelRatio);
 }`;
 
 const FRAG = /* glsl */ `

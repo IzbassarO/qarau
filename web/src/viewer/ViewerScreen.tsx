@@ -193,7 +193,8 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
         </div>
         <div className="grow" />
         <span className={`${mono} text-xs text-ink-2`}>
-          {stats.points.toLocaleString()} · {fps} fps
+          {stats.points.toLocaleString()}
+          {import.meta.env.DEV && ` · ${fps} fps`}
         </span>
         <LangSwitch />
       </header>
@@ -333,7 +334,8 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
               />
             </div>
             <p className={`${mono} m-0 truncate text-xs text-ink-2`}>
-              {f.image.split('/').pop()} · {t('panel.blur')} {f.blur.toFixed(1)}
+              {f.image.split('/').pop()} · {t('panel.blur')}{' '}
+              {f.blur === null ? '—' : f.blur.toFixed(1)}
               {f.drop_reason === 'blur' && ` · ${t('panel.droppedBlur')}`}
               {f.drop_reason === 'exposure' && ` · ${t('panel.droppedExposure')}`}
             </p>
