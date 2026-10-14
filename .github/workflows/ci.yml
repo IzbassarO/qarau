@@ -29,7 +29,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - if: steps.dir.outputs.present == 'true'
         uses: astral-sh/setup-uv@v5
-      - if: steps.dir.outputs.present == 'true'
+      - name: Lint, typecheck and test pipeline
+        if: steps.dir.outputs.present == 'true'
         working-directory: pipeline
         run: |
           uv sync
@@ -54,7 +55,8 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - if: steps.dir.outputs.present == 'true'
+      - name: Install, lint, typecheck, test and build web
+        if: steps.dir.outputs.present == 'true'
         working-directory: web
         run: |
           pnpm install --frozen-lockfile
