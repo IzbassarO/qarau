@@ -2,6 +2,7 @@ import {
   AxesHelper,
   BufferAttribute,
   BufferGeometry,
+  CanvasTexture,
   Color,
   Line,
   LineBasicMaterial,
@@ -10,8 +11,11 @@ import {
   PerspectiveCamera,
   Points,
   PointsMaterial,
+  Quaternion,
   Scene,
   ShaderMaterial,
+  Sprite,
+  SpriteMaterial,
   Uint8BufferAttribute,
   Vector2,
   Vector3,
@@ -21,11 +25,13 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Bundle } from '../lib/bundle';
 import {
   colmapPoseToThree,
+  computeFocus,
   csrSlice,
   median,
   pickNearest,
   quatToMat3,
   RAMP,
+  type Focus,
   robustBounds,
   verticalFovDeg,
 } from '../lib/geometry';
@@ -35,15 +41,19 @@ export interface Options {
   showCurrent: boolean;
   frustums: boolean;
   rgb: boolean;
+  findings: boolean;
   pointSize: number;
 }
 
 const VERT = /* glsl */ `
+uniform float uFindings, uSelected;
 uniform float uCurrentFrame, uBuildUp, uShowCurrent, uPointSize, uPixelRatio, uRefDist, uColorMode;
 uniform vec2 uZRange;
 uniform vec3 uRamp0, uRamp1, uRamp2, uRamp3;
 attribute float firstSeen;
 attribute float visibleNow;
+attribute float fsev; // 0 none, 1 watch, 2 critical
+attribute float fid;  // finding id, 0 none
 varying vec3 vColor;
 vec3 ramp(float t) {
   float s = clamp(t, 0.0, 1.0) * 3.0;
@@ -57,6 +67,11 @@ void main() {
   if (firstSeen > 65534.5) c = vec3(0.4196, 0.4471, 0.4902);            // #6B727D never observed
   else if (uBuildUp > 0.5 && firstSeen > uCurrentFrame) c = vec3(0.1647, 0.1961, 0.2510); // #2A3240
   else if (uShowCurrent > 0.5 && visibleNow > 0.5) { c = min(c * 1.25 + 0.12, vec3(1.0)); k = 1.25; }
+  if (uFindings > 0.5 && fsev > 0.5 && firstSeen < 65534.5 && !(uBuildUp > 0.5 && firstSeen > uCurrentFrame)) {
+    c = fsev > 1.5 ? vec3(0.9412, 0.3373, 0.3608) : vec3(0.9490, 0.6392, 0.2275); // #F0565C critical, #F2A33A watch
+    k = fid == uSelected ? 1.9 : 1.35;
+    if (uSelected > 0.5 && fid != uSelected) c *= 0.65;
+  }
   vColor = c;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mv;
@@ -79,12 +94,31 @@ export interface Callbacks {
   onPick: (point: number | null) => void;
 }
 
+function axisLabel(text: string, color: string, at: number[]) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  g.fillStyle = color;
+  g.font = '600 44px sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(text, 32, 34);
+  const sp = new Sprite(new SpriteMaterial({ map: new CanvasTexture(c), depthTest: false }));
+  sp.position.set(at[0], at[1], at[2]);
+  sp.scale.setScalar(0.45);
+  return sp;
+}
+
 export class ViewerEngine {
   readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
   readonly camera = new PerspectiveCamera(50, 1, 0.01, 100);
   readonly controls: OrbitControls;
   private bounds;
+  readonly focus: Focus;
+  /** called after every render; the UI uses it to place finding markers */
+  onRender?: () => void;
+  private rolled = false;
   private mat: ShaderMaterial;
   private visibleNow: Uint8Array;
   private visAttr: BufferAttribute;
@@ -108,6 +142,8 @@ export class ViewerEngine {
     g1: Vector3;
     f0: number;
     f1: number;
+    q0?: Quaternion;
+    q1?: Quaternion;
   } = null;
   private frames = 0;
   private lastFps = performance.now();
@@ -129,6 +165,21 @@ export class ViewerEngine {
     this.bounds = robustBounds(b.position, centers);
     const r = this.bounds.radius;
     this.regIdx = m.frames.filter((f) => f.registered && f.pose).map((f) => f.i);
+    const wf = m.world.focus;
+    this.focus = wf
+      ? { center: wf.center, radius: wf.radius, method: 'manifest' }
+      : computeFocus(
+          b.position,
+          this.regIdx.map((fi) => ({
+            center: m.frames[fi].center!,
+            forward: colmapPoseToThree(
+              m.frames[fi].pose!.qvec,
+              m.frames[fi].pose!.tvec,
+            ).forward.toArray(),
+          })),
+          this.bounds,
+          b.pointOffsets,
+        );
 
     // ---- points
     const g = new BufferGeometry();
@@ -139,6 +190,17 @@ export class ViewerEngine {
     this.visAttr = new BufferAttribute(this.visibleNow, 1);
     this.visAttr.setUsage(35048); // DynamicDrawUsage
     g.setAttribute('visibleNow', this.visAttr);
+    // findings (v2): per-point severity + id, uploaded once; toggling is a uniform
+    const fsev = new Uint8Array(m.points.count);
+    if (b.pointFinding && b.findings) {
+      const sev = new Map(b.findings.map((x) => [x.id, x.severity === 'critical' ? 2 : 1]));
+      for (let p = 0; p < fsev.length; p++) fsev[p] = sev.get(b.pointFinding[p]) ?? 0;
+    }
+    g.setAttribute('fsev', new BufferAttribute(fsev, 1));
+    g.setAttribute(
+      'fid',
+      new BufferAttribute(b.pointFinding ?? new Uint16Array(m.points.count), 1),
+    );
     // bounding sphere once; robust (outliers must not inflate it) and never recomputed
     g.boundingSphere = null;
     g.computeBoundingSphere();
@@ -155,6 +217,8 @@ export class ViewerEngine {
         uPixelRatio: { value: this.renderer.getPixelRatio() },
         uRefDist: { value: r * 2 },
         uColorMode: { value: 0 },
+        uFindings: { value: 1 },
+        uSelected: { value: 0 },
         uZRange: { value: [m.world.z_range[0], m.world.z_range[1]] },
         uRamp0: { value: raw(RAMP[0]) },
         uRamp1: { value: raw(RAMP[1]) },
@@ -214,7 +278,12 @@ export class ViewerEngine {
     this.scene.add(this.pickMark);
 
     // ---- gizmo
-    this.gizmoScene.add(new AxesHelper(1));
+    this.gizmoScene.add(
+      new AxesHelper(1),
+      axisLabel('X', '#FF6B6B', [1.3, 0, 0]),
+      axisLabel('Y', '#6BE675', [0, 1.3, 0]),
+      axisLabel('Z', '#6BA8FF', [0, 0, 1.3]),
+    );
 
     // ---- camera + controls (Blender-like)
     this.camera.up.set(0, 0, 1);
@@ -232,6 +301,8 @@ export class ViewerEngine {
 
     canvas.tabIndex = 0;
     canvas.addEventListener('dblclick', this.onDbl);
+    canvas.addEventListener('pointerdown', this.exitRoll, true); // capture: before OrbitControls
+    canvas.addEventListener('wheel', this.exitRoll, true);
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointerup', this.onUp);
     canvas.addEventListener('keydown', this.onKey);
@@ -299,9 +370,25 @@ export class ViewerEngine {
     u.uBuildUp.value = o.buildUp ? 1 : 0;
     u.uShowCurrent.value = o.showCurrent ? 1 : 0;
     u.uColorMode.value = o.rgb ? 1 : 0;
+    u.uFindings.value = o.findings ? 1 : 0;
     u.uPointSize.value = o.pointSize;
     this.frustumAll.visible = o.frustums;
     this.dirty = true;
+  }
+
+  setSelectedFinding(id: number) {
+    this.mat.uniforms.uSelected.value = id;
+    this.dirty = true;
+  }
+
+  /** Project a world point to canvas pixels (after the last render). */
+  project(p: number[]) {
+    const v = new Vector3(p[0], p[1], p[2]).project(this.camera);
+    return {
+      x: (v.x * 0.5 + 0.5) * this.canvas.clientWidth,
+      y: (0.5 - v.y * 0.5) * this.canvas.clientHeight,
+      visible: v.z > -1 && v.z < 1,
+    };
   }
 
   setPicked(p: number | null) {
@@ -316,24 +403,51 @@ export class ViewerEngine {
   }
 
   // ------------------------------------------------------------ views
-  private fly(p1: Vector3, g1: Vector3, fov: number, animate = true) {
+  /** Leave the through-camera view: back to the world-up orbit (drops the roll). */
+  private exitRoll = () => {
+    if (!this.rolled) return;
+    this.rolled = false;
+    this.tween = null;
+    this.controls.enabled = true;
+    this.controls.update(); // re-aims at the target with camera.up = +Z
+    this.dirty = true;
+  };
+
+  /** q1 = exact camera rotation (through-camera view, roll included); else normal orbit view. */
+  private fly(p1: Vector3, g1: Vector3, fov: number, animate = true, q1?: Quaternion) {
+    this.exitRoll();
     const p0 = this.camera.position.clone(),
       g0 = this.controls.target.clone();
+    if (q1) {
+      this.rolled = true;
+      this.controls.enabled = false;
+    }
     if (!animate) {
       this.camera.position.copy(p1);
       this.controls.target.copy(g1);
+      if (q1) this.camera.quaternion.copy(q1);
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
-      this.controls.update();
+      if (!q1) this.controls.update();
       this.dirty = true;
       return;
     }
-    this.tween = { t0: performance.now(), p0, p1, g0, g1, f0: this.camera.fov, f1: fov };
+    this.tween = {
+      t0: performance.now(),
+      p0,
+      p1,
+      g0,
+      g1,
+      f0: this.camera.fov,
+      f1: fov,
+      q0: q1 && this.camera.quaternion.clone(),
+      q1,
+    };
   }
 
   private view(dir: Vector3, animate = true) {
-    const c = new Vector3(...this.bounds.center);
-    this.fly(c.clone().addScaledVector(dir.normalize(), this.bounds.radius * 2.2), c, 50, animate);
+    const c = new Vector3(...this.focus.center);
+    this.fly(c.clone().addScaledVector(dir.normalize(), this.focus.radius * 2.4), c, 50, animate);
   }
   resetView(animate = true) {
     this.view(new Vector3(1, -1.3, 0.8), animate);
@@ -343,6 +457,14 @@ export class ViewerEngine {
   }
   sideView() {
     this.view(new Vector3(0, -1, 0.02));
+  }
+  /** Keep the viewing direction, centre on a finding. */
+  flyToFinding(centroid: number[], diag: number) {
+    const c = new Vector3(...centroid);
+    const dir = this.camera.position.clone().sub(this.controls.target);
+    if (dir.lengthSq() < 1e-12) dir.set(1, -1.3, 0.8);
+    const dist = Math.min(this.bounds.radius * 2, Math.max(diag * 3, this.bounds.radius * 0.1));
+    this.fly(c.clone().addScaledVector(dir.normalize(), dist), c, 50);
   }
   zoom(factor: number) {
     const t = this.controls.target;
@@ -357,7 +479,7 @@ export class ViewerEngine {
   viewThroughFrame(i: number, animate = true) {
     const f = this.b.manifest.frames[i];
     if (!f.registered || !f.pose || !f.center || !f.camera) return;
-    const { position, forward } = colmapPoseToThree(f.pose.qvec, f.pose.tvec);
+    const { position, forward, quaternion } = colmapPoseToThree(f.pose.qvec, f.pose.tvec);
     const sl = csrSlice(this.b.frameOffsets, this.b.frameInPoints, i);
     const step = Math.max(1, Math.floor(sl.length / 5000));
     const depths: number[] = [];
@@ -377,6 +499,7 @@ export class ViewerEngine {
       position.clone().addScaledVector(forward, dist),
       verticalFovDeg(f.camera.height, f.camera.K[1]),
       animate,
+      quaternion,
     );
   }
 
@@ -441,6 +564,7 @@ export class ViewerEngine {
       const s = k * k * (3 - 2 * k);
       this.camera.position.lerpVectors(tw.p0, tw.p1, s);
       this.controls.target.lerpVectors(tw.g0, tw.g1, s);
+      if (tw.q0 && tw.q1) this.camera.quaternion.slerpQuaternions(tw.q0, tw.q1, s);
       this.camera.fov = tw.f0 + (tw.f1 - tw.f0) * s;
       this.camera.updateProjectionMatrix();
       if (k >= 1) this.tween = null;
@@ -457,7 +581,7 @@ export class ViewerEngine {
       p.y = t.y + dx * Math.sin(a) + dy * Math.cos(a);
       this.dirty = true;
     }
-    if (this.controls.update()) this.dirty = true;
+    if (!this.rolled && this.controls.update()) this.dirty = true;
     // keep the orbit target near the data
     const t = this.controls.target,
       bd = this.bounds,
@@ -467,7 +591,7 @@ export class ViewerEngine {
       Math.min(bd.max[1] + m, Math.max(bd.min[1] - m, t.y)),
       Math.min(bd.max[2] + m, Math.max(bd.min[2] - m, t.z)),
     );
-    if (!cl.equals(t)) {
+    if (!this.rolled && !cl.equals(t)) {
       this.camera.position.add(cl.clone().sub(t));
       t.copy(cl);
     }
@@ -509,12 +633,15 @@ export class ViewerEngine {
     this.gizmoCam.position.set(0, 0, 3.2).applyQuaternion(this.camera.quaternion);
     r.render(this.gizmoScene, this.gizmoCam);
     r.setScissorTest(false);
+    this.onRender?.();
   }
 
   dispose() {
     cancelAnimationFrame(this.raf);
     const c = this.canvas;
     c.removeEventListener('dblclick', this.onDbl);
+    c.removeEventListener('pointerdown', this.exitRoll, true);
+    c.removeEventListener('wheel', this.exitRoll, true);
     c.removeEventListener('pointerdown', this.onDown);
     c.removeEventListener('pointerup', this.onUp);
     c.removeEventListener('keydown', this.onKey);
