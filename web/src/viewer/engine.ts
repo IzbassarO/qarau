@@ -596,11 +596,13 @@ export class ViewerEngine {
       this.camera.position.add(cl.clone().sub(t));
       t.copy(cl);
     }
-    if (!this.dirty) return;
-    this.dirty = false;
-    this.render();
-    this.frames++;
+    // fps = frames actually rendered per second; renders are on demand, so idle reads 0
     const now = performance.now();
+    if (this.dirty) {
+      this.dirty = false;
+      this.render();
+      this.frames++;
+    }
     if (now - this.lastFps > 1000) {
       this.fps = (this.frames * 1000) / (now - this.lastFps);
       this.frames = 0;

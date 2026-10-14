@@ -178,10 +178,10 @@ async function loadFindings(
 
 /** Download manifest + all typed arrays; progress is 0..1 over bytes. */
 export async function loadBundle(
+  runId: string, // the route id: a copied run may carry a stale manifest.run_id
   manifest: Manifest,
   onProgress: (p: number) => void,
 ): Promise<Bundle> {
-  const runId = manifest.run_id;
   const prog = new Map<string, [number, number]>();
   const report = () => {
     let l = 0;

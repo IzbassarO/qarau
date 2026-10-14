@@ -208,7 +208,7 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
         <Link to="/" aria-label="Qarau">
           <Logo />
         </Link>
-        <span className="text-ink-2">{m.run_id}</span>
+        <span className="text-ink-2">{bundle.runId}</span>
         <div
           role="tablist"
           className="flex gap-0.5 rounded-[9px] border border-line-strong p-[3px]"
@@ -231,7 +231,7 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
         <div className="grow" />
         <span className={`${mono} text-xs text-ink-2`}>
           {stats.points.toLocaleString()}
-          {import.meta.env.DEV && ` · ${fps} fps`}
+          {import.meta.env.DEV && fps > 0 && ` · ${fps} fps`}
         </span>
         <LangSwitch />
       </header>
