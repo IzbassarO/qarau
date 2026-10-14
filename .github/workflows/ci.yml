@@ -17,7 +17,18 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy .
+      - name: Build and start Postgres (PostGIS + pgvector, amd64)
+        working-directory: .
+        run: |
+          docker build -t qarau/postgres:ci infra/postgres
+          docker run -d --name pg -p 5433:5432 \
+            -e POSTGRES_USER=qarau -e POSTGRES_PASSWORD=qarau_dev -e POSTGRES_DB=qarau \
+            --health-cmd "pg_isready -U qarau -d qarau" --health-interval 3s --health-retries 20 \
+            qarau/postgres:ci
+          timeout 90 sh -c 'until [ "$(docker inspect -f "{{.State.Health.Status}}" pg)" = healthy ]; do sleep 2; done'
       - run: uv run pytest
+        env:
+          QARAU_REQUIRE_DB: "1"
 
   pipeline:
     runs-on: ubuntu-latest
