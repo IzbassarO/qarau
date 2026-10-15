@@ -95,4 +95,5 @@ def test_portrait_hdr_video(tmp_path: Path) -> None:
     assert (info["width"], info["height"]) == (1440, 2560)
     frames.run(v, tmp_path / "out", max_frames=60)
     img = cv2.imread(str(tmp_path / "out/frames/000000.jpg"))
+    assert img is not None
     assert img.shape[:2] == (1920, 1080)  # upright portrait, long side capped
