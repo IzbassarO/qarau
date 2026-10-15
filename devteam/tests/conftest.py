@@ -46,3 +46,8 @@ def repo(tmp_path, monkeypatch):
 
 def remote_of(repo) -> str:
     return str(repo.parent / "remote.git")
+
+
+@pytest.fixture(autouse=True)
+def no_retry_waits(monkeypatch):
+    monkeypatch.setattr("devteam.real.RETRY_WAITS", (0, 0, 0))

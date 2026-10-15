@@ -52,10 +52,9 @@ def run_video(
     if p.returncode != 0:
         lines = log.read_text().strip().splitlines()
         raise StageError(f"exit {p.returncode}: {lines[-1] if lines else 'no output'}")
-    metrics: dict[str, Any] = next(
-        s["metrics"] for s in read_run(out) if s["name"] == "reconstruction"
-    )
-    return metrics
+    stages = {s["name"]: s["metrics"] for s in read_run(out)}
+    dropped = stages.get("export", {}).get("dropped_points", {})
+    return {**stages["reconstruction"], "dropped_points": sum(dropped.values())}
 
 
 def video_row(m: dict[str, Any], time_s: float, max_frames: int | None = None) -> dict[str, Any]:
@@ -70,6 +69,7 @@ def video_row(m: dict[str, Any], time_s: float, max_frames: int | None = None) -
         "frames_used": used,
         "registered": reg,
         "max_frames": max_frames,  # benchmark profile from benchmark_set.toml; None = default
+        "dropped_points": m.get("dropped_points", 0),  # export: non-finite + far outliers
     }
 
 
@@ -79,8 +79,10 @@ def md_rows(res: dict[str, Any]) -> list[str]:
     rows = []
     for n, v in res["videos"].items():
         cells = ["" if v[k] is None else str(v[k]) for k in keys]
-        note = f"max_frames {v['max_frames']}" if v.get("max_frames") else ""
-        rows.append(f"| {n} | {tag} | " + " | ".join([*cells, note]) + " |")
+        notes = [f"max_frames {v['max_frames']}"] if v.get("max_frames") else []
+        if v.get("dropped_points"):
+            notes.append(f"dropped {v['dropped_points']}")
+        rows.append(f"| {n} | {tag} | " + " | ".join([*cells, "; ".join(notes)]) + " |")
     dash = " | ".join(["—"] * len(keys))
     return rows + [f"| {n} | {tag} | {dash} | FAILED: {r} |" for n, r in res["errors"].items()]
 

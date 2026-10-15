@@ -136,6 +136,34 @@ def frames_from_json(out: Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------- export
 
 
+def sanitize_points(xyz: np.ndarray) -> tuple[np.ndarray, dict[str, int]]:
+    """Mask of points safe to export + counts. Drops non-finite rows and far outliers:
+    distance from the per-axis median > max(100 x the 99th-percentile distance, 1)."""
+    finite = np.isfinite(xyz).all(axis=1)
+    keep = finite.copy()
+    if finite.any():
+        # ponytail: if >1% of points are outliers r99 is one of them and nothing is dropped;
+        # write_laz_ply still fits any finite extent, only precision suffers
+        d = np.linalg.norm(xyz[finite] - np.median(xyz[finite], axis=0), axis=1)
+        keep[finite] = d <= max(100 * float(np.percentile(d, 99)), 1.0)
+    report = {
+        "non_finite": int((~finite).sum()),
+        "far_outliers": int(finite.sum() - keep.sum()),
+        "kept": int(keep.sum()),
+        "total": len(xyz),
+    }
+    if not report["kept"]:
+        raise ValueError(f"export: no valid points to write ({report})")
+    return keep, report
+
+
+def las_offset_scale(xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Offset = middle of the extent, scale >= 1 mm and coarse enough that every quantized
+    coordinate (x - offset) / scale fits in int32 (10% margin for rounding)."""
+    lo, hi = xyz.min(axis=0), xyz.max(axis=0)
+    return (lo + hi) / 2, np.maximum(0.001, (hi - lo) / 2 / (2**31 - 1) * 1.1)
+
+
 def export_bundle(
     rec: pycolmap.Reconstruction,
     frames: list[dict[str, Any]],
@@ -161,6 +189,12 @@ def export_bundle(
     if N == 0 or not reg:
         raise ValueError("reconstruction has no registered images or no points")
     xyz = np.array([rec.points3D[int(p)].xyz for p in pids], dtype=np.float64)
+    keep, report = sanitize_points(xyz)
+    dropped = {"non_finite": report["non_finite"], "far_outliers": report["far_outliers"]}
+    if report["kept"] < N:
+        print(f"export: dropped {N - report['kept']} of {N} points {dropped}", flush=True)
+    pids, xyz = pids[keep], xyz[keep]  # every per-point array below derives from pids
+    N = len(pids)
     rgb = np.array([rec.points3D[int(p)].color for p in pids], dtype=np.uint8)
 
     # poses (COLMAP world)
@@ -271,6 +305,7 @@ def export_bundle(
             "frames_dropped": sum(1 for f in frames if not f["kept"]),
             "frames_registered": len(reg),
             "points": N,
+            "dropped_points": dropped,
             "mean_track_length": round(mean_track, 3),
             "mean_reproj_error_px": round(mean_err, 3),
             "processing_s": {k: v for k, v in secs.items() if k in ("frames", "reconstruction")},
@@ -281,14 +316,13 @@ def export_bundle(
     manifest["stats"]["processing_s"]["export"] = round(time.perf_counter() - t0, 2)
     (web / "manifest.json").write_text(json.dumps(manifest))
 
-    check = check_projection(rec, out, manifest, reg)
+    check = check_projection(rec, out, manifest, reg, pids)
     return {**manifest["stats"], "reproj_check_px": check}
 
 
 def write_laz_ply(out: Path, xyz: np.ndarray, rgb: np.ndarray) -> None:
     hdr = laspy.LasHeader(point_format=2, version="1.2")
-    hdr.scales = np.array([0.001] * 3)
-    hdr.offsets = xyz.min(axis=0)
+    hdr.offsets, hdr.scales = las_offset_scale(xyz)
     las = laspy.LasData(hdr)
     las.x, las.y, las.z = xyz[:, 0], xyz[:, 1], xyz[:, 2]
     las.red, las.green, las.blue = (rgb[:, 0].astype("u2") << 8, rgb[:, 1].astype("u2") << 8,
@@ -313,12 +347,13 @@ def check_projection(
     out: Path,
     manifest: dict[str, Any],
     reg: dict[int, int],
+    pids: np.ndarray,
     n: int = 3000,
 ) -> dict[str, float]:
     """Project points with the STORED aligned pose + camera params (read back from the
-    written files) and compare with COLMAP's own 2D observations. Returns px error."""
+    written files) and compare with COLMAP's own 2D observations. Returns px error.
+    pids = COLMAP point ids of the written points, in file order."""
     pos = np.fromfile(out / manifest["points"]["position"], dtype="<f4").reshape(-1, 3)
-    pids = np.array(sorted(rec.points3D.keys()))
     sel = np.random.default_rng(0).choice(len(pids), size=min(n, len(pids)), replace=False)
     errs = []
     for k in sel:

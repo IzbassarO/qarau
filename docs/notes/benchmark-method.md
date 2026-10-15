@@ -47,6 +47,8 @@ hanging still leaves room inside the gate's 90 min), output and log in
 - `registered_pct` = 100 · registered / frames_used.
 - `scale_err_cm` = `null` until a scale reference exists (P5/P7).
 - `time_s` = wall-clock of the whole child run, export included.
+- `dropped_points` = points the export stage removed (non-finite + far outliers, rule in
+  `docs/architecture.md`, export row); shown as `dropped N` in Notes when N > 0.
 
 **Exit code.** 0 only if every required video and every present optional video ran. A missing
 required video, a failure or a timeout → listed under `errors`, the other videos still run,
@@ -87,6 +89,15 @@ No threshold separates that from a real change, so mykolaiv is **not gated** unt
 (`devteam/config.yaml` → `gates.benchmark.per_video`, `gated: false`); it is still run and
 shown, and the packet names it under "not compared". Model counts of aegviidu/orono are noisy
 too: watch them when P3 lands.
+
+**Mykolaiv export crash (P0, 2026-10-15).** Gate run beadd07 failed in export with laspy
+`OverflowError`: the old LAS header used offset = min and a fixed 1 mm scale, which overflows
+int32 beyond ~2 147 km of extent. The model itself is broken, not just noisy: 14 consecutive
+registered frames (of 178) sit ~1e8 units from the other 164, and 4 748 of 10 332 points
+(46 %) sit ~2.7e8 away. With that many far points the 99th-percentile rule drops nothing, so
+export now succeeds (LAS scale ~2–8 cm) but the viewer bundle is useless (`reproj_check_px`
+mean ~4 000 px). That is a reconstruction problem (bad registration chain), not an export
+one.
 
 **Sampling phase (P2a, 2026-10-15).** Identical runs repeat, but shifting which source frame
 starts each 1/6 s slot does not. Room (60 fps) with the frame grid moved by 1–5 source frames

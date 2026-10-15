@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import laspy
 import numpy as np
 import pycolmap
 import pytest
@@ -11,6 +12,8 @@ from qarau_pipeline.export import (
     qvec_from_matrix,
     rot_from_qvec,
     rotation_between,
+    sanitize_points,
+    write_laz_ply,
 )
 
 F, N = 4, 40
@@ -23,10 +26,13 @@ def rx(deg: float) -> np.ndarray:
     return np.array([[1, 0, 0], [0, np.cos(a), -np.sin(a)], [0, np.sin(a), np.cos(a)]])
 
 
-def make_model(tmp: Path) -> tuple[Path, dict]:
-    """COLMAP text model: 3 registered cameras tilted 20 deg, points seen by 1-3 of them."""
+def make_model(tmp: Path, far: float | None = None) -> tuple[Path, dict]:
+    """COLMAP text model: 3 registered cameras tilted 20 deg, points seen by 1-3 of them.
+    far: put point 0 that far along the view axis (a degenerate triangulation)."""
     rng = np.random.default_rng(1)
     pts = rng.uniform([-1, -1, 4], [1, 1, 6], (N, 3))
+    if far:
+        pts[0] = [0.0, 0.0, far]
     Rm = rx(20)
     poses = {i: (Rm, np.array([-0.5 * k, 0.1, 0.0])) for k, i in enumerate(REGISTERED)}
     seen = {p: [i for i in REGISTERED if (p + i) % 4 != 0] for p in range(N)}
@@ -54,9 +60,8 @@ def make_model(tmp: Path) -> tuple[Path, dict]:
     return d, {"pts": pts, "seen": seen, "poses": poses}
 
 
-@pytest.fixture
-def bundle(tmp_path: Path):
-    sparse, truth = make_model(tmp_path)
+def run_export(tmp_path: Path, far: float | None = None):
+    sparse, truth = make_model(tmp_path, far)
     rec = pycolmap.Reconstruction(str(sparse))
     frames = [
         {"i": i, "name": f"f{i}.jpg", "file": f"frames/{i:06d}.jpg", "t": i * 0.4,
@@ -76,6 +81,11 @@ def bundle(tmp_path: Path):
     metrics = export_bundle(rec, frames, out, src, "run")
     m = json.loads((out / "web/manifest.json").read_text())
     return out, m, truth, rec, metrics
+
+
+@pytest.fixture
+def bundle(tmp_path: Path):
+    return run_export(tmp_path)
 
 
 def test_quaternion_order_matches_pycolmap() -> None:
@@ -154,3 +164,65 @@ def test_reexport_drops_findings(bundle, tmp_path: Path) -> None:
     export_bundle(rec, frames, out, m["source"], "run")
     again = json.loads(mp.read_text())
     assert "findings" not in again and again["version"] == 1
+
+
+# ---------------------------------------------------------------- far / invalid points
+
+
+def cloud(center: list[float], spread: float, n: int = 2000) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(2)
+    xyz = np.asarray(center) + rng.uniform(-spread / 2, spread / 2, (n, 3))
+    return xyz, rng.integers(0, 256, (n, 3)).astype(np.uint8)
+
+
+def test_far_from_origin_round_trip(tmp_path: Path) -> None:
+    xyz, rgb = cloud([5e6, 7e6, 300], 10.0)
+    write_laz_ply(tmp_path, xyz, rgb)
+    las = laspy.read(tmp_path / "cloud.laz")
+    back = np.stack([las.x, las.y, las.z], 1)
+    assert np.all(np.abs(back - xyz) <= las.header.scales)
+    assert np.allclose(las.header.scales, 0.001)
+
+
+def test_non_finite_dropped_and_counted() -> None:
+    xyz, _ = cloud([0, 0, 0], 10.0)
+    xyz[[3, 7]] = np.nan
+    xyz[11, 1], xyz[12, 2] = np.inf, -np.inf
+    keep, rep = sanitize_points(xyz)
+    assert rep == {"non_finite": 4, "far_outliers": 0, "kept": len(xyz) - 4, "total": len(xyz)}
+    assert not keep[[3, 7, 11, 12]].any() and np.isfinite(xyz[keep]).all()
+
+
+def test_1e12_outlier_dropped_and_never_overflows(tmp_path: Path) -> None:
+    xyz, rgb = cloud([0, 0, 0], 10.0)
+    xyz[5] = [1e12, 0, 0]
+    keep, rep = sanitize_points(xyz)
+    assert (rep["far_outliers"], rep["kept"]) == (1, len(xyz) - 1) and not keep[5]
+    write_laz_ply(tmp_path, xyz[keep], rgb[keep])
+    assert len(laspy.read(tmp_path / "cloud.laz").x) == len(xyz) - 1
+    write_laz_ply(tmp_path, xyz, rgb)  # even an outlier that slips through must fit in int32
+    assert laspy.read(tmp_path / "cloud.laz").x.max() == pytest.approx(1e12, rel=1e-6)
+
+
+def test_clean_cloud_drops_nothing() -> None:
+    xyz = np.random.default_rng(3).normal(0, 5, (20000, 3))
+    keep, rep = sanitize_points(xyz)
+    assert keep.all() and rep["non_finite"] == rep["far_outliers"] == 0
+
+
+def test_all_invalid_raises_value_error() -> None:
+    with pytest.raises(ValueError, match="export: no valid points"):
+        sanitize_points(np.full((5, 3), np.nan))
+
+
+def test_dropped_points_in_metadata(bundle) -> None:
+    out, m, *_, metrics = bundle
+    assert m["stats"]["dropped_points"] == {"non_finite": 0, "far_outliers": 0}
+    assert metrics["dropped_points"] == m["stats"]["dropped_points"]
+
+
+def test_export_bundle_survives_far_point(tmp_path: Path) -> None:
+    """The mykolaiv crash: a far point used to overflow the LAS int32 coordinates."""
+    out, m, *_ = run_export(tmp_path, far=1e12)
+    assert len(laspy.read(out / "cloud.laz").x) == m["points"]["count"]
+    assert m["stats"]["points"] + sum(m["stats"]["dropped_points"].values()) == N
