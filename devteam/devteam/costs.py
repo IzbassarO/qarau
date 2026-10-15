@@ -23,6 +23,8 @@ def _db(home: Path) -> sqlite3.Connection:
     db.execute("""create table if not exists usage (
         day text, ts text, agent text, model text, task text,
         tokens_in int, tokens_out int, usd real, billed int, state text default 'settled')""")
+    if "state" not in {row[1] for row in db.execute("pragma table_info(usage)")}:  # v0 db
+        db.execute("alter table usage add column state text default 'settled'")
     return db
 
 
@@ -50,7 +52,8 @@ def reserve(home: Path, cap: float, agent: str, model: str, task: str, max_usd: 
                 "daily_budget_usd in config.yaml"
             )
         cur = db.execute(
-            "insert into usage values (?,?,?,?,?,0,0,?,1,'reserved')",
+            "insert into usage (day, ts, agent, model, task, tokens_in, tokens_out, usd, billed, "
+            "state) values (?,?,?,?,?,0,0,?,1,'reserved')",
             (_today(), time.strftime("%H:%M:%S"), agent, model, task, max_usd),
         )
         db.execute("commit")
@@ -85,7 +88,8 @@ def record(
 ):
     with _db(home) as db:
         db.execute(
-            "insert into usage values (?,?,?,?,?,?,?,?,?,'settled')",
+            "insert into usage (day, ts, agent, model, task, tokens_in, tokens_out, usd, billed, "
+            "state) values (?,?,?,?,?,?,?,?,?,'settled')",
             (
                 _today(),
                 time.strftime("%H:%M:%S"),

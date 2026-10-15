@@ -23,14 +23,17 @@ def llm_call(
     m = team.cfg["models"][role]
     if m["provider"] != "anthropic":
         raise NotImplementedError(f"provider {m['provider']!r} for {role}: only anthropic so far")
-    est_in = (len(system) + len(prompt) + len(json.dumps(schema))) // 2 + 500  # chars/2 > tokens
+    # Every token is at least one byte, so UTF-8 bytes bound the input tokens from above.
+    est_in = len((system + prompt + json.dumps(schema)).encode()) + 1000
     max_usd = (est_in * m["price_in"] + max_tokens * m["price_out"]) / 1e6
     rid = costs.reserve(team.home, team.cfg["daily_budget_usd"], role, m["model"], task, max_usd)
     if client is None:
         if not team.secrets.get("ANTHROPIC_API_KEY"):
             costs.release(team.home, rid)
             raise RuntimeError("ANTHROPIC_API_KEY is missing in devteam/.env")
-        client = anthropic.Anthropic(api_key=team.secrets["ANTHROPIC_API_KEY"], max_retries=0)
+        client = anthropic.Anthropic(api_key=team.secrets["ANTHROPIC_API_KEY"])
+    if hasattr(client, "with_options"):
+        client = client.with_options(max_retries=0)  # one reservation = one request
     try:
         r = client.messages.create(
             model=m["model"],

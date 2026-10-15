@@ -3,6 +3,7 @@
 
 import copy
 import sqlite3
+import subprocess
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -297,3 +298,109 @@ def test_cleanup_removes_decided_worktrees_and_keeps_branches_and_packets(repo):
     assert (team.home / "worktrees" / "T-002").exists()  # still waiting for review
     assert team.branch_for("T-001") in git(repo, "branch", "--list")
     assert (team.home / "packets" / "T-001.md").exists()
+
+
+# --- second Codex review ---------------------------------------------------------------------
+def test_preexisting_ignored_protected_file_is_never_deleted(repo):
+    team, _ = make(repo)
+    s = add_worktree(team)
+    wt = Path(s["worktree"])
+    (wt / ".env").write_text("KEY=original\n")  # ignored, so git has no copy
+    head, snap = git(wt, "rev-parse", "HEAD").strip(), team.snapshot(str(wt))
+    (wt / ".env").write_text("KEY=changed\n")
+    with pytest.raises(Violation, match="can't restore"):
+        team.commit_round(s, head, snap)
+    assert (wt / ".env").exists()  # left for the owner, not deleted
+    (wt / ".env").write_text("KEY=original\n")  # owner restores it -> passes (hash, not mtime)
+    assert team.commit_round(s, head, snap) == []
+
+
+def test_v0_cost_database_is_migrated(tmp_path):
+    db = sqlite3.connect(tmp_path / "costs.sqlite")
+    db.execute(
+        "create table usage (day text, ts text, agent text, model text, task text, "
+        "tokens_in int, tokens_out int, usd real, billed int)"
+    )
+    db.execute("insert into usage values (date('now','localtime'),'t','a','m','T',1,1,0.5,1)")
+    db.commit()
+    db.close()
+    costs.reserve(tmp_path, 3.0, "brain", "m", "T", 1.0)
+    assert costs.spent_today(tmp_path) == pytest.approx(1.5)
+
+
+def test_carriage_return_file_names_survive(repo):
+    team, _ = make(repo)
+    s = add_worktree(team)
+    wt = Path(s["worktree"])
+    head = git(wt, "rev-parse", "HEAD").strip()
+    (wt / "pipeline" / "a\rb.txt").write_text("x")
+    assert team.commit_round(s, head, {}) == []
+    raw = subprocess.run(
+        ["git", "show", "-z", "--name-only", "--format=", "HEAD"],
+        cwd=wt,
+        capture_output=True,
+        check=True,
+    ).stdout  # bytes: no \r translation
+    assert b"pipeline/a\rb.txt\0" in raw
+
+
+def test_commit_hooks_run(repo):
+    team, _ = make(repo)
+    s = add_worktree(team)
+    wt = Path(s["worktree"])
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\n! git diff --cached | grep -q SECRET\n")
+    hook.chmod(0o755)
+    head = git(wt, "rev-parse", "HEAD").strip()
+    (wt / "pipeline" / "a.py").write_text("token = 'SECRET'\n")
+    with pytest.raises(RuntimeError, match="git commit"):
+        team.commit_round(s, head, {})
+
+
+class CommitThenCrash(Quick):
+    calls = 0
+
+    def develop(self, team, s):
+        CommitThenCrash.calls += 1
+        if CommitThenCrash.calls == 1:
+            wt = Path(s["worktree"])
+            (wt / "web" / "app.ts").write_text("hack\n")
+            git(wt, "commit", "-qam", "sneaky")
+            raise RuntimeError("crash right after a forbidden commit")
+        return super().develop(team, s)
+
+
+def test_forbidden_commit_before_a_crash_is_unwound_on_resume(repo):
+    agents = CommitThenCrash()
+    agents.plan = only_core
+    team, graph = make(repo, agents)
+    config = {"configurable": {"thread_id": "r6"}}
+    with pytest.raises(RuntimeError, match="crash"):
+        graph.invoke({}, config)
+    graph.invoke(None, config)
+    branch = team.branch_for("T-001")
+    assert git(repo, "show", f"{branch}:web/app.ts") == "export {}\n"
+    assert "sneaky" not in git(repo, "log", "--format=%s", branch)
+
+
+def test_supplied_client_gets_no_sdk_retries(repo):
+    team, _ = make(repo)
+    seen = {}
+
+    class Retrying(StubClient):
+        def with_options(self, **kw):
+            seen.update(kw)
+            return self
+
+    llm_call(team, "tester", "T", "s", "p", {}, client=Retrying())
+    assert seen == {"max_retries": 0}
+
+
+def test_tasks_without_area_are_reported_not_silently_skipped(repo):
+    team, graph = make(repo)
+    data = yaml.safe_load(team.backlog_path.read_text())
+    for t in data["tasks"]:
+        t.pop("area")
+    team.backlog_path.write_text(yaml.safe_dump(data))
+    graph.invoke({}, {"configurable": {"thread_id": "r7"}})
+    assert "skipping tasks without a known area" in (team.home / "events.log").read_text()

@@ -6,6 +6,7 @@ Review is outside the graph (`devteam review`): nothing merges without the owner
 """
 
 import fnmatch
+import hashlib
 import operator
 import os
 import shutil
@@ -94,6 +95,8 @@ class TaskState(TypedDict, total=False):
     worktree: str
     branch: str
     session: str
+    head: str  # last commit the graph accepted (checkpointed, so a crash can't move it)
+    snap: dict  # protected-file hashes at the same moment
     dev_summary: str
     feedback: str
     loops: int
@@ -165,17 +168,16 @@ class Team:
         input: str | None = None,
         env: dict | None = None,
     ) -> str:
-        r = subprocess.run(
+        r = subprocess.run(  # bytes, not text=True: that would turn \r in file names into \n
             ["git", *args],
             cwd=cwd or self.root,
             capture_output=True,
-            text=True,
-            input=input,
+            input=input.encode("utf-8", "surrogateescape") if input is not None else None,
             env={**os.environ, "GIT_LITERAL_PATHSPECS": "1", **(env or {})},
         )
         if r.returncode:
-            raise RuntimeError(f"git {' '.join(args)}: {r.stderr.strip()}")
-        return r.stdout
+            raise RuntimeError(f"git {' '.join(args)}: {r.stderr.decode(errors='replace').strip()}")
+        return r.stdout.decode("utf-8", "surrogateescape")
 
     def branch_for(self, task_id: str) -> str:
         return f"{self.branch_prefix}/{task_id}"
@@ -204,8 +206,9 @@ class Team:
                 f"{wt} is on {r.stdout.strip() or 'a detached HEAD'}, expected {branch}"
             )
 
-    def snapshot(self, wt: str) -> dict[str, tuple[int, int]]:
-        """Size and mtime of every protected file, tracked or ignored."""
+    def snapshot(self, wt: str) -> dict[str, str]:
+        """Content hash of every protected file, tracked or ignored.
+        ponytail: skips SNAPSHOT_SKIP dirs (node_modules, .venv) for speed."""
         snap = {}
         for dirpath, dirnames, filenames in os.walk(wt):
             dirnames[:] = [d for d in dirnames if d not in SNAPSHOT_SKIP]
@@ -213,8 +216,11 @@ class Team:
                 full = os.path.join(dirpath, name)
                 rel = os.path.relpath(full, wt)
                 if is_protected(rel):
-                    st = os.lstat(full)
-                    snap[rel] = (st.st_size, st.st_mtime_ns)
+                    if os.path.islink(full):
+                        snap[rel] = "link:" + os.readlink(full)
+                    else:
+                        with open(full, "rb") as f:
+                            snap[rel] = hashlib.file_digest(f, "sha256").hexdigest()
         return snap
 
     def commit_round(self, s: TaskState, head_before: str, snap_before: dict) -> list[str]:
@@ -228,9 +234,10 @@ class Team:
         self.git("reset", "-q", cwd=wt)  # unstage everything; we decide what goes in
 
         snap_after = self.snapshot(wt)
-        refused = {
+        changed = {
             p for p in set(snap_before) | set(snap_after) if snap_before.get(p) != snap_after.get(p)
         }
+        refused = set(changed)
 
         # Everything into a throwaway index, so git sees renames (both paths) and new files.
         # The real index only ever gets the validated paths.
@@ -264,8 +271,18 @@ class Team:
             )
             if in_head:
                 self.git("checkout", "HEAD", "--", path, cwd=wt)
-            else:
+            elif path not in snap_before:  # new file: safe to delete
                 (Path(wt) / path).unlink(missing_ok=True)
+        # A protected file that existed before (ignored, so git has no copy) was changed or
+        # deleted: we can't restore it and won't delete it. Stop for the owner.
+        lost = sorted(
+            p for p in changed if p in snap_before and self.git("ls-files", "--", p, cwd=wt) == ""
+        )
+        if lost:
+            raise Violation(
+                f"developer changed protected files git can't restore: {lost}. "
+                "Restore them by hand, then `devteam resume`."
+            )
 
         allowed = [p for p in allowed if p not in refused]
         if allowed:
@@ -280,7 +297,7 @@ class Team:
         if self.git("diff", "--cached", "--name-only", cwd=wt).strip():
             self.verify_worktree(s)
             msg = f"{s['task']['id']}: {s['task']['title']} (round {s.get('loops', 0) + 1})"
-            self.git("commit", "-q", "--no-verify", "-m", msg, cwd=wt)
+            self.git("commit", "-q", "-m", msg, cwd=wt)  # hooks (e.g. secret scanners) run
         return sorted(refused)
 
     def cleanup(self) -> list[str]:
@@ -332,6 +349,8 @@ def build_graph(team: Team, checkpointer):
                 team.git("worktree", "add", "-b", branch, str(path), cfg["base_branch"])
         out = {"worktree": str(path), "branch": branch, "loops": 0}
         team.verify_worktree({**s, **out})
+        out["head"] = team.git("rev-parse", "HEAD", cwd=path).strip()
+        out["snap"] = team.snapshot(str(path))
         team.emit(
             "brain",
             f"worktree {path.relative_to(team.root)} on {branch}",
@@ -343,11 +362,10 @@ def build_graph(team: Team, checkpointer):
     def develop(s: TaskState):
         dev, tid, wt = s["assignee"], s["task"]["id"], s["worktree"]
         team.verify_worktree(s)
-        head, snap = team.git("rev-parse", "HEAD", cwd=wt).strip(), team.snapshot(wt)
         what = "fixing: " + s["feedback"][:200] if s.get("feedback") else "building the plan"
         team.emit(dev, what, task=tid, status="working")
         out = team.agents.develop(team, s)
-        refused = team.commit_round(s, head, snap)
+        refused = team.commit_round(s, s["head"], s["snap"])
         summary = out["summary"]
         if refused:
             summary += (
@@ -356,7 +374,12 @@ def build_graph(team: Team, checkpointer):
             )
             team.emit(dev, f"touched forbidden files, reverted: {refused}", task=tid)
         team.emit(dev, summary[:300], task=tid, to="tester", status="idle")
-        return {"session": out["session"], "dev_summary": summary}
+        return {
+            "session": out["session"],
+            "dev_summary": summary,
+            "head": team.git("rev-parse", "HEAD", cwd=wt).strip(),
+            "snap": team.snapshot(wt),
+        }
 
     def test(s: TaskState):
         tid = s["task"]["id"]
@@ -372,6 +395,7 @@ def build_graph(team: Team, checkpointer):
             logs = "\n".join(f"$ {c['cmd']}\n{c['output'][-1500:]}" for c in failed)
             verdict["feedback"] = f"{verdict.get('feedback', '')}\n\nFailing checks:\n{logs}"
         verdict["checks"] = checks
+        snap = team.snapshot(s["worktree"])  # files the checks made are not the developer's
         loops = s.get("loops", 0) + 1
         if verdict["passed"]:
             team.emit(
@@ -393,7 +417,7 @@ def build_graph(team: Team, checkpointer):
                 to="reviewer",
                 status="idle",
             )
-        return {"verdict": verdict, "loops": loops, "feedback": verdict["feedback"]}
+        return {"verdict": verdict, "loops": loops, "feedback": verdict["feedback"], "snap": snap}
 
     def after_test(s: TaskState):
         if s["verdict"]["passed"] or s["loops"] > cfg["max_fix_loops"]:
@@ -420,7 +444,7 @@ def build_graph(team: Team, checkpointer):
                 f"# {tid}: {s['task']['title']}\n\n"
                 f"**{head}** · developer: {s['assignee']} · branch `{s['branch']}` · "
                 f"fix loops: {s['loops'] - 1} · "
-                f"judge: {'pass' if v['judge_passed'] else 'fail'}\n\n"
+                f"judge: {'pass' if v.get('judge_passed', v['passed']) else 'fail'}\n\n"
                 f"## What changed\n\n{v.get('summary', '')}\n\n"
                 f"## How to try it\n\n{v.get('how_to_try', '')}\n\n"
                 f"## Acceptance criteria\n\n{crit}\n\n## Checks\n\n{checks or '- (none)'}\n\n"
@@ -459,6 +483,10 @@ def build_graph(team: Team, checkpointer):
             if t["status"] in ("todo", "changes_requested")
             or (t["status"] == "in_progress" and t.get("run") == run)
         ]
+        areas = {a for d in cfg["developers"].values() for a in d["areas"]}
+        if no_area := [t["id"] for t in todo if t.get("area") not in areas]:
+            team.emit("brain", f"skipping tasks without a known area {sorted(areas)}: {no_area}")
+            todo = [t for t in todo if t["id"] not in no_area]
         assignments, feedback = [], None
         for attempt in range(2):  # one retry with the validation errors
             plans = team.agents.plan(team, todo, feedback=feedback) if todo else []
