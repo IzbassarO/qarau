@@ -7,10 +7,33 @@ import time
 from pathlib import Path
 
 import anthropic
+import httpx
 import yaml
 
 from devteam import costs
 from devteam import gates as G
+
+RETRY_WAITS = (15, 60, 180)  # seconds before each retry of a transient API failure
+
+
+def transient(e: Exception) -> bool:
+    """Worth retrying: network drops, timeouts, rate limits, server errors, overload."""
+    if isinstance(e, (anthropic.APIConnectionError, httpx.TransportError)):
+        return True
+    if not isinstance(e, anthropic.APIStatusError):
+        return False
+    err = e.body.get("error") if isinstance(e.body, dict) else None
+    kind = err.get("type") if isinstance(err, dict) else None
+    return (
+        e.status_code in (408, 409, 429)
+        or e.status_code >= 500
+        or kind
+        in (
+            "overloaded_error",
+            "api_error",
+            "rate_limit_error",
+        )
+    )  # a mid-stream error event arrives with HTTP 200, the kind is in the body
 
 
 def llm_call(
@@ -25,18 +48,17 @@ def llm_call(
     images: list[str] = (),
 ) -> dict:
     """One structured-output call for `role` (a key of config.models). Reserves the
-    worst-case cost first, settles to the real usage after. No SDK retries: a retry is a new
-    call with its own reservation (`devteam resume` re-runs the node)."""
+    worst-case cost first, settles to the real usage after. No SDK retries: transient failures
+    (connection, timeout, 429, 5xx, overloaded) are retried here after RETRY_WAITS, each try
+    with its own reservation; then the error is raised (`devteam resume` re-runs the node)."""
     m = team.cfg["models"][role]
     if m["provider"] != "anthropic":
         raise NotImplementedError(f"provider {m['provider']!r} for {role}: only anthropic so far")
     # Every token is at least one byte, so UTF-8 bytes bound the input tokens from above.
     est_in = len((system + prompt + json.dumps(schema)).encode()) + 1000 + 2500 * len(images)
     max_usd = (est_in * m["price_in"] + max_tokens * m["price_out"]) / 1e6
-    rid = costs.reserve(team.home, team.cfg["daily_budget_usd"], role, m["model"], task, max_usd)
     if client is None:
         if not team.secrets.get("ANTHROPIC_API_KEY"):
-            costs.release(team.home, rid)
             raise RuntimeError("ANTHROPIC_API_KEY is missing in devteam/.env")
         client = anthropic.Anthropic(api_key=team.secrets["ANTHROPIC_API_KEY"])
     if hasattr(client, "with_options"):
@@ -54,22 +76,31 @@ def llm_call(
             }
             for i in images
         ] + [{"type": "text", "text": prompt}]
-    try:
-        with client.messages.stream(  # streaming: long thinking can't hit HTTP timeouts
-            model=m["model"],
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": content}],
-            output_config={
-                "effort": m["effort"],
-                "format": {"type": "json_schema", "schema": schema},
-            },
-        ) as stream:
-            r = stream.get_final_message()
-    except anthropic.APIStatusError as e:
-        if e.status_code < 500:  # rejected before any generation: nothing billed
-            costs.release(team.home, rid)
-        raise  # 5xx / connection / timeout: billing unknown, the reservation stays at max
+    for wait in (*RETRY_WAITS, None):
+        rid = costs.reserve(
+            team.home, team.cfg["daily_budget_usd"], role, m["model"], task, max_usd
+        )
+        try:
+            with client.messages.stream(  # streaming: long thinking can't hit HTTP timeouts
+                model=m["model"],
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": content}],
+                output_config={
+                    "effort": m["effort"],
+                    "format": {"type": "json_schema", "schema": schema},
+                },
+            ) as stream:
+                r = stream.get_final_message()
+            break
+        except (anthropic.APIError, httpx.TransportError) as e:
+            if isinstance(e, anthropic.APIStatusError) and 400 <= e.status_code < 500:
+                costs.release(team.home, rid)  # rejected before any generation: nothing billed
+            # else 5xx / connection / timeout / mid-stream error: billing unknown, stays at max
+            if wait is None or not transient(e):
+                raise
+            team.emit(role, f"API call failed ({e}); retrying in {wait}s", task=task)
+            time.sleep(wait)
     u = r.usage
     tokens_in = (
         u.input_tokens + (u.cache_creation_input_tokens or 0) + (u.cache_read_input_tokens or 0)
@@ -100,7 +131,11 @@ on the committed code. Developers run only the QUICK benchmark (named in the pro
 their own numbers; the full benchmark runs only at the merge gate and at release, so never
 ask a developer to run the full set.
 For web tasks list `routes`: the app pages (e.g. "/", "/viewer/demo") the tester screenshots
-and looks at; [] for tasks without UI.
+and looks at; [] for tasks without UI. Developers cannot take screenshots (Codex runs in a
+sandbox with no network and no browser): never require a developer to produce, attach or
+commit a screenshot. Write visual criteria as what the page must show ("/viewer/demo shows a
+black canvas with points and no error banner"); the tester judges them from its own
+screenshots of `routes`.
 Never require edits to docs/notes/progress.md: developers may not touch it (parallel
 tasks would conflict there); the daily report covers progress.
 Pick at most one task per developer, in backlog order, only for the developers listed.
@@ -112,8 +147,12 @@ Judge each acceptance criterion from the diff, the developer's summary and the c
 A criterion is met only if the diff shows it (code + tests), not just because the developer
 says so. Missing tests, placeholders, TODO stubs, silently skipped work, or edits unrelated to
 the task fail. Check results are given; failing checks are handled separately, but mention
-them in feedback if relevant. Screenshots of the app pages, when attached, are the real UI:
-judge visible criteria (layout, text via i18n, errors on screen) from them.
+them in feedback if relevant. Screenshots of the app pages, when attached, are the real UI and
+were taken by the orchestrator for you: judge visible criteria (layout, text via i18n, errors
+on screen) from them. Developers cannot take screenshots (sandbox without network or browser):
+a criterion that asks for a screenshot or visual proof is met or failed by what YOUR
+screenshots show, never failed because the developer produced none. If a page's screenshot
+failed (listed in <screenshots_failed>), judge from the code and say so in the note.
 Developers run only a quick benchmark subset; the full benchmark is a merge gate after you:
 never fail a criterion because the developer did not run the full set.
 The developer cannot commit (the orchestrator commits after each round), so results of the
@@ -265,6 +304,8 @@ Rules:
 - Before using any model or library, check its licence allows commercial use; note it.
 - Your runs are on uncommitted code, so anything tagged with a commit hash shows "+dirty";
   that is expected. If a request needs a commit, say so instead of trying to commit.
+- Do not try to take screenshots: the tester screenshots the app pages itself and judges
+  visual criteria from them.
 {quick_benchmark(team, s, dev)}- Run these checks and make them pass before you finish:
 {checks}
 - Finish with a short summary: what you changed, how you verified it, what is left."""
