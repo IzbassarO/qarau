@@ -322,7 +322,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                 </span>
               ))}
             </div>
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-bg/80 px-2.5 py-1.5 text-xs text-ink-2">
+            <div className="pointer-events-none absolute bottom-3 left-1/2 w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-md bg-bg/80 px-2.5 py-1.5 text-center text-xs leading-5 text-ink-2">
               {t('canvas.hint')}
             </div>
           </div>

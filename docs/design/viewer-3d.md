@@ -25,14 +25,32 @@ evidence: `prototypes/Finding.dc.html`.
 
 | Input | Action |
 | --- | --- |
-| Left drag | orbit around target |
-| Right drag or Shift + drag | pan |
-| Wheel / pinch | zoom (dolly towards cursor) |
-| Double-click on a point | set orbit target there |
+| Left drag | orbit around the cloud point under the cursor at pointer-down |
+| Shift + left drag or middle drag | screen-space pan |
+| Mouse wheel or trackpad pinch | zoom towards the cursor |
+| Two-finger trackpad scroll | orbit around the current pivot |
+| Shift + two-finger scroll / wheel | screen-space pan |
 | Toolbar | reset, top, side, view through current video camera |
 | Keyboard (when canvas focused) | `F` frame selection, `Home` reset, numpad-style 1/3/7 front/side/top |
 
-Smooth (damped) motion; never lose the object (clamp distance, keep target near data).
+Pick the nearest cloud point within the cursor ray's tolerance once at pointer-down.
+If the ray misses, use the ray point at the current target distance. A drag keeps this
+pivot; wheel gestures do not pick another one. Register no double-click action.
+
+Orbit preserves the distance to the pivot and clamps the polar angle. Pan follows the
+camera's screen axes and scales with distance. Zoom moves towards the cursor ray; close
+to the pivot, it advances the pivot along the view ray while keeping a positive camera
+distance, so repeated zoom does not get stuck at a minimum orbit distance.
+
+Motion uses frame-rate-independent exponential damping. The camera stays inside the
+cloud's bounding box expanded on every side by 50% of its diagonal, stopping before the
+first nearby cloud point along the path. A spatial index accelerates picking/collision.
+Toolbar flights use collision checks; the explicit video-camera view retains its
+recorded pose and roll. Bounds include recorded camera centres.
+
+Wheel events do not identify the device. Heuristic: Ctrl + wheel pinches; line/page
+deltas or integral vertical pixel deltas ≥40 without horizontal movement zoom;
+other unmodified pixel deltas orbit. Shift + wheel pans.
 
 ## Video ↔ map correspondence (the point of this screen)
 

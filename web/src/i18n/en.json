@@ -24,7 +24,7 @@
   "toolbar.zoomIn": "Zoom in",
   "toolbar.zoomOut": "Zoom out",
   "canvas.label": "Interactive 3D map: point cloud, camera path. Drag to rotate.",
-  "canvas.hint": "Drag to rotate · Shift or right button to pan · wheel to zoom · double-click to set the centre",
+  "canvas.hint": "Drag / two fingers: orbit · Shift+drag / middle button / Shift+two fingers: pan · wheel / pinch: zoom",
   "legend.now": "Seen by the camera now",
   "legend.seen": "Already filmed (height colours)",
   "legend.later": "Filmed later",

@@ -3,7 +3,7 @@ import type { Bundle, FrameInfo } from '../lib/bundle';
 import type { RunSummary } from '../lib/inspections';
 import { groupRunsIntoSites } from '../lib/inspections';
 
-/** Deterministic, synthetic geometry; only rendered on /inspections/demo. */
+/** Deterministic, synthetic geometry shared by /inspections/demo and /viewer/demo. */
 function createBundle(): Bundle {
   const points: number[] = [];
   for (let x = -14; x <= 14; x += 0.4) for (let y = -9; y <= 9; y += 0.4) points.push(x, y, 0);
