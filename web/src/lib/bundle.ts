@@ -90,6 +90,8 @@ export interface FindingsFile {
 
 export interface Bundle {
   runId: string;
+  /** Optional resolver for self-contained fixtures; real runs use the existing API. */
+  assetUrl?: (rel: string) => string;
   manifest: Manifest;
   position: Float32Array;
   color: Uint8Array;
