@@ -110,14 +110,14 @@ def test_red_ci_sends_back_then_blocks(repo):
 
 def test_secret_is_never_committed(repo):
     def leak(wt, s):
-        (wt / "pipeline" / "a.py").write_text('aws = "AKIAIOSFODNN7EXAMPLQ"\n')
+        (wt / "pipeline" / "a.py").write_text('aws = "AKIAIOSFODNN7EXAMPLQ"\n')  # gitleaks:allow
         (wt / "pipeline" / "c.py").write_text('key = "sk-ant-test-0123456789abcdef"\n')  # .env
         (wt / "pipeline" / "ok.py").write_text("ok = 1\n")
 
     team, graph = make(repo, Dev(leak))
     run(graph)
     log = git(repo, "log", "-p", team.branch_for("T-001"))
-    assert "AKIAIOSFODNN7EXAMPLQ" not in log and "0123456789abcdef" not in log
+    assert "AKIAIOSFODNN7EXAMPLQ" not in log and "0123456789abcdef" not in log  # gitleaks:allow
     assert "pipeline/ok.py" in remote_files(repo)  # the clean part still lands
     events = (team.home / "events.log").read_text()
     assert "secret scan: refused" in events and "0123456789abcdef" not in events
