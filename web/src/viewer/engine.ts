@@ -1,5 +1,6 @@
 import {
   AxesHelper,
+  Box3,
   BufferAttribute,
   BufferGeometry,
   CanvasTexture,
@@ -22,7 +23,7 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { NavigationControls } from './navigation';
 import type { Bundle } from '../lib/bundle';
 import {
   colmapPoseToThree,
@@ -114,7 +115,7 @@ export class ViewerEngine {
   readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
   readonly camera = new PerspectiveCamera(50, 1, 0.01, 100);
-  readonly controls: OrbitControls;
+  readonly controls: NavigationControls;
   private bounds;
   readonly focus: Focus;
   /** called after every render; the UI uses it to place finding markers */
@@ -148,6 +149,7 @@ export class ViewerEngine {
   } = null;
   private frames = 0;
   private lastFps = performance.now();
+  private lastUpdate = performance.now();
   bench = false;
   fps = 0;
 
@@ -290,20 +292,21 @@ export class ViewerEngine {
     this.camera.up.set(0, 0, 1);
     this.camera.near = r * 0.0005;
     this.camera.far = r * 60;
-    this.controls = new OrbitControls(this.camera, canvas);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.12;
-    this.controls.zoomToCursor = true; // wheel dollies towards the cursor
-    this.controls.minDistance = r * 0.002;
-    this.controls.maxDistance = r * 8;
-    this.controls.screenSpacePanning = true; // right-drag / Shift+left-drag pan (OrbitControls default)
-    this.controls.addEventListener('change', () => (this.dirty = true));
+    this.controls = new NavigationControls(this.camera, canvas, {
+      points: b.position,
+      bounds: new Box3(new Vector3(...this.bounds.min), new Vector3(...this.bounds.max)),
+      minDistance: r * 0.002,
+      collisionRadius: r * 0.003,
+      boundsMargin: r,
+      onChange: () => (this.dirty = true),
+      onStart: () => {
+        this.tween = null;
+        this.exitRoll();
+      },
+    });
     this.resetView(false);
 
     canvas.tabIndex = 0;
-    canvas.addEventListener('dblclick', this.onDbl);
-    canvas.addEventListener('pointerdown', this.exitRoll, true); // capture: before OrbitControls
-    canvas.addEventListener('wheel', this.exitRoll, true);
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointerup', this.onUp);
     canvas.addEventListener('keydown', this.onKey);
@@ -410,7 +413,7 @@ export class ViewerEngine {
     this.rolled = false;
     this.tween = null;
     this.controls.enabled = true;
-    this.controls.update(); // re-aims at the target with camera.up = +Z
+    this.controls.sync(); // re-aims at the target with camera.up = +Z
     this.dirty = true;
   };
 
@@ -422,14 +425,14 @@ export class ViewerEngine {
     if (q1) {
       this.rolled = true;
       this.controls.enabled = false;
-    }
+    } else this.controls.enabled = true;
     if (!animate) {
       this.camera.position.copy(p1);
       this.controls.target.copy(g1);
+      this.controls.sync();
       if (q1) this.camera.quaternion.copy(q1);
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
-      if (!q1) this.controls.update();
       this.dirty = true;
       return;
     }
@@ -468,12 +471,9 @@ export class ViewerEngine {
     this.fly(c.clone().addScaledVector(dir.normalize(), dist), c, 50);
   }
   zoom(factor: number) {
-    const t = this.controls.target;
-    this.fly(
-      t.clone().add(this.camera.position.clone().sub(t).multiplyScalar(factor)),
-      t.clone(),
-      this.camera.fov,
-    );
+    this.tween = null;
+    this.exitRoll();
+    this.controls.zoom(factor);
   }
 
   /** Fly into the pose of frame i (position = centre, FOV from fy, looking at median visible depth). */
@@ -508,18 +508,13 @@ export class ViewerEngine {
   private down = { x: 0, y: 0 };
   private onDown = (e: PointerEvent) => (this.down = { x: e.clientX, y: e.clientY });
   private onUp = (e: PointerEvent) => {
-    if (e.button !== 0 || Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 4) return;
+    if (
+      e.button !== 0 ||
+      e.shiftKey ||
+      Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 4
+    )
+      return;
     this.cb.onPick(this.pickAt(e) ?? null);
-  };
-  private onDbl = (e: MouseEvent) => {
-    const p = this.pickAt(e);
-    if (p === undefined) return;
-    this.controls.target.set(
-      this.b.position[p * 3],
-      this.b.position[p * 3 + 1],
-      this.b.position[p * 3 + 2],
-    );
-    this.dirty = true;
   };
   private noCtx = (e: Event) => e.preventDefault();
   private onKey = (e: KeyboardEvent) => {
@@ -559,12 +554,18 @@ export class ViewerEngine {
 
   private loop = () => {
     this.raf = requestAnimationFrame(this.loop);
+    const now = performance.now();
+    const dt = Math.max(0, (now - this.lastUpdate) / 1000);
+    this.lastUpdate = now;
     if (this.tween) {
       const tw = this.tween;
       const k = Math.min(1, (performance.now() - tw.t0) / 400);
       const s = k * k * (3 - 2 * k);
+      const previousPosition = this.camera.position.clone();
       this.camera.position.lerpVectors(tw.p0, tw.p1, s);
       this.controls.target.lerpVectors(tw.g0, tw.g1, s);
+      // Source-camera views reproduce the recorded pose exactly, roll included.
+      this.controls.sync(tw.q1 ? undefined : previousPosition);
       if (tw.q0 && tw.q1) this.camera.quaternion.slerpQuaternions(tw.q0, tw.q1, s);
       this.camera.fov = tw.f0 + (tw.f1 - tw.f0) * s;
       this.camera.updateProjectionMatrix();
@@ -580,24 +581,11 @@ export class ViewerEngine {
         dy = p.y - t.y;
       p.x = t.x + dx * Math.cos(a) - dy * Math.sin(a);
       p.y = t.y + dx * Math.sin(a) + dy * Math.cos(a);
+      this.controls.sync();
       this.dirty = true;
     }
-    if (!this.rolled && this.controls.update()) this.dirty = true;
-    // keep the orbit target near the data
-    const t = this.controls.target,
-      bd = this.bounds,
-      m = bd.radius;
-    const cl = new Vector3(
-      Math.min(bd.max[0] + m, Math.max(bd.min[0] - m, t.x)),
-      Math.min(bd.max[1] + m, Math.max(bd.min[1] - m, t.y)),
-      Math.min(bd.max[2] + m, Math.max(bd.min[2] - m, t.z)),
-    );
-    if (!this.rolled && !cl.equals(t)) {
-      this.camera.position.add(cl.clone().sub(t));
-      t.copy(cl);
-    }
+    if (!this.rolled && this.controls.update(dt)) this.dirty = true;
     // fps = frames actually rendered per second; renders are on demand, so idle reads 0
-    const now = performance.now();
     if (this.dirty) {
       this.dirty = false;
       this.render();
@@ -642,9 +630,6 @@ export class ViewerEngine {
   dispose() {
     cancelAnimationFrame(this.raf);
     const c = this.canvas;
-    c.removeEventListener('dblclick', this.onDbl);
-    c.removeEventListener('pointerdown', this.exitRoll, true);
-    c.removeEventListener('wheel', this.exitRoll, true);
     c.removeEventListener('pointerdown', this.onDown);
     c.removeEventListener('pointerup', this.onUp);
     c.removeEventListener('keydown', this.onKey);
