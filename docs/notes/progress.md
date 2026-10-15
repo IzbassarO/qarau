@@ -2,6 +2,16 @@
 
 Newest first. Keep it short.
 
+## 2026-10-15 — Dev team: retries and tester-owned screenshots
+
+- A2a's tester crashed on one transient "Connection error". `llm_call` now retries
+  connection errors, timeouts, 429, 5xx and mid-stream overload after 15 s, 60 s and 180 s
+  (each try reserves its own budget, each retry is logged), then fails loudly as before.
+- A2a was sent back because Codex did not produce a screenshot; it cannot (sandbox, no
+  network, no browser). The brain no longer asks developers for screenshots, the developer
+  brief says not to try, and the tester judges visual criteria from its own screenshots of
+  the task's `routes`, also for tasks planned before this change.
+
 ## 2026-10-15 — Owner decisions
 
 - **No GitHub Pro.** The local `devteam/hooks/pre-push` stays (now also refuses moving a tag).

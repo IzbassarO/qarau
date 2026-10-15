@@ -144,6 +144,48 @@ def test_llm_call_releases_on_4xx_and_keeps_on_unknown_billing(repo):
     assert costs.spent_today(team.home) > 0.1  # held at the worst case
 
 
+def test_llm_call_retries_transient_errors_not_rejections(repo):
+    """Seen in a real run: the A2a tester crashed on one "Connection error"."""
+    team, _ = make(repo)
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+    def status(cls, code, body=None):
+        return cls("x", response=httpx.Response(code, request=req), body=body)
+
+    class Flaky(StubClient):
+        def __init__(self, errors):
+            super().__init__()
+            self.errors = errors
+
+        def stream(self, **kw):
+            if self.errors:
+                self.calls += 1
+                raise self.errors.pop(0)
+            return super().stream(**kw)
+
+    overloaded = {"type": "error", "error": {"type": "overloaded_error"}}  # mid-stream, HTTP 200
+    client = Flaky(
+        [
+            anthropic.APIConnectionError(request=req),
+            status(anthropic.RateLimitError, 429),
+            status(anthropic.APIStatusError, 200, overloaded),
+        ]
+    )
+    assert llm_call(team, "tester", "T", "s", "p", {}, client=client) == {"ok": True}
+    assert client.calls == 4
+    assert (team.home / "events.log").read_text().count("retrying in") == 3
+
+    client = Flaky([status(anthropic.BadRequestError, 400)] * 2)
+    with pytest.raises(anthropic.BadRequestError):
+        llm_call(team, "tester", "T", "s", "p", {}, client=client)
+    assert client.calls == 1  # a rejection is not retried
+
+    client = Flaky([status(anthropic.InternalServerError, 529)] * 4)
+    with pytest.raises(anthropic.InternalServerError):
+        llm_call(team, "tester", "T", "s", "p", {}, client=client)
+    assert client.calls == 4  # gives up after RETRY_WAITS, then the node crashes loudly
+
+
 # --- #2 branch guard -------------------------------------------------------------------------
 def test_worktree_must_be_registered_and_on_its_task_branch(repo):
     team, _ = make(repo)
