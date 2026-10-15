@@ -34,7 +34,8 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         out.mkdir(parents=True, exist_ok=True)
         (out / "log.txt").write_text("ok")
         return {"images_in": 120, "registered_images": 90, "models": 2, "points": 5000,
-                "mean_reproj_error_px": 0.41}  # fmt: skip
+                "mean_reproj_error_px": 0.41,
+                "dropped_points": 3 if video.name == "IMG_8315.MOV" else 0}  # fmt: skip
 
     def fake_git(repo: Path, *args: str) -> str:
         return "abc1234" if args[0] == "rev-parse" else ""
@@ -86,7 +87,8 @@ def test_results_schema(env: dict[str, Any]) -> None:
     assert res["videos"]["room"]["max_frames"] is None
     for v in res["videos"].values():
         assert set(v) == {"registered_pct", "models", "reproj_px", "points", "scale_err_cm",
-                          "time_s", "frames_used", "registered", "max_frames"}  # fmt: skip
+                          "time_s", "frames_used", "registered", "max_frames",
+                          "dropped_points"}  # fmt: skip
         assert v["scale_err_cm"] is None
         assert (v["registered_pct"], v["frames_used"], v["registered"]) == (75.0, 120, 90)
         assert (v["models"], v["points"], v["reproj_px"]) == (2, 5000, 0.41)
@@ -182,7 +184,8 @@ def test_record_appends_rows(env: dict[str, Any]) -> None:
     assert md.startswith(OLD_TABLE)
     assert md.count(benchmark.SECTION) == 1
     assert md.count("| abc1234 |") == 6 and md.count("| notre-dame | abc1234 |") == 2
-    assert "| room | abc1234 | 120 | 75.0 | 2 | 5000 | 0.41 |  | 0.0 |  |" in md
+    assert "| room | abc1234 | 120 | 75.0 | 2 | 5000 | 0.41 |  | 0.0 | dropped 3 |" in md
+    assert "| notre-dame | abc1234 | 120 | 75.0 | 2 | 5000 | 0.41 |  | 0.0 |  |" in md
     assert "| aegviidu | abc1234 | 120 | 75.0 | 2 | 5000 | 0.41 |  | 0.0 | max_frames 150 |" in md
 
 
