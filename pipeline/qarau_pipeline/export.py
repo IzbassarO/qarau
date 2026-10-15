@@ -139,17 +139,52 @@ MAX_DENSE = 2_000_000  # dense points kept in a bundle (ADR 0008)
 MAX_TRACK = 4  # frames kept per dense point
 
 
-def bound_dense(
-    xyz: np.ndarray, rgb: np.ndarray, trk: np.ndarray, max_points: int, max_track: int
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Uniform random subsample to max_points; keep the first max_track frames per point.
+def thin_track(trk: np.ndarray, k: int) -> np.ndarray:
+    """Keep <= k frames per row: the first (first_seen stays exact), the last, evenly spaced
+    in between. Rows are sorted ascending, padded last; shorter rows are kept whole."""
+    n = (trk != 65535).sum(1)
+    pos = np.round(np.arange(k)[None, :] * (np.maximum(n, 1)[:, None] - 1) / max(k - 1, 1))
+    pos = np.where(n[:, None] > k, pos, np.arange(k)[None, :]).astype(np.int64)
+    out = np.take_along_axis(trk, np.minimum(pos, trk.shape[1] - 1), 1)
+    out[np.arange(k)[None, :] >= np.minimum(n, k)[:, None]] = 65535
+    return out
 
-    tracks.npy rows are sorted ascending with padding last, so [:, :k] keeps the earliest k.
+
+def bound_dense(
+    xyz: np.ndarray,
+    rgb: np.ndarray,
+    trk: np.ndarray,
+    max_points: int,
+    max_track: int,
+    centers: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Cap the dense cloud: keep detail where the camera was close, thin tracks.
+
+    centers: F x 3 camera centres (same frame as xyz, NaN = unregistered). A point is kept with
+    probability min(1, s / d), d = distance to its nearest observing camera and s chosen so the
+    expected count is max_points (fixed seed: deterministic). Without centers: uniform.
+    Tracks: thin_track().
     """
-    if len(xyz) > max_points:
-        keep = np.sort(np.random.default_rng(0).choice(len(xyz), max_points, replace=False))
+    n = len(xyz)
+    if n > max_points:
+        rng = np.random.default_rng(0)
+        if centers is None:
+            w = np.ones(n)
+        else:
+            d = np.full(n, np.inf)
+            for j in range(trk.shape[1]):
+                f = trk[:, j]
+                ok = f != 65535
+                dj = np.linalg.norm(xyz[ok] - centers[f[ok]], axis=1)
+                d[ok] = np.fmin(d[ok], np.where(np.isnan(dj), np.inf, dj))
+            w = 1.0 / np.maximum(np.where(np.isfinite(d), d, np.nanmax(d[np.isfinite(d)])), 1e-9)
+        lo, hi = 0.0, max_points / w.min() * 2
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if np.minimum(1, mid * w).sum() < max_points else (lo, mid)
+        keep = rng.random(n) < np.minimum(1, hi * w)
         xyz, rgb, trk = xyz[keep], rgb[keep], trk[keep]
-    return xyz, rgb, trk[:, :max_track]
+    return xyz, rgb, thin_track(trk, max_track)
 
 
 def dense_pairs(tracks: np.ndarray, first: int, pad: int = NEVER) -> tuple[np.ndarray, np.ndarray]:
@@ -217,6 +252,10 @@ def export_bundle(
     Rs = np.stack(list(R.values()))
     centers = np.stack([-R[i].T @ t[i] for i in reg])
 
+    fcent = np.full((F, 3), np.nan)
+    for i_, fi_ in zip(reg, range(len(reg)), strict=True):
+        fcent[reg[i_]] = centers[fi_]
+
     # alignment: up -> +Z, point centroid -> origin, no scale
     A = rotation_between(estimate_up(Rs, centers), np.array([0.0, 0, 1]))
     c = (xyz @ A.T).mean(axis=0)  # centroid in rotated frame
@@ -240,7 +279,7 @@ def export_bundle(
     if dense is not None:
         dxyz, drgb, dtrk = bound_dense(
             np.load(dense / "points.npy"), np.load(dense / "colors.npy"),
-            np.load(dense / "tracks.npy"), max_dense, max_track,
+            np.load(dense / "tracks.npy"), max_dense, max_track, fcent,
         )  # fmt: skip
         dxyz = dxyz.astype(np.float64)
         pd_, fd_ = dense_pairs(dtrk, N_sparse, 65535)

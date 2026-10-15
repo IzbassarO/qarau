@@ -68,7 +68,10 @@ def cmd_dense(a: argparse.Namespace) -> None:
 
     run = Path(a.run).resolve()
     d = DepthAnythingDensifier(
-        frame_stride=a.frame_stride, pixel_stride=a.pixel_stride, voxel_frac=a.voxel_frac
+        frame_stride=a.frame_stride,
+        pixel_stride=a.pixel_stride,
+        voxel_frac=a.voxel_frac,
+        frame_limit=a.frame_limit,
     )
     res = run_stage(
         run, "dense", d.model, d.params(), lambda: d.densify(run, run / "dense")
@@ -131,6 +134,7 @@ def main(argv: list[str] | None = None) -> None:
     d.add_argument("--frame-stride", type=int, default=1)
     d.add_argument("--pixel-stride", type=int, default=3)
     d.add_argument("--voxel-frac", type=float, default=0.0013)
+    d.add_argument("--frame-limit", type=int, help="first N frames only (diagnosis)")
     d.set_defaults(fn=cmd_dense)
     a = p.parse_args(argv)
     try:

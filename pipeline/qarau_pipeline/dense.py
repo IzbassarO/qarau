@@ -67,6 +67,13 @@ def fit_scale_shift(
     }  # fmt: skip
 
 
+def pick_neighbors(d2: np.ndarray, n: int) -> list[int]:
+    """Valid (finite d2) neighbours, nearest first. Every 2nd one (wider baseline) when there
+    are plenty; all of them otherwise (video start, tight orbits have only a few)."""
+    valid = [int(j) for j in np.argsort(d2) if np.isfinite(d2[j])]
+    return valid[::2][:n] if len(valid) >= 2 * n else valid[:n]
+
+
 def voxel_first(keys: np.ndarray) -> np.ndarray:
     """Indices of the first point in each occupied voxel (keys: int64 voxel ids)."""
     return np.unique(keys, return_index=True)[1]
@@ -86,10 +93,12 @@ class DepthAnythingDensifier:
         frame_stride: int = 1,
         n_neighbors: int = 8,
         min_agree: int = 3,
-        rel_tol: float = 0.02,
+        rel_tol: float = 0.03,
         max_fit_err: float = 0.1,
         voxel_frac: float = 0.0013,
+        frame_limit: int | None = None,
     ) -> None:
+        self.frame_limit = frame_limit
         self.model, self.width = model, width
         self.pixel_stride, self.frame_stride = pixel_stride, frame_stride
         self.n_neighbors, self.min_agree, self.rel_tol = n_neighbors, min_agree, rel_tol
@@ -124,7 +133,7 @@ class DepthAnythingDensifier:
         ims = sorted(
             (im for im in rec.images.values() if im.name in by_name),
             key=lambda im: by_name[im.name]["i"],
-        )[:: self.frame_stride]
+        )[: self.frame_limit : self.frame_stride]
         xyz_s = np.array([p.xyz for p in rec.points3D.values()])
         lo, hi = np.percentile(xyz_s, [2, 98], axis=0)
         diag = float(np.linalg.norm(hi - lo))
@@ -196,13 +205,13 @@ class DepthAnythingDensifier:
         acc_trk = np.zeros((0, 1 + self.n_neighbors), np.uint16)
         origin = lo - voxel
         cand = kept = 0
+        per_frame: list[dict[str, Any]] = []
         agree_hist = np.zeros(self.n_neighbors + 1, np.int64)
         for a, c in enumerate(cams):
             d2 = np.linalg.norm(centers - centers[a], axis=1)
             d2[axes @ axes[a] < np.cos(np.radians(40))] = np.inf
             d2[a] = np.inf
-            near = np.argsort(d2)[: 2 * self.n_neighbors : 2]  # skip every 2nd: wider baseline
-            nb = [j for j in near if np.isfinite(d2[j])]
+            nb = pick_neighbors(d2, self.n_neighbors)
             z = depths[a]
             H, W = z.shape
             st = self.pixel_stride
@@ -212,7 +221,13 @@ class DepthAnythingDensifier:
             lz = np.log(z)
             gx = np.abs(np.roll(lz, 1, 1) - np.roll(lz, -1, 1))
             gy = np.abs(np.roll(lz, 1, 0) - np.roll(lz, -1, 0))
-            ok = np.isfinite(zz) & (np.maximum(gx, gy)[vv, uu] < 0.1)
+            fin = np.isfinite(zz)
+            ok = fin & (np.maximum(gx, gy)[vv, uu] < 0.1)
+            pf: dict[str, Any] = {
+                "frame": c["i"], "pix": int(fin.size), "finite": int(fin.sum()),
+                "edge_ok": int(ok.sum()), "neighbors": len(nb),
+            }  # fmt: skip
+            per_frame.append(pf)
             uu, vv, zz = uu[ok], vv[ok], zz[ok]
             K = c["K"]
             xc = np.stack([(uu - K[0, 2]) / K[0, 0] * zz, (vv - K[1, 2]) / K[1, 1] * zz, zz], 1)
@@ -233,7 +248,8 @@ class DepthAnythingDensifier:
                 hit = np.abs(xj[:, 2] - zj) < self.rel_tol * zj  # False for nan
                 trk[hit, 1 + agree[hit]] = o["i"]
                 agree += hit
-            sel = agree >= self.min_agree
+            sel = agree >= min(self.min_agree, len(nb)) if nb else np.zeros(len(zz), bool)
+            pf["kept"] = int(sel.sum())
             agree_hist += np.bincount(agree[sel], minlength=self.n_neighbors + 1)
             kept += int(sel.sum())
             if not sel.any():
@@ -283,7 +299,9 @@ class DepthAnythingDensifier:
             ),
             "seconds": {k: round(v, 1) for k, v in times.items()},
         }
-        (out_dir / "dense.json").write_text(json.dumps({**metrics, "fits": fits}, indent=1))
+        (out_dir / "dense.json").write_text(
+            json.dumps({**metrics, "per_frame": per_frame, "fits": fits}, indent=1)
+        )
         return metrics
 
 

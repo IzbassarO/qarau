@@ -89,13 +89,34 @@ def test_export_merges_dense(tmp_path: Path) -> None:
     assert metrics["reproj_check_px"]["max"] < 0.05  # still checks the sparse points
 
 
-def test_bound_dense_caps_points_and_tracks() -> None:
+def test_thin_track_keeps_first_last_and_spread() -> None:
+    from qarau_pipeline.export import thin_track
+
+    trk = np.array(
+        [list(range(10, 19)) + [PAD], [3, 4, PAD] + [PAD] * 7, [5] + [PAD] * 9], np.uint16
+    )
+    t = thin_track(trk, 4)
+    assert t[0].tolist() == [10, 13, 15, 18]  # first, spread, last
+    assert t[1].tolist() == [3, 4, PAD, PAD] and t[2].tolist() == [5, PAD, PAD, PAD]
+
+
+def test_bound_dense_prefers_close_cameras() -> None:
     from qarau_pipeline.export import bound_dense
 
-    n = 100
-    xyz = np.arange(n * 3, dtype=np.float32).reshape(n, 3)
-    trk = np.tile(np.array([1, 2, 3, 4, 5, PAD], np.uint16), (n, 1))
-    x, c, t = bound_dense(xyz, np.zeros((n, 3), np.uint8), trk, 40, 3)
-    assert len(x) == len(c) == len(t) == 40 and t.shape == (40, 3)
-    assert (np.diff(x[:, 0]) > 0).all()  # order preserved
-    assert bound_dense(xyz, np.zeros((n, 3), np.uint8), trk, 1000, 9)[2].shape == (n, 6)
+    rng = np.random.default_rng(1)
+    n = 20000
+    xyz = rng.uniform(-1, 1, (n, 3)).astype(np.float32)
+    xyz[: n // 2] += 100  # far half is seen from camera 1 at distance ~100 from origin cam
+    centers = np.array([[0.0, 0, -3], [100.0, 100, 90]])
+    trk = np.full((n, 2), PAD, np.uint16)
+    trk[: n // 2, 0], trk[n // 2 :, 0] = 1, 0
+    trk[:, 1] = trk[:, 0]
+    col = np.zeros((n, 3), np.uint8)
+    x, c, t = bound_dense(xyz, col, trk, 4000, 3, centers)
+    assert len(x) == len(c) == len(t)
+    assert abs(len(x) - 4000) < 300 and t.shape == (len(x), 3)
+    near = (x[:, 0] < 50).sum()
+    assert near > 2 * (len(x) - near)  # close-camera points kept at a higher rate
+    x2, _, _ = bound_dense(xyz, col, trk, 4000, 3, centers)
+    assert np.array_equal(x, x2)  # deterministic
+    assert bound_dense(xyz, col, trk, 40000, 9)[2].shape == (n, 9)
