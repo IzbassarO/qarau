@@ -48,6 +48,12 @@ cloud's bounding box expanded on every side by 50% of its diagonal, and movement
 before the first nearby cloud point along the path. Spatial indexing keeps picking and
 collision checks interactive for large clouds.
 
+For clouds above 50,000 points, prepare the full spatial index in cooperative tasks
+after returning control to the browser. The point cloud and the rest of the UI can
+render during preparation. Show a localized preparation hint and pause navigation
+until the complete index is ready; never use an incomplete cloud for collision checks.
+Cancel preparation when the viewer is disposed. Report a failed build in the canvas.
+
 Interactive movement and ordinary toolbar flights use swept point collision. The
 explicit video-camera view reproduces the recorded pose and roll exactly; its flight
 does not use point collision, because changing the source pose would break video/map

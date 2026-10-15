@@ -242,6 +242,118 @@ describe('PointCloudIndex', () => {
     }
     expectVector(pickPivot(rays[2], index, 0.2), outlier);
   });
+
+  it('yields before reading positions and between chunks so other event work can run', async () => {
+    const positions = new Float32Array(60_000 * 3);
+    let reads = 0;
+    const points = new Proxy(positions, {
+      get(target, property) {
+        if (property === 'length') return target.length;
+        if (typeof property === 'string' && /^\d+$/.test(property)) reads++;
+        return Reflect.get(target, property, target);
+      },
+    });
+    // Advance the build budget with work rather than machine speed.
+    vi.spyOn(performance, 'now').mockImplementation(() => reads / 512);
+    const readsAtYield: number[] = [];
+    let interleavedEvents = 0;
+    const build = PointCloudIndex.createAsync(points, {
+      yieldControl: async () => {
+        readsAtYield.push(reads);
+        await new Promise<void>((resolve) => {
+          setTimeout(() => {
+            interleavedEvents++;
+            resolve();
+          }, 0);
+        });
+      },
+    });
+    expect(reads).toBe(0);
+    expect(readsAtYield).toEqual([0]);
+    await build;
+    expect(readsAtYield.length).toBeGreaterThan(2);
+    expect(readsAtYield.some((count) => count > 0 && count < positions.length)).toBe(true);
+    expect(interleavedEvents).toBe(readsAtYield.length);
+  });
+
+  it('retains exact picking and collision results when built asynchronously, including outliers', async () => {
+    const points = new Float32Array(5002 * 3);
+    for (let i = 0; i < 5000; i++) {
+      points.set(
+        [(((i * 17) % 101) - 50) / 10, (((i * 13) % 103) - 51) / 10, ((i * 7) % 107) / 10],
+        i * 3,
+      );
+    }
+    points.set([0, 0, 8], 5000 * 3);
+    const outlier = v(1e6, -1e6, 1e6);
+    points.set(outlier.toArray(), 5001 * 3);
+    const index = await PointCloudIndex.createAsync(points, {
+      yieldControl: () => Promise.resolve(),
+    });
+    const rays = [
+      new Ray(v(0, 0, 20), v(0, 0, -1)),
+      new Ray(v(10, 4, 12), v(-1, -0.4, -1).normalize()),
+      new Ray(outlier.clone().add(v(0, 0, 10)), v(0, 0, -1)),
+    ];
+    for (const ray of rays) {
+      expectVector(pickPivot(ray, index, 0.2, 10), pickPivot(ray, points, 0.2, 10));
+      expectVector(
+        limitByNearestPoints(ray.origin, ray.at(30, v()), index, 0.2),
+        limitByNearestPoints(ray.origin, ray.at(30, v()), points, 0.2),
+      );
+    }
+    expectVector(pickPivot(rays[2], index, 0.2), outlier);
+  });
+
+  it('cancels a queued build before any positions are read', async () => {
+    let reads = 0;
+    const points = new Proxy({ length: 60_000 * 3 } as ArrayLike<number>, {
+      get(target, property) {
+        if (property === 'length') return target.length;
+        reads++;
+        return 0;
+      },
+    });
+    const controller = new AbortController();
+    let release = () => {};
+    const build = PointCloudIndex.createAsync(points, {
+      signal: controller.signal,
+      yieldControl: () => new Promise<void>((resolve) => (release = resolve)),
+    });
+    const rejected = expect(build).rejects.toMatchObject({ name: 'AbortError' });
+    controller.abort();
+    release();
+    await rejected;
+    expect(reads).toBe(0);
+  });
+
+  it('stops reading positions when cancellation arrives between completed chunks', async () => {
+    let reads = 0;
+    const points = new Proxy({ length: 60_000 * 3 } as ArrayLike<number>, {
+      get(target, property) {
+        if (property === 'length') return target.length;
+        reads++;
+        return 0;
+      },
+    });
+    vi.spyOn(performance, 'now').mockImplementation(() => reads / 512);
+    const controller = new AbortController();
+    let readsAtAbort = 0;
+    const build = PointCloudIndex.createAsync(points, {
+      signal: controller.signal,
+      yieldControl: async () => {
+        if (reads > 0) {
+          readsAtAbort = reads;
+          controller.abort();
+        }
+        await Promise.resolve();
+      },
+    });
+    await expect(build).rejects.toMatchObject({ name: 'AbortError' });
+    expect(readsAtAbort).toBeGreaterThan(0);
+    expect(readsAtAbort).toBeLessThan(points.length);
+    expect(reads).toBe(readsAtAbort);
+  });
 });
 
 describe('mapInput', () => {
@@ -299,7 +411,7 @@ afterEach(() => {
 });
 
 function controlsFixture(
-  points = new Float32Array([0, 0, 0]),
+  points: ArrayLike<number> = new Float32Array([0, 0, 0]),
   target = v(),
   bounds = new Box3(v(-100, -100, -100), v(100, 100, 100)),
 ) {
@@ -358,7 +470,121 @@ function settle(controls: NavigationControls) {
   for (let i = 0; i < 180; i++) controls.update(1 / 60);
 }
 
+function pauseIndexBuild() {
+  const createAsync = PointCloudIndex.createAsync.bind(PointCloudIndex);
+  let release = () => {};
+  const pause = new Promise<void>((resolve) => (release = resolve));
+  vi.spyOn(PointCloudIndex, 'createAsync').mockImplementation((points, options) =>
+    createAsync(points, { ...options, yieldControl: () => pause }),
+  );
+  return release;
+}
+
+function largeCloud() {
+  const points = new Float32Array(50_001 * 3).fill(20);
+  // Keep the closest hit last: preparing a large cloud must not lose it by sampling.
+  points.set([0, 0, 5], points.length - 3);
+  return points;
+}
+
 describe('NavigationControls DOM lifecycle', () => {
+  it('keeps small clouds ready immediately', async () => {
+    const { controls } = controlsFixture();
+    expect(controls.isReady).toBe(true);
+    await expect(controls.ready).resolves.toBeUndefined();
+  });
+
+  it('does no synchronous source scan and ignores navigation until a large index is ready', async () => {
+    const release = pauseIndexBuild();
+    let reads = 0;
+    const positions = largeCloud();
+    const points = new Proxy(positions, {
+      get(target, property) {
+        if (property === 'length') return target.length;
+        if (typeof property === 'string' && /^\d+$/.test(property)) reads++;
+        return Reflect.get(target, property, target);
+      },
+    });
+    const { canvas, camera, controls, onStart, onChange } = controlsFixture(points);
+    expect(controls.isReady).toBe(false);
+    expect(reads).toBe(0);
+    pointer(canvas, 'pointerdown');
+    pointer(canvas, 'pointermove', { clientX: 550 });
+    pointer(canvas, 'pointerup');
+    canvas.dispatchEvent(new WheelEvent('wheel', { ctrlKey: true, deltaY: -120 }));
+    controls.zoom(0.1);
+    expect(controls.update(1 / 60)).toBe(false);
+    expectVector(camera.position, v(0, 0, 10));
+    expectVector(controls.target, v());
+    expect(onStart).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(canvas.setPointerCapture).not.toHaveBeenCalled();
+    expect(reads).toBe(0);
+
+    release();
+    await controls.ready;
+    expect(controls.isReady).toBe(true);
+    // Ignored input must not resume later as an accumulated movement.
+    expect(controls.update(1 / 60)).toBe(false);
+    expectVector(camera.position, v(0, 0, 10));
+    pointer(canvas, 'pointerdown');
+    expectVector(controls.target, v(0, 0, 5));
+    pointer(canvas, 'pointerup');
+    for (let i = 0; i < 3; i++) {
+      controls.zoom(0.1);
+      settle(controls);
+    }
+    expect(camera.position.z).toBeGreaterThan(5.01);
+    expect(camera.position.z).toBeLessThan(5.02);
+  });
+
+  it('holds camera flights until collision data is ready while still clamping resets', async () => {
+    const release = pauseIndexBuild();
+    const bounds = new Box3(v(-10, -10, -10), v(10, 10, 10));
+    const { camera, controls } = controlsFixture(largeCloud(), v(), bounds);
+    const previous = camera.position.clone();
+    camera.position.set(0, 0, -10);
+    controls.sync(previous);
+    expectVector(camera.position, previous);
+    camera.position.set(20, -20, 20);
+    controls.sync();
+    expectVector(camera.position, v(10, -10, 10));
+    expectVector(
+      camera.getWorldDirection(v()),
+      controls.target.clone().sub(camera.position).normalize(),
+    );
+    release();
+    await controls.ready;
+    camera.position.set(0, 0, -10);
+    controls.sync(previous);
+    expect(camera.position.z).toBeGreaterThan(5.01);
+    expect(camera.position.z).toBeLessThan(5.02);
+  });
+
+  it('aborts pending preparation on dispose without resurrecting listeners or navigation', async () => {
+    const release = pauseIndexBuild();
+    const { canvas, camera, controls, onChange, onStart } = controlsFixture(largeCloud());
+    const position = camera.position.clone();
+    const target = controls.target.clone();
+    const rejected = expect(controls.ready).rejects.toMatchObject({ name: 'AbortError' });
+    controls.dispose();
+    release();
+    await rejected;
+    expect(controls.isReady).toBe(false);
+    pointer(canvas, 'pointerdown');
+    pointer(canvas, 'pointermove', { clientX: 550 });
+    const wheel = new WheelEvent('wheel', { deltaY: -120, cancelable: true });
+    canvas.dispatchEvent(wheel);
+    controls.zoom(0.1);
+    expect(controls.update(1 / 60)).toBe(false);
+    expect(wheel.defaultPrevented).toBe(false);
+    expectVector(camera.position, position);
+    expectVector(controls.target, target);
+    expect(canvas.setPointerCapture).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
   it('picks a point on pointerdown and keeps that pivot for the rest of the orbit drag', () => {
     const { canvas, camera, controls, onStart, onChange } = controlsFixture(
       new Float32Array([0, 0, 0]),

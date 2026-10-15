@@ -1,5 +1,16 @@
 # A2a — viewer navigation plan
 
+## Tester follow-up
+
+1. Re-run browser discovery and verification; retain source hashes with screenshots
+   so the gate can establish that `/viewer/demo` uses the replacement controls.
+2. Replace synchronous large-cloud index construction in the controls constructor
+   with a cancellable cooperative build. Yield before work and between bounded
+   portions, including cell hierarchy construction. Render the cloud while preparing;
+   pause collision-dependent navigation until the complete index is available.
+3. Test asynchronous query parity, event-loop yielding, cancellation, and lifecycle
+   readiness. Localize the preparation/error status and rerun all required checks.
+
 1. Read the project guide, viewer engine/screen/UI, and 3D viewer design. Replace the
    existing controls without changing point rendering, evidence selection, or video poses.
 2. Implement immutable navigation math in `web/src/viewer/navigation.ts`: cursor-ray
@@ -35,16 +46,30 @@
   and segment bounds clipping. Orbit sweeps short chords along the arc and searches the
   last allowed angle when blocked, preserving its radius and viewing direction.
 - The full-cloud grid uses percentile-sized cells and a hierarchy over cell bounds.
-  Outliers retain their own cells. No cloud points are discarded. A local, deterministic
-  CPU smoke benchmark with 5,000,001 points (including a billion-unit outlier) measured
-  approximately 0.5 ms per collision/pivot query after warm-up. The one-time synchronous
-  index build took 5.8 seconds in this sandbox. These are CPU timings, not WebGL
-  frame-rate or first-paint measurements.
+  Outliers retain their own cells. No cloud points are discarded. The original
+  synchronous 5,000,001-point build took 5.8 seconds in this sandbox; that path is no
+  longer used by controls for clouds above 50,000 points. They now build cooperatively,
+  yielding before any scan and at an 8 ms work-budget target. Grid population, hierarchy
+  sorting and grouping all yield. GC and individual operations can exceed the target;
+  it is not a real-time guarantee.
+- Follow-up CPU measurement on the same deterministic 5,000,001-point dataset finished
+  in 3.50 s across 283 tasks, while a 16 ms heartbeat ran 152 times. Median task work
+  was 8.05 ms, p95 12.85 ms and maximum 40.47 ms; warmed collision/pivot queries were
+  0.29/0.38 ms. This demonstrates event-loop yielding, not browser rendering speed.
+  [Measured results and source hash](a2a-controls/index-benchmark.json) identify the code.
+- Rendering starts while the full index is prepared. A localized status replaces the
+  controls hint until ready, and a localized error is shown on failure. Navigation is
+  paused so picking/collision never use partial data. Disposal cancels queued work;
+  stale ready/error completions cannot update an unmounted or replacement viewer.
 - Ordinary toolbar flights are collision tested. Explicit source-camera views retain
   the recorded pose/roll, with bounds that include the recorded camera centres.
 - Added `/viewer/demo` using the existing local fixture and updated EN/RU/KK hints.
+  This alias is retained specifically to make the required acceptance URL independent
+  of a backend demo run; real-run loading is unchanged.
 - `pnpm lint` (ESLint and Prettier), `pnpm typecheck`, `pnpm test`, and `pnpm build`
-  pass, including navigation and i18n key parity tests. The production build retains
+  pass (104 tests), including navigation, preparation lifecycle and i18n key parity.
+  Playwright discovery lists the navigation scenario; its browser run is blocked below.
+  The production build retains
   the existing large-bundle warning.
 - Browser verification is blocked in this execution sandbox: Vite cannot bind
   `127.0.0.1:5199` or `::1:5199` (`listen EPERM`), and the installed Chromium exits
@@ -54,3 +79,7 @@
   The scenario opens `/viewer/demo`, exercises drag/trackpad orbit, both pan gestures,
   pinch, extreme zoom and bounds, and writes screenshots to
   `web/test-results/a2a-controls/demo-navigation.png` and `demo-after-navigation.png`.
+  The follow-up also fixes the Node ESM JSON import, verifies that Vite serves the
+  current source and instantiates `NavigationControls`, and records source/screenshot
+  SHA-256 hashes in `provenance.json` only after the full test passes. See
+  [browser evidence](a2a-controls/verification.md) for the current blocked run.

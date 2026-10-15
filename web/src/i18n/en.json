@@ -25,6 +25,8 @@
   "toolbar.zoomOut": "Zoom out",
   "canvas.label": "Interactive 3D map: point cloud, camera path. Drag to rotate.",
   "canvas.hint": "Drag / two fingers: orbit · Shift+drag / middle button / Shift+two fingers: pan · wheel / pinch: zoom",
+  "canvas.preparingNavigation": "Preparing map navigation…",
+  "canvas.navigationError": "Map navigation could not be prepared. Reload the page to try again.",
   "legend.now": "Seen by the camera now",
   "legend.seen": "Already filmed (height colours)",
   "legend.later": "Filmed later",

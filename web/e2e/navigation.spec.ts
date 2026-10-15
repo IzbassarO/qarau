@@ -1,5 +1,17 @@
 import { expect, test, type Page } from '@playwright/test';
-import en from '../src/i18n/en.json';
+import { createHash } from 'node:crypto';
+import { readFile, rm, writeFile } from 'node:fs/promises';
+import en from '../src/i18n/en.json' with { type: 'json' };
+
+const evidenceDirectory = 'test-results/a2a-controls';
+const provenancePath = `${evidenceDirectory}/provenance.json`;
+const sourcePaths = [
+  'src/viewer/navigation.ts',
+  'src/viewer/engine.ts',
+  'src/pages/ViewerPage.tsx',
+  'src/fixtures/demo.ts',
+] as const;
+const sha256 = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
 
 async function snapshot(page: Page) {
   return page.evaluate(() => {
@@ -35,7 +47,13 @@ async function rest(page: Page) {
 
 const distance = (a: number[], b: number[]) => Math.hypot(...a.map((v, i) => v - b[i]));
 
-test('demo navigation: orbit, pan, trackpad, close zoom and bounds', async ({ page }) => {
+test('demo navigation: orbit, pan, trackpad, close zoom and bounds', async ({ page }, testInfo) => {
+  // Remove only the previous generated success record. A failed rerun must not leave
+  // a manifest claiming that its screenshots passed the navigation assertions.
+  await rm(provenancePath, { force: true });
+  const sources = await Promise.all(
+    sourcePaths.map(async (path) => ({ path, text: await readFile(path, 'utf8') })),
+  );
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
@@ -43,15 +61,41 @@ test('demo navigation: orbit, pan, trackpad, close zoom and bounds', async ({ pa
   });
   await page.addInitScript(() => localStorage.setItem('qarau.lang', 'en'));
   await page.goto('/viewer/demo');
-  await page.waitForFunction(() => window.__qarau?.pointsLoaded);
+  await page.waitForFunction(
+    () => window.__qarau?.pointsLoaded && window.__qarau.engine?.controls.isReady,
+  );
   await page.evaluate(() => document.fonts.ready);
+  // Vite may reuse a server. Confirm that it serves this worktree's source and
+  // that the rendered engine really instantiates the replacement controls.
+  const servedSources = await page.evaluate(async (paths) => {
+    return Promise.all(
+      paths.map(async (path) => {
+        const module = await import(`/${path}?raw`);
+        return module.default as string;
+      }),
+    );
+  }, sourcePaths);
+  for (const [index, source] of sources.entries()) {
+    expect(servedSources[index], `Vite source for ${source.path}`).toBe(source.text);
+  }
+  expect(
+    await page.evaluate(async () => {
+      const navigationPath = '/src/viewer/navigation.ts';
+      const { NavigationControls } = await import(navigationPath);
+      return window.__qarau!.engine!.controls instanceof NavigationControls;
+    }),
+  ).toBe(true);
   const canvas = page.locator('canvas');
   const box = (await canvas.boundingBox())!;
   const x = box.x + box.width * 0.5;
   const y = box.y + box.height * 0.5;
   await expect(page.getByText(en['error.webgl'], { exact: true })).toHaveCount(0);
   await expect(page.locator('vite-error-overlay')).toHaveCount(0);
-  await page.screenshot({ path: 'test-results/a2a-controls/demo-navigation.png', fullPage: true });
+  const screenshotPaths = [
+    `${evidenceDirectory}/demo-navigation.png`,
+    `${evidenceDirectory}/demo-after-navigation.png`,
+  ];
+  await page.screenshot({ path: screenshotPaths[0], fullPage: true });
 
   await page.mouse.move(x, y);
   await page.mouse.down();
@@ -124,8 +168,34 @@ test('demo navigation: orbit, pan, trackpad, close zoom and bounds', async ({ pa
   await expect(page.getByText(en['error.webgl'], { exact: true })).toHaveCount(0);
   await expect(page.locator('vite-error-overlay')).toHaveCount(0);
   await page.screenshot({
-    path: 'test-results/a2a-controls/demo-after-navigation.png',
+    path: screenshotPaths[1],
     fullPage: true,
   });
   expect(errors).toEqual([]);
+  for (const source of sources) {
+    expect(await readFile(source.path, 'utf8'), `Source changed during test: ${source.path}`).toBe(
+      source.text,
+    );
+  }
+  const screenshots = await Promise.all(
+    screenshotPaths.map(async (path) => ({ path, sha256: sha256(await readFile(path)) })),
+  );
+  await writeFile(
+    provenancePath,
+    `${JSON.stringify(
+      {
+        capturedAt: new Date().toISOString(),
+        url: page.url(),
+        browser: testInfo.project.use.browserName ?? 'chromium',
+        result: 'All navigation, black-background and no-error assertions completed',
+        sources: sources.map(({ path, text }) => ({ path, sha256: sha256(text) })),
+        screenshots,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  for (const path of [...screenshotPaths, provenancePath]) {
+    await testInfo.attach(path.split('/').at(-1)!, { path });
+  }
 });

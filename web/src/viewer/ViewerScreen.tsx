@@ -83,6 +83,9 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
   const [sel, setSel] = useState<number | null>(null);
   const markerEls = useRef(new Map<number, HTMLButtonElement>());
   const [glError, setGlError] = useState(false);
+  const [navigationStatus, setNavigationStatus] = useState<'ready' | 'preparing' | 'error'>(
+    'ready',
+  );
 
   const f = frames[frame];
   const findings = useMemo(() => bundle.findings ?? [], [bundle]);
@@ -103,10 +106,21 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
       return;
     }
     engineRef.current = eng;
+    let live = true;
+    setNavigationStatus(eng.controls.isReady ? 'ready' : 'preparing');
+    void eng.controls.ready.then(
+      () => {
+        if (live) setNavigationStatus('ready');
+      },
+      () => {
+        if (live) setNavigationStatus('error');
+      },
+    );
     const ro = new ResizeObserver(() => eng.resize());
     ro.observe(canvas);
     eng.resize();
     const timer = setInterval(() => setFps(Math.round(eng.fps)), 1000);
+    let debugTimer: ReturnType<typeof setInterval> | undefined;
     if (import.meta.env.DEV) {
       window.__qarau = {
         pointsLoaded: true,
@@ -114,19 +128,17 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
         engine: eng,
         bench: (on) => (eng.bench = on),
       };
-      const q = setInterval(() => window.__qarau && (window.__qarau.fps = eng.fps), 500);
-      return () => {
-        clearInterval(q);
-        clearInterval(timer);
-        ro.disconnect();
-        eng.dispose();
-        delete window.__qarau;
-      };
+      debugTimer = setInterval(() => window.__qarau && (window.__qarau.fps = eng.fps), 500);
     }
     return () => {
+      // Disposal may reject the pending readiness promise; its handler must not update old UI.
+      live = false;
+      clearInterval(debugTimer);
       clearInterval(timer);
       ro.disconnect();
       eng.dispose();
+      engineRef.current = null;
+      if (import.meta.env.DEV) delete window.__qarau;
     };
   }, [bundle]);
 
@@ -322,8 +334,23 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                 </span>
               ))}
             </div>
-            <div className="pointer-events-none absolute bottom-3 left-1/2 w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-md bg-bg/80 px-2.5 py-1.5 text-center text-xs leading-5 text-ink-2">
-              {t('canvas.hint')}
+            <div
+              role={
+                navigationStatus === 'preparing'
+                  ? 'status'
+                  : navigationStatus === 'error'
+                    ? 'alert'
+                    : undefined
+              }
+              className={`pointer-events-none absolute bottom-3 left-1/2 w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-md bg-bg/80 px-2.5 py-1.5 text-center text-xs leading-5 ${navigationStatus === 'error' ? 'text-watch' : 'text-ink-2'}`}
+            >
+              {t(
+                navigationStatus === 'preparing'
+                  ? 'canvas.preparingNavigation'
+                  : navigationStatus === 'error'
+                    ? 'canvas.navigationError'
+                    : 'canvas.hint',
+              )}
             </div>
           </div>
 
