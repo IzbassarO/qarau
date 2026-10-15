@@ -36,7 +36,8 @@ console = Console()
 def make_team(fake: bool) -> Team:
     cfg = yaml.safe_load((ROOT / "devteam" / "config.yaml").read_text())
     secrets = {k: v for k, v in dotenv_values(ROOT / "devteam" / ".env").items() if v}
-    if fake:
+    if fake:  # "no cost" includes CPU: the real benchmark set takes ~70 min per commit
+        cfg["gates"]["benchmark"]["command"] = "echo 'fake run: benchmark skipped'; false"
         agents = FakeAgents()
     else:
         from devteam.real import RealAgents

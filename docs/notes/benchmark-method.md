@@ -79,3 +79,7 @@ points −10 %). **Mykolaiv does not**: it splits into 3 models, and the points 
 the largest one swing more than the thresholds between identical runs. So the gate can fail or
 pass mykolaiv by chance. Fix options for the gate owner: per-video tolerances, the median of
 2–3 runs, or gating mykolaiv on registered % only. Time is not gated.
+
+Chosen (devteam v2): per-video tolerances in `devteam/config.yaml` → `gates.benchmark.per_video`:
+mykolaiv points −30 %, reproj +25 % (above the measured +23 % / +16 %); registered % and
+models keep the default rules. Revisit when P3 makes mykolaiv one model.

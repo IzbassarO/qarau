@@ -101,6 +101,7 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
             "assignee": p["assignee"],
             "plan": p["plan"],
             "criteria": list(p["criteria"]),
+            "routes": list(p.get("routes") or []),
         }
         for p in plans
     ]
@@ -111,6 +112,7 @@ class TaskState(TypedDict, total=False):
     assignee: str
     plan: str
     criteria: list[str]
+    routes: list[str]  # web pages to screenshot for the tester
     worktree: str
     branch: str
     session: str
@@ -499,7 +501,10 @@ class Team:
         gate_lines = "\n".join(f"- {line}" for line in g.get("lines", []))
         if g.get("reason"):
             gate_lines += f"\n- **stopped:** {g['reason']}"
-        shots = "\n".join(f"![]({p})" for p in v.get("screenshots", []))
+        shots = "\n".join(  # local files: a PR body can't embed them without an upload
+            f"- `{Path(p).relative_to(self.root)}`" for p in v.get("screenshots", [])
+        )
+        shots += "".join(f"\n- **failed:** {x}" for x in v.get("screenshot_problems", []))
         path.write_text(
             self.redact(
                 f"# {tid}: {s['task']['title']}\n\n"
@@ -510,7 +515,11 @@ class Team:
                 f"## How to try it\n\n{v.get('how_to_try', '')}\n\n"
                 f"## Acceptance criteria\n\n{crit}\n\n## Local checks\n\n{checks or '- (none)'}\n\n"
                 f"## Gates\n\n{gate_lines or '- (not reached)'}\n\n"
-                + (f"## Screenshots\n\n{shots}\n\n" if shots else "")
+                + (
+                    f"## Screenshots (dev machine, seen by the tester)\n\n{shots}\n\n"
+                    if shots
+                    else ""
+                )
                 + f"## Files\n\n```\n{stat}```\n\n🤖 Automated by devteam — no human review.\n"
             )
         )
@@ -549,6 +558,11 @@ def build_graph(team: Team, checkpointer):
         team.verify_worktree(s)
         what = "fixing: " + s["feedback"][:200] if s.get("feedback") else "building the plan"
         team.emit(dev, what, task=tid, status="working")
+        if not team.fake:  # e.g. pnpm install: the Codex sandbox has no network
+            for cmd in team.cfg["developers"][dev].get("setup", []):
+                r = team.run_proc(cmd, cwd=wt, timeout=1800)
+                if not r["ok"]:
+                    raise RuntimeError(f"setup `{cmd}` failed: {team.redact(r['output'][-800:])}")
         out = team.agents.develop(team, s)
         res = team.commit_round(s, s["head"], s["snap"])
         summary = out["summary"]
@@ -580,7 +594,17 @@ def build_graph(team: Team, checkpointer):
         checks = [] if team.fake else team.run_checks(s)
         for c in checks:
             team.emit("tester", f"{'ok  ' if c['ok'] else 'FAIL'} {c['cmd']}", task=tid)
-        verdict = team.agents.judge(team, s, checks)
+        shots, problems = [], []
+        if not team.fake:
+            shots, problems = G.screenshots(team, s, s.get("routes") or [])
+            if shots or problems:
+                team.emit(
+                    "tester", f"screenshots: {len(shots)} ok, {len(problems)} failed", task=tid
+                )
+        verdict = team.agents.judge(
+            team, {**s, "screenshots": shots, "screenshot_problems": problems}, checks
+        )
+        verdict["screenshots"], verdict["screenshot_problems"] = shots, problems
         failed = [c for c in checks if not c["ok"]]
         verdict["judge_passed"] = verdict["passed"]
         verdict["passed"] = verdict["passed"] and not failed  # both, or it is not done
@@ -683,7 +707,8 @@ def build_graph(team: Team, checkpointer):
             else:
                 after = G.benchmark(team, head)
                 if after is None:
-                    log = (team.home / "bench" / head / "log.txt").read_text()[-1500:]
+                    log = team.home / "bench" / G.bench_key(team, head) / "log.txt"
+                    log = log.read_text()[-1500:]
                     return stop(f"benchmark failed to run on this branch:\n{log}", head=head)
                 if reg := G.regressions(before, after, bcfg):
                     return stop("benchmark regression vs dev:\n- " + "\n- ".join(reg), head=head)

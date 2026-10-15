@@ -20,6 +20,14 @@ gates:
     max_rise_reproj_pct: 10
     max_drop_points_pct: 10
     max_rise_scale_err_cm: 0.5
+    # Measured run-to-run noise (docs/notes/benchmark-method.md, Variance): mykolaiv swings
+    # +23 % points / +16 % reproj between identical runs, so the defaults flag it by chance.
+    per_video:
+      mykolaiv: {max_drop_points_pct: 30, max_rise_reproj_pct: 25}
+    # Developer rounds run only these (~11 min, low run-to-run noise); the full set runs only at the
+    # merge gate and at release. Saves subscription limits and round time.
+    quick_only: [notre-dame, room]
+    quick_min: 11
 daily_budget_usd: 3.0     # API spend cap (brain + tester); subscriptions are not counted
 
 # provider: anthropic for now. Prices are $ per 1M tokens, used for the cost report.
@@ -72,8 +80,12 @@ developers:
     areas: [app]
     owns: [web/]
     timeout_min: 60
-    setup:
+    setup:                 # runs before every round: the Codex sandbox has no network
       - cd web && pnpm install --frozen-lockfile
+    screenshots:           # pages from the plan's `routes`; the tester sees them
+      serve: cd web && QARAU_RUNS_DIR={data}/runs pnpm exec vite --port 5198 --strictPort
+      url: http://localhost:5198
+      shoot: cd web && pnpm exec playwright screenshot --viewport-size=1440,900 --wait-for-timeout=2500 {url} {png}
     checks:
       - cd web && pnpm lint && pnpm typecheck
       - cd web && pnpm test && pnpm build
