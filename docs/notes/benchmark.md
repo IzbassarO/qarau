@@ -14,10 +14,10 @@ Phase 1.1 (pending the MVP plan text). Registered = frames in the largest model.
 
 Rows appended by `python -m qarau_pipeline benchmark --record` (method: `docs/notes/benchmark-method.md`). `+dirty` = uncommitted changes on top of the commit.
 
-| Video | Commit | Frames used | Registered % | Models | Points | Reproj. px | Scale err cm | Time s |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| mykolaiv | 667d6ee+dirty | 210 | 84.8 | 3 | 10845 | 0.638 |  | 645.2 |
-| notre-dame | 667d6ee+dirty | 109 | 100.0 | 1 | 43269 | 0.395 |  | 148.9 |
-| room | 667d6ee+dirty | 269 | 95.5 | 3 | 26688 | 0.931 |  | 395.3 |
-| aegviidu | 667d6ee+dirty | failed: timeout after 1800 s | | | | | | |
-| orono | 667d6ee+dirty | failed: timeout after 1800 s | | | | | | |
+| Video | Commit | Frames used | Registered % | Models | Points | Reproj. px | Scale err cm | Time s | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| aegviidu | a8efcc9+dirty | 150 | 88.0 | 3 | 55191 | 0.525 |  | 1322.2 | max_frames 150 |
+| mykolaiv | a8efcc9+dirty | 210 | 84.8 | 3 | 13384 | 0.739 |  | 983.9 |  |
+| notre-dame | a8efcc9+dirty | 109 | 100.0 | 1 | 43264 | 0.395 |  | 184.4 |  |
+| orono | a8efcc9+dirty | 150 | 100.0 | 1 | 91847 | 0.568 |  | 1235.5 | max_frames 150 |
+| room | a8efcc9+dirty | 269 | 95.5 | 2 | 26706 | 0.93 |  | 464.9 |  |

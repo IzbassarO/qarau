@@ -25,7 +25,7 @@ REPO = PKG.parents[1]
 SECTION = "## Automated benchmark (P1)"
 HEAD = (
     "| Video | Commit | Frames used | Registered % | Models | Points | Reproj. px "
-    "| Scale err cm | Time s |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+    "| Scale err cm | Time s | Notes |\n" + "| --- " * 10 + "|"
 )
 
 
@@ -34,13 +34,17 @@ def load_manifest(path: Path = MANIFEST) -> list[dict[str, Any]]:
     return entries
 
 
-def run_video(video: Path, out: Path, timeout_s: float) -> dict[str, Any]:
+def run_video(
+    video: Path, out: Path, timeout_s: float, max_frames: int | None = None
+) -> dict[str, Any]:
     """`qarau_pipeline run` in a child process: pycolmap cannot be interrupted in-process and
     a COLMAP crash must not take the other videos down. Returns the reconstruction metrics."""
     out.mkdir(parents=True, exist_ok=True)
     log = out / "log.txt"
     with log.open("w") as f:
         cmd = [sys.executable, "-m", "qarau_pipeline", "run", "--video", str(video)]
+        if max_frames:
+            cmd += ["--max-frames", str(max_frames)]
         p = subprocess.run(
             [*cmd, "--out", str(out)], cwd=PKG.parent, stdout=f, stderr=subprocess.STDOUT,
             timeout=timeout_s,
@@ -54,7 +58,7 @@ def run_video(video: Path, out: Path, timeout_s: float) -> dict[str, Any]:
     return metrics
 
 
-def video_row(m: dict[str, Any], time_s: float) -> dict[str, Any]:
+def video_row(m: dict[str, Any], time_s: float, max_frames: int | None = None) -> dict[str, Any]:
     used, reg = m["images_in"], m["registered_images"]
     return {
         "registered_pct": round(100 * reg / used, 1) if used else 0.0,
@@ -65,17 +69,20 @@ def video_row(m: dict[str, Any], time_s: float) -> dict[str, Any]:
         "time_s": round(time_s, 1),
         "frames_used": used,
         "registered": reg,
+        "max_frames": max_frames,  # benchmark profile from benchmark_set.toml; None = default
     }
 
 
 def md_rows(res: dict[str, Any]) -> list[str]:
     tag = res["commit"] + ("+dirty" if res["dirty"] else "")
     keys = "frames_used registered_pct models points reproj_px scale_err_cm time_s".split()
-    ok = [
-        f"| {n} | {tag} | " + " | ".join("" if v[k] is None else str(v[k]) for k in keys) + " |"
-        for n, v in res["videos"].items()
-    ]
-    return ok + [f"| {n} | {tag} | failed: {r} |" + " |" * 6 for n, r in res["errors"].items()]
+    rows = []
+    for n, v in res["videos"].items():
+        cells = ["" if v[k] is None else str(v[k]) for k in keys]
+        note = f"max_frames {v['max_frames']}" if v.get("max_frames") else ""
+        rows.append(f"| {n} | {tag} | " + " | ".join([*cells, note]) + " |")
+    dash = " | ".join(["—"] * len(keys))
+    return rows + [f"| {n} | {tag} | {dash} | FAILED: {r} |" for n, r in res["errors"].items()]
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -87,11 +94,12 @@ def _git(repo: Path, *args: str) -> str:
         return ""
 
 
-def _version() -> str | None:
+def _version() -> str:
     try:
         return metadata.version("qarau-pipeline")
-    except metadata.PackageNotFoundError:
-        return None
+    except metadata.PackageNotFoundError:  # run from source: the uv project is not installed
+        project: dict[str, Any] = tomllib.loads((PKG.parent / "pyproject.toml").read_text())
+        return str(project["project"]["version"])
 
 
 def _write(out: Path, res: dict[str, Any]) -> None:
@@ -156,8 +164,8 @@ def run_benchmark(
         print(f"benchmark: {name} ({e['file']})", flush=True)
         t0 = time.perf_counter()
         try:
-            m = run_video(video, out / name, timeout_s)
-            res["videos"][name] = video_row(m, time.perf_counter() - t0)
+            m = run_video(video, out / name, timeout_s, e.get("max_frames"))
+            res["videos"][name] = video_row(m, time.perf_counter() - t0, e.get("max_frames"))
         except subprocess.TimeoutExpired:
             res["errors"][name] = f"timeout after {timeout_s:g} s"
         except Exception as err:  # noqa: BLE001 - one video's failure must not stop the rest

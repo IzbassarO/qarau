@@ -9,8 +9,10 @@ its metrics to `O/run.json`; the reconstruction metrics already hold `images_in`
 
 Benchmark = run that exact command per video, read `run.json`. Nothing new to compute.
 
-- `pipeline/qarau_pipeline/benchmark_set.toml` — manifest (name, file, required, notes),
-  read with `tomllib`. 4 public videos required, `IMG_8315.MOV` optional.
+- `pipeline/qarau_pipeline/benchmark_set.toml` — manifest (name, file, required, notes,
+  optional `max_frames` profile), read with `tomllib`. 4 public videos required,
+  `IMG_8315.MOV` optional. Aegviidu/Orono capped at 150 frames after the first run timed out
+  (see `benchmark-method.md`).
 - `pipeline/qarau_pipeline/benchmark.py` — `run_benchmark(data, out, only, timeout_s,
   record, repo_root)`. Each video runs `python -m qarau_pipeline run` in a **child
   process** with `subprocess.run(timeout=...)`: pycolmap cannot be interrupted in-process,

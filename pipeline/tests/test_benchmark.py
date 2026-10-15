@@ -22,11 +22,13 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         (data / f).write_bytes(b"not a real video")
     (repo / "docs/notes").mkdir(parents=True)
     (repo / "docs/notes/benchmark.md").write_text(OLD_TABLE)
-    calls: list[str] = []
+    calls: dict[str, int | None] = {}
     fail: dict[str, BaseException] = {}
 
-    def fake_run_video(video: Path, out: Path, timeout_s: float) -> dict[str, Any]:
-        calls.append(video.name)
+    def fake_run_video(
+        video: Path, out: Path, timeout_s: float, max_frames: int | None = None
+    ) -> dict[str, Any]:
+        calls[video.name] = max_frames
         if video.name in fail:
             raise fail[video.name]
         out.mkdir(parents=True, exist_ok=True)
@@ -65,6 +67,8 @@ def test_manifest() -> None:
         "orono_water_tower.webm": True,
         "IMG_8315.MOV": False,
     }
+    caps = {e["name"]: e.get("max_frames") for e in benchmark.load_manifest()}
+    assert caps["aegviidu"] == caps["orono"] == 150 and caps["notre-dame"] is None
 
 
 def test_results_schema(env: dict[str, Any]) -> None:
@@ -73,10 +77,16 @@ def test_results_schema(env: dict[str, Any]) -> None:
     top = {"commit", "dirty", "pipeline_version", "started_at", "videos", "errors", "skipped"}
     assert top <= set(res)
     assert res["commit"] == "abc1234" and res["dirty"] is False
+    assert res["pipeline_version"] == "0.1.0"  # from pyproject: the project is not installed
     assert set(res["videos"]) == {"aegviidu", "mykolaiv", "notre-dame", "orono", "room"}
+    # the manifest's frame cap reaches the pipeline and is recorded with the row
+    assert env["calls"]["aegviidu_water_tower.ogv"] == 150
+    assert env["calls"]["notre_dame_oubiels.webm"] is None
+    assert res["videos"]["orono"]["max_frames"] == 150
+    assert res["videos"]["room"]["max_frames"] is None
     for v in res["videos"].values():
         assert set(v) == {"registered_pct", "models", "reproj_px", "points", "scale_err_cm",
-                          "time_s", "frames_used", "registered"}  # fmt: skip
+                          "time_s", "frames_used", "registered", "max_frames"}  # fmt: skip
         assert v["scale_err_cm"] is None
         assert (v["registered_pct"], v["frames_used"], v["registered"]) == (75.0, 120, 90)
         assert (v["models"], v["points"], v["reproj_px"]) == (2, 5000, 0.41)
@@ -131,7 +141,7 @@ def test_one_failure_others_still_run(env: dict[str, Any]) -> None:
     assert set(res["videos"]) == {"aegviidu", "notre-dame", "room"}
     assert len(env["calls"]) == 5
     md = (env["out"] / "results.md").read_text()
-    assert "| orono | abc1234 | failed: timeout after 5 s |" in md
+    assert "| orono | abc1234 | — | — | — | — | — | — | — | FAILED: timeout after 5 s |" in md
 
 
 def test_missing_required_fails(env: dict[str, Any]) -> None:
@@ -172,7 +182,8 @@ def test_record_appends_rows(env: dict[str, Any]) -> None:
     assert md.startswith(OLD_TABLE)
     assert md.count(benchmark.SECTION) == 1
     assert md.count("| abc1234 |") == 6 and md.count("| notre-dame | abc1234 |") == 2
-    assert "| room | abc1234 | 120 | 75.0 | 2 | 5000 | 0.41 |  |" in md
+    assert "| room | abc1234 | 120 | 75.0 | 2 | 5000 | 0.41 |  | 0.0 |  |" in md
+    assert "| aegviidu | abc1234 | 120 | 75.0 | 2 | 5000 | 0.41 |  | 0.0 | max_frames 150 |" in md
 
 
 def test_cli(env: dict[str, Any]) -> None:
