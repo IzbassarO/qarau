@@ -20,10 +20,11 @@ gates:
     max_rise_reproj_pct: 10
     max_drop_points_pct: 10
     max_rise_scale_err_cm: 0.5
-    # Measured run-to-run noise (docs/notes/benchmark-method.md, Variance): mykolaiv swings
-    # +23 % points / +16 % reproj between identical runs, so the defaults flag it by chance.
+    # Measured run-to-run noise (docs/notes/benchmark-method.md, Variance). Mykolaiv on the
+    # same 300 frames: 178/210 -> 81/210 registered, 3 -> 5 models, 10 k -> 3 k points. No
+    # threshold separates that from a real change: shown in the packet, not gated, until P3.
     per_video:
-      mykolaiv: {max_drop_points_pct: 30, max_rise_reproj_pct: 25}
+      mykolaiv: {gated: false, why: "COLMAP noise 39-85 % registered on identical frames; gate again after P3"}
     # Developer rounds run only these (~11 min, low run-to-run noise); the full set runs only at the
     # merge gate and at release. Saves subscription limits and round time.
     quick_only: [notre-dame, room]

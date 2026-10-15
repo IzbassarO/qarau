@@ -706,17 +706,29 @@ def build_graph(team: Team, checkpointer):
         if any(p.startswith(tuple(bcfg["when_paths"])) for p in changed if p):
             team.emit("tester", "benchmark: dev baseline vs this branch", task=tid)
             before = G.benchmark(team, base_sha)
-            if before is None:
-                lines.append(f"benchmark: not available on `{base}` yet (skipped)")
-            else:
-                after = G.benchmark(team, head)
-                if after is None:
-                    log = team.home / "bench" / G.bench_key(team, head) / "log.txt"
-                    log = log.read_text()[-1500:]
-                    return stop(f"benchmark failed to run on this branch:\n{log}", head=head)
-                if reg := G.regressions(before, after, bcfg):
-                    return stop("benchmark regression vs dev:\n- " + "\n- ".join(reg), head=head)
-                lines.append("benchmark: no regression\n\n" + G.bench_table(after))
+            if before is None:  # never "skipped": that let P2a merge unmeasured
+                log = team.home / "bench" / G.bench_key(team, base_sha) / "log.txt"
+                tail = log.read_text()[-1500:] if log.exists() else "(no log)"
+                return stop(
+                    f"benchmark could not run on `{base}` @ {base_sha[:8]}, so this change "
+                    f"can't be measured; fix dev first:\n{tail}",
+                    block=True,
+                    head=head,
+                )
+            after = G.benchmark(team, head)
+            if after is None:
+                log = team.home / "bench" / G.bench_key(team, head) / "log.txt"
+                log = log.read_text()[-1500:]
+                return stop(f"benchmark failed to run on this branch:\n{log}", head=head)
+            if reg := G.regressions(before, after, bcfg):
+                return stop("benchmark regression vs dev:\n- " + "\n- ".join(reg), head=head)
+            skipped = G.not_compared(before, bcfg)
+            lines.append(
+                "benchmark: no regression"
+                + "".join(f"\n  - not compared: {x}" for x in skipped)
+                + "\n\n"
+                + G.bench_table(after)
+            )
         else:
             lines.append("benchmark: not needed (no pipeline changes)")
         # 4. Push, PR into dev with the packet as description, wait for GitHub CI.

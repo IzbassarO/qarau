@@ -3,6 +3,7 @@ actions, stop, release, daily report."""
 
 import copy
 import json
+import shutil
 import sqlite3
 import threading
 import time
@@ -158,10 +159,32 @@ def test_benchmark_no_regression_merges_and_records_table(repo):
     assert "| room | 91.0 |" in team.gh.prs[1]["body"]
 
 
-def test_missing_benchmark_on_dev_is_skipped_not_failed(repo):
-    team, graph = make(repo, Dev(lambda wt, s: (wt / "pipeline" / "b.py").write_text("x\n")))
+def test_benchmark_that_cannot_run_on_dev_blocks_instead_of_skipping(repo):
+    """The first real v2 run merged P2a unmeasured: dev's run failed and was 'skipped'."""
+    gates = copy.deepcopy(CFG["gates"])
+    gates["benchmark"]["command"] = "false"
+    team, graph = make(
+        repo, Dev(lambda wt, s: (wt / "pipeline" / "b.py").write_text("x\n")), gates=gates
+    )
     run(graph)
-    assert "benchmark: not available on `dev` yet" in team.gh.prs[1]["body"]
+    t = task(team)
+    assert t["status"] == "blocked" and "benchmark could not run on `dev`" in t["blocked_reason"]
+    assert team.gh.prs == {}  # nothing pushed or merged
+
+
+def test_video_failing_on_dev_is_named_and_others_still_gate(repo):
+    gates = bench_repo(repo, "90")
+    flaky = BENCH.replace(
+        '"videos": {"room": v}', '"videos": {"room": v}, "errors": {"mykolaiv": "OverflowError"}'
+    )
+    (repo / "pipeline" / "bench.py").write_text(flaky)  # local only: dev on the remote stays
+    team, graph = make(
+        repo, Dev(lambda wt, s: (wt / "pipeline/score.txt").write_text("91")), gates=gates
+    )
+    run(graph)
+    assert task(team)["status"] == "done"
+    body = team.gh.prs[1]["body"]
+    assert "| room | 91.0 |" in body and "not gated (COLMAP noise" in body
 
 
 def test_regression_rules():
@@ -247,6 +270,8 @@ def test_stop_kills_running_children(repo):
 def test_release_merges_dev_into_main_only_with_a_green_benchmark(repo):
     team, graph = make(repo, Dev(lambda wt, s: (wt / "pipeline" / "b.py").write_text("x\n")))
     run(graph)
+    shutil.rmtree(team.home / "bench")  # the gate's run is cached per pipeline tree
+    team.cfg["gates"]["benchmark"]["command"] = "false"
     assert release(team).startswith("release blocked: the full benchmark failed")
     assert "pipeline/b.py" not in remote_files(repo, "main")
 

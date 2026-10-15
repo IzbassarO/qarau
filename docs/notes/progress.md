@@ -2,6 +2,36 @@
 
 Newest first. Keep it short.
 
+## 2026-10-15 — Dev team v2: Codex in parallel; first real parallel run
+
+**Done**
+- v2 (PRs #6, #7 and this one): `dev_app` = Codex (`codex exec --json`, `exec resume` for fixes,
+  ChatGPT login, no API key) runs in parallel with `dev_pipeline` (Claude Code). Developers
+  run only the quick benchmark (notre-dame + room, ~11 min) and get the cached dev numbers;
+  the full set runs at the merge gate and release, cached per `pipeline/` tree. Tester sees
+  screenshots of web routes. Daily report: subscription load per task (rounds, minutes,
+  tokens, ≈ API $). P3 moved right after P2a.
+- First real parallel run (`--only P2a,A1a`): A1a merged (PR #8; Codex, 1 round, 20 min,
+  7.4 M tokens in, mostly cached), P2a merged (PR #9; Claude Code, 2 rounds, 56 min, ≈ $10
+  notional), first release `dev` → `main` (PR #10). API: $0.56.
+- Fixed during the run: parallel `git worktree add -b` raced on `.git/config` (A1a died
+  silently) → orchestrator git calls take turns; a crashing parallel task now says so at once.
+
+**Gate hole found and fixed (this PR)**
+- The dev baseline benchmark failed (mykolaiv export: laspy OverflowError after a good
+  reconstruction) and the gate called that "not available yet (skipped)": **P2a merged and
+  was released without a benchmark comparison.** Checked afterwards: P2a extracts
+  byte-identical frames for mykolaiv, so it changed nothing there; mykolaiv's drop
+  (178 → 81/210 registered) is COLMAP noise on identical input.
+- Now: partial results are kept, videos that ran in both runs are compared, a dev baseline
+  with no results blocks the task, a failing video on dev blocks the release. Mykolaiv is
+  shown but not gated until P3 (noise 39–85 % registered). New task P0: export must not crash
+  on far outliers. The brain may no longer require edits to `progress.md` (P2a's tester sent
+  the work back for it although the brief forbids it).
+
+**Next**
+- `devteam run`: P0 (export crash) and A2a (controls) in parallel, then P3.
+
 ## 2026-10-15 — P2a: robust phone import (frames stage)
 
 - `pipeline/qarau_pipeline/probe.py`: `probe_video()` → `VideoInfo` (codec, coded/display
