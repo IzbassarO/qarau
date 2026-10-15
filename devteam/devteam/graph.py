@@ -154,6 +154,9 @@ class Team:
         if fake and not self.backlog_path.exists():
             shutil.copy(real_backlog, self.backlog_path)
         self._lock = threading.Lock()  # ponytail: one lock for backlog + log, fine for 2 devs
+        # Parallel tasks share one repo: `worktree add -b` writes .git/config, fetch locks refs.
+        # Orchestrator git calls are short, so they simply take turns.
+        self._git_lock = threading.Lock()
         self._procs: set[subprocess.Popen] = set()
         self.only: set[str] = set()
         if remote is None and fake:
@@ -304,13 +307,14 @@ class Team:
         env: dict | None = None,
     ) -> str:
         self._guard(args)
-        r = subprocess.run(  # bytes, not text=True: that would turn \r in file names into \n
-            ["git", *args],
-            cwd=cwd or self.root,
-            capture_output=True,
-            input=input.encode("utf-8", "surrogateescape") if input is not None else None,
-            env={**os.environ, "GIT_LITERAL_PATHSPECS": "1", **(env or {})},
-        )
+        with self._git_lock:
+            r = subprocess.run(  # bytes, not text=True: that would turn \r in file names into \n
+                ["git", *args],
+                cwd=cwd or self.root,
+                capture_output=True,
+                input=input.encode("utf-8", "surrogateescape") if input is not None else None,
+                env={**os.environ, "GIT_LITERAL_PATHSPECS": "1", **(env or {})},
+            )
         if r.returncode:
             raise RuntimeError(f"git {' '.join(args)}: {r.stderr.decode(errors='replace').strip()}")
         return r.stdout.decode("utf-8", "surrogateescape")
@@ -770,6 +774,25 @@ def build_graph(team: Team, checkpointer):
             "results": [{"id": tid, "status": status, "packet": str(packet), "pr": g.get("pr", "")}]
         }
 
+    def loud(name, fn):
+        """A parallel task's error surfaces only when the other tasks finish (hours): say it
+        now, so the owner can `devteam stop`, fix and `resume`."""
+
+        def node(s: TaskState):
+            try:
+                return fn(s)
+            except Exception as e:
+                team.emit(
+                    s.get("assignee", "brain"),
+                    f"CRASHED in {name}: {e}. The run stops when the other tasks finish; "
+                    "`devteam stop` now, fix, then `devteam resume`.",
+                    task=s["task"]["id"],
+                    status="idle",
+                )
+                raise
+
+        return node
+
     sub = StateGraph(TaskState)
     for name, fn in [
         ("worktree", worktree),
@@ -778,7 +801,7 @@ def build_graph(team: Team, checkpointer):
         ("gates", gates),
         ("finish", finish),
     ]:
-        sub.add_node(name, fn)
+        sub.add_node(name, loud(name, fn))
     sub.add_edge(START, "worktree")
     sub.add_edge("worktree", "develop")
     sub.add_edge("develop", "test")
