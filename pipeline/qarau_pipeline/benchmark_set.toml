@@ -1,0 +1,41 @@
+# Reference videos for `python -m qarau_pipeline benchmark` (docs/notes/benchmark.md).
+# Image-folder datasets (south-building, attisholz-areal, ...) are out of scope for now:
+# the benchmark runs the video path only.
+#
+# Optional `max_frames` = benchmark profile, passed as `run --max-frames` (frame cap instead of
+# the default 300). Same frames/matching/mapping code as the product, only fewer frames, so
+# regressions still show; recorded per row ("Notes"). Changing it resets that video's baseline.
+# ponytail: 150 on the two high-res drone orbits keeps the whole set ~40 min on an M1 Pro (gate
+# budget 90 min); at 300 frames each spends > 28 min in exhaustive matching and times out.
+
+[[video]]
+name = "aegviidu"
+file = "aegviidu_water_tower.ogv"
+required = true
+max_frames = 150
+notes = "drone orbit around a water tower, 1920x1080, 71 s"
+
+[[video]]
+name = "mykolaiv"
+file = "mykolaiv_oil_tanks.webm"
+required = true
+notes = "drone over oil tanks (first market asset type)"
+
+[[video]]
+name = "notre-dame"
+file = "notre_dame_oubiels.webm"
+required = true
+notes = "drone, 20 s, 640x480 church; fast smoke run"
+
+[[video]]
+name = "orono"
+file = "orono_water_tower.webm"
+required = true
+max_frames = 150
+notes = "drone orbit around a water tower, 2560x1440, 91 s"
+
+[[video]]
+name = "room"
+file = "IMG_8315.MOV"
+required = false
+notes = "owner's iPhone HDR portrait room walk (private; absent from the gate's data dir)"

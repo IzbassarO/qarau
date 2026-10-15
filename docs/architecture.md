@@ -74,6 +74,15 @@ align" rather than guessing.
 increase above noise threshold), shrank (usually a measurement artefact — flag it), and
 stable. Noise thresholds are calibrated per asset type from repeated scans.
 
+## Benchmark
+
+`python -m qarau_pipeline benchmark --data D --out O` runs every reference video in
+`pipeline/qarau_pipeline/benchmark_set.toml` through `run` (one child process per video,
+per-video timeout, optional per-video frame cap) and writes `O/results.json` (`videos.<name>`: registered_pct, models,
+reproj_px, points, scale_err_cm, time_s). Exit 0 only if every required and every present
+optional video ran. The merge gate uses it; `--record` adds a per-commit row to
+`docs/notes/benchmark.md`. Method: `docs/notes/benchmark-method.md`.
+
 ## Deployment shapes
 
 | Shape | Who | What runs where |
