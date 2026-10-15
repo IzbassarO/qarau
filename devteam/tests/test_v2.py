@@ -5,14 +5,18 @@ import copy
 import json
 import os
 import socket
+import sqlite3
+import threading
 
+import pytest
 from conftest import CFG, git, remote_of
+from langgraph.checkpoint.sqlite import SqliteSaver
 from test_gates import bench_repo
 
 from devteam import costs
 from devteam import gates as G
 from devteam.agents import FakeAgents
-from devteam.graph import Team
+from devteam.graph import Team, build_graph
 from devteam.real import RealAgents, parse_codex, quick_benchmark
 from devteam.report import write_report
 
@@ -181,3 +185,42 @@ def test_report_shows_subscription_load_per_task(repo):
     )
     assert "| A1a | dev_app | codex (subscription) | 1 | 20 | 500,000 | 30,000 | — |" in text
     json.dumps(text)
+
+
+def test_parallel_worktrees_do_not_race_on_git_locks(repo):
+    """Seen in the first real v2 run: two `worktree add -b` at once -> .git/config lock."""
+    team = team_for(repo)
+    git(repo, "remote", "add", "devteam-fake", remote_of(repo))  # like origin: -b sets upstream
+    team.fetch("dev")
+    errors = []
+
+    def add(name, start):
+        start.wait()
+        try:
+            team.git(
+                "worktree", "add", "-q", "-b", name, str(repo.parent / name), "devteam-fake/dev"
+            )
+        except RuntimeError as e:
+            errors.append(str(e))
+
+    for i in range(20):
+        start = threading.Barrier(3)
+        threads = [threading.Thread(target=add, args=(f"{x}{i}", start)) for x in "abc"]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+    assert errors == []
+
+
+def test_a_crashing_parallel_task_says_so_at_once(repo):
+    class Crash(FakeAgents):
+        delay = 0
+
+        def develop(self, team, s):
+            raise RuntimeError("codex failed: usage limit")
+
+    team = team_for(repo)
+    team.agents = Crash()
+    graph = build_graph(team, SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False)))
+    with pytest.raises(RuntimeError):
+        graph.invoke({}, {"configurable": {"thread_id": "r"}})
+    assert "CRASHED in develop: codex failed: usage limit" in (team.home / "events.log").read_text()
