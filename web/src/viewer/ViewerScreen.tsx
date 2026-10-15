@@ -61,7 +61,7 @@ const icon = (d: ReactNode) => (
   </svg>
 );
 
-export function ViewerScreen({ bundle }: { bundle: Bundle }) {
+export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; embedded?: boolean }) {
   const { t } = useI18n();
   const m = bundle.manifest;
   const frames = m.frames;
@@ -204,37 +204,39 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
 
   return (
     <div className="flex h-full min-h-[640px] flex-col overflow-hidden bg-bg">
-      <header className="flex flex-wrap items-center gap-4 border-b border-line bg-surface px-4 py-2.5">
-        <Link to="/" aria-label="Qarau">
-          <Logo />
-        </Link>
-        <span className="text-ink-2">{bundle.runId}</span>
-        <div
-          role="tablist"
-          className="flex gap-0.5 rounded-[9px] border border-line-strong p-[3px]"
-        >
-          <span
-            role="tab"
-            aria-selected="false"
-            className="inline-flex h-7 items-center rounded-md px-3 text-[13px] text-ink-2"
+      {!embedded && (
+        <header className="flex flex-wrap items-center gap-4 border-b border-line bg-surface px-4 py-2.5">
+          <Link to="/" aria-label="Qarau">
+            <Logo />
+          </Link>
+          <span className="text-ink-2">{bundle.runId}</span>
+          <div
+            role="tablist"
+            className="flex gap-0.5 rounded-[9px] border border-line-strong p-[3px]"
           >
-            {t('nav.overview')}
+            <span
+              role="tab"
+              aria-selected="false"
+              className="inline-flex h-7 items-center rounded-md px-3 text-[13px] text-ink-2"
+            >
+              {t('nav.overview')}
+            </span>
+            <span
+              role="tab"
+              aria-selected="true"
+              className="inline-flex h-7 items-center rounded-md bg-line px-3 text-[13px]"
+            >
+              {t('nav.viewer')}
+            </span>
+          </div>
+          <div className="grow" />
+          <span className={`${mono} text-xs text-ink-2`}>
+            {stats.points.toLocaleString()}
+            {import.meta.env.DEV && fps > 0 && ` · ${fps} fps`}
           </span>
-          <span
-            role="tab"
-            aria-selected="true"
-            className="inline-flex h-7 items-center rounded-md bg-line px-3 text-[13px]"
-          >
-            {t('nav.viewer')}
-          </span>
-        </div>
-        <div className="grow" />
-        <span className={`${mono} text-xs text-ink-2`}>
-          {stats.points.toLocaleString()}
-          {import.meta.env.DEV && fps > 0 && ` · ${fps} fps`}
-        </span>
-        <LangSwitch />
-      </header>
+          <LangSwitch />
+        </header>
+      )}
 
       <div className="flex min-h-0 grow">
         <div
@@ -400,7 +402,7 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
             </div>
             <div className="relative aspect-video overflow-hidden rounded-lg border border-line bg-[#0d1014]">
               <img
-                src={runUrl(bundle.runId, f.thumb)}
+                src={bundle.assetUrl?.(f.thumb) ?? runUrl(bundle.runId, f.thumb)}
                 alt={t('panel.frame')}
                 className="size-full object-contain"
               />

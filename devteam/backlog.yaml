@@ -1,0 +1,169 @@
+tasks:
+- id: P1
+  area: core
+  title: Benchmark command over all reference videos
+  goal: 'One command (e.g. `python -m qarau_pipeline benchmark`) runs every reference video in data/samples/
+    (the 4 public videos now, the owner''s room video when it is added) and writes a table: registered
+    frames %, number of models, mean reprojection error, points, scale error (blank until P5), time. Results
+    are saved per commit (commit hash in the file name / row) and appended to docs/notes/benchmark.md.
+    Contract used by the merge gate (devteam/config.yaml gates.benchmark): `python -m qarau_pipeline benchmark
+    --data <dir> --out <dir>` reads videos from --data (read-only), writes everything under --out, and
+    writes --out/results.json = {"videos": {name: {registered_pct, models, reproj_px, points, scale_err_cm
+    (null until P5/P7), time_s}}}. Exit code 0 only if every video ran.
+
+    '
+  status: done
+  owner: dev_pipeline
+  run: run-20261014-213422
+  branch: devteam/P1
+  pr: https://github.com/IzbassarO/qarau/pull/3
+  done_at: '2026-10-15'
+- id: P2a
+  area: core
+  title: Robust phone import
+  goal: 'The frames stage handles HEVC, HDR -> SDR, rotation metadata and variable frame rate for any
+    phone video, with tests on synthetic clips for each case.
+
+    '
+  status: todo
+- id: P3
+  area: core
+  title: One connected model per video
+  goal: 'Use loop detection, the global mapper and model merging so one video gives one model. Measure
+    with the P1 benchmark: number of models and registered % before and after. Priority: 3 of 5 benchmark
+    videos split into several models (aegviidu 3, mykolaiv 3, room 2 on a8efcc9).
+
+    '
+  status: todo
+- id: P2b
+  area: core
+  title: Parallax keyframes and a footage quality report
+  goal: 'Keyframes are chosen by parallax (enough camera motion), not a fixed rate. A quality report lists
+    problems with plain re-shoot advice: blur, moving too fast, pure rotation (turning on the spot), low
+    texture.
+
+    '
+  status: todo
+- id: P4a
+  area: core
+  title: Dense reconstruction stage (commercial licence)
+  goal: 'A dense stage behind the Densifier interface using a model whose licence allows commercial use
+    (record the licence in an ADR). Exported to the viewer bundle.
+
+    '
+  status: todo
+- id: P4b
+  area: core
+  title: Frame-to-point links for dense points
+  goal: 'Every dense point keeps the list of frames that saw it, stored in the bundle, so the evidence
+    panel can show source frames for any point.
+
+    '
+  status: todo
+- id: P5a
+  area: core
+  title: Metric scale and gravity from an A4 sheet or a measured distance
+  goal: 'The user marks an A4 sheet or one known distance; the map is scaled to metres and rotated so
+    gravity points down. Scale error is reported in the benchmark.
+
+    '
+  status: todo
+- id: P5b
+  area: core
+  title: Drone telemetry reader (GPS, DJI SRT)
+  goal: 'Read per-frame GPS / DJI SRT telemetry into the capture so scale and georeference can come from
+    it later. Tested on a sample SRT file.
+
+    '
+  status: todo
+- id: P6
+  area: core
+  title: Point confidence and honest display
+  goal: 'Every point gets a confidence score from number of views, triangulation angle, reprojection error
+    and multi-view consistency, stored in the bundle. Low-confidence points are hidden or shown grey as
+    "uncertain". Holes are shown as "not reconstructed", never filled for looks. Estimated (prior-based)
+    geometry is marked and excluded from measurements.
+
+    '
+  licence: 'Own code on NumPy (BSD-3-Clause), pycolmap/COLMAP (BSD-3-Clause; check the licences of libraries
+    bundled in the pycolmap wheel), Open3D if needed (MIT).
+
+    '
+  status: todo
+- id: P7
+  area: core
+  title: Accuracy check with AprilTag markers
+  goal: 'Detect printed AprilTags (tag36h11) in the video, use their known printed size for metric scale,
+    and report the scale error in cm in the P1 benchmark. Include a printable tag sheet and filming instructions
+    in docs.
+
+    '
+  licence: 'OpenCV ArUco module with the AprilTag dictionaries (Apache-2.0, already a pipeline dependency)
+    - no new library. Alternative: AprilRobotics/apriltag (BSD-2-Clause).
+
+    '
+  status: todo
+- id: D1
+  area: core
+  title: Data foundation - storage layout and run catalog
+  goal: 'S3 layout: raw/ (immutable, never overwritten) and processed/<pipeline_version>/. Catalog tables
+    via Alembic (assets, captures, runs, stage_runs) record pipeline, model and parameter versions for
+    every result, and failed runs with their reasons.
+
+    '
+  licence: 'SQLAlchemy and Alembic (MIT), boto3 (Apache-2.0), Versity S3 Gateway (Apache-2.0), pgvector
+    (PostgreSQL licence). PostGIS is GPL-2.0: fine as a separate database server, but shipping it in on-prem
+    installs needs GPL compliance (owner to confirm, ADR).
+
+    '
+  status: todo
+- id: A1a
+  area: app
+  title: Control center layout with sites and inspections
+  goal: 'ChatGPT/Claude-like shell: left sidebar with sites and their inspections (like chats), a "New
+    inspection" button that uploads a video, the main area shows the selected inspection (video, 3D map,
+    processing steps). Follows docs/design/. All text via i18n.
+
+    '
+  status: todo
+- id: A2a
+  area: app
+  title: Blender-like orbit, zoom and pan controls module
+  goal: 'Reusable controls module with tests: orbit around the point under the cursor at mouse-down; zoom
+    toward the cursor that dollies the pivot forward when close (never stuck); camera limited to an expanded
+    bounding box and stopped at the nearest points; pan with Shift+drag / middle mouse; Mac trackpad two-finger
+    orbit, pinch zoom, Shift+two-finger pan; smooth damping. Replaces the current controls.
+
+    '
+  status: todo
+- id: A2b
+  area: app
+  title: Fly mode and clickable axis gizmo
+  goal: 'Fly mode (WASD + mouse look, Shift = faster) toggled with a key; a clickable axis gizmo for top
+    / front / side views as in Blender; both with damping and tests.
+
+    '
+  status: todo
+- id: A3
+  area: app
+  title: Processing status view
+  goal: 'A view of the processing steps of an inspection with clear states and human-readable errors (what
+    went wrong, what to do).
+
+    '
+  status: todo
+- id: A4
+  area: app
+  title: Colour toggle and object framing
+  goal: 'Real colours <-> height-blue toggle; the initial view frames the object, not the whole scene.
+
+    '
+  status: todo
+- id: A1b
+  area: app
+  title: Simple local login
+  goal: 'A simple local login for the app shell (no external identity provider yet). Routes behind it;
+    credentials never hard-coded.
+
+    '
+  status: todo

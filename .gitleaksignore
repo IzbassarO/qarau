@@ -1,0 +1,4 @@
+# Fake credentials used on purpose by devteam tests (they check that gitleaks catches them).
+# Fingerprints are commit-bound: a new real secret is never covered by these lines.
+dd8f3b90309c80892fd5b8decc06e76c601d9ff6:devteam/tests/test_gates.py:aws-access-token:113
+dd8f3b90309c80892fd5b8decc06e76c601d9ff6:devteam/tests/test_gates.py:aws-access-token:120

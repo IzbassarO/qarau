@@ -64,3 +64,12 @@ infra/volumes/
 
 # --- Claude Code agent worktrees ---
 .claude/worktrees/
+
+# --- devteam runtime state (checkpoints, worktrees, packets, costs) ---
+devteam/.state/
+
+# devteam daily reports (local, for the owner)
+devteam/reports/
+
+# Playwright MCP browser logs/screenshots (local tool output)
+.playwright-mcp/

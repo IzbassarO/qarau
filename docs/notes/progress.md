@@ -2,6 +2,93 @@
 
 Newest first. Keep it short.
 
+## 2026-10-15 — P2a: robust phone import (frames stage)
+
+- `pipeline/qarau_pipeline/probe.py`: `probe_video()` → `VideoInfo` (codec, coded/display
+  size, `rotation_deg` from displaymatrix or `tags.rotate`, HDR = PQ/HLG or BT.2020 ≥ 10 bit,
+  fps, `is_vfr` = a pts interval > 25 % off the median in the first 120 packets).
+- `frames.py` decodes from `VideoInfo`: ffmpeg autorotate once (checked against the display
+  size), HDR → 8-bit BT.709, frames picked by pts on the old `fps` grid (room/mykolaiv/orono/
+  aegviidu pick the same frames as before), readable errors (no ffmpeg, unprobeable file,
+  decode failure, 0 frames).
+- New `frames/manifest.json`: `source` VideoInfo, `conversions` (`autorotate:90`,
+  `tonemap:hable|colorspace`, `vfr:pts_sampling`), per frame `file` + source `pts_s`,
+  `warnings`.
+- HDR: `zscale`+`tonemap=hable` when the ffmpeg build has zscale (CI's apt ffmpeg), else the
+  `colorspace` fallback with a manifest warning (Homebrew ffmpeg on the dev Mac: no libzimg,
+  highlights may clip). The hable path runs only in CI; not yet seen on a real iPhone clip.
+- Quick benchmark: notre-dame 109/109 (100 %), room 257/269 (95.5 %), same as before. A draft
+  sampler that moved the grid dropped room to 90 %; see `docs/notes/benchmark-method.md`,
+  "Sampling phase". IMG_8315.MOV: rotation 90 + HLG detected, upright 1080×1920 SDR frames.
+- Next: an ffmpeg with libzimg for dev and on-prem images, so real HDR footage gets hable.
+
+## 2026-10-15 — Dev team v1 done; handoff for v2
+
+**State**
+- No human review (owner's decision): work reaches `dev` only through the gates (local checks,
+  Sonnet tester, GitHub CI, benchmark, gitleaks); weekly `dev` → `main` release. Rules:
+  CLAUDE.md → "Delivery". Design: `docs/notes/devteam-plan.md`. Phase 1: `docs/plan/phase1.md`.
+- Branches: `main` = PR #2 (M2 prep + room test). `dev` = main + P1 (PR #3, merged by the
+  team) + devteam itself (PR #4). Work from `dev`; `feat/*` and `devteam/*` are merged.
+- devteam v1 runs: brain = Opus 5.5 (API), dev_pipeline = Claude Code headless (`claude -p`,
+  subscription token from `devteam/.env`), tester = Sonnet 5.5 (API). 40 tests;
+  `cd devteam && uv run pytest`. Keys in `devteam/.env` (both set; gitignored).
+- P1 took 3 developer rounds (~2 h 45 min, mostly the developer re-running the 70-min
+  benchmark). API cost $0.31; Claude Code reported ~$14.7 notional (subscription limits).
+- First release `dev` → `main` has not run yet: it runs at the end of the next
+  `devteam run` (full benchmark on dev, ~70 min, then CI, then merge).
+- Unmerged agent work from M2 prep, saved as branches (unverified WIP, not in `dev`):
+  `wip/dense-stage` (Depth Anything V2 dense stage + export, ADR 0008 → input for P4a),
+  `wip/recon-eval` (reconstruction config eval script, ADR 0007 → input for P3).
+
+**Next: v2 = dev_app (Codex) in parallel with dev_pipeline**
+- `devteam/devteam/real.py`: add `"codex"` to `RealAgents.TOOLS` and a `_codex()` beside
+  `_claude()`: `codex exec --json --sandbox workspace-write -C <worktree> -` (prompt on
+  stdin, same `_brief`); fix rounds `codex exec resume <thread_id> -` with the feedback.
+  Parse the JSONL stream: thread id from the `thread.started` event, final message and token
+  usage from the last events (check the real event names with a smoke run first). Log cost
+  with `billed=False` (ChatGPT login; never pass OPENAI_API_KEY).
+- The Codex sandbox has no network and cannot write `.git`: run `pnpm install
+  --frozen-lockfile` in the worktree before the first round (the orchestrator commits).
+- Tester for web: screenshots into the packet (Playwright in `web/`; save under
+  `.state/packets/<task>/`), checks already mirror CI (`pnpm lint/typecheck/test/build`).
+- Then run both in parallel: `uv run devteam run --only P2a,A1a` and show the result.
+
+**Known issues**
+- `devteam/backlog.yaml` is read from the main checkout's working tree: keep that checkout on
+  `dev` (or a branch from it); status changes are written there and must be committed by
+  whoever works in that checkout. Consider moving live status into `.state/` (v2 decision).
+- Developer rounds that re-run the full benchmark are slow and costly on the subscription;
+  consider telling developers to run `--only <short video>` and leaving the full run to the gate.
+- The brain sometimes splits one criterion into several list items (seen in P1); harmless.
+
+**Waiting for the owner**
+- GitHub branch protection on `main` needs GitHub Pro (~$4/month) for a private repo;
+  `devteam/hooks/pre-push` stands in locally until then.
+- PostGIS is GPL-2.0: fine as a server, but on-prem installs that ship it must follow the GPL.
+- SAM 3.1 commercial terms still unverified.
+
+## 2026-10-14 — P1: benchmark command (`devteam/P1`)
+
+- `python -m qarau_pipeline benchmark --data D --out O [--only …] [--timeout-s N] [--record]`:
+  manifest `pipeline/qarau_pipeline/benchmark_set.toml` (4 public videos required, room
+  optional), one child `run` per video with timeout, `O/results.json` + `results.md`, exit 0
+  only if all ran. `--record` → `docs/benchmarks/<sha>.json` + rows in `benchmark.md`.
+  Method: `docs/notes/benchmark-method.md`. Tests mock the child run (< 1 s).
+- Product defaults (300 frames, exhaustive matching) on Aegviidu and Orono took > 28 min of
+  matching each on the M1 Pro and timed out at 1800 s. The benchmark caps those two at
+  150 frames (`max_frames` in the manifest, same code path; reasons in
+  `benchmark-method.md`) so the set fits the gate's 90 min. Recorded run (a8efcc9+dirty,
+  all 5 exit 0, required set 62 min on a loaded M1 Pro): aegviidu 132/150, 3 models,
+  0.53 px; mykolaiv 178/210, 3 models, 0.74 px; notre-dame 109/109, 0.40 px; orono 150/150,
+  0.57 px, 92 k points; room 257/269, 0.93 px.
+- **Gate risk:** mykolaiv points/reproj swing +23 %/+16 % between identical runs, which is
+  beyond the gate thresholds (`benchmark-method.md`, Variance).
+- **Known issue (for the tech lead):** a real 300-frame drone video takes ~45 min on CPU. That
+  is a product problem (sequential + loop matching for video? fewer features?). Measure the fix
+  with this benchmark in its own task.
+- Next: `scale_err_cm` once a scale reference exists (P5/P7); image-folder datasets in the set.
+
 ## 2026-10-14 — New direction: MVP plan; Step 1 room test (`feat/room-test`)
 
 - Owner's brief arrived **without the plan text** (placeholder `<paste the plan here>`):
