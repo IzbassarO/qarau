@@ -2,6 +2,23 @@
 
 Newest first. Keep it short.
 
+## 2026-10-14 — Dev team (`devteam/`) v0 → v1; no human review
+
+- Owner's decision: no human review. Work merges into `dev` only through automated gates
+  (local checks, LLM tester, GitHub CI, benchmark, gitleaks); weekly `dev` → `main` release.
+  Rules in CLAUDE.md → "Delivery"; design in `docs/notes/devteam-plan.md`.
+- PR #2 (M2 prep + room test) merged into `main`; `dev` recreated from `main` and pushed.
+- devteam: LangGraph graph (brain → per-task subgraph worktree → develop → test → gates),
+  SQLite checkpoints + `resume`, `stop`, atomic $3/day API budget, cost report, daily report.
+  Two Codex read-only reviews; all findings fixed with tests (40 tests).
+- v1: brain = Opus 5.5 (API), dev_pipeline = Claude Code headless (subscription),
+  tester = Sonnet 5.5 (API). First real task P1 merged automatically (PR #3) after 3 rounds; API cost $0.31.
+- Phase 1 plan: `docs/plan/phase1.md`; backlog `devteam/backlog.yaml` (P1–P7, D1, A1–A4).
+
+**Waiting for the owner**
+- GitHub branch protection on `main` needs GitHub Pro (~$4/month) for a private repo;
+  `devteam/hooks/pre-push` stands in locally until then.
+- PostGIS is GPL-2.0: fine as a server, but on-prem installs that ship it must follow the GPL.
 ## 2026-10-14 — P1: benchmark command (`devteam/P1`)
 
 - `python -m qarau_pipeline benchmark --data D --out O [--only …] [--timeout-s N] [--record]`:

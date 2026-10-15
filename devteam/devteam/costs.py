@@ -1,0 +1,140 @@
+"""Spend log and the daily API budget.
+
+Every billed call first *reserves* its worst-case cost in one SQLite transaction
+(BEGIN IMMEDIATE = one writer at a time, across threads and processes), then the
+reservation is settled to the real cost. A reservation that is never settled (crash,
+network error with unknown billing) keeps counting at its worst case.
+Subscription runs (Claude Code, Codex) are logged with billed=0, for information only.
+"""
+
+import sqlite3
+import time
+from pathlib import Path
+
+from rich.table import Table
+
+
+class BudgetExceeded(RuntimeError):
+    pass
+
+
+def _db(home: Path) -> sqlite3.Connection:
+    db = sqlite3.connect(home / "costs.sqlite", timeout=30, isolation_level=None)
+    db.execute("""create table if not exists usage (
+        day text, ts text, agent text, model text, task text,
+        tokens_in int, tokens_out int, usd real, billed int, state text default 'settled')""")
+    if "state" not in {row[1] for row in db.execute("pragma table_info(usage)")}:  # v0 db
+        db.execute("alter table usage add column state text default 'settled'")
+    return db
+
+
+def _today() -> str:
+    return time.strftime("%Y-%m-%d")
+
+
+def _spent(db, day: str) -> float:
+    return db.execute(
+        "select coalesce(sum(usd), 0) from usage where billed and day = ?", (day,)
+    ).fetchone()[0]
+
+
+def reserve(home: Path, cap: float, agent: str, model: str, task: str, max_usd: float) -> int:
+    """Atomically check the cap and hold max_usd. Returns the reservation id."""
+    db = _db(home)
+    try:
+        db.execute("begin immediate")
+        spent = _spent(db, _today())
+        if spent + max_usd > cap:
+            db.execute("rollback")
+            raise BudgetExceeded(
+                f"daily API budget: ${spent:.2f} spent or reserved of ${cap:.2f}, this call may "
+                f"cost up to ${max_usd:.2f}. `devteam resume` tomorrow, or raise "
+                "daily_budget_usd in config.yaml"
+            )
+        cur = db.execute(
+            "insert into usage (day, ts, agent, model, task, tokens_in, tokens_out, usd, billed, "
+            "state) values (?,?,?,?,?,0,0,?,1,'reserved')",
+            (_today(), time.strftime("%H:%M:%S"), agent, model, task, max_usd),
+        )
+        db.execute("commit")
+        return cur.lastrowid
+    finally:
+        db.close()
+
+
+def settle(home: Path, rid: int, tokens_in: int, tokens_out: int, usd: float):
+    with _db(home) as db:
+        db.execute(
+            "update usage set tokens_in=?, tokens_out=?, usd=?, state='settled' where rowid=?",
+            (tokens_in, tokens_out, usd, rid),
+        )
+
+
+def release(home: Path, rid: int):
+    """Only when the API surely did not bill (it answered with an error status)."""
+    with _db(home) as db:
+        db.execute("delete from usage where rowid=? and state='reserved'", (rid,))
+
+
+def record(
+    home: Path,
+    agent: str,
+    model: str,
+    task: str,
+    tokens_in: int,
+    tokens_out: int,
+    usd: float,
+    billed: bool,
+):
+    with _db(home) as db:
+        db.execute(
+            "insert into usage (day, ts, agent, model, task, tokens_in, tokens_out, usd, billed, "
+            "state) values (?,?,?,?,?,?,?,?,?,'settled')",
+            (
+                _today(),
+                time.strftime("%H:%M:%S"),
+                agent,
+                model,
+                task,
+                tokens_in,
+                tokens_out,
+                usd,
+                int(billed),
+            ),
+        )
+
+
+def spent_today(home: Path) -> float:
+    db = _db(home)
+    try:
+        return _spent(db, _today())
+    finally:
+        db.close()
+
+
+def report(home: Path, console):
+    t = Table("day", "agent", "model", "calls", "tokens in", "tokens out", "$", "billed")
+    db = _db(home)
+    rows = db.execute("""select day, agent, model, count(*), sum(tokens_in), sum(tokens_out),
+        sum(usd), billed, sum(state = 'reserved') from usage
+        group by day, agent, model, billed order by day desc, agent""").fetchall()
+    db.close()
+    for day, agent, model, n, ti, to, usd, billed, open_ in rows:
+        kind = "API" if billed else "subscription"
+        if open_:
+            kind += f" ({open_} unsettled, counted at max)"
+        t.add_row(day, agent, model, str(n), f"{ti:,}", f"{to:,}", f"{usd:.3f}", kind)
+    console.print(t)
+    console.print(f"API spend today (incl. reservations): ${spent_today(home):.2f}")
+
+
+def day_rows(home: Path, day: str) -> list[tuple]:
+    db = _db(home)
+    try:
+        return db.execute(
+            """select agent, model, count(*), sum(usd), billed from usage
+            where day = ? group by agent, model, billed order by agent""",
+            (day,),
+        ).fetchall()
+    finally:
+        db.close()

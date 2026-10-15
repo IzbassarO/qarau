@@ -157,9 +157,9 @@ Full screen specs and interactive prototypes: `docs/design/` (start with
 ## How we work: you own the engineering
 
 This is a startup building a SaaS product, not a pet project. The owner (Izbassar) sets
-product direction and reviews architecture together with a separate Claude "brain"
-session; **you are the engineering team** and are expected to act like a senior engineer
-who owns the outcome.
+product direction and **observes; he does not review or approve code**. **You are the
+engineering team** and are expected to act like a senior engineer who owns the outcome.
+Automated gates replace human review (see "Delivery" below).
 
 You decide on your own (and record non-obvious choices as an ADR in `docs/decisions/`):
 - libraries, code structure, data formats, algorithms, test strategy, refactors;
@@ -174,19 +174,41 @@ You must:
   screenshot. "It compiles" is not done.
 - **Keep `docs/notes/progress.md` current**: what is done, what is next, known issues,
   decisions waiting for the owner. Short, newest first.
-- **Commit in small, meaningful steps** on a feature branch; open a PR with `gh` when a
-  milestone part is done, with screenshots and what you verified.
+- **Commit in small, meaningful steps** on a feature branch; open a PR into `dev` with `gh`,
+  with screenshots and what you verified. It merges when every gate is green.
 - Leave the code better: if something in this file is wrong or missing, propose the change.
 
 Stop and ask the owner only for: spending money or adding a paid service; anything about
 model or data licences; deleting data or history; changing product scope or the two
 modes; security-sensitive defaults. Everything else — decide, document, continue.
 
+## Delivery: automated gates, no human review
+
+- Branches: work happens on `devteam/<task>` (dev team) or a feature branch, always via a
+  PR into **`dev`**. The PR description is the review packet: what changed in plain words,
+  how to try it, acceptance criteria, checks, gates.
+- A PR into `dev` is merged (merge commit, exactly the tested commit) only when **all** hold:
+  local checks green, the tester judge passes, GitHub CI green, no benchmark regression
+  (when `pipeline/` changed; `devteam/config.yaml` → `gates.benchmark`), and the secret scan
+  (gitleaks) is clean. Otherwise the work goes back to the developer, at most 3 times,
+  then the task is **blocked** and listed in the daily report.
+- `dev` → `main`: an automatic weekly release PR, merged only if CI and the full benchmark
+  are green on `dev`. Nothing else reaches `main`.
+- **Forbidden for every agent:** force-push; rewriting published history (rebase, amend,
+  filter); deleting branches other than its own; disabling or editing CI to pass, or
+  touching branch protection; `gh pr merge --admin`; committing secrets or anything under
+  `data/` (or `.env`, `scratch/`).
+- GitHub branch protection needs a paid plan on a private repo; until the owner decides,
+  `devteam/hooks/pre-push` refuses force-pushes, deletions and direct pushes to `main`/`dev`.
+- The owner reads `devteam/reports/YYYY-MM-DD.md` (tasks done, merged PRs, cost, benchmark,
+  blocked tasks). `devteam stop` halts everything at any moment.
+
 ## Working rules for agents
 
 - **Cost first.** Do not add paid services, cloud resources or API usage without the
   owner's explicit OK. Prefer local, open-source, free tiers.
-- **Small, reviewable changes.** One feature or fix per branch/PR, with tests.
+- **Small changes.** One feature or fix per branch/PR, with tests; the gates must be able
+  to judge it.
 - **Never commit** videos, point clouds, model weights, `.env`, keys, or customer data.
 - **Update docs in the same change** when behaviour, API or architecture changes
   (`docs/architecture.md`, ADR in `docs/decisions/` for real decisions).
@@ -194,6 +216,8 @@ modes; security-sensitive defaults. Everything else — decide, document, contin
 - **Every API route declares a role**; no unauthenticated routes except health checks.
 - **Test on real footage.** A stage is not done until it runs on a real phone video in
   `data/samples/` and its output is inspected visually.
+- **Licences:** before using any model or library, check that its licence allows
+  commercial use and note it in the task/PR; unclear → ask the owner.
 - **Ask when a requirement is ambiguous** instead of guessing; note assumptions in the PR.
 - Commit messages in English, imperative ("Add frame quality scoring").
 - Talk to the owner in Russian unless asked otherwise.
