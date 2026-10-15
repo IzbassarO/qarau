@@ -8,14 +8,25 @@ Dev tooling in `devteam/`, not product code. Owner's brief: 2026-10-14.
   writes a plan + acceptance criteria, assigns `dev_pipeline` or `dev_app`.
 - Each task runs in its own LangGraph subgraph, in parallel:
   `worktree → develop → test → (develop again, ≤ 3 fix loops) → packet`.
-- Developers never commit; the graph commits each round and reverts edits outside the
-  developer's folders (`owns` in `config.yaml`, plus `docs/`).
+- The brain only plans; the whole plan is validated (unique tasks and developers, open
+  tasks, task `area` allowed for the developer) and checkpointed before a separate,
+  idempotent `claim` node writes the backlog.
+- Developers never commit. Before each run and each commit the graph checks the worktree
+  is registered and on exactly `devteam/<task>`. It stages only validated paths (status from
+  a throwaway index, NUL-separated, both sides of renames), reverts edits outside the
+  developer's folders (`owns`, plus `docs/`) and protected files (`.env`, `data/`,
+  `scratch/`, found by snapshot because git ignores them). Developer commits are unwound and
+  checked the same way.
+- A task passes only if every setup step and check passes and the judge passes.
 - Task branches `devteam/<id>` start from `base_branch` (`dev`); `devteam review` merges
   approved work into it. Never main, never pushes.
 - SQLite checkpoints (`devteam/.state/`): `devteam resume` re-runs only the node that was
   interrupted (usage limit, budget cap, crash). Subgraph progress survives too.
-- Costs: every API call is logged in `costs.sqlite`; the call is refused once today's billed
-  spend reaches `daily_budget_usd`. Subscription runs (Claude Code, Codex) are logged, not billed.
+- Costs: every API call goes through `llm_call`, which reserves its worst-case cost in one
+  SQLite transaction, refuses it if the day's cap would be crossed, and settles to the real
+  usage after. Unsettled reservations (crash, unknown billing) count at the worst case.
+  Subscription runs (Claude Code, Codex) are logged, not billed.
+- `devteam cleanup` removes worktrees of done/dropped tasks; branches and packets stay.
 
 ## Steps
 

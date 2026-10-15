@@ -23,7 +23,7 @@ def repo(tmp_path, monkeypatch):
         monkeypatch.setenv(f"GIT_{k}_EMAIL", "t@t")
     repo = tmp_path / "repo"
     (repo / "devteam").mkdir(parents=True)
-    shutil.copy(HERE / "backlog.yaml", repo / "devteam" / "backlog.yaml")
+    shutil.copy(HERE / "tests" / "backlog.yaml", repo / "devteam" / "backlog.yaml")
     (repo / "README.md").write_text("x\n")
     (repo / "pipeline").mkdir()
     (repo / "pipeline" / "a.py").write_text("a = 1\n")

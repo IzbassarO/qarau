@@ -1,26 +1,112 @@
-# Phase 1: video -> 3D map. Kept by the brain; you can edit it too.
+# Phase 1: video -> 3D map (docs/plan/phase1.md). Kept by the brain; you can edit it too.
+# Order = priority. ~70 % core / ~30 % app: core tasks are smaller and more numerous.
 # area: core -> dev_pipeline, app -> dev_app (config.yaml `areas`)
 # status: todo | in_progress | review | failed | changes_requested | done | dropped
 # owner, run, branch: filled in by the team.
 tasks:
-  - id: T-001
+  - id: P1
     area: core
-    title: Frame sampling options on the run command
+    title: Benchmark command over all reference videos
     goal: >
-      `python -m qarau_pipeline run` takes --fps and --max-frames so frame sampling can be
-      tuned per video without code changes. Defaults stay as they are now.
+      One command (e.g. `python -m qarau_pipeline benchmark`) runs every reference video in
+      data/samples/ (the 4 public videos now, the owner's room video when it is added) and
+      writes a table: registered frames %, number of models, mean reprojection error, points,
+      scale error (blank until P5), time. Results are saved per commit (commit hash in the
+      file name / row) and appended to docs/notes/benchmark.md.
     status: todo
-  - id: T-002
+  - id: P2a
+    area: core
+    title: Robust phone import
+    goal: >
+      The frames stage handles HEVC, HDR -> SDR, rotation metadata and variable frame rate
+      for any phone video, with tests on synthetic clips for each case.
+    status: todo
+  - id: P2b
+    area: core
+    title: Parallax keyframes and a footage quality report
+    goal: >
+      Keyframes are chosen by parallax (enough camera motion), not a fixed rate. A quality
+      report lists problems with plain re-shoot advice: blur, moving too fast, pure rotation
+      (turning on the spot), low texture.
+    status: todo
+  - id: P3
+    area: core
+    title: One connected model per video
+    goal: >
+      Use loop detection, the global mapper and model merging so one video gives one model.
+      Measure with the P1 benchmark: number of models and registered % before and after.
+    status: todo
+  - id: P4a
+    area: core
+    title: Dense reconstruction stage (commercial licence)
+    goal: >
+      A dense stage behind the Densifier interface using a model whose licence allows
+      commercial use (record the licence in an ADR). Exported to the viewer bundle.
+    status: todo
+  - id: P4b
+    area: core
+    title: Frame-to-point links for dense points
+    goal: >
+      Every dense point keeps the list of frames that saw it, stored in the bundle, so the
+      evidence panel can show source frames for any point.
+    status: todo
+  - id: P5a
+    area: core
+    title: Metric scale and gravity from an A4 sheet or a measured distance
+    goal: >
+      The user marks an A4 sheet or one known distance; the map is scaled to metres and
+      rotated so gravity points down. Scale error is reported in the benchmark.
+    status: todo
+  - id: P5b
+    area: core
+    title: Drone telemetry reader (GPS, DJI SRT)
+    goal: >
+      Read per-frame GPS / DJI SRT telemetry into the capture so scale and georeference can
+      come from it later. Tested on a sample SRT file.
+    status: todo
+  - id: A1a
     area: app
-    title: Run summary in the viewer
+    title: Control center layout with sites and inspections
     goal: >
-      The web viewer shows a small panel with the run's numbers: frames used, frames
-      registered, points, mean reprojection error. Text through i18n (ru/kk/en).
+      ChatGPT/Claude-like shell: left sidebar with sites and their inspections (like chats),
+      a "New inspection" button that uploads a video, the main area shows the selected
+      inspection (video, 3D map, processing steps). Follows docs/design/. All text via i18n.
     status: todo
-  - id: T-003
-    area: core
-    title: Dense reconstruction stage
+  - id: A2a
+    area: app
+    title: Blender-like orbit, zoom and pan controls module
     goal: >
-      Merge the dense stage (Depth Anything V2 Small scaled to sparse COLMAP points) into the
-      pipeline behind the Densifier interface and export it to bundle v2.
+      Reusable controls module with tests: orbit around the point under the cursor at
+      mouse-down; zoom toward the cursor that dollies the pivot forward when close (never
+      stuck); camera limited to an expanded bounding box and stopped at the nearest points;
+      pan with Shift+drag / middle mouse; Mac trackpad two-finger orbit, pinch zoom,
+      Shift+two-finger pan; smooth damping. Replaces the current controls.
+    status: todo
+  - id: A2b
+    area: app
+    title: Fly mode and clickable axis gizmo
+    goal: >
+      Fly mode (WASD + mouse look, Shift = faster) toggled with a key; a clickable axis
+      gizmo for top / front / side views as in Blender; both with damping and tests.
+    status: todo
+  - id: A3
+    area: app
+    title: Processing status view
+    goal: >
+      A view of the processing steps of an inspection with clear states and human-readable
+      errors (what went wrong, what to do).
+    status: todo
+  - id: A4
+    area: app
+    title: Colour toggle and object framing
+    goal: >
+      Real colours <-> height-blue toggle; the initial view frames the object, not the
+      whole scene.
+    status: todo
+  - id: A1b
+    area: app
+    title: Simple local login
+    goal: >
+      A simple local login for the app shell (no external identity provider yet). Routes
+      behind it; credentials never hard-coded.
     status: todo

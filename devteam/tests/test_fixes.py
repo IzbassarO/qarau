@@ -221,7 +221,7 @@ def test_in_progress_tasks_of_this_run_are_recovered(repo):
 
 
 # --- #6 plan validation ----------------------------------------------------------------------
-TODO = yaml.safe_load((Path(__file__).parents[1] / "backlog.yaml").read_text())["tasks"]
+TODO = yaml.safe_load((Path(__file__).parent / "backlog.yaml").read_text())["tasks"]
 
 
 def p(tid, dev, criteria=("c",)):
