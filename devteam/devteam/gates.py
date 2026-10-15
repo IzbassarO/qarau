@@ -178,6 +178,12 @@ def screenshots(team, s, routes: list[str]) -> tuple[list[str], list[str]]:
     finally:
         os.killpg(srv.pid, signal.SIGTERM)
         srv.wait()
+        for sig in [0] * 50 + [signal.SIGKILL]:  # the shell exits first; wait for the server
+            try:
+                os.killpg(srv.pid, sig)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
         with team._lock:
             team._procs.discard(srv)
     return paths, problems
