@@ -14,12 +14,12 @@ export function Logo() {
 }
 
 export function LangSwitch() {
-  const { lang } = useI18n();
+  const { lang, t } = useI18n();
   return (
     <div
       className="flex gap-0.5 rounded-lg border border-line-strong p-0.5"
       role="group"
-      aria-label="Language"
+      aria-label={t('language.label')}
     >
       {(Object.keys(LANGS) as Lang[]).map((l) => (
         <button
@@ -29,7 +29,7 @@ export function LangSwitch() {
           onClick={() => setLang(l)}
           className={`h-6 cursor-pointer rounded-md px-2 text-xs uppercase ${l === lang ? 'bg-line text-ink' : 'text-ink-2'}`}
         >
-          {l}
+          {t(`language.${l}`)}
         </button>
       ))}
     </div>

@@ -12,5 +12,9 @@ const target = proxyEnv === '1' ? 'http://localhost:8000' : proxyEnv;
 export default defineConfig({
   plugins: [react(), tailwindcss(), ...(proxy ? [] : [devRuns()])],
   server: proxy ? { proxy: { '/api': target! } } : {},
-  test: { include: ['src/**/*.test.ts'] },
+  test: {
+    include: ['src/**/*.test.{ts,tsx}'],
+    environment: 'jsdom',
+    setupFiles: ['src/test/setup.ts'],
+  },
 });
