@@ -12,7 +12,7 @@ import anthropic
 import httpx
 import pytest
 import yaml
-from conftest import CFG, git
+from conftest import CFG, git, remote_of
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from devteam import costs
@@ -28,7 +28,7 @@ class Quick(FakeAgents):
 def make(repo, agents=None, fake=True, **cfg_over):
     cfg = copy.deepcopy(CFG)
     cfg.update(cfg_over)
-    team = Team(repo, cfg, {}, agents or Quick(), fake=fake)
+    team = Team(repo, cfg, {}, agents or Quick(), fake=fake, remote=remote_of(repo))
     graph = build_graph(team, SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False)))
     return team, graph
 
@@ -158,7 +158,7 @@ def test_only_validated_paths_are_committed(repo):
     (wt / "pipeline" / ".env").write_text("SECRET=1\n")  # protected, git-ignored
     (wt / "data").mkdir()
     (wt / "data" / "big.bin").write_text("x")  # protected, git-ignored
-    refused = team.commit_round(s, head, snap)
+    refused = team.commit_round(s, head, snap)["refused"]
 
     files = set(git(wt, "show", "--name-only", "--format=", "HEAD").split("\n")) - {""}
     names = set(git(wt, "show", "-z", "--name-only", "--format=", "HEAD").split("\0")) - {""}
@@ -183,7 +183,7 @@ def test_developer_commits_are_unwound_and_checked(repo):
     head = git(wt, "rev-parse", "HEAD").strip()
     (wt / "web" / "app.ts").write_text("hack\n")
     git(wt, "commit", "-qam", "sneaky")
-    assert "web/app.ts" in team.commit_round(s, head, {})
+    assert "web/app.ts" in team.commit_round(s, head, {})["refused"]
     assert git(wt, "rev-parse", "HEAD").strip() == head  # nothing allowed -> no commit
 
 
@@ -209,7 +209,7 @@ def test_assignments_are_checkpointed_before_the_backlog_changes(repo, monkeypat
     monkeypatch.setattr(Team, "update_task", real_update)
     graph.invoke(None, config)
     assert CountingPlans.plans == 1  # resume did not re-plan
-    assert statuses(team) == {"T-001": "review", "T-002": "review", "T-003": "todo"}
+    assert statuses(team) == {"T-001": "done", "T-002": "done", "T-003": "todo"}
     assert {t.get("run") for t in team.load_backlog() if t["id"] != "T-003"} == {"r1"}
 
 
@@ -218,7 +218,7 @@ def test_in_progress_tasks_of_this_run_are_recovered(repo):
     team.update_task("T-001", status="in_progress", run="r2", owner="dev_pipeline")
     team.update_task("T-002", status="in_progress", run="someone-else")
     graph.invoke({}, {"configurable": {"thread_id": "r2"}})
-    assert statuses(team) == {"T-001": "review", "T-002": "in_progress", "T-003": "todo"}
+    assert statuses(team) == {"T-001": "done", "T-002": "in_progress", "T-003": "todo"}
 
 
 # --- #6 plan validation ----------------------------------------------------------------------
@@ -274,7 +274,7 @@ def test_judge_pass_is_not_enough_when_a_check_fails(repo):
     agents.plan = only_core
     team, graph = make(repo, agents, fake=False, developers=cfg_devs, max_fix_loops=1)
     graph.invoke({}, {"configurable": {"thread_id": "r4"}})
-    assert statuses(team)["T-001"] == "failed"  # judge passed in round 2, `false` did not
+    assert statuses(team)["T-001"] == "blocked"  # judge passed in round 2, `false` did not
     packet = (team.home / "packets" / "T-001.md").read_text()
     assert "judge: pass" in packet and "FAIL: `false`" in packet
 
@@ -288,14 +288,15 @@ def test_failed_setup_blocks_success_and_skips_checks(repo):
 
 
 # --- #3 cleanup ------------------------------------------------------------------------------
-def test_cleanup_removes_decided_worktrees_and_keeps_branches_and_packets(repo):
+def test_cleanup_removes_finished_worktrees_and_keeps_branches_and_packets(repo):
     team, graph = make(repo)
     graph.invoke({}, {"configurable": {"thread_id": "r5"}})
-    team.update_task("T-001", status="done")
+    assert not (team.home / "worktrees" / "T-001").exists()  # merged -> removed at once
+    add_worktree(team, "T-003")
+    team.update_task("T-003", status="dropped")
     out = team.cleanup()
-    assert len(out) == 1 and "T-001: removed" in out[0]
-    assert not (team.home / "worktrees" / "T-001").exists()
-    assert (team.home / "worktrees" / "T-002").exists()  # still waiting for review
+    assert len(out) == 1 and "T-003: removed" in out[0]
+    assert team.branch_for("T-003") in git(repo, "branch", "--list")
     assert team.branch_for("T-001") in git(repo, "branch", "--list")
     assert (team.home / "packets" / "T-001.md").exists()
 
@@ -312,7 +313,7 @@ def test_preexisting_ignored_protected_file_is_never_deleted(repo):
         team.commit_round(s, head, snap)
     assert (wt / ".env").exists()  # left for the owner, not deleted
     (wt / ".env").write_text("KEY=original\n")  # owner restores it -> passes (hash, not mtime)
-    assert team.commit_round(s, head, snap) == []
+    assert team.commit_round(s, head, snap)["refused"] == []
 
 
 def test_v0_cost_database_is_migrated(tmp_path):
@@ -334,7 +335,7 @@ def test_carriage_return_file_names_survive(repo):
     wt = Path(s["worktree"])
     head = git(wt, "rev-parse", "HEAD").strip()
     (wt / "pipeline" / "a\rb.txt").write_text("x")
-    assert team.commit_round(s, head, {}) == []
+    assert team.commit_round(s, head, {})["refused"] == []
     raw = subprocess.run(
         ["git", "show", "-z", "--name-only", "--format=", "HEAD"],
         cwd=wt,

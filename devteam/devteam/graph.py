@@ -1,8 +1,9 @@
-"""The team as a LangGraph graph.
+"""The team as a LangGraph graph. No human review: automated gates decide.
 
 brain (plan, validated) -> claim (backlog update) -> one subgraph per task, in parallel:
-    worktree -> develop -> test -> (back to develop, max N loops) -> packet
-Review is outside the graph (`devteam review`): nothing merges without the owner.
+    worktree -> develop -> test -> gates -> finish
+test or gates fail -> back to develop (max N fixes) -> then "blocked".
+gates = merge latest dev in, secret scan, benchmark, push, PR into dev, GitHub CI, auto-merge.
 """
 
 import fnmatch
@@ -10,6 +11,7 @@ import hashlib
 import operator
 import os
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -21,6 +23,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
+
+from devteam import gates as G
 
 AGENTS = ["brain", "dev_pipeline", "dev_app", "tester"]
 SHARED_DIRS = ["docs/"]  # any developer may touch these besides its own folders
@@ -38,6 +42,21 @@ SNAPSHOT_SKIP = {
     "dist",
     ".vite",
 }
+# git commands the orchestrator may never run (history rewrite, deletion)
+FORBIDDEN_GIT = {"rebase", "filter-branch", "filter-repo", "replace", "update-ref"}
+FORBIDDEN_PUSH = {
+    "--force",
+    "-f",
+    "--force-with-lease",
+    "--force-if-includes",
+    "--delete",
+    "-d",
+    "--mirror",
+    "--all",
+    "--tags",
+    "--prune",
+}
+FORBIDDEN_BRANCH = {"-D", "-d", "--delete", "-M", "-m", "--move", "-f", "--force"}
 
 
 class Violation(RuntimeError):
@@ -99,8 +118,10 @@ class TaskState(TypedDict, total=False):
     snap: dict  # protected-file hashes at the same moment
     dev_summary: str
     feedback: str
-    loops: int
+    rounds: int  # developer rounds done
+    fixes: int  # times the work was sent back (by tester or gates)
     verdict: dict
+    gate: dict
     results: Annotated[list, operator.add]
 
 
@@ -110,9 +131,18 @@ class TeamState(TypedDict, total=False):
 
 
 class Team:
-    """Everything the nodes need: paths, config, secrets, the agent implementations."""
+    """Everything the nodes need: paths, config, secrets, agents, the remote."""
 
-    def __init__(self, root: Path, cfg: dict, secrets: dict, agents: Any, fake: bool = False):
+    def __init__(
+        self,
+        root: Path,
+        cfg: dict,
+        secrets: dict,
+        agents: Any,
+        fake: bool = False,
+        remote: str | None = None,
+        gh: Any = None,
+    ):
         self.root, self.cfg, self.secrets, self.agents, self.fake = root, cfg, secrets, agents, fake
         self.home = root / "devteam" / ".state" / ("fake" if fake else "")
         self.home.mkdir(parents=True, exist_ok=True)
@@ -122,6 +152,44 @@ class Team:
         if fake and not self.backlog_path.exists():
             shutil.copy(real_backlog, self.backlog_path)
         self._lock = threading.Lock()  # ponytail: one lock for backlog + log, fine for 2 devs
+        self._procs: set[subprocess.Popen] = set()
+        if remote is None and fake:
+            remote = str(self.home / "remote.git")
+            if not Path(remote).exists():
+                self._seed_fake_remote(remote)
+        self.remote_url = remote or "origin"
+        self.remote_name = "origin" if self.remote_url == "origin" else "devteam-fake"
+        self.gh = gh or (G.GitHub(self) if self.remote_url == "origin" else G.FakeGitHub(self))
+        if self.remote_url == "origin":  # stand-in for branch protection, see hooks/pre-push
+            hook, src = (
+                Path(self.git("rev-parse", "--git-common-dir").strip()),
+                Path(__file__).parents[1] / "hooks" / "pre-push",
+            )
+            hook = (hook if hook.is_absolute() else root / hook) / "hooks" / "pre-push"
+            if not hook.exists() or hook.read_bytes() != src.read_bytes():
+                shutil.copy(src, hook)
+                hook.chmod(0o755)
+
+    def _seed_fake_remote(self, path: str):
+        """A local bare repo standing in for GitHub in --fake runs."""
+        subprocess.run(["git", "init", "-q", "--bare", path], check=True)
+        for b in (self.cfg["base_branch"], self.cfg["release_branch"]):
+            src = next(
+                r
+                for r in (f"origin/{b}", b, "HEAD")
+                if subprocess.run(
+                    ["git", "rev-parse", "-q", "--verify", r],
+                    cwd=self.root,
+                    capture_output=True,
+                ).returncode
+                == 0
+            )
+            subprocess.run(
+                ["git", "push", "-q", path, f"{src}:refs/heads/{b}"],
+                cwd=self.root,
+                check=True,
+                capture_output=True,
+            )
 
     # --- logging / live view -------------------------------------------------------------
     def redact(self, text: str) -> str:
@@ -160,7 +228,71 @@ class Team:
                 yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100)
             )
 
+    # --- processes (all killable by `devteam stop`) --------------------------------------
+    def run_proc(
+        self, cmd, cwd: str, timeout: int, input: str | None = None, env: dict | None = None
+    ) -> dict:
+        """Runs in its own process group, registered so stop() can kill the whole tree."""
+        p = subprocess.Popen(
+            cmd,
+            shell=isinstance(cmd, str),
+            cwd=cwd,
+            text=True,
+            stdin=subprocess.PIPE if input else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+            env=env,
+        )
+        with self._lock:
+            self._procs.add(p)
+        try:
+            out, err = p.communicate(input, timeout=timeout)
+            ok = p.returncode == 0
+        except subprocess.TimeoutExpired:
+            os.killpg(p.pid, signal.SIGKILL)
+            out, err = p.communicate()
+            ok, err = False, (err or "") + f"\ntimed out after {timeout // 60} min"
+        finally:
+            with self._lock:
+                self._procs.discard(p)
+        return {
+            "ok": ok,
+            "code": p.returncode,
+            "stdout": out or "",
+            "stderr": err or "",
+            "output": (out or "") + (err or ""),
+        }
+
+    def kill_all(self):
+        with self._lock:
+            for p in list(self._procs):
+                try:
+                    os.killpg(p.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+
     # --- git -----------------------------------------------------------------------------
+    def _guard(self, args: tuple[str, ...]):
+        cmd = args[0] if args else ""
+        if cmd in FORBIDDEN_GIT:
+            raise PermissionError(f"forbidden for agents: git {cmd}")
+        if cmd == "push":
+            refs = [a for a in args[1:] if not a.startswith("-")][1:]  # after the remote
+            if (
+                FORBIDDEN_PUSH & set(args)
+                or any(a.startswith("--force") for a in args)
+                or not refs
+                or any(r.startswith(("+", ":")) for r in refs)
+                or any(not r.startswith(self.branch_prefix + "/") for r in refs)
+            ):
+                raise PermissionError(
+                    f"forbidden push: git {' '.join(args)} (only "
+                    f"{self.branch_prefix}/<task>, never forced)"
+                )
+        if cmd == "branch" and FORBIDDEN_BRANCH & set(args):
+            raise PermissionError(f"forbidden for agents: git {' '.join(args)}")
+
     def git(
         self,
         *args: str,
@@ -168,6 +300,7 @@ class Team:
         input: str | None = None,
         env: dict | None = None,
     ) -> str:
+        self._guard(args)
         r = subprocess.run(  # bytes, not text=True: that would turn \r in file names into \n
             ["git", *args],
             cwd=cwd or self.root,
@@ -179,13 +312,17 @@ class Team:
             raise RuntimeError(f"git {' '.join(args)}: {r.stderr.decode(errors='replace').strip()}")
         return r.stdout.decode("utf-8", "surrogateescape")
 
+    def fetch(self, *branches: str):
+        specs = [f"+refs/heads/{b}:refs/remotes/{self.remote_name}/{b}" for b in branches]
+        self.git("fetch", "-q", self.remote_url, *specs)
+
     def branch_for(self, task_id: str) -> str:
         return f"{self.branch_prefix}/{task_id}"
 
     def verify_worktree(self, s: TaskState):
         """The worktree must be registered with git and sit on exactly devteam/<task>."""
         wt, branch = Path(s["worktree"]).resolve(), self.branch_for(s["task"]["id"])
-        if branch in (self.cfg["base_branch"], "main", "master"):
+        if branch in (self.cfg["base_branch"], self.cfg["release_branch"], "main", "master"):
             raise Violation(f"refusing to work on {branch}")
         registered, current = {}, None
         for line in self.git("worktree", "list", "--porcelain").splitlines():
@@ -223,9 +360,22 @@ class Team:
                             snap[rel] = hashlib.file_digest(f, "sha256").hexdigest()
         return snap
 
-    def commit_round(self, s: TaskState, head_before: str, snap_before: dict) -> list[str]:
-        """Commit the developer's changes in its own folders, staging only checked paths.
-        Reverts edits outside them and protected-file changes. Returns what it refused."""
+    def _revert(self, wt: str, paths, snap_before: dict):
+        for path in sorted(paths):
+            in_head = (
+                subprocess.run(
+                    ["git", "cat-file", "-e", f"HEAD:{path}"], cwd=wt, capture_output=True
+                ).returncode
+                == 0
+            )
+            if in_head:
+                self.git("checkout", "HEAD", "--", path, cwd=wt)
+            elif path not in snap_before:  # new file: safe to delete
+                (Path(wt) / path).unlink(missing_ok=True)
+
+    def commit_round(self, s: TaskState, head_before: str, snap_before: dict) -> dict:
+        """Commit the developer's changes in its own folders, staging only checked paths, and
+        only if no secret is found. Returns {"refused": [...], "secrets": [...]}."""
         self.verify_worktree(s)
         wt = s["worktree"]
         owns = self.cfg["developers"][s["assignee"]]["owns"] + SHARED_DIRS
@@ -262,19 +412,9 @@ class Team:
             else:
                 refused.update(paths)
 
-        for path in sorted(refused):
-            in_head = (
-                subprocess.run(
-                    ["git", "cat-file", "-e", f"HEAD:{path}"], cwd=wt, capture_output=True
-                ).returncode
-                == 0
-            )
-            if in_head:
-                self.git("checkout", "HEAD", "--", path, cwd=wt)
-            elif path not in snap_before:  # new file: safe to delete
-                (Path(wt) / path).unlink(missing_ok=True)
+        self._revert(wt, refused, snap_before)
         # A protected file that existed before (ignored, so git has no copy) was changed or
-        # deleted: we can't restore it and won't delete it. Stop for the owner.
+        # deleted: we can't restore it and won't delete it. Stop.
         lost = sorted(
             p for p in changed if p in snap_before and self.git("ls-files", "--", p, cwd=wt) == ""
         )
@@ -285,6 +425,7 @@ class Team:
             )
 
         allowed = [p for p in allowed if p not in refused]
+        secrets = []
         if allowed:
             self.git(
                 "add",
@@ -294,15 +435,19 @@ class Team:
                 cwd=wt,
                 input="\0".join(allowed),
             )
+            leaks = G.gitleaks(self, wt, "--pre-commit", "--staged")
+            secrets = sorted({f["file"] for f in leaks} | set(G.env_secrets_in(self, wt, allowed)))
+            if secrets:  # never committed, so never in history; the developer must rewrite
+                self.git("reset", "-q", "--", *secrets, cwd=wt)
+                self._revert(wt, secrets, snap_before)
         if self.git("diff", "--cached", "--name-only", cwd=wt).strip():
             self.verify_worktree(s)
-            msg = f"{s['task']['id']}: {s['task']['title']} (round {s.get('loops', 0) + 1})"
+            msg = f"{s['task']['id']}: {s['task']['title']} (round {s.get('rounds', 0) + 1})"
             self.git("commit", "-q", "-m", msg, cwd=wt)  # hooks (e.g. secret scanners) run
-        return sorted(refused)
+        return {"refused": sorted(refused), "secrets": secrets}
 
     def cleanup(self) -> list[str]:
-        """Remove worktrees of tasks the owner has decided on (done / dropped).
-        Branches and review packets stay. Refuses dirty worktrees (git's own check)."""
+        """Remove worktrees of finished tasks (done / dropped). Branches and packets stay."""
         out = []
         for t in self.load_backlog():
             path = self.home / "worktrees" / t["id"]
@@ -322,32 +467,71 @@ class Team:
         steps += [("check", c) for c in dev.get("checks", [])]
         out = []
         for kind, cmd in steps:
-            try:
-                r = subprocess.run(
-                    cmd, shell=True, cwd=s["worktree"], capture_output=True, text=True, timeout=1800
-                )
-                ok, text = r.returncode == 0, r.stdout + r.stderr
-            except subprocess.TimeoutExpired:
-                ok, text = False, "timed out after 30 min"
-            out.append({"cmd": cmd, "kind": kind, "ok": ok, "output": self.redact(text[-4000:])})
-            if kind == "setup" and not ok:
+            r = self.run_proc(cmd, cwd=s["worktree"], timeout=1800)
+            out.append(
+                {
+                    "cmd": cmd,
+                    "kind": kind,
+                    "ok": r["ok"],
+                    "output": self.redact(r["output"][-4000:]),
+                }
+            )
+            if kind == "setup" and not r["ok"]:
                 break
         return out
+
+    def write_packet(self, s: TaskState, status: str) -> Path:
+        """The PR description: what changed, how to try it, criteria, checks, gates."""
+        tid, v, g = s["task"]["id"], s.get("verdict", {}), s.get("gate", {})
+        path = self.home / "packets" / f"{tid}.md"
+        path.parent.mkdir(exist_ok=True)
+        base = f"{self.remote_name}/{self.cfg['base_branch']}"
+        stat = self.git("diff", "--stat", f"{base}...{s['branch']}")  # no worktree needed
+        crit = "\n".join(
+            f"- [{'x' if c.get('met') else ' '}] {c['criterion']}"
+            + (f" — {c['note']}" if c.get("note") else "")
+            for c in v.get("criteria", [])
+        )
+        checks = "\n".join(
+            f"- {'ok' if c['ok'] else 'FAIL'}: `{c['cmd']}`" for c in v.get("checks", [])
+        )
+        gate_lines = "\n".join(f"- {line}" for line in g.get("lines", []))
+        if g.get("reason"):
+            gate_lines += f"\n- **stopped:** {g['reason']}"
+        shots = "\n".join(f"![]({p})" for p in v.get("screenshots", []))
+        path.write_text(
+            self.redact(
+                f"# {tid}: {s['task']['title']}\n\n"
+                f"**{status}** · developer: {s['assignee']} · branch `{s['branch']}` · "
+                f"rounds: {s.get('rounds', 0)} · sent back: {s.get('fixes', 0)} · "
+                f"judge: {'pass' if v.get('judge_passed') else 'fail'}\n\n"
+                f"## What changed\n\n{v.get('summary', '')}\n\n"
+                f"## How to try it\n\n{v.get('how_to_try', '')}\n\n"
+                f"## Acceptance criteria\n\n{crit}\n\n## Local checks\n\n{checks or '- (none)'}\n\n"
+                f"## Gates\n\n{gate_lines or '- (not reached)'}\n\n"
+                + (f"## Screenshots\n\n{shots}\n\n" if shots else "")
+                + f"## Files\n\n```\n{stat}```\n\n🤖 Automated by devteam — no human review.\n"
+            )
+        )
+        return path
 
 
 def build_graph(team: Team, checkpointer):
     cfg = team.cfg
+    max_fixes = cfg["max_fix_loops"]
+    base = cfg["base_branch"]
 
     # --- per-task subgraph ---------------------------------------------------------------
     def worktree(s: TaskState):
         tid = s["task"]["id"]
         branch, path = team.branch_for(tid), team.home / "worktrees" / tid
         if not path.exists():
+            team.fetch(base)
             if team.git("branch", "--list", branch).strip():
                 team.git("worktree", "add", str(path), branch)
             else:
-                team.git("worktree", "add", "-b", branch, str(path), cfg["base_branch"])
-        out = {"worktree": str(path), "branch": branch, "loops": 0}
+                team.git("worktree", "add", "-b", branch, str(path), f"{team.remote_name}/{base}")
+        out = {"worktree": str(path), "branch": branch, "rounds": 0, "fixes": 0}
         team.verify_worktree({**s, **out})
         out["head"] = team.git("rev-parse", "HEAD", cwd=path).strip()
         out["snap"] = team.snapshot(str(path))
@@ -365,18 +549,26 @@ def build_graph(team: Team, checkpointer):
         what = "fixing: " + s["feedback"][:200] if s.get("feedback") else "building the plan"
         team.emit(dev, what, task=tid, status="working")
         out = team.agents.develop(team, s)
-        refused = team.commit_round(s, s["head"], s["snap"])
+        res = team.commit_round(s, s["head"], s["snap"])
         summary = out["summary"]
-        if refused:
+        if res["refused"]:
             summary += (
                 "\n\nThe orchestrator reverted your changes to files you may not touch "
-                f"(outside your folders, or protected): {', '.join(refused)}"
+                f"(outside your folders, or protected): {', '.join(res['refused'])}"
             )
-            team.emit(dev, f"touched forbidden files, reverted: {refused}", task=tid)
+            team.emit(dev, f"touched forbidden files, reverted: {res['refused']}", task=tid)
+        if res["secrets"]:
+            summary += (
+                "\n\nThe secret scan found credentials in these files; they were NOT "
+                f"committed and were reverted: {', '.join(res['secrets'])}. Never put "
+                "keys or tokens in code; read them from the environment."
+            )
+            team.emit(dev, f"secret scan: refused {res['secrets']}", task=tid)
         team.emit(dev, summary[:300], task=tid, to="tester", status="idle")
         return {
             "session": out["session"],
             "dev_summary": summary,
+            "rounds": s.get("rounds", 0) + 1,
             "head": team.git("rev-parse", "HEAD", cwd=wt).strip(),
             "snap": team.snapshot(wt),
         }
@@ -396,81 +588,177 @@ def build_graph(team: Team, checkpointer):
             verdict["feedback"] = f"{verdict.get('feedback', '')}\n\nFailing checks:\n{logs}"
         verdict["checks"] = checks
         snap = team.snapshot(s["worktree"])  # files the checks made are not the developer's
-        loops = s.get("loops", 0) + 1
+        fixes = s.get("fixes", 0) + (0 if verdict["passed"] else 1)
         if verdict["passed"]:
             team.emit(
-                "tester", "all checks and criteria pass", task=tid, to="reviewer", status="idle"
+                "tester", "local checks and criteria pass", task=tid, to="gates", status="idle"
             )
-        elif loops <= cfg["max_fix_loops"]:
+        elif fixes <= max_fixes:
             team.emit(
                 "tester",
-                f"loop {loops}: {verdict['feedback'].strip()[:300]}",
+                f"sent back ({fixes}/{max_fixes}): {verdict['feedback'].strip()[:300]}",
                 task=tid,
                 to=s["assignee"],
                 status="idle",
             )
         else:
-            team.emit(
-                "tester",
-                f"giving up after {loops - 1} fix loops",
-                task=tid,
-                to="reviewer",
-                status="idle",
-            )
-        return {"verdict": verdict, "loops": loops, "feedback": verdict["feedback"], "snap": snap}
+            team.emit("tester", "out of fix loops", task=tid, status="idle")
+        out = {"verdict": verdict, "fixes": fixes, "snap": snap, "gate": {}}
+        if not verdict["passed"]:
+            out["feedback"] = verdict["feedback"]
+            out["gate"] = {"reason": "tester: " + verdict["feedback"].strip()[:500]}
+        return out
 
     def after_test(s: TaskState):
-        if s["verdict"]["passed"] or s["loops"] > cfg["max_fix_loops"]:
-            return "packet"
+        if s["verdict"]["passed"]:
+            return "gates"
+        return "develop" if s["fixes"] <= max_fixes else "finish"
+
+    def gates(s: TaskState):
+        tid, wt, g = s["task"]["id"], s["worktree"], cfg["gates"]
+        lines: list[str] = []
+        team.emit(
+            "tester", "gates: merge dev, secrets, benchmark, PR, CI", task=tid, status="working"
+        )
+
+        def stop(reason: str, *, block: bool = False, head: str | None = None):
+            fixes = s["fixes"] + (0 if block else 1)
+            blocked = block or fixes > max_fixes
+            team.emit(
+                "tester",
+                f"{'BLOCKED' if blocked else 'sent back'}: {reason[:300]}",
+                task=tid,
+                to="reviewer" if blocked else s["assignee"],
+                status="idle",
+            )
+            out = {
+                "gate": {"merged": False, "blocked": blocked, "reason": reason, "lines": lines},
+                "fixes": fixes,
+                "feedback": reason,
+            }
+            if head:
+                out["head"] = head
+            return out
+
+        done = team.gh.find_pr(s["branch"], base)
+        if done and done["state"] == "MERGED":  # re-run after a crash: already merged
+            return {
+                "gate": {
+                    "merged": True,
+                    "pr": team.gh.url(done),
+                    "number": done["number"],
+                    "lines": ["already merged"],
+                }
+            }
+        team.verify_worktree(s)
+        team.fetch(base)
+        base_ref = f"{team.remote_name}/{base}"
+        base_sha = team.git("rev-parse", base_ref).strip()
+        # 1. Bring the branch up to date with dev: a merge, never a rebase.
+        r = subprocess.run(
+            ["git", "merge", "--no-edit", base_ref], cwd=wt, capture_output=True, text=True
+        )
+        if r.returncode:
+            files = team.git("diff", "--name-only", "--diff-filter=U", cwd=wt).split()
+            subprocess.run(["git", "merge", "--abort"], cwd=wt, capture_output=True)
+            # ponytail: conflicts block the task; add a "developer resolves markers" round
+            # if they become common (parallel tasks own different folders, so rare)
+            return stop(f"conflicts with {base} in {files}", block=True)
+        head = team.git("rev-parse", "HEAD", cwd=wt).strip()
+        lines.append(f"up to date with `{base}` @ {base_sha[:8]}")
+        # 2. Nothing with a secret is ever pushed (history can't be rewritten afterwards).
+        leaks = G.gitleaks(team, wt, f"--log-opts={base_ref}..HEAD")
+        if leaks:
+            return stop(f"secret scan found {leaks}; not pushed", block=True, head=head)
+        lines.append("secret scan (gitleaks): clean")
+        # 3. Benchmark, when the change can affect it.
+        bcfg = g["benchmark"]
+        changed = team.git("diff", "--name-only", f"{base_ref}...HEAD", cwd=wt).split("\n")
+        if any(p.startswith(tuple(bcfg["when_paths"])) for p in changed if p):
+            team.emit("tester", "benchmark: dev baseline vs this branch", task=tid)
+            before = G.benchmark(team, base_sha)
+            if before is None:
+                lines.append(f"benchmark: not available on `{base}` yet (skipped)")
+            else:
+                after = G.benchmark(team, head)
+                if after is None:
+                    log = (team.home / "bench" / head / "log.txt").read_text()[-1500:]
+                    return stop(f"benchmark failed to run on this branch:\n{log}", head=head)
+                if reg := G.regressions(before, after, bcfg):
+                    return stop("benchmark regression vs dev:\n- " + "\n- ".join(reg), head=head)
+                lines.append("benchmark: no regression\n\n" + G.bench_table(after))
+        else:
+            lines.append("benchmark: not needed (no pipeline changes)")
+        # 4. Push, PR into dev with the packet as description, wait for GitHub CI.
+        team.verify_worktree(s)
+        team.git("push", "-q", team.remote_url, s["branch"])
+        body = team.write_packet({**s, "gate": {"lines": lines}}, "Checking: waiting for CI")
+        pr = team.gh.open_pr(s["branch"], base, f"{tid}: {s['task']['title']}", body)
+        lines.append(f"PR: {team.gh.url(pr)}")
+        if pr["state"] != "MERGED":
+            team.emit("tester", f"waiting for GitHub CI on {team.gh.url(pr)}", task=tid)
+            ok, why = team.gh.wait_ci(pr["number"], head, g["ci_timeout_min"] * 60)
+            if not ok:
+                return stop(f"GitHub CI failed:\n{why}", head=head)
+            lines.append("GitHub CI: green")
+            # 5. All gates green: merge exactly the tested commit.
+            team.gh.merge(pr["number"], head)
+        team.emit(
+            "tester",
+            f"merged into {base}: {team.gh.url(pr)}",
+            task=tid,
+            to="reviewer",
+            status="idle",
+        )
+        return {
+            "gate": {"merged": True, "pr": team.gh.url(pr), "number": pr["number"], "lines": lines},
+            "head": head,
+        }
+
+    def after_gates(s: TaskState):
+        g = s["gate"]
+        if g.get("merged") or g.get("blocked"):
+            return "finish"
         return "develop"
 
-    def packet(s: TaskState):
-        tid, v = s["task"]["id"], s["verdict"]
-        status = "review" if v["passed"] else "failed"
-        path = team.home / "packets" / f"{tid}.md"
-        path.parent.mkdir(exist_ok=True)
-        base = cfg["base_branch"]
-        stat = team.git("diff", "--stat", f"{base}...{s['branch']}", cwd=s["worktree"])
-        crit = "\n".join(
-            f"- [{'x' if c.get('met') else ' '}] {c['criterion']}"
-            + (f" — {c['note']}" if c.get("note") else "")
-            for c in v.get("criteria", [])
-        )
-        checks = "\n".join(f"- {'ok' if c['ok'] else 'FAIL'}: `{c['cmd']}`" for c in v["checks"])
-        shots = "\n".join(f"![]({p})" for p in v.get("screenshots", []))
-        head = "Ready for review" if v["passed"] else "Not done — needs you"
-        path.write_text(
-            team.redact(
-                f"# {tid}: {s['task']['title']}\n\n"
-                f"**{head}** · developer: {s['assignee']} · branch `{s['branch']}` · "
-                f"fix loops: {s['loops'] - 1} · "
-                f"judge: {'pass' if v.get('judge_passed', v['passed']) else 'fail'}\n\n"
-                f"## What changed\n\n{v.get('summary', '')}\n\n"
-                f"## How to try it\n\n{v.get('how_to_try', '')}\n\n"
-                f"## Acceptance criteria\n\n{crit}\n\n## Checks\n\n{checks or '- (none)'}\n\n"
-                + (f"## Screenshots\n\n{shots}\n\n" if shots else "")
-                + f"## Files\n\n```\n{stat}```\n"
-            )
-        )
-        team.update_task(tid, status=status, branch=s["branch"])
-        team.emit(
-            "tester", f"review packet: {path.relative_to(team.root)}", task=tid, to="reviewer"
-        )
-        return {"results": [{"id": tid, "status": status, "packet": str(path)}]}
+    def finish(s: TaskState):
+        tid, g = s["task"]["id"], s.get("gate", {})
+        merged = bool(g.get("merged"))
+        status = "done" if merged else "blocked"
+        packet = team.write_packet(s, "Merged into dev" if merged else "Blocked")
+        fields: dict = {"status": status, "branch": s["branch"]}
+        if merged:
+            fields.update(pr=g["pr"], done_at=time.strftime("%Y-%m-%d"))
+        else:
+            fields["blocked_reason"] = (g.get("reason") or "unknown")[:500]
+            if g.get("number"):
+                team.gh.open_pr(s["branch"], base, f"{tid}: {s['task']['title']}", packet)
+        team.update_task(tid, **fields)
+        if merged:  # finished: the worktree is no longer needed (branch and packet stay)
+            try:
+                team.git("worktree", "remove", "--force", s["worktree"])
+            except RuntimeError:
+                pass
+        team.emit("tester", f"{status}: {packet.relative_to(team.root)}", task=tid, to="reviewer")
+        return {
+            "results": [{"id": tid, "status": status, "packet": str(packet), "pr": g.get("pr", "")}]
+        }
 
     sub = StateGraph(TaskState)
     for name, fn in [
         ("worktree", worktree),
         ("develop", develop),
         ("test", test),
-        ("packet", packet),
+        ("gates", gates),
+        ("finish", finish),
     ]:
         sub.add_node(name, fn)
     sub.add_edge(START, "worktree")
     sub.add_edge("worktree", "develop")
     sub.add_edge("develop", "test")
-    sub.add_conditional_edges("test", after_test, ["develop", "packet"])
-    sub.add_edge("packet", END)
+    sub.add_conditional_edges("test", after_test, ["gates", "develop", "finish"])
+    sub.add_conditional_edges("gates", after_gates, ["develop", "finish"])
+    sub.add_edge("finish", END)
 
     # --- top level -----------------------------------------------------------------------
     def brain(s: TeamState, config: RunnableConfig):
@@ -480,8 +768,7 @@ def build_graph(team: Team, checkpointer):
         todo = [
             t
             for t in team.load_backlog()
-            if t["status"] in ("todo", "changes_requested")
-            or (t["status"] == "in_progress" and t.get("run") == run)
+            if t["status"] == "todo" or (t["status"] == "in_progress" and t.get("run") == run)
         ]
         areas = {a for d in cfg["developers"].values() for a in d["areas"]}
         if no_area := [t["id"] for t in todo if t.get("area") not in areas]:

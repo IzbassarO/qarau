@@ -67,3 +67,6 @@ infra/volumes/
 
 # --- devteam runtime state (checkpoints, worktrees, packets, costs) ---
 devteam/.state/
+
+# devteam daily reports (local, for the owner)
+devteam/reports/

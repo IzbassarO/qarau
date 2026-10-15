@@ -17,7 +17,8 @@ def git(repo, *args):
 
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
-    """A throwaway repo shaped like ours: dev branch, pipeline/, web/, ignored .env/data/."""
+    """A throwaway repo shaped like ours (dev + main, pipeline/, web/, ignored .env/data/)
+    with a bare repo next to it as the remote."""
     for k in ("AUTHOR", "COMMITTER"):
         monkeypatch.setenv(f"GIT_{k}_NAME", "t")
         monkeypatch.setenv(f"GIT_{k}_EMAIL", "t@t")
@@ -33,4 +34,12 @@ def repo(tmp_path, monkeypatch):
     git(repo, "init", "-q", "-b", "dev")
     git(repo, "add", ".")
     git(repo, "commit", "-qm", "init")
+    git(repo, "branch", "main")
+    remote = tmp_path / "remote.git"  # stands in for GitHub
+    git(tmp_path, "init", "-q", "--bare", str(remote))
+    git(repo, "push", "-q", str(remote), "dev", "main")
     return repo
+
+
+def remote_of(repo) -> str:
+    return str(repo.parent / "remote.git")

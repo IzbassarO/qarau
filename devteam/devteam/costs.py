@@ -126,3 +126,15 @@ def report(home: Path, console):
         t.add_row(day, agent, model, str(n), f"{ti:,}", f"{to:,}", f"{usd:.3f}", kind)
     console.print(t)
     console.print(f"API spend today (incl. reservations): ${spent_today(home):.2f}")
+
+
+def day_rows(home: Path, day: str) -> list[tuple]:
+    db = _db(home)
+    try:
+        return db.execute(
+            """select agent, model, count(*), sum(usd), billed from usage
+            where day = ? group by agent, model, billed order by agent""",
+            (day,),
+        ).fetchall()
+    finally:
+        db.close()

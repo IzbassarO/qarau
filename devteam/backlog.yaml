@@ -1,8 +1,8 @@
 # Phase 1: video -> 3D map (docs/plan/phase1.md). Kept by the brain; you can edit it too.
 # Order = priority. ~70 % core / ~30 % app: core tasks are smaller and more numerous.
 # area: core -> dev_pipeline, app -> dev_app (config.yaml `areas`)
-# status: todo | in_progress | review | failed | changes_requested | done | dropped
-# owner, run, branch: filled in by the team.
+# status: todo | in_progress | done (merged into dev) | blocked (gates failed 3x) | dropped
+# owner, run, branch, pr, done_at, blocked_reason: filled in by the team.
 # Licences: before using any model or library, check that its licence allows commercial use
 # and note it in the task (`licence:`). Unclear or non-commercial -> stop and ask the owner.
 tasks:
@@ -15,6 +15,11 @@ tasks:
       writes a table: registered frames %, number of models, mean reprojection error, points,
       scale error (blank until P5), time. Results are saved per commit (commit hash in the
       file name / row) and appended to docs/notes/benchmark.md.
+      Contract used by the merge gate (devteam/config.yaml gates.benchmark):
+      `python -m qarau_pipeline benchmark --data <dir> --out <dir>` reads videos from --data
+      (read-only), writes everything under --out, and writes --out/results.json =
+      {"videos": {name: {registered_pct, models, reproj_px, points, scale_err_cm (null until
+      P5/P7), time_s}}}. Exit code 0 only if every video ran.
     status: todo
   - id: P2a
     area: core

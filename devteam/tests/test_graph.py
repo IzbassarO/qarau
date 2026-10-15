@@ -4,7 +4,7 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
-from conftest import CFG
+from conftest import CFG, remote_of
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from devteam.agents import FakeAgents
@@ -30,7 +30,7 @@ class CrashOnce(FakeAgents):
 
 
 def test_fake_team_runs_parallel_loops_and_resumes(repo):
-    team = Team(repo, CFG, {}, CrashOnce(), fake=True)
+    team = Team(repo, CFG, {}, CrashOnce(), fake=True, remote=remote_of(repo))
     db = sqlite3.connect(team.home / "c.sqlite", check_same_thread=False)
     graph = build_graph(team, SqliteSaver(db))
     config = {"configurable": {"thread_id": "t1"}}
@@ -44,7 +44,8 @@ def test_fake_team_runs_parallel_loops_and_resumes(repo):
     graph.invoke(None, config)  # resume
 
     results = graph.get_state(config).values["results"]
-    assert sorted(r["status"] for r in results) == ["review", "review"]  # T-001 + T-002 parallel
+    assert sorted(r["status"] for r in results) == ["done", "done"]  # T-001 + T-002 parallel
+    assert len(team.gh.merged) == 2  # both PRs auto-merged after the gates
     owners = {t["id"]: t.get("owner") for t in team.load_backlog()}
     assert owners["T-001"] == "dev_pipeline" and owners["T-002"] == "dev_app"
     assert {t["id"]: t["status"] for t in team.load_backlog()}["T-003"] == "todo"
@@ -55,6 +56,14 @@ def test_fake_team_runs_parallel_loops_and_resumes(repo):
     ).stdout
     assert "(round 2)" in log
     assert (team.home / "packets" / "T-001.md").exists()
+    remote_dev = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", "dev"],
+        cwd=remote_of(repo),
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "pipeline/devteam-fake-T-001.txt" in remote_dev
+    assert "web/devteam-fake-T-002.txt" in remote_dev
     files = subprocess.run(
         ["git", "ls-tree", "-r", "--name-only", "devteam-fake/T-001"],
         cwd=repo,

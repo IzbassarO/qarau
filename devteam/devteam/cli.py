@@ -1,6 +1,8 @@
-"""devteam run | resume | status | costs | cleanup  (--fake: no-cost team, separate state)."""
+"""devteam run|resume|stop|status|costs|report|release|cleanup  (--fake: no cost, local remote)."""
 
 import argparse
+import os
+import signal
 import sqlite3
 import sys
 import time
@@ -15,7 +17,9 @@ from rich.table import Table
 
 from devteam import costs
 from devteam.agents import FakeAgents
+from devteam.gates import release
 from devteam.graph import AGENTS, Team, build_graph
+from devteam.report import write_report
 
 ROOT = Path(__file__).resolve().parents[2]
 COLORS = {
@@ -24,6 +28,7 @@ COLORS = {
     "dev_app": "green",
     "tester": "yellow",
     "reviewer": "bold white",
+    "gates": "yellow",
 }
 console = Console()
 
@@ -93,35 +98,88 @@ def run_graph(team: Team, resume: bool):
         thread_file.write_text(time.strftime("run-%Y%m%d-%H%M%S"))
         config = {"configurable": {"thread_id": thread_file.read_text()}}
         inp = {}
+    pid_file = team.home / "run.pid"
+    pid_file.write_text(str(os.getpid()))
+
+    def on_stop(signum, frame):  # Ctrl-C or `devteam stop`: kill agents, checks, benchmark
+        team.kill_all()
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, on_stop)
+    signal.signal(signal.SIGINT, on_stop)
     try:
         watch(team, graph, inp, config)
     except KeyboardInterrupt:
-        sys.exit("\nstopped. Continue with `devteam resume`.")
+        team.kill_all()
+        print(f"\nstopped. Report: {write_report(team)}. Continue with `devteam resume`.")
+        sys.stdout.flush()
+        os._exit(130)  # don't wait for worker threads; every finished step is checkpointed
     except Exception as e:  # usage limit, budget cap, crash: the checkpoint keeps the progress
         console.print(f"[red]stopped:[/] {team.redact(str(e))}")
+        write_report(team)
         sys.exit("Fix the cause, then `devteam resume` continues where it stopped.")
+    finally:
+        pid_file.unlink(missing_ok=True)
     results = graph.get_state(config).values.get("results", [])
     for r in results:
-        console.print(f"{r['id']}: [bold]{r['status']}[/] — {Path(r['packet']).relative_to(ROOT)}")
+        console.print(f"{r['id']}: [bold]{r['status']}[/] {r.get('pr', '')}")
     if not results:
         console.print("nothing to do: no todo tasks in the backlog")
+    if release_due(team):
+        console.print(release(team))
+    console.print(f"report: {write_report(team)}")
+
+
+def release_due(team: Team) -> bool:
+    last = team.home / "last_release"
+    if not last.exists():
+        return True
+    age = time.time() - time.mktime(time.strptime(last.read_text().strip(), "%Y-%m-%d"))
+    return age >= team.cfg["release_every_days"] * 86400
+
+
+def stop(team: Team):
+    pid_file = team.home / "run.pid"
+    if not pid_file.exists():
+        sys.exit("no devteam run is active")
+    try:
+        os.kill(int(pid_file.read_text()), signal.SIGTERM)
+        print("stop sent; finished steps are kept, `devteam resume` continues later")
+    except ProcessLookupError:
+        pid_file.unlink()
+        print("the run was already gone")
 
 
 def show_status(team: Team):
-    t = Table("id", "status", "owner", "title")
+    t = Table("id", "status", "owner", "title", "PR / reason")
     for task in team.load_backlog():
-        t.add_row(task["id"], task["status"], task.get("owner", ""), task["title"])
+        t.add_row(
+            task["id"],
+            task["status"],
+            task.get("owner", ""),
+            task["title"],
+            task.get("pr") or task.get("blocked_reason", "")[:60],
+        )
     console.print(t)
 
 
 def main():
     p = argparse.ArgumentParser(prog="devteam")
-    p.add_argument("command", choices=["run", "resume", "status", "costs", "cleanup"])
+    p.add_argument(
+        "command",
+        choices=["run", "resume", "stop", "status", "costs", "report", "release", "cleanup"],
+    )
     p.add_argument("--fake", action="store_true", help="fake agents, no cost, separate state")
     args = p.parse_args()
     team = make_team(args.fake)
     if args.command in ("run", "resume"):
         run_graph(team, resume=args.command == "resume")
+    elif args.command == "stop":
+        stop(team)
+    elif args.command == "report":
+        console.print(f"report: {write_report(team)}")
+    elif args.command == "release":
+        console.print(release(team))
     elif args.command == "status":
         show_status(team)
     elif args.command == "costs":

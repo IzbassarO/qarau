@@ -2,6 +2,7 @@ name: ci
 
 on:
   push:
+    branches: [main, dev]  # task branches get CI through their PR (one run, not two)
   pull_request:
 
 jobs:
@@ -64,3 +65,37 @@ jobs:
           pnpm typecheck
           pnpm test
           pnpm build
+
+  devteam:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: dir
+        run: test -d devteam && echo present=true >> "$GITHUB_OUTPUT" || true
+      - if: steps.dir.outputs.present == 'true'
+        uses: astral-sh/setup-uv@v5
+      - name: Install gitleaks (MIT)
+        if: steps.dir.outputs.present == 'true'
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+      - name: Lint and test devteam
+        if: steps.dir.outputs.present == 'true'
+        working-directory: devteam
+        run: |
+          uv sync
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run pytest -q
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scan (gitleaks, MIT)
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks git --no-banner --redact .

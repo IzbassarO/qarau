@@ -34,7 +34,7 @@ class FakeAgents:
         folder = team.cfg["developers"][s["assignee"]]["owns"][0]
         stub = Path(s["worktree"]) / folder / f"devteam-fake-{s['task']['id']}.txt"
         stub.parent.mkdir(parents=True, exist_ok=True)
-        stub.write_text(f"round {s.get('loops', 0) + 1}\n")
+        stub.write_text(f"round {s.get('rounds', 0) + 1}\n")
         return {
             "session": s.get("session") or f"fake-{s['task']['id']}",
             "summary": f"wrote {stub.name}",
@@ -42,7 +42,7 @@ class FakeAgents:
 
     def judge(self, team, s, checks: list[dict]) -> dict:
         time.sleep(self.delay)
-        passed = s.get("loops", 0) >= 1
+        passed = s.get("rounds", 0) >= 2  # fails round 1, passes round 2
         return {
             "passed": passed,
             "feedback": "" if passed else "stub file must say round 2",

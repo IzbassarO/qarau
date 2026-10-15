@@ -1,9 +1,24 @@
 # Qarau dev team. All models live here; keys live only in devteam/.env.
 
-# Task branches start from this branch, and `devteam review` merges approved work into it.
-# Never main: you open the PR dev -> main yourself.
+# No human review. Each task: branch devteam/<task> from dev, PR into dev, auto-merged only
+# when every gate is green. dev -> main: weekly release PR, merged only if CI and the full
+# benchmark are green on dev.
 base_branch: dev
-max_fix_loops: 3
+release_branch: main
+release_every_days: 7
+max_fix_loops: 3          # times a task is sent back (tester or gates), then "blocked"
+
+gates:
+  ci_timeout_min: 40
+  benchmark:
+    when_paths: [pipeline/]   # run only when the change touches these
+    # Contract (task P1): writes {out}/results.json, reads videos from {data} (read-only).
+    command: cd pipeline && uv run python -m qarau_pipeline benchmark --data {data} --out {out}
+    timeout_min: 90
+    max_drop_registered_pct: 2.0   # percentage points
+    max_rise_reproj_pct: 10
+    max_drop_points_pct: 10
+    max_rise_scale_err_cm: 0.5
 daily_budget_usd: 3.0     # API spend cap (brain + tester); subscriptions are not counted
 
 # provider: anthropic for now. Prices are $ per 1M tokens, used for the cost report.
@@ -39,6 +54,12 @@ developers:
       - "Bash(git diff:*)"
       - "Bash(git log:*)"
       - "Bash(ls:*)"
+    disallowed_tools:      # agents never push, merge or touch GitHub; the orchestrator does
+      - "Bash(git push:*)"
+      - "Bash(git rebase:*)"
+      - "Bash(git reset:*)"
+      - "Bash(git branch:*)"
+      - "Bash(gh:*)"
     setup: []
     checks:
       - cd pipeline && uv run ruff check . && uv run ruff format --check .
