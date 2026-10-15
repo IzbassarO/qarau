@@ -25,6 +25,22 @@ tasks:
     phone video, with tests on synthetic clips for each case.
 
     '
+  status: done
+  owner: dev_pipeline
+  run: run-20261015-081950
+  branch: devteam/P2a
+  pr: https://github.com/IzbassarO/qarau/pull/9
+  done_at: '2026-10-15'
+- id: P0
+  area: core
+  title: Export never crashes on far outlier points
+  goal: 'The export stage crashed on mykolaiv in a gate run (laspy OverflowError: "Values given do not
+    fit after applying offset and scale") after a good reconstruction (178/210 frames), so the whole benchmark
+    failed. Choose LAS offset/scale from the actual point extent (or drop non-finite / absurdly far points
+    and report how many), with a test on synthetic points far from the origin. Log: devteam/.state/bench/beadd07*/mykolaiv/log.txt
+    on the dev Mac.
+
+    '
   status: todo
 - id: P3
   area: core
@@ -125,7 +141,12 @@ tasks:
     processing steps). Follows docs/design/. All text via i18n.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261015-081950
+  branch: devteam/A1a
+  pr: https://github.com/IzbassarO/qarau/pull/8
+  done_at: '2026-10-15'
 - id: A2a
   area: app
   title: Blender-like orbit, zoom and pan controls module

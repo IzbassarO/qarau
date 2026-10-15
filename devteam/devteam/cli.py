@@ -17,7 +17,7 @@ from rich.table import Table
 
 from devteam import costs
 from devteam.agents import FakeAgents
-from devteam.gates import release
+from devteam.gates import EMPTY_BENCH, release
 from devteam.graph import AGENTS, Team, build_graph
 from devteam.report import write_report
 
@@ -37,7 +37,7 @@ def make_team(fake: bool) -> Team:
     cfg = yaml.safe_load((ROOT / "devteam" / "config.yaml").read_text())
     secrets = {k: v for k, v in dotenv_values(ROOT / "devteam" / ".env").items() if v}
     if fake:  # "no cost" includes CPU: the real benchmark set takes ~70 min per commit
-        cfg["gates"]["benchmark"]["command"] = "echo 'fake run: benchmark skipped'; false"
+        cfg["gates"]["benchmark"]["command"] = EMPTY_BENCH
         agents = FakeAgents()
     else:
         from devteam.real import RealAgents

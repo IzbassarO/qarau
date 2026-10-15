@@ -56,6 +56,14 @@ def env_secrets_in(team, cwd: str, paths: list[str]) -> list[str]:
 
 
 # --- benchmark -------------------------------------------------------------------------------
+# --fake and tests: a benchmark that measures nothing (the real set takes ~70 min per commit)
+EMPTY_BENCH = (
+    'python3 -c "import json, pathlib, sys; o = pathlib.Path(sys.argv[1]); '
+    "o.mkdir(parents=True, exist_ok=True); "
+    "(o / 'results.json').write_text(json.dumps(dict(videos=dict(), errors=dict())))\" {out}"
+)
+
+
 def bench_key(team, sha: str) -> str:
     """Cache key: the git trees of `when_paths` at `sha`. A merge that leaves pipeline/ alone
     (a web task, docs) reuses the result instead of another ~70 min run."""
@@ -71,8 +79,9 @@ def cached_benchmark(team, sha: str) -> dict | None:
 
 def benchmark(team, sha: str) -> dict | None:
     """Full benchmark results for commit `sha`, run in a throwaway detached worktree (so
-    nothing it writes can end up in a task branch) and cached per pipeline tree. None if the
-    command is missing or fails, e.g. before the benchmark task (P1) has landed."""
+    nothing it writes can end up in a task branch) and cached per pipeline tree. Videos that
+    failed are in results["errors"] (the command exits 1 then, but the others still count).
+    None only if the command wrote no results at all."""
     bcfg = team.cfg["gates"]["benchmark"]
     out = team.home / "bench" / bench_key(team, sha)
     if (res := cached_benchmark(team, sha)) is not None:
@@ -85,23 +94,26 @@ def benchmark(team, sha: str) -> dict | None:
         cmd = bcfg["command"].format(data=team.root / "data" / "samples", out=out)
         r = team.run_proc(cmd, cwd=str(tmp), timeout=bcfg["timeout_min"] * 60)
         (out / "log.txt").write_text(team.redact(r["output"]))
-        if r["ok"] and (out / "results.json").exists():
+        if (out / "results.json").exists():
             return json.loads((out / "results.json").read_text())
-        (out / "results.json").unlink(missing_ok=True)
         return None
     finally:
         team.git("worktree", "remove", "--force", str(tmp))
 
 
 def regressions(base: dict, new: dict, cfg: dict) -> list[str]:
-    """Per video present in both runs. Contract (task P1): results.json =
-    {"videos": {name: {registered_pct, models, reproj_px, points, scale_err_cm, time_s}}}."""
+    """Per video that ran in the base run and is gated. Contract (task P1): results.json =
+    {"videos": {name: {registered_pct, models, reproj_px, points, scale_err_cm, time_s}},
+    "errors": {name: reason}}."""
     out = []
     for name, b in base.get("videos", {}).items():
         c = {**cfg, **cfg.get("per_video", {}).get(name, {})}  # measured run-to-run noise
+        if not c.get("gated", True):
+            continue
         n = new.get("videos", {}).get(name)
         if n is None:
-            out.append(f"{name}: missing from the new run")
+            why = new.get("errors", {}).get(name, "missing from the new run")
+            out.append(f"{name}: {why}")
             continue
         if n["registered_pct"] < b["registered_pct"] - c["max_drop_registered_pct"]:
             out.append(
@@ -119,6 +131,17 @@ def regressions(base: dict, new: dict, cfg: dict) -> list[str]:
     return out
 
 
+def not_compared(base: dict, cfg: dict) -> list[str]:
+    """Said out loud in the packet: videos the gate could not or does not compare."""
+    out = [f"{n}: failed on the base run ({e})" for n, e in base.get("errors", {}).items()]
+    out += [
+        f"{n}: not gated ({c.get('why', 'see config')})"
+        for n, c in cfg.get("per_video", {}).items()
+        if not c.get("gated", True)
+    ]
+    return out
+
+
 def bench_table(res: dict) -> str:
     rows = [
         "| Video | Registered % | Models | Reproj. px | Points | Scale err. cm | Time s |",
@@ -130,6 +153,7 @@ def bench_table(res: dict) -> str:
             f"{v['reproj_px']:.2f} | {v['points']} | {v.get('scale_err_cm', '—')} | "
             f"{v.get('time_s', '—')} |"
         )
+    rows += [f"| {n} | FAILED: {e} | | | | | |" for n, e in sorted(res.get("errors", {}).items())]
     return "\n".join(rows)
 
 
@@ -349,10 +373,13 @@ def release(team) -> str:
         return f"release: nothing new on {base}"
     team.emit("brain", f"release: benchmark on {base} @ {dev_sha[:8]}", status="working")
     on_dev = benchmark(team, dev_sha)
-    if on_dev is None:
+    if on_dev is None or on_dev.get("errors"):
         log = team.home / "bench" / bench_key(team, dev_sha) / "log.txt"
         tail = log.read_text()[-600:] if log.exists() else "(no log)"
-        return f"release blocked: the full benchmark failed on {base} @ {dev_sha[:8]}:\n{tail}"
+        why = "\n".join(f"- {n}: {e}" for n, e in (on_dev or {}).get("errors", {}).items())
+        return f"release blocked: the full benchmark failed on {base} @ {dev_sha[:8]}:\n" + (
+            why or tail
+        )
     on_main = benchmark(team, main_sha)
     if on_main and (reg := regressions(on_main, on_dev, team.cfg["gates"]["benchmark"])):
         return "release blocked, benchmark regression vs main:\n- " + "\n- ".join(reg)

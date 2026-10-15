@@ -80,9 +80,13 @@ the largest one swing more than the thresholds between identical runs. So the ga
 pass mykolaiv by chance. Fix options for the gate owner: per-video tolerances, the median of
 2–3 runs, or gating mykolaiv on registered % only. Time is not gated.
 
-Chosen (devteam v2): per-video tolerances in `devteam/config.yaml` → `gates.benchmark.per_video`:
-mykolaiv points −30 %, reproj +25 % (above the measured +23 % / +16 %); registered % and
-models keep the default rules. Revisit when P3 makes mykolaiv one model.
+Later (2026-10-15, devteam gate runs): mykolaiv on byte-identical frames (all 300 extracted
+frames have the same hash) gave 178/210 registered, 3 models, 10 332 points in one run and
+81/210 (38.6 %), 5 models, 2 946 points in the next; aegviidu went 3 → 5 models, orono 1 → 2.
+No threshold separates that from a real change, so mykolaiv is **not gated** until P3
+(`devteam/config.yaml` → `gates.benchmark.per_video`, `gated: false`); it is still run and
+shown, and the packet names it under "not compared". Model counts of aegviidu/orono are noisy
+too: watch them when P3 lands.
 
 **Sampling phase (P2a, 2026-10-15).** Identical runs repeat, but shifting which source frame
 starts each 1/6 s slot does not. Room (60 fps) with the frame grid moved by 1–5 source frames

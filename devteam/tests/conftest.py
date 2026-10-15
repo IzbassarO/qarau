@@ -5,8 +5,11 @@ from pathlib import Path
 import pytest
 import yaml
 
+from devteam.gates import EMPTY_BENCH
+
 HERE = Path(__file__).parents[1]
 CFG = yaml.safe_load((HERE / "config.yaml").read_text())
+CFG["gates"]["benchmark"]["command"] = EMPTY_BENCH  # tests that need numbers set their own
 
 
 def git(repo, *args):

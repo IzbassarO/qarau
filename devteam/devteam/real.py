@@ -101,6 +101,8 @@ their own numbers; the full benchmark runs only at the merge gate and at release
 ask a developer to run the full set.
 For web tasks list `routes`: the app pages (e.g. "/", "/viewer/demo") the tester screenshots
 and looks at; [] for tasks without UI.
+Never require edits to docs/notes/progress.md: developers may not touch it (parallel
+tasks would conflict there); the daily report covers progress.
 Pick at most one task per developer, in backlog order, only for the developers listed.
 Respect the repository rules (CLAUDE.md). Keep each task small enough for one PR."""
 
