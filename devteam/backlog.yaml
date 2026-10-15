@@ -44,13 +44,50 @@ tasks:
   status: todo
 - id: P3
   area: core
-  title: One connected model per video
+  title: One connected model per video, without a sky wall
   goal: 'Use loop detection, the global mapper and model merging so one video gives one model. Measure
     with the P1 benchmark: number of models and registered % before and after. Priority: 3 of 5 benchmark
     videos split into several models (aegviidu 3, mykolaiv 3, room 2 on a8efcc9).
 
+
+    Owner''s review 2026-10-15: long outdoor shots grow a "sky wall" of far, badly triangulated points
+    that hides buildings and trees in the default view. Also in this task:
+
+
+    1. Sky masks before feature extraction: mask sky regions per frame and pass the masks to COLMAP feature
+    extraction (ImageReaderOptions.mask_path), so no feature inside the sky is extracted or matched. Prefer
+    a light, permissive approach: a classical detector on OpenCV (Apache-2.0, already a dependency), or
+    a small Apache/MIT segmentation model. Record the choice and its licence in a new ADR (docs/decisions/0011-*).
+    Tests on synthetic frames with a known sky region.
+
+
+    2. Point filtering after mapping: drop (or flag separately) 3D points with triangulation angle < 1.5
+    degrees or reprojection error above COLMAP''s robust threshold (mapper filter_max_reproj_error, 4
+    px by default). The run report and the benchmark results.json show points_total, points_dropped_low_parallax,
+    points_dropped_reproj.
+
+
+    3. Far layer: far points that survive filtering are exported as a separate `far` layer in the viewer
+    bundle (own arrays + manifest key, ADR 0003), never mixed into the object cloud. The viewer draws
+    it gray; until the app side renders it, the viewer simply does not load it.
+
+
+    Acceptance (in addition to the criteria above):
+
+    - On the owner''s room video and on notre-dame there is no sky wall occluding buildings or trees in
+    the default view (the tester judges this from its own screenshots).
+
+    - Benchmark registered-frames % does not drop vs the dev baseline on any gated video.
+
+    - Tests for the sky mask, the point filter counts and the far layer export.
+
     '
   status: todo
+  licence: 'Classical sky detector on OpenCV (Apache-2.0) preferred. Any model must be Apache-2.0/MIT/BSD
+    for code AND weights; note it in the ADR. NVIDIA SegFormer weights are under the NVIDIA Source Code
+    License (non-commercial): forbidden. Unclear -> ask the owner.
+
+    '
 - id: P2b
   area: core
   title: Parallax keyframes and a footage quality report
@@ -82,6 +119,37 @@ tasks:
 
     '
   status: todo
+- id: S1
+  area: core
+  phase: server
+  title: Server job queue with per-stage progress
+  goal: 'The pipeline runs as jobs from a durable queue (Redis + RQ or Celery, per CLAUDE.md; record the
+    choice in an ADR). Each stage reports progress 0-100 to the API; the viewer shows the current stage
+    and percent. A 30-minute video is processed on a single worker without blocking the API.
+
+
+    Acceptance:
+
+    - Upload -> job -> progress visible -> the map opens when the job is done.
+
+    - One stage can be re-run alone (stages are idempotent and read/write storage).
+
+    - The API stays responsive while a long job runs (test with a long job).
+
+    - Web part (stage + percent in the viewer) is in web/, owned by dev_app: split it out as an app task
+    when S1 is unblocked.
+
+    '
+  licence: 'Redis server (check the current licence: RSALv2/SSPLv1 since 7.4, AGPLv3 option since 8.0;
+    Valkey BSD-3-Clause is the drop-in alternative), RQ (BSD-2-Clause), Celery (BSD-3-Clause). Ask the
+    owner before picking the server.
+
+    '
+  status: blocked
+  blocked_by:
+  - P4a
+  blocked_reason: 'Waits for P4a (dense stage): the queue runs the full pipeline, including the dense
+    stage.'
 - id: P5a
   area: core
   title: Metric scale and gravity from an A4 sheet or a measured distance

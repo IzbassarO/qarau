@@ -2,6 +2,19 @@
 
 Newest first. Keep it short.
 
+## 2026-10-15 — Owner's review of the first maps
+
+- **Sky wall on long shots.** Long outdoor videos grow a wall of far, badly triangulated
+  points in the sky that hides buildings and trees in the default view. Added to P3: sky
+  masks before feature extraction, a filter for low-parallax (< 1.5°) and high-reprojection
+  points with counts in the run report, and surviving far points exported as a separate
+  `far` layer (gray), never mixed into the object cloud.
+- **The current viewer is a dev tool, not the product UI.** The product UI comes after the
+  geometry is right; the order stays geometry (P-tasks) first, then D1.
+- New task **S1**, a server job queue with per-stage progress, placed after P4 and blocked
+  by P4a. The Redis licence (RSAL/SSPL/AGPL since 7.4/8.0) must be decided with the owner
+  before S1 starts; Valkey (BSD) is the drop-in alternative.
+
 ## 2026-10-15 — Dev team: retries and tester-owned screenshots
 
 - A2a's tester crashed on one transient "Connection error". `llm_call` now retries
