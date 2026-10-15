@@ -25,6 +25,25 @@ frame ↔ point links (each dense point knows which frames saw it) — needed fo
 **P5 Metric scale and gravity alignment.** Now: an A4 sheet or one user-measured distance;
 the floor/gravity direction is "down". Later-ready: drone telemetry (per-frame GPS, DJI SRT).
 
+**P6 Point confidence and honest display.** Every point gets a confidence score (number of
+views, triangulation angle, reprojection error, multi-view consistency). Low-confidence points
+are hidden or shown grey as "uncertain". Holes are shown as "not reconstructed", never filled
+for looks. Estimated (prior-based) geometry is marked and excluded from measurements.
+
+**P7 Accuracy check with AprilTag markers.** Detect printed AprilTags in the video, use them
+for metric scale, and report the scale error in cm in the benchmark.
+
+**D1 Data foundation.** S3 layout `raw/` (immutable) and `processed/<pipeline_version>/`;
+catalog tables (assets, captures, runs, stage_runs) recording pipeline, model and parameter
+versions for every result; failed runs recorded with their reasons.
+
+## Licences
+
+Before using any model or library, check that its licence allows commercial use and note it
+in the task. Unclear or non-commercial (e.g. VGGT weights, CC-BY-NC) → ask the owner first.
+Open question: PostGIS is GPL-2.0 — fine as a separate server, but on-prem installs that
+ship it must follow the GPL.
+
 ## App shell (dev_app)
 
 **A1 Control center**, like ChatGPT / Claude: a left sidebar with sites and inspections

@@ -3,6 +3,8 @@
 # area: core -> dev_pipeline, app -> dev_app (config.yaml `areas`)
 # status: todo | in_progress | review | failed | changes_requested | done | dropped
 # owner, run, branch: filled in by the team.
+# Licences: before using any model or library, check that its licence allows commercial use
+# and note it in the task (`licence:`). Unclear or non-commercial -> stop and ask the owner.
 tasks:
   - id: P1
     area: core
@@ -63,6 +65,42 @@ tasks:
     goal: >
       Read per-frame GPS / DJI SRT telemetry into the capture so scale and georeference can
       come from it later. Tested on a sample SRT file.
+    status: todo
+  - id: P6
+    area: core
+    title: Point confidence and honest display
+    goal: >
+      Every point gets a confidence score from number of views, triangulation angle,
+      reprojection error and multi-view consistency, stored in the bundle. Low-confidence
+      points are hidden or shown grey as "uncertain". Holes are shown as "not reconstructed",
+      never filled for looks. Estimated (prior-based) geometry is marked and excluded from
+      measurements.
+    licence: >
+      Own code on NumPy (BSD-3-Clause), pycolmap/COLMAP (BSD-3-Clause; check the licences of
+      libraries bundled in the pycolmap wheel), Open3D if needed (MIT).
+    status: todo
+  - id: P7
+    area: core
+    title: Accuracy check with AprilTag markers
+    goal: >
+      Detect printed AprilTags (tag36h11) in the video, use their known printed size for
+      metric scale, and report the scale error in cm in the P1 benchmark. Include a printable
+      tag sheet and filming instructions in docs.
+    licence: >
+      OpenCV ArUco module with the AprilTag dictionaries (Apache-2.0, already a pipeline
+      dependency) - no new library. Alternative: AprilRobotics/apriltag (BSD-2-Clause).
+    status: todo
+  - id: D1
+    area: core
+    title: Data foundation - storage layout and run catalog
+    goal: >
+      S3 layout: raw/ (immutable, never overwritten) and processed/<pipeline_version>/.
+      Catalog tables via Alembic (assets, captures, runs, stage_runs) record pipeline, model
+      and parameter versions for every result, and failed runs with their reasons.
+    licence: >
+      SQLAlchemy and Alembic (MIT), boto3 (Apache-2.0), Versity S3 Gateway (Apache-2.0),
+      pgvector (PostgreSQL licence). PostGIS is GPL-2.0: fine as a separate database server,
+      but shipping it in on-prem installs needs GPL compliance (owner to confirm, ADR).
     status: todo
   - id: A1a
     area: app
