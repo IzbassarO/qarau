@@ -26,20 +26,21 @@ tasks:
 
     '
   status: todo
+- id: P3
+  area: core
+  title: One connected model per video
+  goal: 'Use loop detection, the global mapper and model merging so one video gives one model. Measure
+    with the P1 benchmark: number of models and registered % before and after. Priority: 3 of 5 benchmark
+    videos split into several models (aegviidu 3, mykolaiv 3, room 2 on a8efcc9).
+
+    '
+  status: todo
 - id: P2b
   area: core
   title: Parallax keyframes and a footage quality report
   goal: 'Keyframes are chosen by parallax (enough camera motion), not a fixed rate. A quality report lists
     problems with plain re-shoot advice: blur, moving too fast, pure rotation (turning on the spot), low
     texture.
-
-    '
-  status: todo
-- id: P3
-  area: core
-  title: One connected model per video
-  goal: 'Use loop detection, the global mapper and model merging so one video gives one model. Measure
-    with the P1 benchmark: number of models and registered % before and after.
 
     '
   status: todo
