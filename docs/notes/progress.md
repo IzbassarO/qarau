@@ -2,6 +2,27 @@
 
 Newest first. Keep it short.
 
+## 2026-10-14 — P1: benchmark command (`devteam/P1`)
+
+- `python -m qarau_pipeline benchmark --data D --out O [--only …] [--timeout-s N] [--record]`:
+  manifest `pipeline/qarau_pipeline/benchmark_set.toml` (4 public videos required, room
+  optional), one child `run` per video with timeout, `O/results.json` + `results.md`, exit 0
+  only if all ran. `--record` → `docs/benchmarks/<sha>.json` + rows in `benchmark.md`.
+  Method: `docs/notes/benchmark-method.md`. Tests mock the child run (< 1 s).
+- Product defaults (300 frames, exhaustive matching) on Aegviidu and Orono took > 28 min of
+  matching each on the M1 Pro and timed out at 1800 s. The benchmark caps those two at
+  150 frames (`max_frames` in the manifest, same code path; reasons in
+  `benchmark-method.md`) so the set fits the gate's 90 min. Recorded run (a8efcc9+dirty,
+  all 5 exit 0, required set 62 min on a loaded M1 Pro): aegviidu 132/150, 3 models,
+  0.53 px; mykolaiv 178/210, 3 models, 0.74 px; notre-dame 109/109, 0.40 px; orono 150/150,
+  0.57 px, 92 k points; room 257/269, 0.93 px.
+- **Gate risk:** mykolaiv points/reproj swing +23 %/+16 % between identical runs, which is
+  beyond the gate thresholds (`benchmark-method.md`, Variance).
+- **Known issue (for the tech lead):** a real 300-frame drone video takes ~45 min on CPU. That
+  is a product problem (sequential + loop matching for video? fewer features?). Measure the fix
+  with this benchmark in its own task.
+- Next: `scale_err_cm` once a scale reference exists (P5/P7); image-folder datasets in the set.
+
 ## 2026-10-14 — New direction: MVP plan; Step 1 room test (`feat/room-test`)
 
 - Owner's brief arrived **without the plan text** (placeholder `<paste the plan here>`):
