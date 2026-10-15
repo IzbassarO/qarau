@@ -33,10 +33,9 @@ evidence: `prototypes/Finding.dc.html`.
 | Toolbar | reset, top, side, view through current video camera |
 | Keyboard (when canvas focused) | `F` frame selection, `Home` reset, numpad-style 1/3/7 front/side/top |
 
-Pick the pivot once at pointer-down: the nearest cloud point within the cursor ray's
-pick tolerance. If the ray misses the cloud, use the point along the ray at the current
-target distance. A drag keeps this pivot; wheel gestures do not pick another one. No
-double-click action is registered.
+Pick the nearest cloud point within the cursor ray's tolerance once at pointer-down.
+If the ray misses, use the ray point at the current target distance. A drag keeps this
+pivot; wheel gestures do not pick another one. Register no double-click action.
 
 Orbit preserves the distance to the pivot and clamps the polar angle. Pan follows the
 camera's screen axes and scales with distance. Zoom moves towards the cursor ray; close
@@ -44,26 +43,14 @@ to the pivot, it advances the pivot along the view ray while keeping a positive 
 distance, so repeated zoom does not get stuck at a minimum orbit distance.
 
 Motion uses frame-rate-independent exponential damping. The camera stays inside the
-cloud's bounding box expanded on every side by 50% of its diagonal, and movement stops
-before the first nearby cloud point along the path. Spatial indexing keeps picking and
-collision checks interactive for large clouds.
+cloud's bounding box expanded on every side by 50% of its diagonal, stopping before the
+first nearby cloud point along the path. A spatial index accelerates picking/collision.
+Toolbar flights use collision checks; the explicit video-camera view retains its
+recorded pose and roll. Bounds include recorded camera centres.
 
-For clouds above 50,000 points, prepare the full spatial index in cooperative tasks
-after returning control to the browser. The point cloud and the rest of the UI can
-render during preparation. Show a localized preparation hint and pause navigation
-until the complete index is ready; never use an incomplete cloud for collision checks.
-Cancel preparation when the viewer is disposed. Report a failed build in the canvas.
-
-Interactive movement and ordinary toolbar flights use swept point collision. The
-explicit video-camera view reproduces the recorded pose and roll exactly; its flight
-does not use point collision, because changing the source pose would break video/map
-correspondence. Camera bounds still apply and include the recorded camera centres.
-
-Browsers expose trackpad scroll and mouse wheels through the same wheel event. Treat
-Ctrl + wheel as a pinch, line/page deltas as a mouse wheel, and a large integral vertical
-pixel delta (at least 40, without horizontal movement) as a mouse wheel. Other unmodified
-pixel deltas orbit; Shift + wheel pans. This is a documented input heuristic because the
-browser does not identify the physical device.
+Wheel events do not identify the device. Heuristic: Ctrl + wheel pinches; line/page
+deltas or integral vertical pixel deltas ≥40 without horizontal movement zoom;
+other unmodified pixel deltas orbit. Shift + wheel pans.
 
 ## Video ↔ map correspondence (the point of this screen)
 

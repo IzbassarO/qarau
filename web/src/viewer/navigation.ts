@@ -66,99 +66,24 @@ interface CellNode {
   children?: [CellNode, CellNode];
 }
 
-interface BuildBudget {
-  deadline: number;
-}
-
-/** Return control before a build can monopolize a frame; checked every 256 items. */
-function* checkpoint(budget: BuildBudget): Generator<void> {
-  if (performance.now() >= budget.deadline) {
-    yield;
-    budget.deadline = performance.now() + 8;
-  }
-}
-
-/** Merge sort can yield; Array.sort on the complete hierarchy root cannot. */
-function* sortCells(
-  cells: PointCell[],
-  start: number,
-  end: number,
-  axis: number,
-  budget: BuildBudget,
-  scratch: PointCell[],
-): Generator<void> {
-  let source = cells;
-  let destination = scratch;
-  const coordinate = (cell: PointCell) =>
-    cell.bounds.min.getComponent(axis) + cell.bounds.max.getComponent(axis);
-  for (let width = 1; width < end - start; width *= 2) {
-    for (let run = start; run < end; run += width * 2) {
-      const middle = Math.min(run + width, end);
-      const runEnd = Math.min(run + width * 2, end);
-      let left = run;
-      let right = middle;
-      for (let out = run; out < runEnd; out++) {
-        if ((out & 255) === 0) yield* checkpoint(budget);
-        destination[out] =
-          left < middle &&
-          (right >= runEnd || coordinate(source[left]) <= coordinate(source[right]))
-            ? source[left++]
-            : source[right++];
-      }
-    }
-    [source, destination] = [destination, source];
-  }
-  if (source !== cells)
-    for (let i = start; i < end; i++) {
-      if ((i & 255) === 0) yield* checkpoint(budget);
-      cells[i] = source[i];
-    }
-}
-
-function* groupCells(
-  cells: PointCell[],
-  start: number,
-  end: number,
-  budget: BuildBudget,
-  scratch: PointCell[],
-): Generator<void, CellNode> {
+function groupCells(cells: PointCell[]): CellNode {
   const bounds = new Box3();
-  for (let i = start; i < end; i++) {
-    if ((i & 255) === 0) yield* checkpoint(budget);
-    bounds.union(cells[i].bounds);
-  }
-  if (end - start <= 8) return { bounds, cells: cells.slice(start, end) };
+  for (const cell of cells) bounds.union(cell.bounds);
+  if (cells.length <= 8) return { bounds, cells };
   const size = bounds.getSize(new Vector3());
   const axis = size.x >= size.y && size.x >= size.z ? 0 : size.y >= size.z ? 1 : 2;
-  yield* sortCells(cells, start, end, axis, budget, scratch);
-  const middle = Math.floor((start + end) / 2);
-  const left = yield* groupCells(cells, start, middle, budget, scratch);
-  const right = yield* groupCells(cells, middle, end, budget, scratch);
+  cells.sort(
+    (a, b) =>
+      a.bounds.min.getComponent(axis) +
+      a.bounds.max.getComponent(axis) -
+      b.bounds.min.getComponent(axis) -
+      b.bounds.max.getComponent(axis),
+  );
+  const middle = Math.floor(cells.length / 2);
   return {
     bounds,
-    children: [left, right],
+    children: [groupCells(cells.slice(0, middle)), groupCells(cells.slice(middle))],
   };
-}
-
-export interface IndexBuildOptions {
-  signal?: AbortSignal;
-  /** Injectable task boundary for hosts/tests. Must yield to the event loop, not just a microtask. */
-  yieldControl?: () => Promise<void>;
-}
-
-function nextBuildTask(signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    signal?.throwIfAborted();
-    const abort = () => {
-      clearTimeout(timer);
-      reject(signal!.reason);
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', abort);
-      resolve();
-    }, 0);
-    signal?.addEventListener('abort', abort, { once: true });
-  });
 }
 
 /**
@@ -171,35 +96,6 @@ export class PointCloudIndex {
   private root: CellNode;
 
   constructor(private positions: ArrayLike<number>) {
-    const build = this.build();
-    let result = build.next();
-    while (!result.done) result = build.next();
-    this.root = result.value;
-  }
-
-  /** Build the exact same index cooperatively, with no point scan before the first yield. */
-  static async createAsync(
-    positions: ArrayLike<number>,
-    options: IndexBuildOptions = {},
-  ): Promise<PointCloudIndex> {
-    const index = new PointCloudIndex(new Float32Array());
-    index.positions = positions;
-    const build = index.build();
-    for (;;) {
-      options.signal?.throwIfAborted();
-      await (options.yieldControl?.() ?? nextBuildTask(options.signal));
-      options.signal?.throwIfAborted();
-      const result = build.next();
-      if (result.done) {
-        index.root = result.value;
-        return index;
-      }
-    }
-  }
-
-  private *build(): Generator<void, CellNode> {
-    const positions = this.positions;
-    const budget = { deadline: performance.now() + 8 };
     const bounds = new Box3();
     const point = new Vector3();
     const stride = Math.max(1, Math.ceil(positions.length / 3 / 4096));
@@ -212,13 +108,11 @@ export class PointCloudIndex {
         bounds.min.setComponent(axis, sample[Math.floor((sample.length - 1) * 0.02)]);
         bounds.max.setComponent(axis, sample[Math.ceil((sample.length - 1) * 0.98)]);
       }
-      yield* checkpoint(budget);
     }
     const size = bounds.isEmpty() ? new Vector3() : bounds.getSize(new Vector3());
     const cellSize = Math.max(size.x, size.y, size.z, 1e-6) / 32;
     const cells = new Map<number | string, PointCell>();
     for (let i = 0; i + 2 < positions.length; i += 3) {
-      if (i % 768 === 0) yield* checkpoint(budget);
       const x = positions[i],
         y = positions[i + 1],
         z = positions[i + 2];
@@ -240,12 +134,7 @@ export class PointCloudIndex {
       cell.indices.push(i);
       cell.bounds.expandByPoint(point.set(x, y, z));
     }
-    const list: PointCell[] = [];
-    for (const cell of cells.values()) {
-      if ((list.length & 255) === 0) yield* checkpoint(budget);
-      list.push(cell);
-    }
-    return yield* groupCells(list, 0, list.length, budget, []);
+    this.root = groupCells([...cells.values()]);
   }
 
   forEachNearRay(ray: Ray, radius: number, distance: number, visit: VisitPoint) {
@@ -447,12 +336,8 @@ export interface NavigationOptions {
 /** DOM adapter. No React or renderer; the owner supplies seconds to update(dt). */
 export class NavigationControls {
   readonly target: Vector3;
-  /** Resolves only when all cloud points participate in picking and collision. */
-  readonly ready: Promise<void>;
   enabled = true;
-  private points: PointSource;
-  private readonly indexBuild = new AbortController();
-  private prepared = true;
+  private readonly points: PointSource;
   private readonly minDistance: number;
   private readonly radius: number;
   private readonly margin: number;
@@ -472,31 +357,10 @@ export class NavigationControls {
     this.minDistance = options.minDistance ?? Math.max(diagonal * 0.001, 1e-6);
     this.radius = options.collisionRadius ?? Math.max(diagonal * 0.0015, 1e-6);
     this.margin = options.boundsMargin ?? Math.max(diagonal * 0.5, this.minDistance * 10);
-    if (
-      options.points instanceof PointCloudIndex ||
-      (Array.isArray(options.points) &&
-        options.points.length > 0 &&
-        typeof options.points[0] !== 'number')
-    ) {
-      this.points = options.points;
-      this.ready = Promise.resolve();
-    } else if (options.points.length <= 50_000 * 3) {
-      this.points = new PointCloudIndex(options.points as ArrayLike<number>);
-      this.ready = Promise.resolve();
-    } else {
-      this.points = options.points;
-      this.prepared = false;
-      this.ready = PointCloudIndex.createAsync(options.points as ArrayLike<number>, {
-        signal: this.indexBuild.signal,
-      }).then((index) => {
-        this.indexBuild.signal.throwIfAborted();
-        this.points = index;
-        this.prepared = true;
-      });
-      // A consumer may dispose immediately (React StrictMode) before attaching its
-      // own readiness handler. Keep cancellation from becoming an unhandled rejection.
-      void this.ready.catch(() => {});
-    }
+    this.points =
+      options.points instanceof PointCloudIndex || Array.isArray(options.points)
+        ? options.points
+        : new PointCloudIndex(options.points as ArrayLike<number>);
     this.previousTouchAction = canvas.style.touchAction;
     canvas.style.touchAction = 'none';
     canvas.addEventListener('pointerdown', this.onPointerDown);
@@ -505,10 +369,6 @@ export class NavigationControls {
     canvas.addEventListener('pointercancel', this.onPointerEnd);
     canvas.addEventListener('lostpointercapture', this.onPointerEnd);
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
-  }
-
-  get isReady(): boolean {
-    return this.prepared && !this.disposed;
   }
 
   private state(): NavigationState {
@@ -555,7 +415,7 @@ export class NavigationControls {
 
   /** Toolbar zoom follows the same damped, bounded, collision-tested path as pinch. */
   zoom(factor: number) {
-    if (!this.isReady || !this.enabled || !Number.isFinite(factor) || factor <= 0) return;
+    if (this.disposed || !this.enabled || !Number.isFinite(factor) || factor <= 0) return;
     const rect = this.canvas.getBoundingClientRect();
     this.cursor = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
     const distance = Math.max(this.camera.position.distanceTo(this.target), this.minDistance * 10);
@@ -564,7 +424,7 @@ export class NavigationControls {
 
   private onPointerDown = (event: PointerEvent) => {
     const action = mapInput(event);
-    if (!this.isReady || this.drag || action === NavigationAction.None) return;
+    if (this.disposed || this.drag || action === NavigationAction.None) return;
     // onStart lets the engine leave an exact video-camera pose before navigation.
     this.options.onStart?.();
     if (!this.enabled) return;
@@ -616,10 +476,7 @@ export class NavigationControls {
   };
 
   private onWheel = (event: WheelEvent) => {
-    if (!this.isReady) {
-      if (!this.disposed) event.preventDefault();
-      return;
-    }
+    if (this.disposed) return;
     this.options.onStart?.();
     if (!this.enabled) return;
     event.preventDefault();
@@ -646,8 +503,6 @@ export class NavigationControls {
   };
 
   private constrainMove(from: Vector3, to: Vector3): Vector3 {
-    // Never navigate through a partial cloud. The canvas can render while preparing.
-    if (!this.isReady) return from.clone();
     let bounded = clampToBounds(to, this.options.bounds, this.margin);
     const expanded = this.options.bounds.clone().expandByScalar(this.margin);
     if (!bounded.equals(to) && expanded.containsPoint(from)) {
@@ -703,7 +558,7 @@ export class NavigationControls {
   }
 
   update(dt = 1 / 60): boolean {
-    if (!this.isReady || !this.enabled) {
+    if (this.disposed || !this.enabled) {
       this.clearPending();
       return false;
     }
@@ -746,7 +601,6 @@ export class NavigationControls {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
-    this.indexBuild.abort();
     this.clearPending();
     if (this.drag && this.canvas.hasPointerCapture?.(this.drag.id))
       this.canvas.releasePointerCapture(this.drag.id);

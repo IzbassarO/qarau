@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useI18n, type Key } from '../i18n';
-import { createDemo } from '../fixtures/demo';
 import { BundleError, loadBundle, loadManifest, type Bundle } from '../lib/bundle';
 import { ViewerScreen } from '../viewer/ViewerScreen';
 
@@ -12,11 +11,10 @@ type State =
 
 export function ViewerPage() {
   const { runId = '' } = useParams();
-  const { t, lang } = useI18n();
+  const { t } = useI18n();
   const [st, setSt] = useState<State>({ s: 'loading', p: 0 });
 
   useEffect(() => {
-    if (runId === 'demo') return;
     let dead = false;
     setSt({ s: 'loading', p: 0 });
     (async () => {
@@ -35,8 +33,6 @@ export function ViewerPage() {
     };
   }, [runId]);
 
-  // createDemo retains its bundle across locale changes, preserving the camera.
-  if (runId === 'demo') return <ViewerScreen bundle={createDemo(lang).bundle} />;
   if (st.s === 'ready') return <ViewerScreen bundle={st.bundle} />;
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 bg-bg p-6 text-center">
