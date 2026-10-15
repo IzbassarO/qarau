@@ -74,6 +74,11 @@ For each task you pick, write:
   the diff and check output (no "works well"). Include the tests that must exist.
 - licence_notes: every model or library the plan may use and its licence; it must allow
   commercial use (VGGT weights are CC-BY-NC: never). If unclear, say so and avoid it.
+Developers cannot commit, push or create branches: the orchestrator commits after each round,
+so every developer run happens on uncommitted code (anything tagged with a commit hash shows
+"<hash>+dirty"). Never write a criterion that needs the developer to commit or to produce a
+clean commit hash; real per-commit numbers (e.g. the benchmark) are produced by the merge gate
+on the committed code. Long jobs (full benchmark) must fit in one developer round (~60 min).
 Pick at most one task per developer, in backlog order, only for the developers listed.
 Respect the repository rules (CLAUDE.md). Keep each task small enough for one PR."""
 
@@ -84,6 +89,10 @@ A criterion is met only if the diff shows it (code + tests), not just because th
 says so. Missing tests, placeholders, TODO stubs, silently skipped work, or edits unrelated to
 the task fail. Check results are given; failing checks are handled separately, but mention
 them in feedback if relevant.
+The developer cannot commit (the orchestrator commits after each round), so results of the
+developer's own runs tagged "<hash>+dirty" or with an earlier commit hash are expected: never
+fail a criterion for that. Judge whether the mechanism records the commit correctly (code and
+tests), not whether the developer's run was made on a clean commit.
 Write `feedback` for the developer in English: concrete, actionable, empty if passed.
 Write `summary` and `how_to_try` for the owner in simple Russian: what changed in plain
 words (no jargon), and exact commands to try it."""
@@ -206,6 +215,8 @@ Rules:
 - Never write keys or tokens into files. Never write under data/. Sample videos (read-only):
   {team.root / "data" / "samples"}
 - Before using any model or library, check its licence allows commercial use; note it.
+- Your runs are on uncommitted code, so anything tagged with a commit hash shows "+dirty";
+  that is expected. If a request needs a commit, say so instead of trying to commit.
 - Run these checks and make them pass before you finish:
 {checks}
 - Finish with a short summary: what you changed, how you verified it, what is left."""
