@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { PerspectiveCamera, Vector3 } from 'three';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createDemo } from '../fixtures/demo';
-import { setLang } from '../i18n';
+import { LANGS, setLang, type Lang } from '../i18n';
 import * as bundleApi from '../lib/bundle';
 import { ViewerEngine } from '../viewer/engine';
 import type { Axis } from '../viewer/gizmo';
@@ -165,16 +165,31 @@ it('shows the fly controls after F and exits with F or Escape', () => {
   expect(screen.queryByText(hint)).toBeNull();
 });
 
-it('localizes axis controls and the fly hint in Russian', () => {
-  setLang('ru');
+it.each<Lang>(['en', 'ru', 'kk'])('localizes axis controls and the fly hint in %s', (lang) => {
+  setLang(lang);
   renderDemo();
-  const gizmo = screen.getByRole('group', { name: 'Виды по осям' });
+  const locale = LANGS[lang];
+  const gizmo = screen.getByRole('group', { name: locale['gizmo.label'] });
   expect(within(gizmo).getAllByRole('button')).toHaveLength(6);
-  expect(within(gizmo).getByRole('button', { name: 'Вид сверху (+Z)' })).toBeTruthy();
-  const canvas = screen.getByLabelText(/Интерактивная 3D-карта/);
+  for (const key of [
+    'gizmo.positiveX',
+    'gizmo.negativeX',
+    'gizmo.positiveY',
+    'gizmo.negativeY',
+    'gizmo.positiveZ',
+    'gizmo.negativeZ',
+  ] as const)
+    expect(within(gizmo).getByRole('button', { name: locale[key] })).toBeTruthy();
+  const canvas = screen.getByLabelText(locale['canvas.label']);
   canvas.focus();
   fireEvent.keyDown(canvas, { key: 'f', code: 'KeyF' });
-  expect(screen.getByRole('status').textContent).toBe(
-    'Режим полёта: WASD — движение, мышь — обзор, Shift — быстрее, F/Esc — выход',
+  expect(screen.getByRole('status').textContent).toBe(locale['canvas.flyHint']);
+  fireEvent.click(within(gizmo).getByRole('button', { name: locale['gizmo.positiveZ'] }));
+  expect(screen.getByRole('status').textContent).toBe(locale['canvas.hint']);
+  expect(document.activeElement).toBe(canvas);
+  advanceFrames(180);
+  const camera = renderScene.mock.calls.at(-1)![1] as PerspectiveCamera;
+  expect(camera.getWorldDirection(new Vector3()).distanceTo(new Vector3(0, 0, -1))).toBeLessThan(
+    0.001,
   );
 });

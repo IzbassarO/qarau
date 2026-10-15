@@ -117,6 +117,7 @@ export class ViewerEngine {
   private pickMark: Points;
   private navigationBounds: Box3;
   private flyState: FlyState | null = null;
+  private flyLookActive = false;
   private flyDistance = 1;
   private heldKeys = new Set<string>();
   private pointerLocked = false;
@@ -558,7 +559,9 @@ export class ViewerEngine {
     this.flyState = createFlyState(
       this.camera.position,
       this.camera.getWorldDirection(new Vector3()),
+      new Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion),
     );
+    this.flyLookActive = false;
     this.heldKeys.clear();
     this.canvas.focus({ preventScroll: true });
     this.cb.onFlyModeChange?.(true);
@@ -608,7 +611,8 @@ export class ViewerEngine {
   };
 
   private look(dx: number, dy: number) {
-    if (!this.flyState) return;
+    if (!this.flyState || (!dx && !dy)) return;
+    this.flyLookActive = true;
     this.flyState = applyMouseLook(this.flyState, dx, dy, 0.002);
     this.dirty = true;
   }
@@ -742,9 +746,11 @@ export class ViewerEngine {
     if (!safe.equals(this.flyState.position)) this.flyState.velocity.set(0, 0, 0);
     this.flyState.position.copy(safe);
     this.camera.position.copy(safe);
-    const target = flyOrientation(this.flyState);
-    this.camera.quaternion.slerp(target, damp(0, 1, 16, dt));
-    if (this.camera.quaternion.angleTo(target) < 1e-6) this.camera.quaternion.copy(target);
+    if (this.flyLookActive) {
+      const target = flyOrientation(this.flyState);
+      this.camera.quaternion.slerp(target, damp(0, 1, 16, dt));
+      if (this.camera.quaternion.angleTo(target) < 1e-6) this.camera.quaternion.copy(target);
+    }
     this.camera.updateMatrixWorld();
     this.dirty ||=
       !previousPosition.equals(safe) || !previousRotation.equals(this.camera.quaternion);

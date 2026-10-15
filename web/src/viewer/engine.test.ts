@@ -241,6 +241,53 @@ describe('ViewerEngine fly input', () => {
     expect(engine.camera.quaternion.angleTo(beforeExit)).toBeLessThan(1e-6);
   });
 
+  it.each(['z', '-z'] as const)(
+    'keeps the %s axis pose until look and preserves its stable heading on first look',
+    (axis) => {
+      const { canvas, engine } = setup(navigationBundle());
+      engine.axisView(axis);
+      frame(150);
+      const position = engine.camera.position.clone();
+      const orientation = engine.camera.quaternion.clone();
+      key(canvas, 'f');
+      frame(60);
+      expect(engine.camera.position.equals(position)).toBe(true);
+      expect(engine.camera.quaternion.angleTo(orientation)).toBeLessThan(1e-7);
+      pointer(canvas, 'pointerdown', 100, 100);
+      pointer(canvas, 'pointermove', 120, 100);
+      pointer(canvas, 'pointerup', 120, 100);
+      frame(60);
+      // The small look should not turn a residual pole heading into a large roll.
+      expect(engine.camera.quaternion.angleTo(orientation)).toBeGreaterThan(0.02);
+      expect(engine.camera.quaternion.angleTo(orientation)).toBeLessThan(0.05);
+      const afterLook = engine.camera.quaternion.clone();
+      key(canvas, 'f');
+      key(canvas, 'f');
+      frame(60);
+      expect(engine.camera.quaternion.angleTo(afterLook)).toBeLessThan(1e-7);
+    },
+  );
+
+  it('preserves a rolled source-camera pose until nonzero mouse look starts', () => {
+    const { canvas, engine } = setup();
+    engine.viewThroughFrame(0, false);
+    engine.camera.rotateZ(Math.PI / 3);
+    const position = engine.camera.position.clone();
+    const orientation = engine.camera.quaternion.clone();
+    key(canvas, 'f');
+    frame(60);
+    pointer(canvas, 'pointerdown', 100, 100);
+    pointer(canvas, 'pointermove', 100, 100);
+    frame(30);
+    expect(engine.camera.position.equals(position)).toBe(true);
+    expect(engine.camera.quaternion.angleTo(orientation)).toBeLessThan(1e-7);
+    pointer(canvas, 'pointermove', 140, 100);
+    pointer(canvas, 'pointerup', 140, 100);
+    frame(60);
+    expect(engine.camera.quaternion.angleTo(orientation)).toBeGreaterThan(0.05);
+    expect(engine.camera.position.equals(position)).toBe(true);
+  });
+
   it('uses pointer-lock mouse deltas and exits when the browser releases the lock', () => {
     const { canvas, engine, onFlyModeChange } = setup();
     const request = vi.fn(() => setLock(canvas));

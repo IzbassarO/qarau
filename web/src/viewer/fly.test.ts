@@ -53,6 +53,32 @@ describe('fly mouse look', () => {
     initial.position.set(0, 0, 0);
     expectVector(position, v(5, -7, 2));
   });
+
+  it.each([-1, 1])('adopts the exact %s Z pole without tilting before mouse look', (sign) => {
+    const initial = createFlyState(v(), v(0, 0, sign), v(1, 0, 0));
+    expect(initial.pitch).toBeCloseTo((sign * Math.PI) / 2, 12);
+    expectVector(flyDirection(initial), v(0, 0, sign));
+    expectVector(
+      step(initial, { forward: true }, 0.5, options).position.clone().normalize(),
+      v(0, 0, sign),
+    );
+    expect(Math.abs(applyMouseLook(initial, 10, 0, 0.002).pitch)).toBeCloseTo(
+      (89 * Math.PI) / 180,
+      12,
+    );
+  });
+
+  it.each([-1, 1])('uses screen-right for a stable heading near the %s Z pole', (sign) => {
+    const right = v(1, 0, 0);
+    const initial = createFlyState(v(), v(-3e-6, 8e-6, sign), right);
+    expect(initial.yaw).toBe(0);
+    const looked = applyMouseLook(initial, 10, 0, 0.002);
+    expect(looked.yaw).toBeCloseTo(-0.02);
+    expect(
+      new Vector3(1, 0, 0).applyQuaternion(flyOrientation(looked)).distanceTo(right),
+    ).toBeLessThan(0.021);
+    expectVector(right, v(1, 0, 0));
+  });
 });
 
 describe('fly motion', () => {

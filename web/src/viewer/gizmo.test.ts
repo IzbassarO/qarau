@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { Quaternion, Vector3 } from 'three';
-import { orientationFor, stepAxisView, viewDirectionFor, type Axis } from './gizmo';
+import { Euler, Quaternion, Vector3 } from 'three';
+import {
+  orientationFor,
+  projectAxisButtons,
+  stepAxisView,
+  viewDirectionFor,
+  type Axis,
+} from './gizmo';
 
 const v = (x = 0, y = 0, z = 0) => new Vector3(x, y, z);
 const axes: Axis[] = ['x', '-x', 'y', '-y', 'z', '-z'];
@@ -10,6 +16,59 @@ function expectVector(actual: Vector3, expected: Vector3, precision = 10) {
   expect(actual.y).toBeCloseTo(expected.y, precision);
   expect(actual.z).toBeCloseTo(expected.z, precision);
 }
+
+function expectClickableLayout(orientation: Quaternion) {
+  const positions = projectAxisButtons(orientation);
+  expect(positions.map(({ axis }) => axis)).toEqual(axes);
+  for (const [i, a] of positions.entries()) {
+    // A 22px button must fit inside the circular 104px widget, with a 2px gap.
+    expect(Math.hypot(a.x, a.y) + 11).toBeLessThanOrEqual(52 + 1e-8);
+    for (const b of positions.slice(i + 1))
+      expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(24 - 1e-7);
+  }
+}
+
+describe('projectAxisButtons', () => {
+  it('separates different axes that coincide when viewed along a diagonal', () => {
+    const orientation = orientationFor(v(1, 1, 0).normalize(), v(0, 0, 1));
+    const inverse = orientation.clone().invert();
+    const rawX = v(1, 0, 0).applyQuaternion(inverse);
+    const rawNegativeY = v(0, -1, 0).applyQuaternion(inverse);
+    expect(Math.hypot(rawX.x - rawNegativeY.x, rawX.y - rawNegativeY.y)).toBeLessThan(1e-12);
+    expectClickableLayout(orientation);
+  });
+
+  it.each(axes)('keeps all six buttons separate at the %s axis pole', (axis) => {
+    const target = viewDirectionFor(axis, v(0, 0, 1));
+    expectClickableLayout(orientationFor(target.direction, target.up));
+  });
+
+  it('keeps every circle in bounds and clickable across rotated and rolled camera views', () => {
+    for (let x = 0; x < 8; x++)
+      for (let y = 0; y < 8; y++)
+        for (let z = 0; z < 8; z++)
+          expectClickableLayout(
+            new Quaternion().setFromEuler(
+              new Euler((x * Math.PI) / 4, (y * Math.PI) / 4, (z * Math.PI) / 4),
+            ),
+          );
+  });
+
+  it('retains the actual camera projection and depth when the endpoints are already separate', () => {
+    const orientation = orientationFor(v(1, 1, 1).normalize(), v(0, 0, 1));
+    const original = orientation.clone();
+    const inverse = orientation.clone().invert();
+    for (const position of projectAxisButtons(orientation)) {
+      const projected = viewDirectionFor(position.axis, v(0, 0, 1)).direction.applyQuaternion(
+        inverse,
+      );
+      expect(position.x).toBeCloseTo(projected.x * 35, 10);
+      expect(position.y).toBeCloseTo(-projected.y * 35, 10);
+      expect(position.depth).toBeCloseTo(projected.z, 10);
+    }
+    expect(orientation.equals(original)).toBe(true);
+  });
+});
 
 describe('viewDirectionFor', () => {
   it.each<[Axis, Vector3, Vector3]>([

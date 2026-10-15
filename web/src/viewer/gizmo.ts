@@ -3,6 +3,77 @@ import { damp } from './navigation';
 
 export type Axis = 'x' | '-x' | 'y' | '-y' | 'z' | '-z';
 
+export const GIZMO_SIZE = 104;
+export const GIZMO_BUTTON_SIZE = 22;
+
+const axisVectors: { axis: Axis; direction: Vector3 }[] = [
+  { axis: 'x', direction: new Vector3(1, 0, 0) },
+  { axis: '-x', direction: new Vector3(-1, 0, 0) },
+  { axis: 'y', direction: new Vector3(0, 1, 0) },
+  { axis: '-y', direction: new Vector3(0, -1, 0) },
+  { axis: 'z', direction: new Vector3(0, 0, 1) },
+  { axis: '-z', direction: new Vector3(0, 0, -1) },
+];
+
+export interface AxisButtonPosition {
+  axis: Axis;
+  x: number;
+  y: number;
+  depth: number;
+}
+
+/**
+ * Project world axes into camera space, then spread crowded endpoints just enough
+ * to keep every button clickable. Different axes can project to the same point
+ * in diagonal views; depth sorting alone would hide the rear button completely.
+ */
+export function projectAxisButtons(orientation: Quaternion): AxisButtonPosition[] {
+  const inverse = orientation.clone().invert();
+  const positions = axisVectors.map(({ axis, direction }) => {
+    const p = direction.clone().applyQuaternion(inverse);
+    return { axis, x: p.x * 35, y: -p.y * 35, depth: p.z };
+  });
+  const separation = GIZMO_BUTTON_SIZE + 2;
+  const maxRadius = (GIZMO_SIZE - GIZMO_BUTTON_SIZE) / 2;
+  for (let pass = 0; pass < 80; pass++) {
+    let crowded = false;
+    for (let i = 0; i < positions.length; i++) {
+      for (let j = i + 1; j < positions.length; j++) {
+        const a = positions[i];
+        const b = positions[j];
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance >= separation - 1e-8) continue;
+        crowded = true;
+        if (distance < 1e-8) {
+          // Split coincident endpoints tangentially; at a pole use screen X.
+          dx = -a.y;
+          dy = a.x;
+          if (Math.hypot(dx, dy) < 1e-8) {
+            dx = 1;
+            dy = 0;
+          }
+        }
+        const displacement = (separation - distance) / (2 * Math.hypot(dx, dy));
+        a.x -= dx * displacement;
+        a.y -= dy * displacement;
+        b.x += dx * displacement;
+        b.y += dy * displacement;
+        for (const point of [a, b]) {
+          const radius = Math.hypot(point.x, point.y);
+          if (radius > maxRadius) {
+            point.x *= maxRadius / radius;
+            point.y *= maxRadius / radius;
+          }
+        }
+      }
+    }
+    if (!crowded) break;
+  }
+  return positions;
+}
+
 export interface AxisViewTarget {
   /** Camera-to-pivot offset direction, opposite to the camera's viewing direction. */
   direction: Vector3;

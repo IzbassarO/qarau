@@ -16,6 +16,32 @@ test('demo axis views and fly keyboard/mouse controls', async ({ page }) => {
   const canvas = page.getByLabel(en['canvas.label']);
   const gizmo = page.getByRole('group', { name: en['gizmo.label'] });
   await expect(gizmo.getByRole('button')).toHaveCount(6);
+  // Diagonal views used to project two axis pairs onto the same screen points.
+  // Check actual browser hit targets, without screenshots or forced clicks.
+  await page.evaluate(() => {
+    const engine = window.__qarau!.engine!;
+    const pivot = engine.controls.target;
+    const distance = engine.camera.position.distanceTo(pivot);
+    const offset = engine.camera.position.clone().set(1, 1, 0).normalize();
+    engine.camera.position.copy(pivot).addScaledVector(offset, distance);
+    engine.controls.sync();
+    engine.setFrame(0);
+  });
+  await expect
+    .poll(() =>
+      gizmo.getByRole('button').evaluateAll((buttons) =>
+        buttons
+          .filter((button) => {
+            const rect = button.getBoundingClientRect();
+            return (
+              document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) !==
+              button
+            );
+          })
+          .map((button) => button.getAttribute('aria-label')),
+      ),
+    )
+    .toEqual([]);
   const pivot = await page.evaluate(() => window.__qarau!.engine!.controls.target.toArray());
   const distance = await page.evaluate(() => {
     const engine = window.__qarau!.engine!;

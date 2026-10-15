@@ -37,13 +37,23 @@ const copyState = (state: FlyState): FlyState => ({
   velocity: state.velocity.clone(),
 });
 
-/** Adopt the current camera direction without changing its position. */
-export function createFlyState(position: Vector3, direction: Vector3): FlyState {
+/** Adopt the current direction, including exact poles; only mouse look clamps pitch. */
+export function createFlyState(
+  position: Vector3,
+  direction: Vector3,
+  cameraRight?: Vector3,
+): FlyState {
   const forward = direction.clone().normalize();
+  // Near a pole, tiny residual XY components do not define a useful heading.
+  // The existing screen-right axis preserves the stable top/bottom orientation.
+  const poleHeading =
+    forward.x ** 2 + forward.y ** 2 < 1e-8 &&
+    cameraRight &&
+    cameraRight.x ** 2 + cameraRight.y ** 2 > 1e-12;
   return {
     position: position.clone(),
-    yaw: Math.atan2(-forward.x, forward.y),
-    pitch: clampPitch(Math.asin(Math.max(-1, Math.min(1, forward.z)))),
+    yaw: poleHeading ? Math.atan2(cameraRight.y, cameraRight.x) : Math.atan2(-forward.x, forward.y),
+    pitch: Math.asin(Math.max(-1, Math.min(1, forward.z))),
     velocity: new Vector3(),
   };
 }
