@@ -5,18 +5,20 @@ from pathlib import Path
 
 
 class FakeAgents:
-    """Brain plans by keyword, devs write a stub file, tester fails round 1, passes round 2."""
+    """Brain plans by area, devs write a stub file, tester fails round 1, passes round 2."""
 
     delay = 1.0
 
-    def plan(self, team, todo: list[dict]) -> list[dict]:
+    def plan(self, team, todo: list[dict], feedback=None) -> list[dict]:
+        """First open task per developer, matched by area."""
         time.sleep(self.delay)
-        out = []
+        out, busy = [], set()
         for t in todo:
-            text = (t["title"] + " " + t.get("goal", "")).lower()
-            dev = t.get("owner") or (
-                "dev_app" if "viewer" in text or "web" in text else "dev_pipeline"
-            )
+            devs = [d for d, c in team.cfg["developers"].items() if t.get("area") in c["areas"]]
+            if not devs or devs[0] in busy:
+                continue
+            dev = devs[0]
+            busy.add(dev)
             out.append(
                 {
                     "task_id": t["id"],

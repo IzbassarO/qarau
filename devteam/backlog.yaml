@@ -1,20 +1,24 @@
 # Phase 1: video -> 3D map. Kept by the brain; you can edit it too.
-# status: todo | in_progress | review | changes_requested | done | failed
-# owner (optional): dev_pipeline | dev_app; the brain fills it in when it plans the task.
+# area: core -> dev_pipeline, app -> dev_app (config.yaml `areas`)
+# status: todo | in_progress | review | failed | changes_requested | done | dropped
+# owner, run, branch: filled in by the team.
 tasks:
   - id: T-001
+    area: core
     title: Frame sampling options on the run command
     goal: >
       `python -m qarau_pipeline run` takes --fps and --max-frames so frame sampling can be
       tuned per video without code changes. Defaults stay as they are now.
     status: todo
   - id: T-002
+    area: app
     title: Run summary in the viewer
     goal: >
       The web viewer shows a small panel with the run's numbers: frames used, frames
       registered, points, mean reprojection error. Text through i18n (ru/kk/en).
     status: todo
   - id: T-003
+    area: core
     title: Dense reconstruction stage
     goal: >
       Merge the dense stage (Depth Anything V2 Small scaled to sparse COLMAP points) into the

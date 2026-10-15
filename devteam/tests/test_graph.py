@@ -1,31 +1,14 @@
 """End-to-end run of the fake team on a throwaway repo, including crash + resume."""
 
-import shutil
 import sqlite3
 import subprocess
 from pathlib import Path
 
-import yaml
+from conftest import CFG
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from devteam.agents import FakeAgents
 from devteam.graph import Team, build_graph
-
-CFG = yaml.safe_load((Path(__file__).parents[1] / "config.yaml").read_text())
-
-
-def make_repo(tmp: Path) -> Path:
-    repo = tmp / "repo"
-    (repo / "devteam").mkdir(parents=True)
-    shutil.copy(Path(__file__).parents[1] / "backlog.yaml", repo / "devteam" / "backlog.yaml")
-    (repo / "README.md").write_text("x\n")
-    for cmd in (
-        ["init", "-q", "-b", "dev"],
-        ["add", "."],
-        ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"],
-    ):
-        subprocess.run(["git", *cmd], cwd=repo, check=True)
-    return repo
 
 
 class CrashOnce(FakeAgents):
@@ -46,12 +29,7 @@ class CrashOnce(FakeAgents):
         return super().judge(team, s, checks)
 
 
-def test_fake_team_runs_parallel_loops_and_resumes(tmp_path, monkeypatch):
-    repo = make_repo(tmp_path)
-    monkeypatch.setenv("GIT_AUTHOR_NAME", "t")
-    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
-    monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
-    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
+def test_fake_team_runs_parallel_loops_and_resumes(repo):
     team = Team(repo, CFG, {}, CrashOnce(), fake=True)
     db = sqlite3.connect(team.home / "c.sqlite", check_same_thread=False)
     graph = build_graph(team, SqliteSaver(db))

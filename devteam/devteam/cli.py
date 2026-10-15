@@ -1,4 +1,4 @@
-"""devteam run | resume | status | costs   (add --fake to any of them for the no-cost team)."""
+"""devteam run | resume | status | costs | cleanup  (--fake: no-cost team, separate state)."""
 
 import argparse
 import sqlite3
@@ -116,7 +116,7 @@ def show_status(team: Team):
 
 def main():
     p = argparse.ArgumentParser(prog="devteam")
-    p.add_argument("command", choices=["run", "resume", "status", "costs"])
+    p.add_argument("command", choices=["run", "resume", "status", "costs", "cleanup"])
     p.add_argument("--fake", action="store_true", help="fake agents, no cost, separate state")
     args = p.parse_args()
     team = make_team(args.fake)
@@ -126,6 +126,9 @@ def main():
         show_status(team)
     elif args.command == "costs":
         costs.report(team.home, console)
+    elif args.command == "cleanup":
+        for line in team.cleanup() or ["nothing to clean: no done/dropped task has a worktree"]:
+            console.print(line)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ models:
 developers:
   dev_pipeline:
     tool: claude           # Claude Code headless, your subscription (CLAUDE_CODE_OAUTH_TOKEN)
+    areas: [core]          # backlog tasks with this area may go to this developer
     owns: [pipeline/, backend/, infra/]
     timeout_min: 60
     allowed_tools:
@@ -45,6 +46,7 @@ developers:
       - cd backend && uv run pytest -q
   dev_app:
     tool: codex            # Codex CLI, your saved ChatGPT login
+    areas: [app]
     owns: [web/]
     timeout_min: 60
     setup:
