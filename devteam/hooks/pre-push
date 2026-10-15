@@ -1,7 +1,8 @@
 #!/bin/sh
 # Installed by devteam. Stand-in for GitHub branch protection (needs a paid plan on private
 # repos): for pushes to GitHub, refuse force-pushes, branch deletion and direct pushes to
-# main or dev (those change only through merged PRs).
+# main or dev (those change only through merged PRs), and moving an existing tag (release
+# tags are the rollback points).
 case "$2" in *github.com*) ;; *) exit 0 ;; esac
 zero=0000000000000000000000000000000000000000
 while read -r local_ref local_sha remote_ref remote_sha; do
@@ -11,6 +12,13 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         echo "pre-push: direct push to ${remote_ref#refs/heads/} is not allowed; open a PR" >&2
         exit 1
       fi ;;  # creating dev the first time is allowed
+  esac
+  case "$remote_ref" in
+    refs/tags/*)
+      if [ "$remote_sha" != "$zero" ]; then
+        echo "pre-push: tag ${remote_ref#refs/tags/} exists on GitHub; tags never move" >&2
+        exit 1
+      fi ;;
   esac
   if [ "$local_sha" = "$zero" ]; then
     echo "pre-push: deleting $remote_ref is not allowed" >&2; exit 1

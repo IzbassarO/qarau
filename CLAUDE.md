@@ -198,8 +198,10 @@ modes; security-sensitive defaults. Everything else — decide, document, contin
   filter); deleting branches other than its own; disabling or editing CI to pass, or
   touching branch protection; `gh pr merge --admin`; committing secrets or anything under
   `data/` (or `.env`, `scratch/`).
-- GitHub branch protection needs a paid plan on a private repo; until the owner decides,
-  `devteam/hooks/pre-push` refuses force-pushes, deletions and direct pushes to `main`/`dev`.
+- No GitHub Pro (owner, 2026-10-15), so no server-side branch protection:
+  `devteam/hooks/pre-push` refuses force-pushes, deletions, direct pushes to `main`/`dev` and
+  moving an existing tag. Every successful `dev` → `main` release is tagged
+  `release-YYYY-MM-DD` (`.2`, `.3` for a second one that day): the rollback points.
 - The owner reads `devteam/reports/YYYY-MM-DD.md` (tasks done, merged PRs, cost, benchmark,
   blocked tasks). `devteam stop` halts everything at any moment.
 

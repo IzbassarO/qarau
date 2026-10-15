@@ -63,11 +63,17 @@ tasks:
 - id: P4a
   area: core
   title: Dense reconstruction stage (commercial licence)
-  goal: 'A dense stage behind the Densifier interface using a model whose licence allows commercial use
-    (record the licence in an ADR). Exported to the viewer bundle.
+  goal: 'A dense stage behind the Densifier interface, starting from branch wip/dense-stage (ADR 0008).
+    Model: Depth Anything V2 **Small only** (depth-anything/Depth-Anything-V2-Small-hf, Apache-2.0); Base
+    and Large are CC-BY-NC (non-commercial) and must never be loaded: the code refuses any other model
+    id, with a test. Exported to the viewer bundle.
 
     '
   status: todo
+  licence: 'Depth Anything V2 Small code and weights: Apache-2.0 (owner confirmed 2026-10-15). Base/Large:
+    CC-BY-NC-4.0, forbidden.
+
+    '
 - id: P4b
   area: core
   title: Frame-to-point links for dense points
@@ -128,8 +134,8 @@ tasks:
 
     '
   licence: 'SQLAlchemy and Alembic (MIT), boto3 (Apache-2.0), Versity S3 Gateway (Apache-2.0), pgvector
-    (PostgreSQL licence). PostGIS is GPL-2.0: fine as a separate database server, but shipping it in on-prem
-    installs needs GPL compliance (owner to confirm, ADR).
+    (PostgreSQL licence). PostGIS (GPL-2.0): only as a separate, unmodified database server reached over
+    SQL (ADR 0010, owner 2026-10-15).
 
     '
   status: todo
