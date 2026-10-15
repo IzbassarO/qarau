@@ -2,23 +2,52 @@
 
 Newest first. Keep it short.
 
-## 2026-10-14 — Dev team (`devteam/`) v0 → v1; no human review
+## 2026-10-15 — Dev team v1 done; handoff for v2
 
-- Owner's decision: no human review. Work merges into `dev` only through automated gates
-  (local checks, LLM tester, GitHub CI, benchmark, gitleaks); weekly `dev` → `main` release.
-  Rules in CLAUDE.md → "Delivery"; design in `docs/notes/devteam-plan.md`.
-- PR #2 (M2 prep + room test) merged into `main`; `dev` recreated from `main` and pushed.
-- devteam: LangGraph graph (brain → per-task subgraph worktree → develop → test → gates),
-  SQLite checkpoints + `resume`, `stop`, atomic $3/day API budget, cost report, daily report.
-  Two Codex read-only reviews; all findings fixed with tests (40 tests).
-- v1: brain = Opus 5.5 (API), dev_pipeline = Claude Code headless (subscription),
-  tester = Sonnet 5.5 (API). First real task P1 merged automatically (PR #3) after 3 rounds; API cost $0.31.
-- Phase 1 plan: `docs/plan/phase1.md`; backlog `devteam/backlog.yaml` (P1–P7, D1, A1–A4).
+**State**
+- No human review (owner's decision): work reaches `dev` only through the gates (local checks,
+  Sonnet tester, GitHub CI, benchmark, gitleaks); weekly `dev` → `main` release. Rules:
+  CLAUDE.md → "Delivery". Design: `docs/notes/devteam-plan.md`. Phase 1: `docs/plan/phase1.md`.
+- Branches: `main` = PR #2 (M2 prep + room test). `dev` = main + P1 (PR #3, merged by the
+  team) + devteam itself (PR #4). Work from `dev`; `feat/*` and `devteam/*` are merged.
+- devteam v1 runs: brain = Opus 5.5 (API), dev_pipeline = Claude Code headless (`claude -p`,
+  subscription token from `devteam/.env`), tester = Sonnet 5.5 (API). 40 tests;
+  `cd devteam && uv run pytest`. Keys in `devteam/.env` (both set; gitignored).
+- P1 took 3 developer rounds (~2 h 45 min, mostly the developer re-running the 70-min
+  benchmark). API cost $0.31; Claude Code reported ~$14.7 notional (subscription limits).
+- First release `dev` → `main` has not run yet: it runs at the end of the next
+  `devteam run` (full benchmark on dev, ~70 min, then CI, then merge).
+- Unmerged agent work from M2 prep, saved as branches (unverified WIP, not in `dev`):
+  `wip/dense-stage` (Depth Anything V2 dense stage + export, ADR 0008 → input for P4a),
+  `wip/recon-eval` (reconstruction config eval script, ADR 0007 → input for P3).
+
+**Next: v2 = dev_app (Codex) in parallel with dev_pipeline**
+- `devteam/devteam/real.py`: add `"codex"` to `RealAgents.TOOLS` and a `_codex()` beside
+  `_claude()`: `codex exec --json --sandbox workspace-write -C <worktree> -` (prompt on
+  stdin, same `_brief`); fix rounds `codex exec resume <thread_id> -` with the feedback.
+  Parse the JSONL stream: thread id from the `thread.started` event, final message and token
+  usage from the last events (check the real event names with a smoke run first). Log cost
+  with `billed=False` (ChatGPT login; never pass OPENAI_API_KEY).
+- The Codex sandbox has no network and cannot write `.git`: run `pnpm install
+  --frozen-lockfile` in the worktree before the first round (the orchestrator commits).
+- Tester for web: screenshots into the packet (Playwright in `web/`; save under
+  `.state/packets/<task>/`), checks already mirror CI (`pnpm lint/typecheck/test/build`).
+- Then run both in parallel: `uv run devteam run --only P2a,A1a` and show the result.
+
+**Known issues**
+- `devteam/backlog.yaml` is read from the main checkout's working tree: keep that checkout on
+  `dev` (or a branch from it); status changes are written there and must be committed by
+  whoever works in that checkout. Consider moving live status into `.state/` (v2 decision).
+- Developer rounds that re-run the full benchmark are slow and costly on the subscription;
+  consider telling developers to run `--only <short video>` and leaving the full run to the gate.
+- The brain sometimes splits one criterion into several list items (seen in P1); harmless.
 
 **Waiting for the owner**
 - GitHub branch protection on `main` needs GitHub Pro (~$4/month) for a private repo;
   `devteam/hooks/pre-push` stands in locally until then.
 - PostGIS is GPL-2.0: fine as a server, but on-prem installs that ship it must follow the GPL.
+- SAM 3.1 commercial terms still unverified.
+
 ## 2026-10-14 — P1: benchmark command (`devteam/P1`)
 
 - `python -m qarau_pipeline benchmark --data D --out O [--only …] [--timeout-s N] [--record]`:

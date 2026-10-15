@@ -70,3 +70,6 @@ devteam/.state/
 
 # devteam daily reports (local, for the owner)
 devteam/reports/
+
+# Playwright MCP browser logs/screenshots (local tool output)
+.playwright-mcp/
