@@ -10,6 +10,7 @@ import fnmatch
 import hashlib
 import operator
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -56,6 +57,7 @@ FORBIDDEN_PUSH = {
     "--tags",
     "--prune",
 }
+RELEASE_TAG = re.compile(r"refs/tags/release-\d{4}-\d{2}-\d{2}(\.\d+)?")  # pushed, never moved
 FORBIDDEN_BRANCH = {"-D", "-d", "--delete", "-M", "-m", "--move", "-f", "--force"}
 
 
@@ -290,11 +292,14 @@ class Team:
                 or any(a.startswith("--force") for a in args)
                 or not refs
                 or any(r.startswith(("+", ":")) for r in refs)
-                or any(not r.startswith(self.branch_prefix + "/") for r in refs)
+                or any(
+                    not r.startswith(self.branch_prefix + "/") and not RELEASE_TAG.fullmatch(r)
+                    for r in refs
+                )
             ):
                 raise PermissionError(
                     f"forbidden push: git {' '.join(args)} (only "
-                    f"{self.branch_prefix}/<task>, never forced)"
+                    f"{self.branch_prefix}/<task> or a new release tag, never forced)"
                 )
         if cmd == "branch" and FORBIDDEN_BRANCH & set(args):
             raise PermissionError(f"forbidden for agents: git {' '.join(args)}")

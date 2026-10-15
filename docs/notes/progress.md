@@ -2,6 +2,20 @@
 
 Newest first. Keep it short.
 
+## 2026-10-15 — Owner decisions
+
+- **No GitHub Pro.** The local `devteam/hooks/pre-push` stays (now also refuses moving a tag).
+  Every successful `dev` → `main` release is tagged `release-YYYY-MM-DD` (`.N` for a second
+  one that day) and pushed; `devteam release` does it. The first release (PR #10) is
+  tagged `release-2026-10-15`.
+- **PostGIS:** fine as a separate, unmodified database server reached over SQL (ADR 0010).
+  On-prem installs that ship the image pass on its licence and source offer.
+- **SAM 3.1 licence:** decided later, before the defect phase. Until then no task may depend
+  on SAM 3.1 weights for anything sold.
+- **Depth Anything V2:** only Small (Apache-2.0). `wip/dense-stage` already defaults to
+  `Depth-Anything-V2-Small-hf` and ADR 0008 forbids Base/Large, but the model id is a
+  parameter, so P4a must refuse any other id in code (backlog P4a updated).
+
 ## 2026-10-15 — Dev team v2: Codex in parallel; first real parallel run
 
 **Done**

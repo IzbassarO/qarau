@@ -15,7 +15,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from devteam import costs
 from devteam.agents import FakeAgents
-from devteam.gates import FakeGitHub, GitHub, regressions, release
+from devteam.gates import FakeGitHub, GitHub, regressions, release, tag_release
 from devteam.graph import Team, build_graph
 from devteam.report import write_report
 
@@ -240,9 +240,14 @@ def test_forbidden_git_and_gh_actions(repo):
         ("branch", "-D", "main"),
         ("rebase", "dev"),
         ("update-ref", "refs/heads/dev", "HEAD"),
+        ("push", url, "refs/tags/v1"),
+        ("push", url, "+refs/tags/release-2026-10-15"),
+        ("push", "--force", url, "refs/tags/release-2026-10-15"),
+        ("push", "--tags", url),
     ]:
         with pytest.raises(PermissionError):
             team.git(*args)
+    team._guard(("push", "-q", url, "refs/tags/release-2026-10-15.2"))  # the one tag allowed
     gh = GitHub(team)
     for args in [
         ("api", "repos/x/y/branches/main/protection", "-X", "DELETE"),
@@ -276,9 +281,21 @@ def test_release_merges_dev_into_main_only_with_a_green_benchmark(repo):
     assert "pipeline/b.py" not in remote_files(repo, "main")
 
     team.cfg["gates"] = bench_repo(repo, "90")
-    assert release(team).startswith("released")
+    day = time.strftime("%Y-%m-%d")
+    assert release(team).endswith(f"(tag release-{day})")
     assert "pipeline/b.py" in remote_files(repo, "main")
     assert release(team) == "release: nothing new on dev"
+    remote = repo.parent / "remote.git"
+    main_sha = git(remote, "rev-parse", "main").strip()
+    assert git(remote, "rev-parse", f"release-{day}^{{commit}}").strip() == main_sha
+    assert tag_release(team, "re-run") == f"release-{day}"  # same commit: no new tag
+
+    (repo / "pipeline" / "c.py").write_text("c = 1\n")  # a second release the same day
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "more")
+    git(repo, "push", "-q", str(remote), "dev")
+    assert release(team).endswith(f"(tag release-{day}.2)")
+    assert git(remote, "rev-parse", f"release-{day}^{{commit}}").strip() == main_sha  # unmoved
 
 
 def test_daily_report(repo):

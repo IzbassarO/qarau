@@ -34,6 +34,10 @@ uv run pytest                  # 47 tests, incl. gates, crash + resume, forbidde
 - Keys: `.env` (gitignored), template `.env.example`.
 - Agents never push, merge or call `gh`; the orchestrator does, and refuses force-push,
   history rewrites, branch deletion and `--admin` (`graph.py` `_guard`, `gates.py`).
-- `hooks/pre-push` (installed automatically): local stand-in for GitHub branch protection.
+- `hooks/pre-push` (installed automatically): local stand-in for GitHub branch protection
+  (no GitHub Pro); also refuses moving an existing tag.
+- Every successful release is tagged `release-YYYY-MM-DD` on `main` and pushed. Roll back:
+  `git checkout release-YYYY-MM-DD` to look; to restore `main`, open a PR that reverts to it
+  (`git revert` of the release merge), never a force-push.
 - Runtime state (checkpoints, worktrees, packets, benchmark cache, costs, event log):
   `.state/` (gitignored). Daily reports: `reports/` (gitignored, local).

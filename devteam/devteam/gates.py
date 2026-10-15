@@ -396,5 +396,31 @@ def release(team) -> str:
         return f"release blocked, CI on {base}: {why} ({team.gh.url(pr)})"
     team.gh.merge(pr["number"], dev_sha)
     (team.home / "last_release").write_text(time.strftime("%Y-%m-%d"))
-    team.emit("brain", f"released {base} -> {main}: {team.gh.url(pr)}", status="idle")
-    return f"released: {team.gh.url(pr)}"
+    tag = tag_release(team, team.gh.url(pr))
+    team.emit("brain", f"released {base} -> {main}: {team.gh.url(pr)}, tag {tag}", status="idle")
+    return f"released: {team.gh.url(pr)} (tag {tag})"
+
+
+def tag_release(team, note: str) -> str:
+    """Annotated tag release-YYYY-MM-DD[.N] on the released main, pushed; tags never move, so
+    every release can be checked out or rolled back to. Idempotent (resume after a crash)."""
+    main = team.cfg["release_branch"]
+    team.fetch(main)
+    sha = team.git("rev-parse", f"{team.remote_name}/{main}").strip()
+    day, n = time.strftime("%Y-%m-%d"), 1
+    while True:
+        tag = f"release-{day}" + (f".{n}" if n > 1 else "")
+        have = subprocess.run(
+            ["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}"],
+            cwd=team.root,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if not have:
+            team.git("tag", "-a", tag, sha, "-m", f"Release {day}: {note}")
+            break
+        if have == sha:  # already tagged (re-run)
+            break
+        n += 1  # a second release the same day
+    team.git("push", "-q", team.remote_url, f"refs/tags/{tag}")
+    return tag
