@@ -40,6 +40,7 @@ class VideoInfo:
     r_fps: float
     duration_s: float
     is_vfr: bool
+    frame_dt_s: float  # median pts interval in the first VFR_PACKETS packets, 0 if unknown
 
 
 def _rate(s: str | None) -> float:
@@ -65,10 +66,14 @@ def bit_depth(stream: dict[str, Any]) -> int:
     return int(m.group(1)) if m else 8
 
 
+def intervals(pts: list[float]) -> list[float]:
+    ts = sorted(pts)  # packets come in decode order (B-frames)
+    return [d for a, b in zip(ts, ts[1:], strict=False) if (d := b - a) > 0]
+
+
 def is_vfr(pts: list[float]) -> bool:
     """True when any frame interval deviates from the median by more than VFR_TOLERANCE."""
-    ts = sorted(pts)  # packets come in decode order (B-frames)
-    d = [b - a for a, b in zip(ts, ts[1:], strict=False)]
+    d = intervals(pts)
     if len(d) < 2:
         return False
     med = statistics.median(d)
@@ -94,6 +99,7 @@ def parse(probe: dict[str, Any], pts: list[float]) -> VideoInfo:
         bit_depth=depth, is_hdr=trc in HDR_TRANSFERS or (prim == "bt2020" and depth >= 10),
         avg_fps=_rate(s.get("avg_frame_rate")), r_fps=_rate(s.get("r_frame_rate")),
         duration_s=float(dur), is_vfr=is_vfr(pts),
+        frame_dt_s=statistics.median(intervals(pts) or [0.0]),
     )  # fmt: skip
 
 

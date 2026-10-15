@@ -61,6 +61,8 @@ def test_duration_from_container() -> None:
 
 def test_vfr_tolerance() -> None:
     assert not is_vfr([round(t, 3) for t in CFR])  # 1 ms timebase rounding is not VFR
+    # webm stores 30 fps as 33/34 ms: the median interval is what the stream really has
+    assert parse(stream(), [round(t, 3) for t in CFR]).frame_dt_s == pytest.approx(0.033)
     assert is_vfr([i / 10 for i in range(10)] + [1 + i / 30 for i in range(30)])
     assert not is_vfr([0.0])
 

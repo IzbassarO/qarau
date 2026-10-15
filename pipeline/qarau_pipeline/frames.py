@@ -45,13 +45,28 @@ def has_zscale() -> bool:
     return any(line.split()[1:2] == ["zscale"] for line in p.stdout.splitlines())
 
 
+def pts_select(rate: float, frame_dt: float) -> str:
+    """Same frames as the old `fps=rate` filter (round=near: per output tick k the last source
+    frame with t < (k+0.5)/rate), but by presentation time without duplicates, so the source
+    pts survive. select cannot look ahead, so "last frame before B" is taken as "first frame at
+    or after B - frame_dt", frame_dt = median frame interval (1/r_fps is off for ms-rounded
+    pts: 33.37 vs 33 ms). Exact for CFR; with ms-rounded
+    pts (webm) a frame exactly at a boundary may go one frame either way; within one frame
+    interval for VFR. Slot k of frame t = floor((t + frame_dt)*rate - 0.5)."""
+
+    def slot(t: str) -> str:
+        return f"floor(({t}+{frame_dt:.6f})*{rate:.6f}-0.5)"
+
+    return (f"select='if(isnan(prev_selected_t),gte({slot('t')},0),"
+            f"gt({slot('t')},{slot('prev_selected_t')}))'")  # fmt: skip
+
+
 def decode_plan(info: VideoInfo, rate: float, zscale: bool) -> tuple[str, list[str], list[str]]:
     """ffmpeg -vf chain, conversions applied, warnings."""
     conv = [f"autorotate:{info.rotation_deg}"] if info.rotation_deg else []  # ffmpeg default
     warn: list[str] = []
-    # first source frame in each 1/rate slot, by presentation time (VFR-safe; pts stay the source's)
-    r = f"{rate:.6f}"
-    vf = [f"select='isnan(prev_selected_t)+gt(floor(t*{r}),floor(prev_selected_t*{r}))'"]
+    fps = info.r_fps or info.avg_fps
+    vf = [pts_select(rate, info.frame_dt_s or (1 / fps if fps else 0.0))]
     if info.is_vfr:
         conv.append("vfr:pts_sampling")
     if info.is_hdr:

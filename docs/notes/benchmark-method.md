@@ -92,8 +92,11 @@ starts each 1/6 s slot does not. Room (60 fps) with the frame grid moved by 1–
 | --- | --- |
 | old `fps` filter (a8efcc9) | 257/269 (95.5 %) ×3 |
 | old `fps` filter, `start_time` +1 frame | 242/267 (90.6 %) |
-| pts `select`, slot start (P2a) | 241/267 (90.3 %) ×2 |
+| pts `select`, slot start (P2a draft) | 241/267 (90.3 %) ×2 |
 | pts `select`, slot +¼, +½ | 239/267 (89.5 %), 242/268 (90.3 %) |
+| pts `select` on the old grid (P2a final) | 257/269 (95.5 %) |
 
-So 257 is a lucky phase, not a better method: a change that only moves the sampling grid can
-swing room by ~6 pp. Notre-dame (30 fps drone) stays at 100 % under the same change.
+So a change that only moves the sampling grid can swing room by ~6 pp, and the old grid
+happens to be a good phase for it. Notre-dame (30 fps drone) stays at 100 % either way. P2a
+therefore keeps the old grid exactly (`frames.pts_select`); a sampler change (e.g. parallax
+keyframes) should be judged on several videos, not on room alone.

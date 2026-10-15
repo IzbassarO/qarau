@@ -2,6 +2,26 @@
 
 Newest first. Keep it short.
 
+## 2026-10-15 — P2a: robust phone import (frames stage)
+
+- `pipeline/qarau_pipeline/probe.py`: `probe_video()` → `VideoInfo` (codec, coded/display
+  size, `rotation_deg` from displaymatrix or `tags.rotate`, HDR = PQ/HLG or BT.2020 ≥ 10 bit,
+  fps, `is_vfr` = a pts interval > 25 % off the median in the first 120 packets).
+- `frames.py` decodes from `VideoInfo`: ffmpeg autorotate once (checked against the display
+  size), HDR → 8-bit BT.709, frames picked by pts on the old `fps` grid (room/mykolaiv/orono/
+  aegviidu pick the same frames as before), readable errors (no ffmpeg, unprobeable file,
+  decode failure, 0 frames).
+- New `frames/manifest.json`: `source` VideoInfo, `conversions` (`autorotate:90`,
+  `tonemap:hable|colorspace`, `vfr:pts_sampling`), per frame `file` + source `pts_s`,
+  `warnings`.
+- HDR: `zscale`+`tonemap=hable` when the ffmpeg build has zscale (CI's apt ffmpeg), else the
+  `colorspace` fallback with a manifest warning (Homebrew ffmpeg on the dev Mac: no libzimg,
+  highlights may clip). The hable path runs only in CI; not yet seen on a real iPhone clip.
+- Quick benchmark: notre-dame 109/109 (100 %), room 257/269 (95.5 %), same as before. A draft
+  sampler that moved the grid dropped room to 90 %; see `docs/notes/benchmark-method.md`,
+  "Sampling phase". IMG_8315.MOV: rotation 90 + HLG detected, upright 1080×1920 SDR frames.
+- Next: an ffmpeg with libzimg for dev and on-prem images, so real HDR footage gets hable.
+
 ## 2026-10-15 — Dev team v1 done; handoff for v2
 
 **State**

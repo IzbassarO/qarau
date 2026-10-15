@@ -131,13 +131,30 @@ def test_hdr_pq_to_sdr(tmp_path: Path) -> None:
     m = extract(v, tmp_path / "out")
     src = m["source"]
     assert src["is_hdr"] and src["bit_depth"] == 10 and src["color_transfer"] == "smpte2084"
-    assert any(c.startswith("tonemap:") for c in m["conversions"])
-    if not frames.has_zscale():
-        assert m["warnings"] and "zscale" in m["warnings"][0]
+    # with zscale (CI's apt ffmpeg) the hable chain must run end to end, no silent fallback
+    if frames.has_zscale():
+        assert m["conversions"] == ["tonemap:hable"] and m["warnings"] == []
+    else:
+        assert m["conversions"] == ["tonemap:colorspace"] and "zscale" in m["warnings"][0]
     img = first_frame(tmp_path / "out", m)
     assert img.dtype == np.uint8 and img.shape == (240, 320, 3)  # 8-bit SDR JPEG
     sat = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)[..., 1]
     assert sat.mean() > 40  # testsrc2 is colourful; a grey/washed-out conversion is not
+
+
+def test_hable_chain_runs() -> None:
+    """The zscale+hable chain itself, on a PQ-tagged 10-bit lavfi source (no libx265 needed)."""
+    if not frames.has_zscale():
+        pytest.skip("this ffmpeg build has no zscale filter (libzimg); hable chain not runnable")
+    tag = "setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc"
+    vf = f"format=yuv420p10le,{tag},{frames.HDR_HABLE},showinfo"
+    p = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-f", "lavfi", "-i", "testsrc2=d=0.2:s=320x240:r=10",
+         "-vf", vf, "-f", "null", "-"],
+        capture_output=True, text=True,
+    )  # fmt: skip
+    assert p.returncode == 0, p.stderr[-800:]
+    assert "fmt:yuv420p " in p.stderr  # 8-bit out
 
 
 def test_rotation_90(tmp_path: Path) -> None:
