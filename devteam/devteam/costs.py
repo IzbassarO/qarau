@@ -22,9 +22,13 @@ def _db(home: Path) -> sqlite3.Connection:
     db = sqlite3.connect(home / "costs.sqlite", timeout=30, isolation_level=None)
     db.execute("""create table if not exists usage (
         day text, ts text, agent text, model text, task text,
-        tokens_in int, tokens_out int, usd real, billed int, state text default 'settled')""")
-    if "state" not in {row[1] for row in db.execute("pragma table_info(usage)")}:  # v0 db
+        tokens_in int, tokens_out int, usd real, billed int, state text default 'settled',
+        secs real default 0)""")
+    cols = {row[1] for row in db.execute("pragma table_info(usage)")}
+    if "state" not in cols:  # v0 db
         db.execute("alter table usage add column state text default 'settled'")
+    if "secs" not in cols:  # v1 db
+        db.execute("alter table usage add column secs real default 0")
     return db
 
 
@@ -85,11 +89,12 @@ def record(
     tokens_out: int,
     usd: float,
     billed: bool,
+    secs: float = 0,
 ):
     with _db(home) as db:
         db.execute(
             "insert into usage (day, ts, agent, model, task, tokens_in, tokens_out, usd, billed, "
-            "state) values (?,?,?,?,?,?,?,?,?,'settled')",
+            "state, secs) values (?,?,?,?,?,?,?,?,?,'settled',?)",
             (
                 _today(),
                 time.strftime("%H:%M:%S"),
@@ -100,6 +105,7 @@ def record(
                 tokens_out,
                 usd,
                 int(billed),
+                secs,
             ),
         )
 
@@ -134,6 +140,20 @@ def day_rows(home: Path, day: str) -> list[tuple]:
         return db.execute(
             """select agent, model, count(*), sum(usd), billed from usage
             where day = ? group by agent, model, billed order by agent""",
+            (day,),
+        ).fetchall()
+    finally:
+        db.close()
+
+
+def subscription_rows(home: Path, day: str) -> list[tuple]:
+    """Developer runs on subscriptions, per task: (task, agent, model, runs, secs, in, out, usd)."""
+    db = _db(home)
+    try:
+        return db.execute(
+            """select task, agent, model, count(*), sum(secs), sum(tokens_in), sum(tokens_out),
+            sum(usd) from usage where day = ? and not billed
+            group by task, agent, model order by sum(secs) desc""",
             (day,),
         ).fetchall()
     finally:

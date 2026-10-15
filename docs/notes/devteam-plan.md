@@ -51,4 +51,13 @@ Dev tooling in `devteam/`, not product code. Owner's brief: 2026-10-14.
 - v1: real brain (structured output) + dev_pipeline (`claude -p`, `--resume` for fixes) +
   tester (checks from config + Sonnet judge + packet). One real task end to end.
 - v2: dev_app (`codex exec --json`, `codex exec resume`), parallel with dev_pipeline.
-  (`devteam review` dropped: gates replace the owner's review.)
+  (`devteam review` dropped: gates replace the owner's review.) Codex runs in the
+  `workspace-write` sandbox (no network, no `.git` writes): the orchestrator runs the
+  developer's `setup` (`pnpm install`) before every round and commits. Web tasks: the brain
+  lists `routes`, the tester gets screenshots of them (Playwright CLI on the worktree's Vite
+  server with the main checkout's runs) and they are listed in the packet (local files).
+- v2 limits savers (owner, 2026-10-15): developers run only the quick benchmark
+  (`gates.benchmark.quick_only`: notre-dame + room, ~11 min) with the cached dev numbers in the
+  brief; the full set runs only at the merge gate and at release, cached per `pipeline/` tree
+  (a web merge doesn't re-run it). Mykolaiv gets wider tolerances (measured noise). The daily
+  report shows subscription load per task: rounds, minutes, tokens, ≈ API $ (Claude Code).

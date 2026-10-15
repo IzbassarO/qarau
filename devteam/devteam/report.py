@@ -46,13 +46,42 @@ def write_report(team, day: str | None = None) -> Path:
         f"${team.cfg['daily_budget_usd']:.2f} per day",
     ]
 
+    lines += [
+        "",
+        "## Subscription load per task",
+        "",
+        "Developer runs on your Claude / ChatGPT plans (not billed per call). Minutes and tokens",
+        "show how fast the plan limits go; ≈ API $ is what Claude Code says the same work would",
+        "cost on the API (Codex reports tokens only).",
+        "",
+        "| Task | Developer | Tool | Rounds | Minutes | Tokens in | Tokens out | ≈ API $ |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    sub = costs.subscription_rows(team.home, day)
+    lines += [
+        f"| {t} | {a} | {m} | {n} | {secs / 60:.0f} | {ti:,} | {to:,} | "
+        + (f"{usd:.2f}" if usd else "—")
+        + " |"
+        for t, a, m, n, secs, ti, to, usd in sub
+    ] or ["| — | — | — | 0 | 0 | 0 | 0 | — |"]
+    for m in sorted({r[2] for r in sub}):
+        mine = [r for r in sub if r[2] == m]
+        lines.append(
+            f"| **total** | | {m} | {sum(r[3] for r in mine)} | "
+            f"{sum(r[4] for r in mine) / 60:.0f} | {sum(r[5] for r in mine):,} | "
+            f"{sum(r[6] for r in mine):,} | "
+            + (f"{t:.2f}" if (t := sum(r[7] for r in mine)) else "—")
+            + " |"
+        )
+
     lines += ["", "## Benchmark (latest on dev)", ""]
     bench = sorted((team.home / "bench").glob("*/results.json"), key=lambda p: p.stat().st_mtime)
     if bench:
+        res = json.loads(bench[-1].read_text())
         lines += [
-            f"Commit `{bench[-1].parent.name[:8]}`",
+            f"Commit `{res.get('commit', '?')}`",
             "",
-            bench_table(json.loads(bench[-1].read_text())),
+            bench_table(res),
         ]
     else:
         lines += ["Not available yet (the benchmark command comes with task P1)."]

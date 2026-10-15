@@ -6,11 +6,17 @@ Everything that talks to the remote goes through `GitHub` (real, via gh) or `Fak
 deletes branches or bypasses branch protection.
 """
 
+import hashlib
 import json
+import os
+import re
+import shlex
 import shutil
+import signal
 import subprocess
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 FORBIDDEN_GH_FLAGS = {"--admin", "--delete-branch", "-d"}
@@ -50,14 +56,27 @@ def env_secrets_in(team, cwd: str, paths: list[str]) -> list[str]:
 
 
 # --- benchmark -------------------------------------------------------------------------------
+def bench_key(team, sha: str) -> str:
+    """Cache key: the git trees of `when_paths` at `sha`. A merge that leaves pipeline/ alone
+    (a web task, docs) reuses the result instead of another ~70 min run."""
+    paths = team.cfg["gates"]["benchmark"]["when_paths"]
+    trees = [team.git("rev-parse", f"{sha}:{p.rstrip('/')}").strip() for p in paths]
+    return hashlib.sha1(" ".join(trees).encode()).hexdigest()
+
+
+def cached_benchmark(team, sha: str) -> dict | None:
+    f = team.home / "bench" / bench_key(team, sha) / "results.json"
+    return json.loads(f.read_text()) if f.exists() else None
+
+
 def benchmark(team, sha: str) -> dict | None:
-    """Benchmark results for commit `sha`, run in a throwaway detached worktree (so nothing it
-    writes can end up in a task branch) and cached per commit. None if the command is missing
-    or fails, e.g. before the benchmark task (P1) has landed."""
+    """Full benchmark results for commit `sha`, run in a throwaway detached worktree (so
+    nothing it writes can end up in a task branch) and cached per pipeline tree. None if the
+    command is missing or fails, e.g. before the benchmark task (P1) has landed."""
     bcfg = team.cfg["gates"]["benchmark"]
-    out = team.home / "bench" / sha
-    if (out / "results.json").exists():
-        return json.loads((out / "results.json").read_text())
+    out = team.home / "bench" / bench_key(team, sha)
+    if (res := cached_benchmark(team, sha)) is not None:
+        return res
     out.mkdir(parents=True, exist_ok=True)
     tmp = team.home / "bench-wt" / sha
     if not tmp.exists():
@@ -79,22 +98,23 @@ def regressions(base: dict, new: dict, cfg: dict) -> list[str]:
     {"videos": {name: {registered_pct, models, reproj_px, points, scale_err_cm, time_s}}}."""
     out = []
     for name, b in base.get("videos", {}).items():
+        c = {**cfg, **cfg.get("per_video", {}).get(name, {})}  # measured run-to-run noise
         n = new.get("videos", {}).get(name)
         if n is None:
             out.append(f"{name}: missing from the new run")
             continue
-        if n["registered_pct"] < b["registered_pct"] - cfg["max_drop_registered_pct"]:
+        if n["registered_pct"] < b["registered_pct"] - c["max_drop_registered_pct"]:
             out.append(
                 f"{name}: registered {b['registered_pct']:.1f}% -> {n['registered_pct']:.1f}%"
             )
         if n["models"] > b["models"]:
             out.append(f"{name}: models {b['models']} -> {n['models']}")
-        if n["reproj_px"] > b["reproj_px"] * (1 + cfg["max_rise_reproj_pct"] / 100):
+        if n["reproj_px"] > b["reproj_px"] * (1 + c["max_rise_reproj_pct"] / 100):
             out.append(f"{name}: reprojection {b['reproj_px']:.2f} -> {n['reproj_px']:.2f} px")
-        if n["points"] < b["points"] * (1 - cfg["max_drop_points_pct"] / 100):
+        if n["points"] < b["points"] * (1 - c["max_drop_points_pct"] / 100):
             out.append(f"{name}: points {b['points']} -> {n['points']}")
         bs, ns = b.get("scale_err_cm"), n.get("scale_err_cm")
-        if bs is not None and (ns is None or ns > bs + cfg["max_rise_scale_err_cm"]):
+        if bs is not None and (ns is None or ns > bs + c["max_rise_scale_err_cm"]):
             out.append(f"{name}: scale error {bs} -> {ns} cm")
     return out
 
@@ -111,6 +131,62 @@ def bench_table(res: dict) -> str:
             f"{v.get('time_s', '—')} |"
         )
     return "\n".join(rows)
+
+
+# --- screenshots (web tasks) -----------------------------------------------------------------
+def screenshots(team, s, routes: list[str]) -> tuple[list[str], list[str]]:
+    """One PNG per route of the dev server in the task's worktree, for the tester (it sees
+    them) and the packet. Returns (paths, problems); a route that fails is a problem, never
+    silently dropped."""
+    sc = team.cfg["developers"][s["assignee"]].get("screenshots")
+    if not sc or not routes:
+        return [], []
+    out = team.home / "packets" / s["task"]["id"]
+    out.mkdir(parents=True, exist_ok=True)
+    srv = subprocess.Popen(  # {data}: the main checkout's data/ (runs to show, read-only)
+        sc["serve"].format(data=shlex.quote(str(team.root / "data"))),
+        shell=True,
+        cwd=s["worktree"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    with team._lock:
+        team._procs.add(srv)  # `devteam stop` kills it too
+    paths, problems = [], []
+    try:
+        for _ in range(60):
+            try:
+                urllib.request.urlopen(sc["url"], timeout=2)
+                break
+            except OSError:
+                time.sleep(1)
+        else:
+            return [], [f"dev server did not start: {sc['serve']}"]
+        for route in routes:
+            name = re.sub(r"[^A-Za-z0-9]+", "-", route).strip("-") or "root"
+            png = out / f"{name}.png"
+            r = team.run_proc(
+                sc["shoot"].format(url=shlex.quote(sc["url"] + route), png=shlex.quote(str(png))),
+                cwd=s["worktree"],
+                timeout=120,
+            )
+            if r["ok"] and png.exists():
+                paths.append(str(png))
+            else:
+                problems.append(f"{route}: {r['output'][-300:]}")
+    finally:
+        os.killpg(srv.pid, signal.SIGTERM)
+        srv.wait()
+        for sig in [0] * 50 + [signal.SIGKILL]:  # the shell exits first; wait for the server
+            try:
+                os.killpg(srv.pid, sig)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        with team._lock:
+            team._procs.discard(srv)
+    return paths, problems
 
 
 # --- GitHub ----------------------------------------------------------------------------------
@@ -274,7 +350,7 @@ def release(team) -> str:
     team.emit("brain", f"release: benchmark on {base} @ {dev_sha[:8]}", status="working")
     on_dev = benchmark(team, dev_sha)
     if on_dev is None:
-        log = team.home / "bench" / dev_sha / "log.txt"
+        log = team.home / "bench" / bench_key(team, dev_sha) / "log.txt"
         tail = log.read_text()[-600:] if log.exists() else "(no log)"
         return f"release blocked: the full benchmark failed on {base} @ {dev_sha[:8]}:\n{tail}"
     on_main = benchmark(team, main_sha)
