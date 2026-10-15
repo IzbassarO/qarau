@@ -68,8 +68,8 @@ tasks:
 
 
     3. Far layer: far points that survive filtering are exported as a separate `far` layer in the viewer
-    bundle (own arrays + manifest key, ADR 0003), never mixed into the object cloud. The viewer draws
-    it gray; until the app side renders it, the viewer simply does not load it.
+    bundle (own arrays + manifest key, ADR 0003), never mixed into the object cloud. Rendering it (gray,
+    toggle) is task A5 (dev_app); until then the viewer simply does not load it.
 
 
     Acceptance (in addition to the criteria above):
@@ -123,9 +123,9 @@ tasks:
   area: core
   phase: server
   title: Server job queue with per-stage progress
-  goal: 'The pipeline runs as jobs from a durable queue (Redis + RQ or Celery, per CLAUDE.md; record the
-    choice in an ADR). Each stage reports progress 0-100 to the API; the viewer shows the current stage
-    and percent. A 30-minute video is processed on a single worker without blocking the API.
+  goal: 'The pipeline runs as jobs from a durable queue: Valkey + RQ (ADR 0012; not Redis). Each stage
+    reports progress 0-100 to the API; the viewer shows the current stage and percent. A 30-minute video
+    is processed on a single worker without blocking the API.
 
 
     Acceptance:
@@ -136,13 +136,15 @@ tasks:
 
     - The API stays responsive while a long job runs (test with a long job).
 
-    - Web part (stage + percent in the viewer) is in web/, owned by dev_app: split it out as an app task
-    when S1 is unblocked.
+    - Valkey runs in infra/ Docker Compose; no Redis image or Redis-only feature is used.
+
+
+    Note: the web part (stage + percent in the UI) is in web/, owned by dev_app. When S1 unblocks, it
+    becomes its own dev_app task; S1 itself delivers the progress API.
 
     '
-  licence: 'Redis server (check the current licence: RSALv2/SSPLv1 since 7.4, AGPLv3 option since 8.0;
-    Valkey BSD-3-Clause is the drop-in alternative), RQ (BSD-2-Clause), Celery (BSD-3-Clause). Ask the
-    owner before picking the server.
+  licence: 'Valkey (BSD-3-Clause), RQ (BSD-2-Clause), redis-py client (MIT). Redis server is not used:
+    RSALv2/SSPLv1 since 7.4, AGPLv3 since 8.0 (owner 2026-10-15, ADR 0012).
 
     '
   status: blocked
@@ -254,6 +256,20 @@ tasks:
 
     '
   status: todo
+- id: A5
+  area: app
+  title: Far-point layer in the viewer
+  goal: 'Load the `far` layer from the viewer bundle (written by P3: own arrays + manifest key, ADR 0003)
+    and render it gray with the not-seen token #6B727D (--color-notseen), never mixed into the object
+    cloud. A toggle in the Show panel; off by default in Quick Scan. Bundles without a `far` layer load
+    as before. All text via i18n (RU/KK/EN). Unit test for layer loading (with and without `far`).
+
+    '
+  owner: dev_app
+  status: blocked
+  blocked_by:
+  - P3
+  blocked_reason: 'Waits for P3: the pipeline must first export the `far` layer.'
 - id: A1b
   area: app
   title: Simple local login

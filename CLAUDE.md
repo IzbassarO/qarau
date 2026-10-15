@@ -119,7 +119,7 @@ Create folders when the first real file needs them, not before.
 | --- | --- |
 | Language | Python 3.12 (backend, pipeline), TypeScript (web, desktop) |
 | API | FastAPI, Pydantic v2, SQLAlchemy 2, Alembic |
-| Queue | Redis + a durable task runner (start with RQ or Celery; Temporal later if needed) |
+| Queue | Valkey + RQ (Temporal later if needed); not Redis (licence, ADR 0012) |
 | DB | PostgreSQL 16 + PostGIS + pgvector |
 | Storage | S3-compatible: Versity S3 Gateway (dev, ADR 0006), S3 in cloud |
 | 3D | COLMAP, Open3D, laspy, PotreeConverter |

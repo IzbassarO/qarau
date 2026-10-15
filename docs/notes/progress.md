@@ -9,11 +9,12 @@ Newest first. Keep it short.
   masks before feature extraction, a filter for low-parallax (< 1.5°) and high-reprojection
   points with counts in the run report, and surviving far points exported as a separate
   `far` layer (gray), never mixed into the object cloud.
-- **The current viewer is a dev tool, not the product UI.** The product UI comes after the
-  geometry is right; the order stays geometry (P-tasks) first, then D1.
+- **Product UI** (screens in docs/design/) is a later task U1, after geometry P3/P4; the
+  current viewer is a dev tool.
 - New task **S1**, a server job queue with per-stage progress, placed after P4 and blocked
-  by P4a. The Redis licence (RSAL/SSPL/AGPL since 7.4/8.0) must be decided with the owner
-  before S1 starts; Valkey (BSD) is the drop-in alternative.
+  by P4a. Queue server: **Valkey + RQ, not Redis** (owner; Redis ≥ 7.4 is RSAL/SSPL, ≥ 8
+  AGPL; ADR 0012). Its web part becomes a separate `dev_app` task when S1 unblocks.
+- New task **A5**, the far-point layer in the viewer (gray, toggle in Show), blocked by P3.
 
 ## 2026-10-15 — Dev team: retries and tester-owned screenshots
 
