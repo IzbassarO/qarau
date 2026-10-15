@@ -83,3 +83,20 @@ pass mykolaiv by chance. Fix options for the gate owner: per-video tolerances, t
 Chosen (devteam v2): per-video tolerances in `devteam/config.yaml` → `gates.benchmark.per_video`:
 mykolaiv points −30 %, reproj +25 % (above the measured +23 % / +16 %); registered % and
 models keep the default rules. Revisit when P3 makes mykolaiv one model.
+
+**Sampling phase (P2a, 2026-10-15).** Identical runs repeat, but shifting which source frame
+starts each 1/6 s slot does not. Room (60 fps) with the frame grid moved by 1–5 source frames
+(17–80 ms):
+
+| Sampler | Registered |
+| --- | --- |
+| old `fps` filter (a8efcc9) | 257/269 (95.5 %) ×3 |
+| old `fps` filter, `start_time` +1 frame | 242/267 (90.6 %) |
+| pts `select`, slot start (P2a draft) | 241/267 (90.3 %) ×2 |
+| pts `select`, slot +¼, +½ | 239/267 (89.5 %), 242/268 (90.3 %) |
+| pts `select` on the old grid (P2a final) | 257/269 (95.5 %) |
+
+So a change that only moves the sampling grid can swing room by ~6 pp, and the old grid
+happens to be a good phase for it. Notre-dame (30 fps drone) stays at 100 % either way. P2a
+therefore keeps the old grid exactly (`frames.pts_select`); a sampler change (e.g. parallax
+keyframes) should be judged on several videos, not on room alone.
