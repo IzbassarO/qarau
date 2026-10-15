@@ -85,15 +85,18 @@ def cmd_run(a: argparse.Namespace) -> None:
         )  # fmt: skip
     fj = json.loads((out / "frames.json").read_text())
     names = [Path(f["file"]).name for f in fj["frames"] if f["kept"]]
+    dropped = [Path(f["file"]).name for f in fj["frames"] if not f["kept"]]
     rc = ColmapReconstructor(
         mode="video" if a.video else "images",
         max_image_size=a.max_image_size,
         max_num_features=a.max_features,
         peak_threshold=a.peak_threshold,
+        mapper=a.mapper,
+        merge=a.merge,
     )
     res = run_stage(
         out, "reconstruction", f"pycolmap {pycolmap.__version__}", rc.params(),
-        lambda: rc.reconstruct(out / "frames", names, out / "colmap"),
+        lambda: rc.reconstruct(out / "frames", names, out / "colmap", dropped),
     )  # fmt: skip
     print("reconstruction:", res.metrics)
     _export(out, out / "colmap/sparse/0", frames_from_json(out), fj["source"])
@@ -121,7 +124,8 @@ def cmd_project(a: argparse.Namespace) -> None:
 def cmd_benchmark(a: argparse.Namespace) -> None:
     from .benchmark import run_benchmark
 
-    sys.exit(run_benchmark(a.data, a.out, a.only, a.timeout_s, a.record))
+    only = [n for s in a.only for n in s.split(",") if n] if a.only else None
+    sys.exit(run_benchmark(a.data, a.out, only, a.timeout_s, a.record))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -136,6 +140,9 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--max-image-size", type=int, default=1600)
     r.add_argument("--max-features", type=int, help="SIFT features per image (default 8192)")
     r.add_argument("--peak-threshold", type=float, help="SIFT peak threshold (default 0.00667)")
+    r.add_argument("--mapper", choices=["incremental", "global"], default="incremental")
+    r.add_argument("--no-merge", dest="merge", action="store_false",
+                   help="largest model only, no leftover registration (pre-P3)")  # fmt: skip
     r.set_defaults(fn=cmd_run)
     e = sub.add_parser("export", help="COLMAP model -> LAZ/PLY + viewer bundle")
     e.add_argument("--sparse", required=True)
@@ -158,7 +165,7 @@ def main(argv: list[str] | None = None) -> None:
     b = sub.add_parser("benchmark", help="all reference videos -> <out>/results.json")
     b.add_argument("--data", required=True, help="dir with the reference videos (read-only)")
     b.add_argument("--out", required=True)
-    b.add_argument("--only", nargs="+", metavar="NAME", help="manifest names to run")
+    b.add_argument("--only", nargs="+", metavar="NAME", help="manifest names to run (a,b or a b)")
     b.add_argument("--timeout-s", type=float, default=1800, help="per video (default 1800)")
     b.add_argument("--record", action="store_true", help="also write docs/benchmarks/<sha>.json"
                    " and append rows to docs/notes/benchmark.md")  # fmt: skip

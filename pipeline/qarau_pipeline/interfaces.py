@@ -31,8 +31,11 @@ class StageError(RuntimeError):
 
 
 class Reconstructor(Protocol):
-    def reconstruct(self, frames_dir: Path, names: list[str], out_dir: Path) -> dict[str, Any]:
-        """Reconstruct the named images into out_dir (database.db, sparse/0); return metrics."""
+    def reconstruct(
+        self, frames_dir: Path, names: list[str], out_dir: Path, bridges: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Reconstruct the named images into out_dir (database.db, sparse/0); return metrics.
+        bridges: dropped frames that may only link parts of the map, never end up in it."""
         ...
 
 
