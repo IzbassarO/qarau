@@ -211,6 +211,8 @@ Acceptance criteria (all must be visibly met in your diff, with tests):
 
 Rules:
 - Edit only {", ".join(dev["owns"])} and docs/. Anything else is reverted automatically.
+  Do not edit docs/notes/progress.md: parallel tasks would conflict there (the daily
+  report covers progress).
 - Do not commit, push, merge or create branches; the orchestrator commits your changes.
 - Never write keys or tokens into files. Never write under data/. Sample videos (read-only):
   {team.root / "data" / "samples"}
