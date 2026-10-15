@@ -413,6 +413,15 @@ export class NavigationControls {
     this.pending = { orbitX: 0, orbitY: 0, panX: 0, panY: 0, zoom: 0 };
   }
 
+  /** Cancel residual input/capture before another camera mode takes ownership. */
+  stop() {
+    this.clearPending();
+    const drag = this.drag;
+    this.drag = null;
+    if (drag && this.canvas.hasPointerCapture?.(drag.id))
+      this.canvas.releasePointerCapture(drag.id);
+  }
+
   /** Toolbar zoom follows the same damped, bounded, collision-tested path as pinch. */
   zoom(factor: number) {
     if (this.disposed || !this.enabled || !Number.isFinite(factor) || factor <= 0) return;
@@ -502,7 +511,8 @@ export class NavigationControls {
     }
   };
 
-  private constrainMove(from: Vector3, to: Vector3): Vector3 {
+  /** Shared swept collision/bounds constraint for orbit, fly and view animations. */
+  constrainMove(from: Vector3, to: Vector3): Vector3 {
     let bounded = clampToBounds(to, this.options.bounds, this.margin);
     const expanded = this.options.bounds.clone().expandByScalar(this.margin);
     if (!bounded.equals(to) && expanded.containsPoint(from)) {

@@ -1,12 +1,9 @@
 import {
-  AxesHelper,
   Box3,
   BufferAttribute,
   BufferGeometry,
-  CanvasTexture,
   Color,
   Line,
-  OrthographicCamera,
   LineBasicMaterial,
   LineDashedMaterial,
   LineSegments,
@@ -16,14 +13,14 @@ import {
   Quaternion,
   Scene,
   ShaderMaterial,
-  Sprite,
-  SpriteMaterial,
   Uint8BufferAttribute,
   Vector2,
   Vector3,
   WebGLRenderer,
 } from 'three';
-import { NavigationControls } from './navigation';
+import { damp, NavigationControls } from './navigation';
+import { applyMouseLook, createFlyState, flyOrientation, step, type FlyState } from './fly';
+import { orientationFor, stepAxisView, viewDirectionFor, type Axis } from './gizmo';
 import type { Bundle } from '../lib/bundle';
 import {
   colmapPoseToThree,
@@ -94,21 +91,7 @@ const raw = (h: string) => {
 
 export interface Callbacks {
   onPick: (point: number | null) => void;
-}
-
-function axisLabel(text: string, color: string, at: number[]) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d')!;
-  g.fillStyle = color;
-  g.font = '600 44px sans-serif';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText(text, 32, 34);
-  const sp = new Sprite(new SpriteMaterial({ map: new CanvasTexture(c), depthTest: false }));
-  sp.position.set(at[0], at[1], at[2]);
-  sp.scale.setScalar(0.6);
-  return sp;
+  onFlyModeChange?: (active: boolean) => void;
 }
 
 export class ViewerEngine {
@@ -132,8 +115,18 @@ export class ViewerEngine {
   private frustumNow: LineSegments;
   private dot: Points;
   private pickMark: Points;
-  private gizmoScene = new Scene();
-  private gizmoCam = new OrthographicCamera(-1.7, 1.7, 1.7, -1.7, 0.1, 10); // ortho: labels same size
+  private navigationBounds: Box3;
+  private flyState: FlyState | null = null;
+  private flyLookActive = false;
+  private flyDistance = 1;
+  private heldKeys = new Set<string>();
+  private pointerLocked = false;
+  private disposed = false;
+  private lookDrag: { id: number; x: number; y: number } | null = null;
+  private axisAnimation: {
+    pivot: Vector3;
+    target: ReturnType<typeof viewDirectionFor>;
+  } | null = null;
   private dirty = true;
   private raf = 0;
   private tween: null | {
@@ -167,6 +160,10 @@ export class ViewerEngine {
     const centers = m.frames.filter((f) => f.registered && f.center).map((f) => f.center!);
     this.bounds = robustBounds(b.position, centers);
     const r = this.bounds.radius;
+    this.navigationBounds = new Box3(
+      new Vector3(...this.bounds.min),
+      new Vector3(...this.bounds.max),
+    );
     this.regIdx = m.frames.filter((f) => f.registered && f.pose).map((f) => f.i);
     const wf = m.world.focus;
     this.focus = wf
@@ -280,27 +277,21 @@ export class ViewerEngine {
     this.pickMark.frustumCulled = false;
     this.scene.add(this.pickMark);
 
-    // ---- gizmo
-    this.gizmoScene.add(
-      new AxesHelper(1),
-      axisLabel('X', '#FF6B6B', [1.3, 0, 0]),
-      axisLabel('Y', '#6BE675', [0, 1.3, 0]),
-      axisLabel('Z', '#6BA8FF', [0, 0, 1.3]),
-    );
-
     // ---- camera + controls (Blender-like)
     this.camera.up.set(0, 0, 1);
     this.camera.near = r * 0.0005;
     this.camera.far = r * 60;
     this.controls = new NavigationControls(this.camera, canvas, {
       points: b.position,
-      bounds: new Box3(new Vector3(...this.bounds.min), new Vector3(...this.bounds.max)),
+      bounds: this.navigationBounds,
       minDistance: r * 0.002,
       collisionRadius: r * 0.003,
       boundsMargin: r,
       onChange: () => (this.dirty = true),
       onStart: () => {
+        if (this.flyMode) return;
         this.tween = null;
+        this.axisAnimation = null;
         this.exitRoll();
       },
     });
@@ -309,7 +300,16 @@ export class ViewerEngine {
     canvas.tabIndex = 0;
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointerup', this.onUp);
-    canvas.addEventListener('keydown', this.onKey);
+    canvas.addEventListener('pointermove', this.onLookDrag);
+    canvas.addEventListener('pointercancel', this.onLookEnd);
+    canvas.addEventListener('lostpointercapture', this.onLookEnd);
+    document.addEventListener('keydown', this.onKey);
+    document.addEventListener('keyup', this.onKeyUp);
+    document.addEventListener('mousemove', this.onMouseLook);
+    document.addEventListener('pointerlockchange', this.onPointerLockChange);
+    document.addEventListener('focusin', this.onFocusIn);
+    document.addEventListener('visibilitychange', this.onVisibility);
+    window.addEventListener('blur', this.onBlur);
     canvas.addEventListener('contextmenu', this.noCtx);
     this.setFrame(0);
     this.loop();
@@ -419,6 +419,9 @@ export class ViewerEngine {
 
   /** q1 = exact camera rotation (through-camera view, roll included); else normal orbit view. */
   private fly(p1: Vector3, g1: Vector3, fov: number, animate = true, q1?: Quaternion) {
+    this.exitFlyMode();
+    this.axisAnimation = null;
+    this.controls.stop();
     this.exitRoll();
     const p0 = this.camera.position.clone(),
       g0 = this.controls.target.clone();
@@ -451,16 +454,47 @@ export class ViewerEngine {
 
   private view(dir: Vector3, animate = true) {
     const c = new Vector3(...this.focus.center);
-    this.fly(c.clone().addScaledVector(dir.normalize(), this.focus.radius * 2.4), c, 50, animate);
+    const expanded = this.navigationBounds.clone().expandByScalar(this.bounds.radius);
+    const framingDistance = this.focus.radius * 2.4;
+    let distance = framingDistance;
+    // A wide/flat cloud's framing radius can exceed its vertical navigation room.
+    // Reset within a sphere that fits all six axis views at the same distance.
+    if (expanded.containsPoint(c))
+      for (let axis = 0; axis < 3; axis++)
+        distance = Math.min(
+          distance,
+          c.getComponent(axis) - expanded.min.getComponent(axis),
+          expanded.max.getComponent(axis) - c.getComponent(axis),
+        );
+    distance = Math.max(this.bounds.radius * 0.002, distance * 0.999);
+    const fov = Math.min(
+      120,
+      (Math.atan((framingDistance / distance) * Math.tan((25 * Math.PI) / 180)) * 360) / Math.PI,
+    );
+    this.fly(c.clone().addScaledVector(dir.normalize(), distance), c, fov, animate);
   }
   resetView(animate = true) {
     this.view(new Vector3(1, -1.3, 0.8), animate);
   }
   topView() {
-    this.view(new Vector3(0, -1e-4, 1));
+    this.axisView('z');
   }
   sideView() {
-    this.view(new Vector3(0, -1, 0.02));
+    this.axisView('x');
+  }
+
+  /** Axis buttons orbit the current pivot at the current distance, with stable pole up. */
+  axisView(axis: Axis) {
+    this.exitFlyMode();
+    this.tween = null;
+    this.rolled = false;
+    this.controls.stop();
+    this.controls.enabled = true;
+    this.axisAnimation = {
+      pivot: this.controls.target.clone(),
+      target: viewDirectionFor(axis, this.camera.up),
+    };
+    this.dirty = true;
   }
   /** Keep the viewing direction, centre on a finding. */
   flyToFinding(centroid: number[], diag: number) {
@@ -471,6 +505,8 @@ export class ViewerEngine {
     this.fly(c.clone().addScaledVector(dir.normalize(), dist), c, 50);
   }
   zoom(factor: number) {
+    this.exitFlyMode();
+    this.axisAnimation = null;
     this.tween = null;
     this.exitRoll();
     this.controls.zoom(factor);
@@ -505,10 +541,119 @@ export class ViewerEngine {
   }
 
   // ------------------------------------------------------------ input
+  get flyMode() {
+    return this.flyState !== null;
+  }
+
+  private enterFlyMode() {
+    if (this.flyMode || this.disposed) return;
+    this.tween = null;
+    this.axisAnimation = null;
+    this.rolled = false;
+    this.controls.stop();
+    this.controls.enabled = false;
+    this.flyDistance = Math.max(
+      this.camera.position.distanceTo(this.controls.target),
+      this.bounds.radius * 0.002,
+    );
+    this.flyState = createFlyState(
+      this.camera.position,
+      this.camera.getWorldDirection(new Vector3()),
+      new Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion),
+    );
+    this.flyLookActive = false;
+    this.heldKeys.clear();
+    this.canvas.focus({ preventScroll: true });
+    this.cb.onFlyModeChange?.(true);
+    this.requestPointerLock();
+  }
+
+  private requestPointerLock() {
+    if (!this.canvas.requestPointerLock || document.pointerLockElement) return;
+    try {
+      // Older browsers return void; rejected requests leave drag-to-look available.
+      const request = this.canvas.requestPointerLock();
+      void Promise.resolve(request)
+        .then(() => {
+          if ((!this.flyMode || this.disposed) && document.pointerLockElement === this.canvas)
+            document.exitPointerLock?.();
+        })
+        .catch(() => undefined);
+    } catch {
+      // Unsupported/denied pointer lock uses the same drag-to-look fallback.
+    }
+  }
+
+  private exitFlyMode() {
+    if (!this.flyMode) return;
+    this.flyState = null;
+    this.heldKeys.clear();
+    this.endLookDrag();
+    this.controls.target
+      .copy(this.camera.position)
+      .addScaledVector(this.camera.getWorldDirection(new Vector3()), this.flyDistance);
+    this.controls.stop();
+    this.controls.enabled = true;
+    this.pointerLocked = false;
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock?.();
+    this.cb.onFlyModeChange?.(false);
+    this.dirty = true;
+  }
+
+  private onPointerLockChange = () => {
+    const locked = document.pointerLockElement === this.canvas;
+    if (locked && (!this.flyMode || this.disposed)) {
+      document.exitPointerLock?.();
+      return;
+    }
+    if (!locked && this.pointerLocked) this.exitFlyMode();
+    this.pointerLocked = locked;
+  };
+
+  private look(dx: number, dy: number) {
+    if (!this.flyState || (!dx && !dy)) return;
+    this.flyLookActive = true;
+    this.flyState = applyMouseLook(this.flyState, dx, dy, 0.002);
+    this.dirty = true;
+  }
+
+  private onMouseLook = (e: MouseEvent) => {
+    if (document.pointerLockElement === this.canvas) this.look(e.movementX, e.movementY);
+  };
+
+  private onLookDrag = (e: PointerEvent) => {
+    if (!this.flyMode || !this.lookDrag || document.pointerLockElement === this.canvas) return;
+    if (e.pointerId !== this.lookDrag.id) return;
+    this.look(e.clientX - this.lookDrag.x, e.clientY - this.lookDrag.y);
+    this.lookDrag.x = e.clientX;
+    this.lookDrag.y = e.clientY;
+    e.preventDefault();
+  };
+
+  private endLookDrag() {
+    const drag = this.lookDrag;
+    this.lookDrag = null;
+    if (drag && this.canvas.hasPointerCapture?.(drag.id))
+      this.canvas.releasePointerCapture(drag.id);
+  }
+  private onLookEnd = (e: PointerEvent) => {
+    if (e.pointerId === this.lookDrag?.id) this.endLookDrag();
+  };
+
   private down = { x: 0, y: 0 };
-  private onDown = (e: PointerEvent) => (this.down = { x: e.clientX, y: e.clientY });
+  private onDown = (e: PointerEvent) => {
+    this.down = { x: e.clientX, y: e.clientY };
+    if (this.flyMode && e.button === 0 && document.pointerLockElement !== this.canvas) {
+      this.canvas.focus({ preventScroll: true });
+      this.lookDrag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      this.canvas.setPointerCapture?.(e.pointerId);
+      e.preventDefault();
+    }
+  };
   private onUp = (e: PointerEvent) => {
+    this.onLookEnd(e);
     if (
+      this.flyMode ||
       e.button !== 0 ||
       e.shiftKey ||
       Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 4
@@ -517,13 +662,143 @@ export class ViewerEngine {
     this.cb.onPick(this.pickAt(e) ?? null);
   };
   private noCtx = (e: Event) => e.preventDefault();
+
+  private isEditing(target: EventTarget | null) {
+    return (
+      target instanceof Element &&
+      !!target.closest(
+        'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]',
+      )
+    );
+  }
+  private keyName(e: KeyboardEvent) {
+    // Physical WASD also works with Russian/Kazakh keyboard layouts.
+    return /^Key[WASD]$/.test(e.code) ? e.code.slice(3).toLowerCase() : e.key.toLowerCase();
+  }
   private onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Home') this.resetView();
-    else if (e.key === 'f' || e.key === 'F') this.resetView();
-    else if (e.key === '1') this.sideView();
-    else if (e.key === '3') this.view(new Vector3(1, 0, 0.02));
-    else if (e.key === '7') this.topView();
+    const key = this.keyName(e);
+    const flyExit = this.flyMode && (key === 'f' || e.code === 'KeyF' || key === 'escape');
+    if (
+      this.isEditing(e.target) ||
+      this.isEditing(document.activeElement) ||
+      e.ctrlKey ||
+      e.metaKey ||
+      e.altKey ||
+      (document.activeElement !== this.canvas &&
+        e.target !== this.canvas &&
+        document.pointerLockElement !== this.canvas &&
+        !flyExit)
+    )
+      return;
+    if (key === 'f' || e.code === 'KeyF') {
+      if (!e.repeat) {
+        if (this.flyMode) this.exitFlyMode();
+        else this.enterFlyMode();
+      }
+    } else if (this.flyMode) {
+      if (key === 'escape') this.exitFlyMode();
+      else if (['w', 'a', 's', 'd', 'shift'].includes(key)) this.heldKeys.add(key);
+      else return;
+    } else if (key === 'home') this.resetView();
+    else if (key === '1') this.axisView('-y');
+    else if (key === '3') this.sideView();
+    else if (key === '7') this.topView();
+    else return;
+    if (this.flyMode && e.shiftKey) this.heldKeys.add('shift');
+    e.preventDefault();
   };
+  private onKeyUp = (e: KeyboardEvent) => {
+    this.heldKeys.delete(this.keyName(e));
+  };
+  private onFocusIn = (e: FocusEvent) => {
+    if (this.isEditing(e.target)) this.exitFlyMode();
+    else if (e.target !== this.canvas) this.heldKeys.clear();
+  };
+  private onBlur = () => this.exitFlyMode();
+  private onVisibility = () => {
+    if (document.hidden) this.exitFlyMode();
+  };
+
+  private updateFly(dt: number) {
+    if (!this.flyState) return;
+    const previousPosition = this.camera.position.clone();
+    const previousRotation = this.camera.quaternion.clone();
+    const diagonal = this.navigationBounds.getSize(new Vector3()).length();
+    this.flyState = step(
+      this.flyState,
+      {
+        forward: this.heldKeys.has('w'),
+        backward: this.heldKeys.has('s'),
+        left: this.heldKeys.has('a'),
+        right: this.heldKeys.has('d'),
+        boost: this.heldKeys.has('shift'),
+      },
+      dt,
+      {
+        baseSpeed: Math.max(diagonal * 0.15, 1e-6),
+        boostMultiplier: 4,
+        damping: 10,
+        bounds: this.navigationBounds,
+        boundsMargin: this.bounds.radius,
+      },
+    );
+    const safe = this.controls.constrainMove(previousPosition, this.flyState.position);
+    if (!safe.equals(this.flyState.position)) this.flyState.velocity.set(0, 0, 0);
+    this.flyState.position.copy(safe);
+    this.camera.position.copy(safe);
+    if (this.flyLookActive) {
+      const target = flyOrientation(this.flyState);
+      this.camera.quaternion.slerp(target, damp(0, 1, 16, dt));
+      if (this.camera.quaternion.angleTo(target) < 1e-6) this.camera.quaternion.copy(target);
+    }
+    this.camera.updateMatrixWorld();
+    this.dirty ||=
+      !previousPosition.equals(safe) || !previousRotation.equals(this.camera.quaternion);
+  }
+
+  private updateAxisView(dt: number) {
+    const animation = this.axisAnimation;
+    if (!animation) return;
+    const target = orientationFor(animation.target.direction, animation.target.up);
+    // Sweep short chords of the spherical flight, keeping radius when obstructed.
+    const radialAngle = this.camera.position
+      .clone()
+      .sub(animation.pivot)
+      .angleTo(animation.target.direction);
+    const angle =
+      Math.max(this.camera.quaternion.angleTo(target), radialAngle) * damp(0, 1, 10, dt);
+    const radius = this.camera.position.distanceTo(animation.pivot);
+    const maxAngle = Math.min(
+      0.025,
+      Math.sqrt((this.bounds.radius * 0.003) / Math.max(radius, 1e-9)),
+    );
+    const steps = Math.max(1, Math.ceil(angle / maxAngle));
+    for (let i = 0; i < steps; i++) {
+      const next = stepAxisView(
+        {
+          position: this.camera.position,
+          quaternion: this.camera.quaternion,
+        },
+        animation.pivot,
+        animation.target,
+        dt / steps,
+      );
+      const safe = this.controls.constrainMove(this.camera.position, next.position);
+      if (!safe.equals(next.position)) {
+        this.axisAnimation = null;
+        break;
+      }
+      this.camera.position.copy(next.position);
+      this.camera.quaternion.copy(next.quaternion);
+    }
+    if (
+      this.camera.quaternion.angleTo(target) < 1e-5 &&
+      this.camera.position.clone().sub(animation.pivot).angleTo(animation.target.direction) < 1e-5
+    )
+      this.axisAnimation = null;
+    this.camera.updateMatrixWorld();
+    this.dirty = true;
+  }
 
   private pickAt(e: MouseEvent): number | undefined {
     const rc = this.canvas.getBoundingClientRect();
@@ -555,7 +830,7 @@ export class ViewerEngine {
   private loop = () => {
     this.raf = requestAnimationFrame(this.loop);
     const now = performance.now();
-    const dt = Math.max(0, (now - this.lastUpdate) / 1000);
+    const dt = Math.min(0.05, Math.max(0, (now - this.lastUpdate) / 1000));
     this.lastUpdate = now;
     if (this.tween) {
       const tw = this.tween;
@@ -572,7 +847,9 @@ export class ViewerEngine {
       if (k >= 1) this.tween = null;
       this.dirty = true;
     }
-    if (this.bench) {
+    this.updateFly(dt);
+    this.updateAxisView(dt);
+    if (this.bench && !this.flyMode && !this.axisAnimation) {
       // steady-state measurement: slowly orbit so every frame is a real redraw
       const t = this.controls.target,
         p = this.camera.position;
@@ -584,7 +861,8 @@ export class ViewerEngine {
       this.controls.sync();
       this.dirty = true;
     }
-    if (!this.rolled && this.controls.update(dt)) this.dirty = true;
+    if (!this.rolled && !this.flyMode && !this.axisAnimation && this.controls.update(dt))
+      this.dirty = true;
     // fps = frames actually rendered per second; renders are on demand, so idle reads 0
     if (this.dirty) {
       this.dirty = false;
@@ -614,25 +892,27 @@ export class ViewerEngine {
     if (atCam) this.frustumAll.visible = this.frustumNow.visible = this.dot.visible = false;
     r.render(this.scene, this.camera);
     [this.frustumAll.visible, this.frustumNow.visible, this.dot.visible] = shown;
-    // axis gizmo, bottom-left, second viewport via scissor
-    const s = 96;
-    r.setViewport(12, 12, s, s);
-    r.setScissor(12, 12, s, s);
-    r.setScissorTest(true);
-    r.clearDepth();
-    this.gizmoCam.quaternion.copy(this.camera.quaternion);
-    this.gizmoCam.position.set(0, 0, 3.2).applyQuaternion(this.camera.quaternion);
-    r.render(this.gizmoScene, this.gizmoCam);
-    r.setScissorTest(false);
     this.onRender?.();
   }
 
   dispose() {
+    this.disposed = true;
+    this.exitFlyMode();
+    this.axisAnimation = null;
     cancelAnimationFrame(this.raf);
     const c = this.canvas;
     c.removeEventListener('pointerdown', this.onDown);
     c.removeEventListener('pointerup', this.onUp);
-    c.removeEventListener('keydown', this.onKey);
+    c.removeEventListener('pointermove', this.onLookDrag);
+    c.removeEventListener('pointercancel', this.onLookEnd);
+    c.removeEventListener('lostpointercapture', this.onLookEnd);
+    document.removeEventListener('keydown', this.onKey);
+    document.removeEventListener('keyup', this.onKeyUp);
+    document.removeEventListener('mousemove', this.onMouseLook);
+    document.removeEventListener('pointerlockchange', this.onPointerLockChange);
+    document.removeEventListener('focusin', this.onFocusIn);
+    document.removeEventListener('visibilitychange', this.onVisibility);
+    window.removeEventListener('blur', this.onBlur);
     c.removeEventListener('contextmenu', this.noCtx);
     this.controls.dispose();
     this.renderer.dispose();
