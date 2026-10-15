@@ -63,7 +63,7 @@ def benchmark(team, sha: str) -> dict | None:
     if not tmp.exists():
         team.git("worktree", "add", "--detach", str(tmp), sha)
     try:
-        cmd = bcfg["command"].format(data=team.root / "data", out=out)
+        cmd = bcfg["command"].format(data=team.root / "data" / "samples", out=out)
         r = team.run_proc(cmd, cwd=str(tmp), timeout=bcfg["timeout_min"] * 60)
         (out / "log.txt").write_text(team.redact(r["output"]))
         if r["ok"] and (out / "results.json").exists():
@@ -274,7 +274,9 @@ def release(team) -> str:
     team.emit("brain", f"release: benchmark on {base} @ {dev_sha[:8]}", status="working")
     on_dev = benchmark(team, dev_sha)
     if on_dev is None:
-        return f"release blocked: the full benchmark does not run on {base} (P1 not merged yet?)"
+        log = team.home / "bench" / dev_sha / "log.txt"
+        tail = log.read_text()[-600:] if log.exists() else "(no log)"
+        return f"release blocked: the full benchmark failed on {base} @ {dev_sha[:8]}:\n{tail}"
     on_main = benchmark(team, main_sha)
     if on_main and (reg := regressions(on_main, on_dev, team.cfg["gates"]["benchmark"])):
         return "release blocked, benchmark regression vs main:\n- " + "\n- ".join(reg)

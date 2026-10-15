@@ -247,7 +247,7 @@ def test_stop_kills_running_children(repo):
 def test_release_merges_dev_into_main_only_with_a_green_benchmark(repo):
     team, graph = make(repo, Dev(lambda wt, s: (wt / "pipeline" / "b.py").write_text("x\n")))
     run(graph)
-    assert release(team).startswith("release blocked: the full benchmark does not run")
+    assert release(team).startswith("release blocked: the full benchmark failed")
     assert "pipeline/b.py" not in remote_files(repo, "main")
 
     team.cfg["gates"] = bench_repo(repo, "90")

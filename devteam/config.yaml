@@ -12,7 +12,8 @@ gates:
   ci_timeout_min: 40
   benchmark:
     when_paths: [pipeline/]   # run only when the change touches these
-    # Contract (task P1): writes {out}/results.json, reads videos from {data} (read-only).
+    # Contract (task P1): writes {out}/results.json, reads videos from {data} (read-only);
+    # {data} = data/samples of the main checkout.
     command: cd pipeline && uv run python -m qarau_pipeline benchmark --data {data} --out {out}
     timeout_min: 90
     max_drop_registered_pct: 2.0   # percentage points
