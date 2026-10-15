@@ -170,8 +170,10 @@ def main():
         choices=["run", "resume", "stop", "status", "costs", "report", "release", "cleanup"],
     )
     p.add_argument("--fake", action="store_true", help="fake agents, no cost, separate state")
+    p.add_argument("--only", default="", help="run: only these task ids, e.g. --only P1,A1a")
     args = p.parse_args()
     team = make_team(args.fake)
+    team.only = {t for t in args.only.split(",") if t}
     if args.command in ("run", "resume"):
         run_graph(team, resume=args.command == "resume")
     elif args.command == "stop":

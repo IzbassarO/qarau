@@ -153,6 +153,7 @@ class Team:
             shutil.copy(real_backlog, self.backlog_path)
         self._lock = threading.Lock()  # ponytail: one lock for backlog + log, fine for 2 devs
         self._procs: set[subprocess.Popen] = set()
+        self.only: set[str] = set()
         if remote is None and fake:
             remote = str(self.home / "remote.git")
             if not Path(remote).exists():
@@ -770,6 +771,8 @@ def build_graph(team: Team, checkpointer):
             for t in team.load_backlog()
             if t["status"] == "todo" or (t["status"] == "in_progress" and t.get("run") == run)
         ]
+        if team.only:  # `devteam run --only P1`
+            todo = [t for t in todo if t["id"] in team.only]
         areas = {a for d in cfg["developers"].values() for a in d["areas"]}
         if no_area := [t["id"] for t in todo if t.get("area") not in areas]:
             team.emit("brain", f"skipping tasks without a known area {sorted(areas)}: {no_area}")

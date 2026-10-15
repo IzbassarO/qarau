@@ -41,7 +41,7 @@ developers:
     tool: claude           # Claude Code headless, your subscription (CLAUDE_CODE_OAUTH_TOKEN)
     areas: [core]          # backlog tasks with this area may go to this developer
     owns: [pipeline/, backend/, infra/]
-    timeout_min: 60
+    timeout_min: 90
     allowed_tools:
       - Read
       - Edit
@@ -61,9 +61,10 @@ developers:
       - "Bash(git branch:*)"
       - "Bash(gh:*)"
     setup: []
-    checks:
-      - cd pipeline && uv run ruff check . && uv run ruff format --check .
+    checks:                # same as GitHub CI, so CI rarely surprises
+      - cd pipeline && uv run ruff check . && uv run ruff format --check . && uv run mypy .
       - cd pipeline && uv run pytest -q
+      - cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy .
       - cd backend && uv run pytest -q
   dev_app:
     tool: codex            # Codex CLI, your saved ChatGPT login
@@ -74,4 +75,4 @@ developers:
       - cd web && pnpm install --frozen-lockfile
     checks:
       - cd web && pnpm lint && pnpm typecheck
-      - cd web && pnpm test
+      - cd web && pnpm test && pnpm build

@@ -76,6 +76,24 @@ class StubClient:
         self.calls, self.error = 0, error
         self.messages = self
 
+    def stream(self, **kw):
+        outer = self
+
+        class Ctx:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def get_final_message(self):
+                return outer.create(**kw)
+
+        if self.error:
+            self.calls += 1
+            raise self.error
+        return Ctx()
+
     def create(self, **kw):
         self.calls += 1
         if self.error:
