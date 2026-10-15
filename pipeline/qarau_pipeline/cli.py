@@ -1,4 +1,4 @@
-"""CLI: python -m qarau_pipeline {run,export,segment,project} ..."""
+"""CLI: python -m qarau_pipeline {run,export,segment,project,benchmark} ..."""
 
 from __future__ import annotations
 
@@ -118,6 +118,12 @@ def cmd_project(a: argparse.Namespace) -> None:
     print("project:", project_stage(Path(a.run).resolve(), a.scale))
 
 
+def cmd_benchmark(a: argparse.Namespace) -> None:
+    from .benchmark import run_benchmark
+
+    sys.exit(run_benchmark(a.data, a.out, a.only, a.timeout_s, a.record))
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="qarau_pipeline")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -149,6 +155,14 @@ def main(argv: list[str] | None = None) -> None:
     pj.add_argument("--run", required=True)
     pj.add_argument("--scale", type=float, help="metres per world unit (area in m2 only with it)")
     pj.set_defaults(fn=cmd_project)
+    b = sub.add_parser("benchmark", help="all reference videos -> <out>/results.json")
+    b.add_argument("--data", required=True, help="dir with the reference videos (read-only)")
+    b.add_argument("--out", required=True)
+    b.add_argument("--only", nargs="+", metavar="NAME", help="manifest names to run")
+    b.add_argument("--timeout-s", type=float, default=1800, help="per video (default 1800)")
+    b.add_argument("--record", action="store_true", help="also write docs/benchmarks/<sha>.json"
+                   " and append rows to docs/notes/benchmark.md")  # fmt: skip
+    b.set_defaults(fn=cmd_benchmark)
     a = p.parse_args(argv)
     try:
         a.fn(a)

@@ -1,0 +1,33 @@
+# Reference videos for `python -m qarau_pipeline benchmark` (docs/notes/benchmark.md).
+# Image-folder datasets (south-building, attisholz-areal, ...) are out of scope for now:
+# the benchmark runs the video path only.
+
+[[video]]
+name = "aegviidu"
+file = "aegviidu_water_tower.ogv"
+required = true
+notes = "drone orbit around a water tower, long; COLMAP splits it into several models"
+
+[[video]]
+name = "mykolaiv"
+file = "mykolaiv_oil_tanks.webm"
+required = true
+notes = "drone over oil tanks (first market asset type)"
+
+[[video]]
+name = "notre-dame"
+file = "notre_dame_oubiels.webm"
+required = true
+notes = "drone, 20 s, 640x480 church; fast smoke run"
+
+[[video]]
+name = "orono"
+file = "orono_water_tower.webm"
+required = true
+notes = "drone orbit around a water tower"
+
+[[video]]
+name = "room"
+file = "IMG_8315.MOV"
+required = false
+notes = "owner's iPhone HDR portrait room walk (private; absent from the gate's data dir)"

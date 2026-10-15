@@ -1,0 +1,43 @@
+{
+  "commit": "667d6ee",
+  "dirty": true,
+  "pipeline_version": null,
+  "started_at": "2026-10-15T01:40:33+00:00",
+  "videos": {
+    "mykolaiv": {
+      "registered_pct": 84.8,
+      "models": 3,
+      "reproj_px": 0.638,
+      "points": 10845,
+      "scale_err_cm": null,
+      "time_s": 645.2,
+      "frames_used": 210,
+      "registered": 178
+    },
+    "notre-dame": {
+      "registered_pct": 100.0,
+      "models": 1,
+      "reproj_px": 0.395,
+      "points": 43269,
+      "scale_err_cm": null,
+      "time_s": 148.9,
+      "frames_used": 109,
+      "registered": 109
+    },
+    "room": {
+      "registered_pct": 95.5,
+      "models": 3,
+      "reproj_px": 0.931,
+      "points": 26688,
+      "scale_err_cm": null,
+      "time_s": 395.3,
+      "frames_used": 269,
+      "registered": 257
+    }
+  },
+  "errors": {
+    "aegviidu": "timeout after 1800 s",
+    "orono": "timeout after 1800 s"
+  },
+  "skipped": []
+}
