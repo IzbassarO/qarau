@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useI18n } from '../i18n';
-import { runUrl, type Bundle } from '../lib/bundle';
+import { runUrl, type Bundle, type Finding } from '../lib/bundle';
 import { csrSlice, heightRamp, RAMP } from '../lib/geometry';
 import { ViewerEngine, type Options } from './engine';
 import { H2, LangSwitch, Logo, Row, Toggle } from './ui';
@@ -77,11 +77,19 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
     showCurrent: true,
     frustums: true,
     rgb: false,
+    findings: true,
     pointSize: 2.5,
   });
+  const [sel, setSel] = useState<number | null>(null);
+  const markerEls = useRef(new Map<number, HTMLButtonElement>());
   const [glError, setGlError] = useState(false);
 
   const f = frames[frame];
+  const findings = useMemo(() => bundle.findings ?? [], [bundle]);
+  const selected = findings.find((x) => x.id === sel) ?? null;
+  const sevColor = (x: Finding) => (x.severity === 'critical' ? '#F0565C' : '#F2A33A');
+  // a finding exists on the map once its first frame has played (always, with build-up off)
+  const seen = (x: Finding) => !opts.buildUp || !x.frames.length || x.frames[0] <= frame;
   const tc = (i: number) => (isImages ? `#${i}` : fmtTime(frames[i].t));
 
   // engine lifecycle
@@ -125,6 +133,27 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
   useEffect(() => engineRef.current?.setFrame(frame), [frame, bundle]);
   useEffect(() => engineRef.current?.setOptions(opts), [opts, bundle]);
   useEffect(() => engineRef.current?.setPicked(picked), [picked, bundle]);
+  useEffect(() => engineRef.current?.setSelectedFinding(sel ?? 0), [sel, bundle]);
+
+  // finding markers are HTML on top of the canvas, re-placed after every render
+  useEffect(() => {
+    const e = engineRef.current;
+    if (!e) return;
+    const place = () => {
+      for (const x of findings) {
+        const el = markerEls.current.get(x.id);
+        if (!el) continue;
+        const p = e.project(x.centroid);
+        el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)`;
+        el.style.visibility = p.visible ? 'visible' : 'hidden';
+      }
+    };
+    e.onRender = place;
+    place();
+    return () => {
+      e.onRender = undefined;
+    };
+  }, [bundle, findings, frame, opts.buildUp, opts.findings]);
 
   // play: step in real time by frames[i].t (photo sets: 4 frames per second)
   useEffect(() => {
@@ -151,6 +180,13 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
     engineRef.current?.viewThroughFrame(i);
   };
 
+  const select = (x: Finding) => {
+    if (sel === x.id) return setSel(null);
+    setSel(x.id);
+    const d = x.bbox.max.map((v, k) => v - x.bbox.min[k]);
+    engineRef.current?.flyToFinding(x.centroid, Math.hypot(d[0], d[1], d[2]));
+  };
+
   const observed = useMemo(
     () =>
       picked === null
@@ -160,6 +196,7 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
   );
 
   const eng = () => engineRef.current;
+  const tickFindings = !opts.findings ? [] : selected ? [selected] : findings;
   const ticks = frames.filter((x) => !x.registered || !x.kept);
   const stats = m.stats;
   const totalS = Object.values(stats.processing_s ?? {}).reduce((a, b) => a + b, 0);
@@ -171,7 +208,7 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
         <Link to="/" aria-label="Qarau">
           <Logo />
         </Link>
-        <span className="text-ink-2">{m.run_id}</span>
+        <span className="text-ink-2">{bundle.runId}</span>
         <div
           role="tablist"
           className="flex gap-0.5 rounded-[9px] border border-line-strong p-[3px]"
@@ -194,7 +231,7 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
         <div className="grow" />
         <span className={`${mono} text-xs text-ink-2`}>
           {stats.points.toLocaleString()}
-          {import.meta.env.DEV && ` · ${fps} fps`}
+          {import.meta.env.DEV && fps > 0 && ` · ${fps} fps`}
         </span>
         <LangSwitch />
       </header>
@@ -249,6 +286,27 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
                 {t('error.webgl')}
               </p>
             )}
+            {opts.findings && (
+              <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                {findings.filter(seen).map((x) => (
+                  <button
+                    key={x.id}
+                    type="button"
+                    ref={(el) => {
+                      if (el) markerEls.current.set(x.id, el);
+                      else markerEls.current.delete(x.id);
+                    }}
+                    data-testid="finding-marker"
+                    aria-label={`${t('findings.marker')} ${x.id}`}
+                    onClick={() => select(x)}
+                    className={`pointer-events-auto absolute left-0 top-0 flex size-6 cursor-pointer items-center justify-center rounded-full border-2 p-0 font-mono text-xs font-semibold text-bg ${x.id === sel ? 'border-white' : 'border-bg'} ${x.status === 'low_evidence' ? 'opacity-80 outline-dashed outline-1 outline-offset-2 outline-ink-2' : ''}`}
+                    style={{ background: sevColor(x) }}
+                  >
+                    {x.id}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="absolute right-3 top-3 flex flex-col gap-1.5 rounded-lg bg-bg/85 px-3 py-2.5 text-xs leading-4">
               {[
                 ['#EAF2FF', 'legend.now'],
@@ -291,7 +349,7 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
               <span className={`${mono} min-w-24 text-[13px]`}>{tc(frame)}</span>
               <div className="relative flex h-9 grow items-center">
                 <div aria-hidden="true" className="absolute inset-x-0 top-0.5 h-2">
-                  {/* ponytail: finding ticks arrive in M2; gray marks = frames not used */}
+                  {/* gray marks = frames not used; coloured = frames where a finding is visible */}
                   {ticks.map((x) => (
                     <span
                       key={x.i}
@@ -300,6 +358,20 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
                       style={{ left: `${(x.i / Math.max(1, frames.length - 1)) * 100}%` }}
                     />
                   ))}
+                  {tickFindings.flatMap((x) =>
+                    x.frames.map((i) => (
+                      <span
+                        key={`${x.id}-${i}`}
+                        data-testid="finding-tick"
+                        title={`${t('timeline.findingTick')}: ${t('findings.marker')} ${x.id}`}
+                        className="absolute top-0 h-2 w-0.5 rounded-sm"
+                        style={{
+                          left: `${(i / Math.max(1, frames.length - 1)) * 100}%`,
+                          background: sevColor(x),
+                        }}
+                      />
+                    )),
+                  )}
                 </div>
                 <input
                   type="range"
@@ -356,6 +428,86 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
             <p className="m-0 text-xs text-ink-2">{t('panel.cameraHeightNote')}</p>
           </section>
 
+          <section className="flex flex-col gap-2" aria-label={t('findings.title')}>
+            <H2>{t('findings.title')}</H2>
+            {!m.findings ? (
+              <p className="m-0 text-[13px] text-ink-2">{t('findings.notRun')}</p>
+            ) : bundle.findingsError ? (
+              <p role="alert" className="m-0 text-[13px] text-watch">
+                {t(
+                  bundle.findingsError === 'missing'
+                    ? 'findings.errorMissing'
+                    : 'findings.errorBroken',
+                )}
+              </p>
+            ) : findings.length === 0 ? (
+              <p className="m-0 text-[13px] text-ink-2">{t('findings.empty')}</p>
+            ) : (
+              <ul className="m-0 flex list-none flex-col gap-1 p-0">
+                {findings.map((x) => (
+                  <li key={x.id}>
+                    <button
+                      type="button"
+                      data-testid="finding-item"
+                      aria-pressed={x.id === sel}
+                      onClick={() => select(x)}
+                      className={`flex w-full cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-1.5 text-left text-[13px] text-ink ${x.id === sel ? 'border-line-strong bg-raised' : 'border-transparent bg-transparent'}`}
+                    >
+                      <span
+                        className="flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-xs font-semibold text-bg"
+                        style={{ background: sevColor(x) }}
+                      >
+                        {x.id}
+                      </span>
+                      <span className="flex min-w-0 grow flex-col">
+                        <span className="truncate">
+                          {x.class} ·{' '}
+                          {t(x.severity === 'critical' ? 'findings.critical' : 'findings.watch')}
+                        </span>
+                        <span
+                          className={`text-xs ${x.status === 'low_evidence' ? 'text-watch' : 'text-ink-2'}`}
+                        >
+                          {t(
+                            x.status === 'low_evidence'
+                              ? 'findings.lowEvidence'
+                              : 'findings.confirmed',
+                          )}
+                        </span>
+                      </span>
+                      <span className={`${mono} shrink-0 text-xs text-ink-2`}>
+                        {x.frames.length} {t('findings.frames')}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {selected && (
+              <div
+                data-testid="finding-detail"
+                className="flex flex-col gap-2 rounded-[10px] border border-line-strong p-3"
+              >
+                {selected.status === 'low_evidence' && (
+                  <p className="m-0 text-xs text-watch">{t('findings.lowEvidenceNote')}</p>
+                )}
+                <span className="text-[13px]">{t('findings.seenAt')}</span>
+                <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
+                  {selected.frames.map((i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      data-testid="finding-timecode"
+                      onClick={() => jump(i)}
+                      className={`${mono} h-7 cursor-pointer rounded-md border border-line-strong bg-transparent px-2 text-xs text-ink ${i === frame ? 'bg-raised' : ''}`}
+                    >
+                      {tc(i)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+
           <section className="flex flex-col gap-1.5">
             <H2>{t('show.title')}</H2>
             <Toggle on={opts.buildUp} onChange={(v) => setOpts({ ...opts, buildUp: v })}>
@@ -367,6 +519,11 @@ export function ViewerScreen({ bundle }: { bundle: Bundle }) {
             <Toggle on={opts.frustums} onChange={(v) => setOpts({ ...opts, frustums: v })}>
               {t('show.frustums')}
             </Toggle>
+            {findings.length > 0 && (
+              <Toggle on={opts.findings} onChange={(v) => setOpts({ ...opts, findings: v })}>
+                {t('show.findings')}
+              </Toggle>
+            )}
             <Toggle on={opts.rgb} onChange={(v) => setOpts({ ...opts, rgb: v })}>
               {t('show.rgb')}
             </Toggle>

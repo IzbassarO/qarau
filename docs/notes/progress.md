@@ -2,6 +2,43 @@
 
 Newest first. Keep it short.
 
+## 2026-10-14 — New direction: MVP plan; Step 1 room test (`feat/room-test`)
+
+- Owner's brief arrived **without the plan text** (placeholder `<paste the plan here>`):
+  `docs/plan/mvp.md`, roadmap update and `docs/tasks/phase1.md` wait for it.
+- Room video (`IMG_8315.MOV`, iPhone HDR portrait): M1 registered 14 of 111 frames. Fixed in
+  the frames/reconstruction stages (HDR→SDR, long-side cap, 6 fps, exhaustive matching ≤ 300)
+  → 244 of 269, 26 k points. Details: `docs/notes/room-test.md`, `docs/notes/benchmark.md`.
+- No A4 visible in the video → scale check needs a re-shoot.
+- "Original colours" toggle already existed in the viewer; checked on the room.
+- R and D agent worktrees from M2 prep left as they are (D has the dense stage, unmerged).
+
+## 2026-10-14 — M2 prep resumed after the session stopped
+
+- Merged: V (roll-exact camera view, object-focused initial view, bundle v2 reader,
+  findings UI) and T (datasets, `docs/notes/datasets.md`, Raketa shipwreck drone video).
+- R, D, S agents had stopped mid-way; relaunched in their own worktrees from where they were:
+  - R: PostGIS test committed; recon eval done on notre-dame (global mapper + loop +
+    overlap 20 registers 54/54 vs 52/54), Aegviidu baseline only (6 models, 127/177).
+  - D: Depth Anything V2 Small (Apache-2.0) scaled to sparse COLMAP points → 7.1 M points on
+    Orono (held-out depth error median 4.3 %); export to bundle v2 and viewer check pending.
+  - S: segmenters + projection committed; real-footage run (Raketa) and ADR pending.
+
+## 2026-10-14 — M2 prep started (`feat/m2-prep`)
+
+**Done**
+- PR #1 (M0 + M1) merged into `main` after owner review; CI green.
+- Task `docs/tasks/M2.md` and plan `docs/notes/m2-plan.md` (bundle v2 + findings contract,
+  `Segmenter`/`Densifier` interfaces, five parallel parts R/D/S/V/T). `ml` dependency group
+  (torch, transformers) kept out of default `uv sync`.
+
+**In progress (Sonnet agents, coordinator reviews before merge)**
+- R: reconstruction eval (loop detection / overlap / global mapper) on all four runs, ADR 0007; PostGIS test + CI.
+- D: densification without CUDA, commercial-licence models only, ≥ 1 M points on Orono, ADR 0008.
+- S: segmenters (manual, local dev-only, SAM 3.1 API stub), mask → 3D projection, voting, findings, ADR 0009.
+- V: through-camera roll, initial view on the object, bundle v2 reader, findings UI.
+- T: CC-licensed defect footage + segmentation dataset, `docs/notes/datasets.md`.
+
 ## 2026-10-14 — Part B (pipeline) merged; M0 + M1 complete on public data
 
 **Done**

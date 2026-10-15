@@ -159,3 +159,130 @@ export function median(a: number[]): number {
   a.sort((x, y) => x - y);
   return a[a.length >> 1];
 }
+
+export interface Focus {
+  center: number[];
+  radius: number;
+  method: 'converge' | 'density' | 'manifest';
+}
+
+export interface Ray {
+  center: number[];
+  forward: number[];
+}
+
+const det3 = (m: number[]) =>
+  m[0] * (m[4] * m[8] - m[5] * m[7]) -
+  m[1] * (m[3] * m[8] - m[5] * m[6]) +
+  m[2] * (m[3] * m[7] - m[4] * m[6]);
+
+/**
+ * Least-squares point closest to all optical axes (trimmed twice against outlier cameras).
+ * Returns null when the axes do not converge: near-parallel (forward motion, det ratio ~ 0) or
+ * the point is behind most cameras.
+ */
+export function convergePoint(rays: Ray[]): number[] | null {
+  let use = rays;
+  let x: number[] | null = null;
+  for (let it = 0; it < 3 && use.length >= 3; it++) {
+    const A = new Array<number>(9).fill(0);
+    const b = [0, 0, 0];
+    for (const { center: o, forward: d } of use)
+      for (let r = 0; r < 3; r++)
+        for (let c = 0; c < 3; c++) {
+          const a = (r === c ? 1 : 0) - d[r] * d[c];
+          A[r * 3 + c] += a;
+          b[r] += a * o[c];
+        }
+    const det = det3(A);
+    const mean = (A[0] + A[4] + A[8]) / 3;
+    if (it === 0 && det / mean ** 3 < 0.1) return null; // axes (nearly) parallel
+    if (!(Math.abs(det) > 1e-12)) return null;
+    const sol = [0, 1, 2].map((k) => {
+      const m = A.slice();
+      for (let r = 0; r < 3; r++) m[r * 3 + k] = b[r];
+      return det3(m) / det;
+    });
+    x = sol;
+    const dist = use.map(({ center: o, forward: d }) => {
+      const v = [sol[0] - o[0], sol[1] - o[1], sol[2] - o[2]];
+      const t = v[0] * d[0] + v[1] * d[1] + v[2] * d[2];
+      return Math.hypot(v[0] - t * d[0], v[1] - t * d[1], v[2] - t * d[2]);
+    });
+    const cut = [...dist].sort((a, c) => a - c)[Math.floor(dist.length * 0.8)];
+    use = use.filter((_, k) => dist[k] <= cut);
+  }
+  if (!x) return null;
+  const c = x;
+  const front = rays.filter(
+    ({ center: o, forward: d }) =>
+      (c[0] - o[0]) * d[0] + (c[1] - o[1]) * d[1] + (c[2] - o[2]) * d[2] > 0,
+  ).length;
+  return front >= rays.length * 0.7 ? c : null;
+}
+
+/**
+ * Where the inspected object is: the converge point of the camera axes when they converge inside
+ * the cloud (orbits, image sets around a building), else the voxel-density peak (points weighted
+ * by how many frames saw them, so well-observed structure beats sparse terrain).
+ * radius: 1.6 x the 30th percentile of point distances from the centre, clamped to the cloud.
+ * ponytail: density ignores where the cameras look; add a look-at prior if a scene frames wrong.
+ */
+export function computeFocus(
+  pos: Float32Array,
+  rays: Ray[],
+  bounds: { min: number[]; max: number[]; radius: number },
+  pointOffsets?: Uint32Array,
+  maxSample = 200000,
+): Focus {
+  const n = pos.length / 3;
+  const step = Math.max(1, Math.floor(n / maxSample));
+  const R = bounds.radius;
+  const dists = (c: number[]) => {
+    const d: number[] = [];
+    for (let p = 0; p < n; p += step)
+      d.push(Math.hypot(pos[p * 3] - c[0], pos[p * 3 + 1] - c[1], pos[p * 3 + 2] - c[2]));
+    return d.sort((a, b) => a - b);
+  };
+  const radiusAt = (d: number[]) =>
+    Math.min(R, Math.max(0.03 * R, 1.6 * (d[Math.floor(d.length * 0.3)] ?? R)));
+  const conv = convergePoint(rays);
+  if (conv) {
+    const d = dists(conv);
+    const inside = d.filter((v) => v < 0.2 * R).length;
+    if (inside >= Math.max(30, 0.002 * d.length))
+      return { center: conv, radius: radiusAt(d), method: 'converge' };
+  }
+
+  const cell = R / 24;
+  const dim = [0, 1, 2].map((k) => Math.max(1, Math.ceil((bounds.max[k] - bounds.min[k]) / cell)));
+  const grid = new Float32Array(dim[0] * dim[1] * dim[2]);
+  const idx = (i: number, j: number, k: number) => (k * dim[1] + j) * dim[0] + i;
+  for (let p = 0; p < n; p += step) {
+    const c = [0, 1, 2].map((k) => Math.floor((pos[p * 3 + k] - bounds.min[k]) / cell));
+    if (c.some((v, k) => v < 0 || v >= dim[k])) continue;
+    grid[idx(c[0], c[1], c[2])] += pointOffsets ? pointOffsets[p + 1] - pointOffsets[p] : 1;
+  }
+  let best = -1;
+  let at = [dim[0] >> 1, dim[1] >> 1, dim[2] >> 1];
+  for (let k = 0; k < dim[2]; k++)
+    for (let j = 0; j < dim[1]; j++)
+      for (let i = 0; i < dim[0]; i++) {
+        let s = 0; // 3x3x3 box sum
+        for (let dk = -1; dk <= 1; dk++)
+          for (let dj = -1; dj <= 1; dj++)
+            for (let di = -1; di <= 1; di++) {
+              const a = i + di,
+                b = j + dj,
+                c = k + dk;
+              if (a >= 0 && b >= 0 && c >= 0 && a < dim[0] && b < dim[1] && c < dim[2])
+                s += grid[idx(a, b, c)];
+            }
+        if (s > best) {
+          best = s;
+          at = [i, j, k];
+        }
+      }
+  const center = at.map((v, k) => bounds.min[k] + (v + 0.5) * cell);
+  return { center, radius: radiusAt(dists(center)), method: 'density' };
+}

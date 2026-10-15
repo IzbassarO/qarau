@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+import numpy as np
+
 
 @dataclass
 class StageResult:
@@ -31,6 +33,34 @@ class StageError(RuntimeError):
 class Reconstructor(Protocol):
     def reconstruct(self, frames_dir: Path, names: list[str], out_dir: Path) -> dict[str, Any]:
         """Reconstruct the named images into out_dir (database.db, sparse/0); return metrics."""
+        ...
+
+
+@dataclass
+class MaskResult:
+    prompt: str
+    mask: np.ndarray  # H x W bool, frame resolution
+    confidence: float  # 0..1
+    bbox: tuple[int, int, int, int]  # x0, y0, x1, y1
+
+
+class Segmenter(Protocol):
+    """Frame + text prompts -> instance masks. Contract: docs/notes/m2-plan.md section 3."""
+
+    name: str
+
+    def info(self) -> dict[str, Any]:
+        """name, version, licence, dev_only"""
+        ...
+
+    def segment(self, image: np.ndarray, prompts: list[str], frame: int) -> list[MaskResult]:
+        """image: H x W x 3 RGB uint8; frame: index into frames.json (for file-based masks)."""
+        ...
+
+
+class Densifier(Protocol):
+    def densify(self, run_dir: Path, out_dir: Path) -> dict[str, Any]:
+        """Dense points for a reconstructed run into out_dir; return metrics."""
         ...
 
 

@@ -12,12 +12,20 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+ml = [
+    "torch>=2.14.1",
+    "torchvision>=0.29.1",
+    "transformers>=5.19.0",
+]
 
 [tool.pytest.ini_options]
 addopts = "-m 'not slow'"
 pythonpath = ["."]
 testpaths = ["tests"]
-markers = ["slow: end-to-end tests on real videos (deselected by default)"]
+markers = [
+  "slow: end-to-end tests on real videos (deselected by default)",
+  "ml: needs the ml dependency group (uv sync --group ml); skipped when missing",
+]
 
 [tool.ruff]
 line-length = 100

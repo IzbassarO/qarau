@@ -1,6 +1,8 @@
 # --- never commit: data, media, point clouds, model weights, secrets ---
 data/
+/data
 scratch/
+/scratch
 .env
 .env.*
 !.env.example

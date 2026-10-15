@@ -20,7 +20,7 @@ export function ViewerPage() {
     (async () => {
       try {
         const m = await loadManifest(runId);
-        const bundle = await loadBundle(m, (p) => !dead && setSt({ s: 'loading', p }));
+        const bundle = await loadBundle(runId, m, (p) => !dead && setSt({ s: 'loading', p }));
         if (!dead) setSt({ s: 'ready', bundle });
       } catch (e) {
         if (dead) return;

@@ -1,4 +1,4 @@
-"""CLI: python -m qarau_pipeline {run,export} ..."""
+"""CLI: python -m qarau_pipeline {run,export,segment,project} ..."""
 
 from __future__ import annotations
 
@@ -9,12 +9,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import pycolmap
-
 from . import frames as frames_stage
-from .export import export_bundle, frames_from_images, frames_from_json
 from .interfaces import StageError, run_stage
-from .reconstruction import ColmapReconstructor
+from .segmentation import GroundedSam2, ManualMasks, SamApiSegmenter, parse_prompt, segment_stage
 
 
 def _ffmpeg_version() -> str:
@@ -25,7 +22,15 @@ def _ffmpeg_version() -> str:
         return "unknown"
 
 
+# pycolmap is imported inside the commands that need it: it bundles its own libomp, which makes
+# torch abort in the same process (segment stage), so the segment path must not load it.
+
+
 def _export(out: Path, sparse: Path, frames: list[dict[str, Any]], source: dict[str, Any]) -> None:
+    import pycolmap
+
+    from .export import export_bundle
+
     def go() -> dict[str, Any]:
         rec = pycolmap.Reconstruction(str(sparse))
         return export_bundle(rec, frames, out, source, out.name)
@@ -35,6 +40,10 @@ def _export(out: Path, sparse: Path, frames: list[dict[str, Any]], source: dict[
 
 
 def cmd_export(a: argparse.Namespace) -> None:
+    import pycolmap
+
+    from .export import frames_from_images, frames_from_json
+
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     if a.images:
@@ -55,6 +64,11 @@ def cmd_export(a: argparse.Namespace) -> None:
 
 
 def cmd_run(a: argparse.Namespace) -> None:
+    import pycolmap
+
+    from .export import frames_from_json
+    from .reconstruction import ColmapReconstructor
+
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     if a.video:
@@ -85,6 +99,25 @@ def cmd_run(a: argparse.Namespace) -> None:
     _export(out, out / "colmap/sparse/0", frames_from_json(out), fj["source"])
 
 
+def cmd_segment(a: argparse.Namespace) -> None:
+    run = Path(a.run).resolve()
+    if a.segmenter == "manual":
+        if not a.masks:
+            raise StageError("--segmenter manual needs --masks DIR")
+        seg: Any = ManualMasks(a.masks)
+    else:
+        seg = (GroundedSam2(box_threshold=a.box_threshold) if a.segmenter == "grounded-sam2"
+               else SamApiSegmenter())  # fmt: skip
+    prompts = [parse_prompt(p) for p in a.prompt]
+    print("segment:", segment_stage(run, seg, prompts, a.frames, a.stride))
+
+
+def cmd_project(a: argparse.Namespace) -> None:
+    from .projection import project_stage
+
+    print("project:", project_stage(Path(a.run).resolve(), a.scale))
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="qarau_pipeline")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -103,6 +136,19 @@ def main(argv: list[str] | None = None) -> None:
     e.add_argument("--images", help="image dir (image-set input); omit to use <out>/frames.json")
     e.add_argument("--out", required=True)
     e.set_defaults(fn=cmd_export)
+    sg = sub.add_parser("segment", help="masks for the bundle's frames -> <run>/segmentation/")
+    sg.add_argument("--run", required=True)
+    sg.add_argument("--segmenter", choices=["manual", "grounded-sam2", "sam-api"], required=True)
+    sg.add_argument("--masks", help="manual: directory with masks")
+    sg.add_argument("--prompt", action="append", required=True, metavar="TEXT[:CLASS[:SEVERITY]]")
+    sg.add_argument("--frames", choices=["registered", "all", "stride"], default="registered")
+    sg.add_argument("--stride", type=int, default=5)
+    sg.add_argument("--box-threshold", type=float, default=0.3, help="grounded-sam2 only")
+    sg.set_defaults(fn=cmd_segment)
+    pj = sub.add_parser("project", help="masks -> labelled 3D points -> <run>/findings/")
+    pj.add_argument("--run", required=True)
+    pj.add_argument("--scale", type=float, help="metres per world unit (area in m2 only with it)")
+    pj.set_defaults(fn=cmd_project)
     a = p.parse_args(argv)
     try:
         a.fn(a)

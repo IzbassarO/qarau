@@ -71,3 +71,29 @@ def test_stage_failure_is_recorded(tmp_path: Path) -> None:
     assert r[0]["status"] == "failed" and "nope" in r[0]["error"]
     run_stage(tmp_path, "frames", "t", {}, lambda: {"ok": 1})  # re-run replaces entry
     assert len(read_run(tmp_path)) == 1 and read_run(tmp_path)[0]["status"] == "ok"
+
+
+def test_portrait_hdr_video(tmp_path: Path) -> None:
+    """iPhone-style input: rotated, 10-bit HLG BT.2020 -> upright SDR frames, long side 1920."""
+    v0, v = tmp_path / "hlg.mov", tmp_path / "phone.mov"
+    hlg = "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc"
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+         "testsrc=duration=1:size=2560x1440:rate=30", "-c:v", "libx265", "-x265-params",
+         f"log-level=error:{hlg}", "-pix_fmt", "yuv420p10le", "-color_primaries", "bt2020",
+         "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc", str(v0)],
+        check=True,
+    )  # fmt: skip
+    # rotation as a container tag (like an iPhone), pixels stay landscape
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-display_rotation", "90", "-i", str(v0),
+         "-c", "copy", str(v)],
+        check=True,
+    )  # fmt: skip
+    info = frames.probe(v)
+    assert info["hdr"] and info["rotation"] in (90, -90)
+    assert (info["width"], info["height"]) == (1440, 2560)
+    frames.run(v, tmp_path / "out", max_frames=60)
+    img = cv2.imread(str(tmp_path / "out/frames/000000.jpg"))
+    assert img is not None
+    assert img.shape[:2] == (1920, 1080)  # upright portrait, long side capped

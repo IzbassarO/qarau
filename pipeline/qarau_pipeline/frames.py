@@ -13,16 +13,23 @@ import numpy as np
 
 from .interfaces import StageError
 
-MIN_FRAMES, MAX_FRAMES, FRAMES_PER_S = 60, 300, 2.5
+# 6 fps: hand-held phone pans lose overlap at 2.5 fps (room test: 14 -> 257 registered)
+MIN_FRAMES, MAX_FRAMES, FRAMES_PER_S = 60, 300, 6.0
 BLUR_RATIO, MAX_DROP = 0.35, 0.30
 # sky legitimately saturates ~40-45 % of drone frames; only near-white frames are exposure failures
 CLIP_HIGH_MAX = 0.7
+LONG_SIDE = 1920
+HDR_TRANSFERS = {"arib-std-b67", "smpte2084"}  # HLG (iPhone default), PQ
+# ponytail: `colorspace` reads HLG/PQ as BT.2020 gamma (no zscale in Homebrew ffmpeg); colours
+# are right, HDR highlights clip. Swap for zscale+tonemap once every build we ship has libzimg.
+HDR_TO_SDR = "colorspace=all=bt709:iall=bt2020:itrc=bt2020-10:format=yuv420p"
 
 
 def probe(video: Path) -> dict[str, Any]:
     p = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-         "stream=width,height,avg_frame_rate:format=duration", "-of", "json", str(video)],
+         "stream=width,height,avg_frame_rate,color_transfer,color_primaries:"
+         "stream_side_data=rotation:format=duration", "-of", "json", str(video)],
         capture_output=True, text=True,
     )  # fmt: skip
     if p.returncode != 0:
@@ -30,14 +37,19 @@ def probe(video: Path) -> dict[str, Any]:
     j = json.loads(p.stdout)
     s = j["streams"][0]
     n, d = (int(x) for x in s["avg_frame_rate"].split("/"))
+    rot = next((int(x["rotation"]) for x in s.get("side_data_list", []) if "rotation" in x), 0)
+    w, h = (s["height"], s["width"]) if rot % 180 else (s["width"], s["height"])
+    trc = s.get("color_transfer", "")
     return {
-        "width": s["width"], "height": s["height"],
+        "width": w, "height": h,  # as displayed: ffmpeg auto-rotates frames
+        "rotation": rot, "hdr": trc in HDR_TRANSFERS or s.get("color_primaries") == "bt2020",
+        "color_transfer": trc,
         "fps": n / d if d else 0.0, "duration_s": float(j["format"]["duration"]),
     }  # fmt: skip
 
 
 def target_frames(duration: float, max_frames: int | None = None) -> int:
-    """clamp(duration * 2.5, 60, 300); an explicit max_frames replaces the 300 cap."""
+    """clamp(duration * 6, 60, 300); an explicit max_frames replaces the 300 cap."""
     return int(min(max_frames or MAX_FRAMES, max(MIN_FRAMES, duration * FRAMES_PER_S)))
 
 
@@ -88,9 +100,13 @@ def run(video: Path, out: Path, max_frames: int | None = None) -> dict[str, Any]
         old.unlink()
     n_target = target_frames(info["duration_s"], max_frames)
     rate = min(n_target / info["duration_s"], info["fps"] or 1e9)
+    vf = f"fps={rate:.6f},"
+    if info["hdr"]:
+        vf += HDR_TO_SDR + ","
+    vf += (f"scale='min({LONG_SIDE},iw)':'min({LONG_SIDE},ih)':force_original_aspect_ratio=decrease"
+           ":force_divisible_by=2,showinfo")  # fmt: skip
     p = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-y", "-i", str(video), "-an", "-vf",
-         f"fps={rate:.6f},scale='min(1920,iw)':-2,showinfo", "-q:v", "2",
+        ["ffmpeg", "-hide_banner", "-y", "-i", str(video), "-an", "-vf", vf, "-q:v", "2",
          "-start_number", "0", str(fdir / "%06d.jpg")],
         capture_output=True, text=True,
     )  # fmt: skip

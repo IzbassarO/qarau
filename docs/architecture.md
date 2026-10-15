@@ -36,13 +36,13 @@ failure local.
 
 | Stage | Inputs | Outputs |
 | --- | --- | --- |
-| frames | video (or image set) | `frames/000000.jpg…` (≤ 1920 px wide, adaptive rate: `clamp(duration·2.5, 60, 300)` frames), `frames.json` (`source`; per frame `i`, `file`, `t` from ffmpeg `showinfo`, `blur`, `exposure{mean,clip_low,clip_high}`, `kept`, `drop_reason`; GPS later) |
+| frames | video (or image set) | `frames/000000.jpg…` (long side ≤ 1920 px, upright per the rotation tag, HDR (HLG/PQ) converted to SDR BT.709; rate `clamp(duration·6, 60, 300)` frames), `frames.json` (`source`; per frame `i`, `file`, `t` from ffmpeg `showinfo`, `blur`, `exposure{mean,clip_low,clip_high}`, `kept`, `drop_reason`; GPS later) |
 | quality | frames.json | `quality.json`: usable frames, re-shoot list (time ranges + reason) |
-| reconstruction | kept frames | `colmap/database.db`, `colmap/sparse/0/*.bin` (largest model; pycolmap in-process, `Reconstructor` interface); metrics: registered images, points, mean track length, mean reprojection error, seconds per step |
+| reconstruction | kept frames | `colmap/database.db`, `colmap/sparse/0/*.bin` (largest model; pycolmap in-process, `Reconstructor` interface; exhaustive matching ≤ 300 frames, else sequential + loop detection); metrics: registered images, points, mean track length, mean reprojection error, seconds per step |
 | export | `colmap/sparse/0`, `frames.json` | `cloud.laz` (xyz+rgb), `cloud.ply`, `web/` viewer bundle: `manifest.json` + raw typed arrays + `thumbs/` (format: ADR 0003, `docs/notes/m1-plan.md` §3); world is Z-up, centroid at origin, `world_from_colmap` stored |
-| segmentation | usable frames, prompts | `masks/<frame>.png`, `observations.json` (class, confidence, bbox) |
-| projection | masks, poses, depth | `labels.npy` (per-point class/finding id) |
-| measurement | labelled points, scale | `findings.json` (area m², extent, centroid) |
+| segmentation | bundle frames, text prompts, a `Segmenter` | `segmentation/observations.json` + `segmentation/masks/<frame>_<k>.png` (prompt, confidence, bbox per instance); implementations: manual masks, Grounded SAM 2 (dev only), SAM 3.1 API stub (ADR 0009) |
+| projection | masks, poses, tracks | `findings/findings.json` + `findings/points.finding.u16`, manifest `findings` key; visibility from tracks, voting, clustering (ADR 0009) |
+| measurement | clustered points, scale | area is part of the findings file: m² only with a known scale, else `rel` (ADR 0009) |
 | registration (monitoring) | new frames, baseline model | transform to baseline, aligned cloud |
 | change detection | findings now vs baseline/previous | `changes.json` (new / grew / shrank / stable) |
 | coverage | poses, usable frames, cloud | per-point/voxel state: inspected_ok / finding / not_seen |

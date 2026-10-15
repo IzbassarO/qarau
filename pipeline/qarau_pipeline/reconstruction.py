@@ -12,13 +12,14 @@ import pycolmap
 
 from .interfaces import StageError
 
-EXHAUSTIVE_MAX = 200
+EXHAUSTIVE_MAX = 300  # ~3 min of CPU matching on an M1 Pro
 
 
 @dataclass
 class ColmapReconstructor:
-    """Only Reconstructor implementation. mode: 'video' (SINGLE camera, sequential matching)
-    or 'images' (AUTO cameras, exhaustive matching when small)."""
+    """Only Reconstructor implementation. mode: 'video' (SINGLE camera) or 'images' (AUTO
+    cameras). Exhaustive matching up to EXHAUSTIVE_MAX images, else sequential + loop detection
+    (sequential alone splits hand-held videos that revisit a place: room test 136 vs 257)."""
 
     mode: str = "video"
     max_image_size: int = 1600
@@ -54,10 +55,11 @@ class ColmapReconstructor:
             reader_options=rd, extraction_options=ext,
         )  # fmt: skip
         t_feat = time.perf_counter()
-        if video or len(names) > EXHAUSTIVE_MAX:
-            # ponytail: image sets > 200 assume name order = capture order
+        if len(names) > EXHAUSTIVE_MAX:
+            # ponytail: image sets > EXHAUSTIVE_MAX assume name order = capture order;
+            # loop detection downloads COLMAP's vocabulary tree once (bundle it for on-prem)
             pairing = pycolmap.SequentialPairingOptions(
-                overlap=self.overlap, quadratic_overlap=True, loop_detection=False
+                overlap=self.overlap, quadratic_overlap=True, loop_detection=True
             )
             pycolmap.match_sequential(db, pairing_options=pairing)
         else:
