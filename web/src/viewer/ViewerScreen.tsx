@@ -4,6 +4,7 @@ import { useI18n } from '../i18n';
 import { runUrl, type Bundle, type Finding } from '../lib/bundle';
 import { csrSlice, heightRamp, RAMP } from '../lib/geometry';
 import { ViewerEngine, type Options } from './engine';
+import { AxisGizmo, type AxisGizmoHandle } from './AxisGizmo';
 import { H2, LangSwitch, Logo, Row, Toggle } from './ui';
 
 declare global {
@@ -68,6 +69,8 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
   const isImages = m.source.kind === 'images';
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
+  const gizmoRef = useRef<AxisGizmoHandle>(null);
+  const [flyMode, setFlyMode] = useState(false);
   const [frame, setFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [picked, setPicked] = useState<number | null>(null);
@@ -97,7 +100,10 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
     const canvas = canvasRef.current!;
     let eng: ViewerEngine;
     try {
-      eng = new ViewerEngine(canvas, bundle, { onPick: (p) => setPicked(p) });
+      eng = new ViewerEngine(canvas, bundle, {
+        onPick: (p) => setPicked(p),
+        onFlyModeChange: setFlyMode,
+      });
     } catch {
       setGlError(true);
       return;
@@ -140,6 +146,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
     const e = engineRef.current;
     if (!e) return;
     const place = () => {
+      gizmoRef.current?.update(e.camera.quaternion);
       for (const x of findings) {
         const el = markerEls.current.get(x.id);
         if (!el) continue;
@@ -322,8 +329,18 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                 </span>
               ))}
             </div>
-            <div className="pointer-events-none absolute bottom-3 left-1/2 w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-md bg-bg/80 px-2.5 py-1.5 text-center text-xs leading-5 text-ink-2">
-              {t('canvas.hint')}
+            <AxisGizmo
+              ref={gizmoRef}
+              onSelect={(axis) => {
+                eng()?.axisView(axis);
+                canvasRef.current?.focus({ preventScroll: true });
+              }}
+            />
+            <div
+              role="status"
+              className="pointer-events-none absolute bottom-3 left-1/2 w-max max-w-[calc(100%-15rem)] -translate-x-1/2 rounded-md bg-bg/80 px-2.5 py-1.5 text-center text-xs leading-5 text-ink-2"
+            >
+              {flyMode ? t('canvas.flyHint') : t('canvas.hint')}
             </div>
           </div>
 
