@@ -291,7 +291,12 @@ tasks:
     went wrong, what to do).
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261016-115433
+  branch: devteam/A3
+  pr: https://github.com/IzbassarO/qarau/pull/20
+  done_at: '2026-10-16'
 - id: A4
   area: app
   title: Colour toggle and object framing
