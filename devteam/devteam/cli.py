@@ -175,6 +175,11 @@ def main():
     args = p.parse_args()
     team = make_team(args.fake)
     team.only = {t for t in args.only.split(",") if t}
+    if args.command == "run" and not args.fake and (drift := team.backlog_drift()):
+        sys.exit(  # statuses kept only in the working tree get lost: get them into dev first
+            "backlog.yaml status fields differ from origin/dev; merge them into dev first:\n"
+            + "\n".join(drift)
+        )
     if args.command in ("run", "resume"):
         run_graph(team, resume=args.command == "resume")
     elif args.command == "stop":

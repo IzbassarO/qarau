@@ -41,7 +41,12 @@ tasks:
     on the dev Mac.
 
     '
-  status: todo
+  status: done
+  owner: dev_pipeline
+  run: run-20261015-121320
+  branch: devteam/P0
+  pr: https://github.com/IzbassarO/qarau/pull/14
+  done_at: '2026-10-15'
 - id: P3
   area: core
   title: One connected model per video
@@ -50,6 +55,71 @@ tasks:
     videos split into several models (aegviidu 3, mykolaiv 3, room 2 on a8efcc9).
 
     '
+  status: done
+  owner: dev_pipeline
+  run: run-20261015-182436
+  branch: devteam/P3
+  pr: https://github.com/IzbassarO/qarau/pull/18
+  done_at: '2026-10-15'
+- id: P3b
+  area: core
+  title: Sky mask and far-point filter
+  goal: 'Owner''s review 2026-10-15: long outdoor shots grow a "sky wall" of far, badly triangulated points
+    that hides buildings and trees in the default view. Split out of P3 (merged in #18).
+
+
+    1. Sky mask before feature extraction: mask sky regions per frame and pass the masks to COLMAP feature
+    extraction (ImageReaderOptions.mask_path), so no feature inside the sky is extracted or matched. A
+    classical detector on OpenCV (Apache-2.0, already a dependency) or a small Apache-2.0/MIT segmentation
+    model; NVIDIA SegFormer is not allowed. Record the choice and its licence in ADR docs/decisions/0013-*.
+    Tests on synthetic frames with a known sky region.
+
+
+    2. Point filter after mapping: drop 3D points with triangulation angle < 1.5 degrees or reprojection
+    error above COLMAP''s robust threshold (mapper filter_max_reproj_error, 4 px by default). The run
+    report and the benchmark results.json show points_total, points_dropped_low_parallax, points_dropped_reproj.
+
+
+    3. Far layer: far points that survive the filter are exported as a separate `far` layer in the viewer
+    bundle (own arrays + manifest key, ADR 0003), never mixed into the object cloud. Rendering it is A5
+    (dev_app); until then the viewer does not load it.
+
+
+    Acceptance:
+
+    - The tester MUST take its own screenshots of the viewer on the benchmark videos with sky, notre-dame
+    and aegviidu (water towers): routes /viewer/notre-dame and /viewer/aegviidu, and judge that no sky
+    wall occludes the structure in the default view. A pass on the criteria without those screenshots
+    is a fail.
+
+    - Registered-frames ratio is not below dev on any gated video.
+
+    - points_total, points_dropped_low_parallax, points_dropped_reproj are in the run report and results.json.
+
+    - Tests for the sky mask, the point filter counts and the far layer export.
+
+    '
+  owner: dev_pipeline
+  quick_only:
+  - notre-dame
+  - aegviidu
+  licence: 'Classical sky detector on OpenCV (Apache-2.0) preferred. Any model must be Apache-2.0/MIT/BSD
+    for code AND weights; note it in ADR 0013. NVIDIA SegFormer weights are under the NVIDIA Source Code
+    License (non-commercial): forbidden. Unclear -> ask the owner.
+
+    '
+  status: todo
+- id: P3c
+  area: core
+  title: Re-gate mykolaiv
+  goal: 'After P3 mykolaiv still gives 2 models / 84.8 % registered, so it stays ungated in devteam/config.yaml
+    (gates.benchmark.per_video). Goal: 1 model with >= 90 % registered frames, stable across repeated
+    runs, then remove the per_video exception so mykolaiv is gated again. If that is not reachable, document
+    why (frames, motion, measured run-to-run noise) in docs/notes/benchmark-method.md and keep it excluded
+    with that reason.
+
+    '
+  owner: dev_pipeline
   status: todo
 - id: P2b
   area: core
@@ -82,6 +152,39 @@ tasks:
 
     '
   status: todo
+- id: S1
+  area: core
+  phase: server
+  title: Server job queue with per-stage progress
+  goal: 'The pipeline runs as jobs from a durable queue: Valkey + RQ (ADR 0012; not Redis). Each stage
+    reports progress 0-100 to the API; the viewer shows the current stage and percent. A 30-minute video
+    is processed on a single worker without blocking the API.
+
+
+    Acceptance:
+
+    - Upload -> job -> progress visible -> the map opens when the job is done.
+
+    - One stage can be re-run alone (stages are idempotent and read/write storage).
+
+    - The API stays responsive while a long job runs (test with a long job).
+
+    - Valkey runs in infra/ Docker Compose; no Redis image or Redis-only feature is used.
+
+
+    Note: the web part (stage + percent in the UI) is in web/, owned by dev_app. When S1 unblocks, it
+    becomes its own dev_app task; S1 itself delivers the progress API.
+
+    '
+  licence: 'Valkey (BSD-3-Clause), RQ (BSD-2-Clause), redis-py client (MIT). Redis server is not used:
+    RSALv2/SSPLv1 since 7.4, AGPLv3 since 8.0 (owner 2026-10-15, ADR 0012).
+
+    '
+  status: blocked
+  blocked_by:
+  - P4a
+  blocked_reason: 'Waits for P4a (dense stage): the queue runs the full pipeline, including the dense
+    stage.'
 - id: P5a
   area: core
   title: Metric scale and gravity from an A4 sheet or a measured distance
@@ -162,7 +265,12 @@ tasks:
     orbit, pinch zoom, Shift+two-finger pan; smooth damping. Replaces the current controls.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261015-121320
+  branch: devteam/A2a
+  pr: https://github.com/IzbassarO/qarau/pull/15
+  done_at: '2026-10-15'
 - id: A2b
   area: app
   title: Fly mode and clickable axis gizmo
@@ -170,7 +278,12 @@ tasks:
     / front / side views as in Blender; both with damping and tests.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261015-182436
+  branch: devteam/A2b
+  pr: https://github.com/IzbassarO/qarau/pull/17
+  done_at: '2026-10-15'
 - id: A3
   area: app
   title: Processing status view
@@ -186,6 +299,20 @@ tasks:
 
     '
   status: todo
+- id: A5
+  area: app
+  title: Far-point layer in the viewer
+  goal: 'Load the `far` layer from the viewer bundle (written by P3b: own arrays + manifest key, ADR 0003)
+    and render it gray with the not-seen token #6B727D (--color-notseen), never mixed into the object
+    cloud. A toggle in the Show panel; off by default in Quick Scan. Bundles without a `far` layer load
+    as before. All text via i18n (RU/KK/EN). Unit test for layer loading (with and without `far`).
+
+    '
+  owner: dev_app
+  status: blocked
+  blocked_by:
+  - P3b
+  blocked_reason: 'Waits for P3b: the pipeline must first export the `far` layer.'
 - id: A1b
   area: app
   title: Simple local login

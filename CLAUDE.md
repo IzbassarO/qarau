@@ -119,7 +119,7 @@ Create folders when the first real file needs them, not before.
 | --- | --- |
 | Language | Python 3.12 (backend, pipeline), TypeScript (web, desktop) |
 | API | FastAPI, Pydantic v2, SQLAlchemy 2, Alembic |
-| Queue | Redis + a durable task runner (start with RQ or Celery; Temporal later if needed) |
+| Queue | Valkey + RQ (Temporal later if needed); not Redis (licence, ADR 0012) |
 | DB | PostgreSQL 16 + PostGIS + pgvector |
 | Storage | S3-compatible: Versity S3 Gateway (dev, ADR 0006), S3 in cloud |
 | 3D | COLMAP, Open3D, laspy, PotreeConverter |
@@ -200,7 +200,9 @@ modes; security-sensitive defaults. Everything else — decide, document, contin
   `data/` (or `.env`, `scratch/`).
 - No GitHub Pro (owner, 2026-10-15), so no server-side branch protection:
   `devteam/hooks/pre-push` refuses force-pushes, deletions, direct pushes to `main`/`dev` and
-  moving an existing tag. Every successful `dev` → `main` release is tagged
+  moving an existing tag. One exception (owner, 2026-10-16): devteam's task-status commits
+  (`backlog: P3 done (#18)`) go straight to `dev` as fast-forwards that change only
+  `devteam/backlog.yaml`; never to `main`. Every successful `dev` → `main` release is tagged
   `release-YYYY-MM-DD` (`.2`, `.3` for a second one that day): the rollback points.
 - The owner reads `devteam/reports/YYYY-MM-DD.md` (tasks done, merged PRs, cost, benchmark,
   blocked tasks). `devteam stop` halts everything at any moment.

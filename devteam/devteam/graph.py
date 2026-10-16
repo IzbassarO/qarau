@@ -44,6 +44,8 @@ SNAPSHOT_SKIP = {
     ".vite",
 }
 # git commands the orchestrator may never run (history rewrite, deletion)
+# Task status lives in backlog.yaml; these fields must match origin/dev before a run.
+STATUS_FIELDS = ("status", "owner", "run", "branch", "pr", "done_at")
 FORBIDDEN_GIT = {"rebase", "filter-branch", "filter-repo", "replace", "update-ref"}
 FORBIDDEN_PUSH = {
     "--force",
@@ -72,6 +74,9 @@ def is_protected(path: str) -> bool:
     return match(PROTECTED) and not match(PROTECTED_OK)
 
 
+VISUAL = re.compile(r"\b(viewer|screenshots?)\b", re.I)  # criteria the tester must see
+
+
 def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
     """The whole plan is valid or nothing happens. Returns assignments."""
     by_id = {t["id"]: t for t in todo}
@@ -95,6 +100,10 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
             )
         if not str(p.get("plan", "")).strip() or not p.get("criteria"):
             errors.append(f"{tid}: plan and acceptance criteria must not be empty")
+        if VISUAL.search(" ".join(map(str, p.get("criteria") or []))) and not p.get("routes"):
+            errors.append(f"{tid}: criteria mention the viewer or screenshots but list no routes")
+        if p.get("routes") and dev in devs and not devs[dev].get("screenshots"):
+            errors.append(f"{tid}: routes given but {dev} has no screenshots config")
     if errors:
         raise ValueError("invalid plan: " + "; ".join(errors))
     return [
@@ -119,6 +128,7 @@ class TaskState(TypedDict, total=False):
     branch: str
     session: str
     head: str  # last commit the graph accepted (checkpointed, so a crash can't move it)
+    start: str  # HEAD when this run took the task: commits after it are this run's
     snap: dict  # protected-file hashes at the same moment
     dev_summary: str
     feedback: str
@@ -160,6 +170,7 @@ class Team:
         # Orchestrator git calls are short, so they simply take turns.
         self._git_lock = threading.Lock()
         self._procs: set[subprocess.Popen] = set()
+        self._status_commit = None  # the only commit push_status may push straight to dev
         self.only: set[str] = set()
         if remote is None and fake:
             remote = str(self.home / "remote.git")
@@ -293,7 +304,9 @@ class Team:
                 or not refs
                 or any(r.startswith(("+", ":")) for r in refs)
                 or any(
-                    not r.startswith(self.branch_prefix + "/") and not RELEASE_TAG.fullmatch(r)
+                    not r.startswith(self.branch_prefix + "/")
+                    and not RELEASE_TAG.fullmatch(r)
+                    and r != f"{self._status_commit}:refs/heads/{self.cfg['base_branch']}"
                     for r in refs
                 )
             ):
@@ -327,6 +340,90 @@ class Team:
     def fetch(self, *branches: str):
         specs = [f"+refs/heads/{b}:refs/remotes/{self.remote_name}/{b}" for b in branches]
         self.git("fetch", "-q", self.remote_url, *specs)
+
+    def merged_tasks(self) -> set[str]:
+        """Task ids whose devteam/<id> branch on the remote is already merged into dev."""
+        rn, base, pre = self.remote_name, self.cfg["base_branch"], self.branch_prefix
+        self.git(
+            "fetch",
+            "-q",
+            self.remote_url,
+            f"+refs/heads/{base}:refs/remotes/{rn}/{base}",
+            f"+refs/heads/{pre}/*:refs/remotes/{rn}/{pre}/*",
+        )
+        out = self.git("branch", "-r", "--merged", f"{rn}/{base}", "--list", f"{rn}/{pre}/*")
+        return {line.strip().rsplit("/", 1)[1] for line in out.splitlines() if line.strip()}
+
+    def push_status(self, task_id: str, message: str) -> str | None:
+        """Commits this task's status fields onto origin/dev and pushes them straight to dev:
+        dev holds the record (a status kept only in the working copy got lost on 2026-10-16).
+        Built on a fresh origin/dev each try, so a race costs a retry; never forced or rebased.
+        The pre-push hook lets through only a fast-forward that changes backlog.yaml alone."""
+        base, rn, err = self.cfg["base_branch"], self.remote_name, None
+        with self._lock:  # no emit() inside: it takes the same lock
+            mine = next(t for t in self.load_backlog() if t["id"] == task_id)
+            for attempt in range(3):
+                self.fetch(base)
+                parent = self.git("rev-parse", f"{rn}/{base}").strip()
+                data = yaml.safe_load(self.git("show", f"{parent}:devteam/backlog.yaml"))
+                for t in data["tasks"]:
+                    if t["id"] == task_id:
+                        for k in (*STATUS_FIELDS, "blocked_reason"):
+                            if k in mine:
+                                t[k] = mine[k]
+                            else:
+                                t.pop(k, None)
+                text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100)
+                blob = self.git("hash-object", "-w", "--stdin", input=text).strip()
+                env = {"GIT_INDEX_FILE": str(self.home / "status.index")}
+                self.git("read-tree", parent, env=env)
+                self.git(
+                    "update-index", "--cacheinfo", f"100644,{blob},devteam/backlog.yaml", env=env
+                )
+                tree = self.git("write-tree", env=env).strip()
+                if tree == self.git("rev-parse", f"{parent}^{{tree}}").strip():
+                    break  # dev already says so (a resumed finish)
+                self._status_commit = self.git(
+                    "commit-tree", tree, "-p", parent, "-m", message
+                ).strip()
+                try:
+                    self.git(
+                        "push", "-q", self.remote_url, f"{self._status_commit}:refs/heads/{base}"
+                    )
+                    break
+                except RuntimeError:  # dev moved meanwhile: rebuild on the new tip
+                    if attempt == 2:
+                        raise
+                finally:
+                    self._status_commit = None
+            if not self.fake and self.git("branch", "--show-current").strip() == base:
+                try:  # keep the main checkout on dev in step; local edits ride along
+                    self.git("merge", "-q", "--ff-only", "--autostash", f"{rn}/{base}")
+                except RuntimeError as e:
+                    err = e
+        if err:
+            self.emit("brain", f"could not fast-forward the checkout: {err}; pull by hand")
+        return message
+
+    def backlog_drift(self) -> list[str]:
+        """Status fields that differ between the backlog file and the one on origin/dev."""
+        base = self.cfg["base_branch"]
+        self.fetch(base)
+        theirs = yaml.safe_load(
+            self.git("show", f"{self.remote_name}/{base}:devteam/backlog.yaml")
+        )["tasks"]
+
+        def fields(tasks):
+            return {t["id"]: {k: t.get(k) for k in STATUS_FIELDS} for t in tasks}
+
+        mine, theirs = fields(self.load_backlog()), fields(theirs)
+        return [
+            f"{tid}.{k}: {theirs.get(tid, {}).get(k)!r} on {base} -> "
+            f"{mine.get(tid, {}).get(k)!r} here"
+            for tid in sorted(mine.keys() | theirs.keys())
+            for k in STATUS_FIELDS
+            if mine.get(tid, {}).get(k) != theirs.get(tid, {}).get(k)
+        ]
 
     def branch_for(self, task_id: str) -> str:
         return f"{self.branch_prefix}/{task_id}"
@@ -552,7 +649,7 @@ def build_graph(team: Team, checkpointer):
                 team.git("worktree", "add", "-b", branch, str(path), f"{team.remote_name}/{base}")
         out = {"worktree": str(path), "branch": branch, "rounds": 0, "fixes": 0}
         team.verify_worktree({**s, **out})
-        out["head"] = team.git("rev-parse", "HEAD", cwd=path).strip()
+        out["head"] = out["start"] = team.git("rev-parse", "HEAD", cwd=path).strip()
         out["snap"] = team.snapshot(str(path))
         team.emit(
             "brain",
@@ -616,7 +713,14 @@ def build_graph(team: Team, checkpointer):
         verdict["screenshots"], verdict["screenshot_problems"] = shots, problems
         failed = [c for c in checks if not c["ok"]]
         verdict["judge_passed"] = verdict["passed"]
-        verdict["passed"] = verdict["passed"] and not failed  # both, or it is not done
+        # a visual criterion passes only on the tester's own screenshots, one per route
+        no_shots = len(shots) < len(s.get("routes") or [])
+        verdict["passed"] = verdict["passed"] and not failed and not no_shots
+        if no_shots:
+            verdict["feedback"] = (
+                f"{verdict.get('feedback', '')}\n\nTester screenshots missing for "
+                f"{s['routes']}: visual criteria cannot pass without them.\n" + "\n".join(problems)
+            )
         if failed:
             logs = "\n".join(f"$ {c['cmd']}\n{c['output'][-1500:]}" for c in failed)
             verdict["feedback"] = f"{verdict.get('feedback', '')}\n\nFailing checks:\n{logs}"
@@ -675,7 +779,16 @@ def build_graph(team: Team, checkpointer):
             return out
 
         done = team.gh.find_pr(s["branch"], base)
-        if done and done["state"] == "MERGED":  # re-run after a crash: already merged
+        ours = team.git("rev-list", f"{s.get('start', 'HEAD')}..HEAD", cwd=wt).split()
+        if done and done["state"] == "MERGED" and not ours:
+            # the brain guard should have kept this task out (P0/A2a on 2026-10-16)
+            return stop(
+                f"nothing to merge, already done: {s['branch']} was merged in "
+                f"{team.gh.url(done)} and this run added no commits",
+                block=True,
+            )
+        if done and done["state"] == "MERGED" and done.get("headRefOid") in ours:
+            # resume after a crash: this run's own PR is already merged
             return {
                 "gate": {
                     "merged": True,
@@ -742,14 +855,13 @@ def build_graph(team: Team, checkpointer):
         body = team.write_packet({**s, "gate": {"lines": lines}}, "Checking: waiting for CI")
         pr = team.gh.open_pr(s["branch"], base, f"{tid}: {s['task']['title']}", body)
         lines.append(f"PR: {team.gh.url(pr)}")
-        if pr["state"] != "MERGED":
-            team.emit("tester", f"waiting for GitHub CI on {team.gh.url(pr)}", task=tid)
-            ok, why = team.gh.wait_ci(pr["number"], head, g["ci_timeout_min"] * 60)
-            if not ok:
-                return stop(f"GitHub CI failed:\n{why}", head=head)
-            lines.append("GitHub CI: green")
-            # 5. All gates green: merge exactly the tested commit.
-            team.gh.merge(pr["number"], head)
+        team.emit("tester", f"waiting for GitHub CI on {team.gh.url(pr)}", task=tid)
+        ok, why = team.gh.wait_ci(pr["number"], head, g["ci_timeout_min"] * 60)
+        if not ok:
+            return stop(f"GitHub CI failed:\n{why}", head=head)
+        lines.append("GitHub CI: green")
+        # 5. All gates green: merge exactly the tested commit.
+        team.gh.merge(pr["number"], head)
         team.emit(
             "tester",
             f"merged into {base}: {team.gh.url(pr)}",
@@ -781,6 +893,7 @@ def build_graph(team: Team, checkpointer):
             if g.get("number"):
                 team.gh.open_pr(s["branch"], base, f"{tid}: {s['task']['title']}", packet)
         team.update_task(tid, **fields)
+        team.push_status(tid, f"backlog: {tid} {status}" + (f" (#{g['number']})" if merged else ""))
         if merged:  # finished: the worktree is no longer needed (branch and packet stay)
             try:
                 team.git("worktree", "remove", "--force", s["worktree"])
@@ -836,6 +949,10 @@ def build_graph(team: Team, checkpointer):
             for t in team.load_backlog()
             if t["status"] == "todo" or (t["status"] == "in_progress" and t.get("run") == run)
         ]
+        # Never redo landed work, even if the backlog lost its status (2026-10-16: P0, A2a).
+        if again := sorted(t["id"] for t in todo if t["id"] in team.merged_tasks()):
+            team.emit("brain", f"skipping tasks already merged into dev, mark them done: {again}")
+            todo = [t for t in todo if t["id"] not in again]
         if team.only:  # `devteam run --only P1`
             todo = [t for t in todo if t["id"] in team.only]
         areas = {a for d in cfg["developers"].values() for a in d["areas"]}

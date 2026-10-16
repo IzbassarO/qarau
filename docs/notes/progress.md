@@ -2,6 +2,46 @@
 
 Newest first. Keep it short.
 
+## 2026-10-16 — Dev team re-planned P0 and A2a (incident)
+
+- Cause: devteam writes task status only to the working copy of `devteam/backlog.yaml`; it
+  was never committed, so on `dev` P0, P3, A2a and A2b were still `todo`. Before today's run
+  the working copy was reset to `dev`, the statuses were lost and the brain planned P0 and
+  A2a again. The reruns committed only to local branches; the gate saw PR #14 / #15 already
+  merged and marked them done: nothing reached `dev`, no new PR.
+- Fix: backlog statuses for every merged devteam PR are now on `dev`. The brain skips tasks
+  whose `devteam/<id>` branch is merged into `dev`; `devteam run` refuses to start while
+  the backlog's status fields differ from `origin/dev`.
+- devteam now owns the statuses: when a task ends it commits them straight to `dev`
+  (`backlog: P3 done (#18)`, backlog-only fast-forward, allowed by the pre-push hook) and
+  fast-forwards the main checkout. The gate no longer takes an old merged PR as this run's:
+  done needs this run's commits merged through a PR with green CI.
+
+## 2026-10-16 — Backlog after P3 merged; screenshots for pipeline tasks
+
+- P3 is done (#18). The sky work moves to a new task **P3b** (sky mask, far-point filter,
+  `far` layer; ADR 0013 when built); **A5** now waits for P3b. New **P3c**: mykolaiv still
+  gives 2 models / 84.8 %, goal 1 model ≥ 90 % and gated again, or a written reason.
+- Dev team: a task whose acceptance mentions a visual result in the viewer needs the
+  tester's own screenshots, pipeline tasks too (the viewer serves the developer's quick
+  benchmark output). No screenshot → the task fails, whatever the judge says. A plan whose
+  criteria mention the viewer but list no routes is rejected. A task may pick its own
+  quick benchmark videos (`quick_only`), e.g. P3b uses notre-dame and aegviidu.
+
+## 2026-10-15 — Owner's review of the first maps
+
+- **Sky wall on long shots.** Long outdoor videos grow a wall of far, badly triangulated
+  points in the sky that hides buildings and trees in the default view. Planned for P3,
+  moved to P3b on 2026-10-16: sky masks before feature extraction, a filter for
+  low-parallax (< 1.5°) and high-reprojection points with counts in the run report, and surviving far points exported as a separate
+  `far` layer (gray), never mixed into the object cloud.
+- **Product UI** (screens in docs/design/) is a later task U1, after geometry P3/P4; the
+  current viewer is a dev tool.
+- New task **S1**, a server job queue with per-stage progress, placed after P4 and blocked
+  by P4a. Queue server: **Valkey + RQ, not Redis** (owner; Redis ≥ 7.4 is RSAL/SSPL, ≥ 8
+  AGPL; ADR 0012). Its web part becomes a separate `dev_app` task when S1 unblocks.
+- New task **A5**, the far-point layer in the viewer (gray, toggle in Show), blocked by P3b.
+
 ## 2026-10-15 — Dev team: retries and tester-owned screenshots
 
 - A2a's tester crashed on one transient "Connection error". `llm_call` now retries

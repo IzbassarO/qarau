@@ -130,12 +130,14 @@ clean commit hash; real per-commit numbers (e.g. the benchmark) are produced by 
 on the committed code. Developers run only the QUICK benchmark (named in the prompt) for
 their own numbers; the full benchmark runs only at the merge gate and at release, so never
 ask a developer to run the full set.
-For web tasks list `routes`: the app pages (e.g. "/", "/viewer/demo") the tester screenshots
-and looks at; [] for tasks without UI. Developers cannot take screenshots (Codex runs in a
-sandbox with no network and no browser): never require a developer to produce, attach or
-commit a screenshot. Write visual criteria as what the page must show ("/viewer/demo shows a
-black canvas with points and no error banner"); the tester judges them from its own
-screenshots of `routes`.
+List `routes` for every task whose acceptance mentions a visual result in the viewer, pipeline
+tasks too: the app pages (e.g. "/", "/viewer/demo") the tester screenshots and looks at; []
+only for tasks with nothing to see. For pipeline tasks the viewer serves the developer's quick
+benchmark output, so routes are "/viewer/<video>" for videos in that run. Developers cannot
+take screenshots (Codex runs in a sandbox with no network and no browser): never require a
+developer to produce, attach or commit a screenshot. Write visual criteria as what the page
+must show ("/viewer/demo shows a black canvas with points and no error banner"); the tester
+judges them from its own screenshots of `routes`, and a missing screenshot fails the task.
 Never require edits to docs/notes/progress.md: developers may not touch it (parallel
 tasks would conflict there); the daily report covers progress.
 Pick at most one task per developer, in backlog order, only for the developers listed.
@@ -151,8 +153,9 @@ them in feedback if relevant. Screenshots of the app pages, when attached, are t
 were taken by the orchestrator for you: judge visible criteria (layout, text via i18n, errors
 on screen) from them. Developers cannot take screenshots (sandbox without network or browser):
 a criterion that asks for a screenshot or visual proof is met or failed by what YOUR
-screenshots show, never failed because the developer produced none. If a page's screenshot
-failed (listed in <screenshots_failed>), judge from the code and say so in the note.
+screenshots show, never failed because the developer produced none. A visual criterion in the
+viewer (web or pipeline task) with no screenshot of yours (none attached, or listed in
+<screenshots_failed>) is NOT met: never pass it from the code alone.
 Developers run only a quick benchmark subset; the full benchmark is a merge gate after you:
 never fail a criterion because the developer did not run the full set.
 The developer cannot commit (the orchestrator commits after each round), so results of the
@@ -519,6 +522,7 @@ def quick_benchmark(team, s, dev) -> str:
     b = team.cfg["gates"]["benchmark"]
     if not any(p in b["when_paths"] for p in dev["owns"]):
         return ""
+    quick = s["task"].get("quick_only") or b["quick_only"]
     out = team.home / "bench-dev" / s["task"]["id"]
     cmd = b["command"].format(data=team.root / "data" / "samples", out=out)
     base = None
@@ -526,7 +530,7 @@ def quick_benchmark(team, s, dev) -> str:
         base = G.cached_benchmark(team, f"{team.remote_name}/{team.cfg['base_branch']}")
     except RuntimeError:  # no remote-tracking ref yet
         pass
-    rows = {k: v for k, v in (base or {}).get("videos", {}).items() if k in b["quick_only"]}
+    rows = {k: v for k, v in (base or {}).get("videos", {}).items() if k in quick}
     baseline = (
         "Baseline on dev for these videos (full gate run, no need to re-measure it):\n"
         + G.bench_table({"videos": rows})
@@ -535,7 +539,7 @@ def quick_benchmark(team, s, dev) -> str:
     )
     return (
         f"- Benchmark: run ONLY the quick set (~{b['quick_min']} min):\n"
-        f"  `{cmd} --only {','.join(b['quick_only'])}`\n"
+        f"  `{cmd} --only {','.join(quick)}`\n"
         "  Never run the full set (all videos, ~70 min): the merge gate runs it on the\n"
         "  committed code and blocks regressions.\n"
         + "\n".join("  " + line for line in baseline.splitlines())

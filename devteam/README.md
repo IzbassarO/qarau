@@ -20,14 +20,30 @@ uv run devteam release         # dev -> main now (also runs automatically every 
 uv run devteam costs           # API spend per day / agent / model
 uv run devteam cleanup         # remove leftover worktrees of done/dropped tasks
 uv run devteam run --fake      # whole flow with fake agents and a local fake GitHub, no cost
-uv run pytest                  # 47 tests, incl. gates, crash + resume, forbidden actions
+uv run pytest                  # tests, incl. gates, crash + resume, forbidden actions
 ```
 
 - Developers, in parallel: `dev_pipeline` = Claude Code (`claude -p`, subscription token in
   `.env`), `dev_app` = Codex (`codex exec`, your saved ChatGPT login; `codex login` once; no
   API key is ever passed). Codex has no network in its sandbox: `setup` installs first.
 - Benchmark: developers run only the quick set (`quick_only`); the full set runs at the merge
-  gate and at release, cached per `pipeline/` tree. Web tasks: the tester sees screenshots.
+  gate and at release, cached per `pipeline/` tree; a task may set its own `quick_only`.
+- Screenshots: any task whose criteria mention the viewer lists `routes`; the tester
+  screenshots them (pipeline tasks: the viewer on the quick benchmark output). A missing
+  screenshot fails the task even if the judge passed.
+- Task status lives in `backlog.yaml` on `dev`, owned by devteam. When a task ends (PR merged
+  → `done`, or `blocked`), the orchestrator commits its status fields (`status, owner, run,
+  branch, pr, done_at`, `blocked_reason`) straight to `dev` as `backlog: P3 done (#18)`:
+  built on a fresh `origin/dev`, retried on a race, never forced, never to `main`. The
+  pre-push hook lets a push to `dev` through only if it fast-forwards and changes nothing but
+  `devteam/backlog.yaml`. The main checkout, when on `dev`, is then fast-forwarded
+  (`--autostash`, your local edits stay). Never reset `backlog.yaml` by hand.
+- `devteam run` refuses to start while the backlog's status fields differ from `origin/dev`
+  (it prints them; after a crash use `devteam resume`). The brain skips any task whose
+  `devteam/<id>` branch is already merged into `dev`.
+- A task is `done` only when this run's commits went through a PR that passed CI and was
+  merged. A branch already merged with nothing new is blocked as "nothing to merge, already
+  done", never marked done.
 - Daily report: merged / blocked tasks, API cost, **subscription load per task** (rounds,
   minutes, tokens, ≈ API $), latest benchmark, last release.
 - Models, budget, gates, developer folders and checks: `config.yaml`.
