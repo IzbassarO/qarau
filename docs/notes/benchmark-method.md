@@ -88,7 +88,8 @@ frames have the same hash) gave 178/210 registered, 3 models, 10 332 points in o
 No threshold separates that from a real change, so mykolaiv is **not gated** until P3
 (`devteam/config.yaml` → `gates.benchmark.per_video`, `gated: false`); it is still run and
 shown, and the packet names it under "not compared". Model counts of aegviidu/orono are noisy
-too: watch them when P3 lands.
+too: watch them when P3 lands. After P3 it stays ungated for a different reason: see
+"Mykolaiv (P3c)" below.
 
 **Mykolaiv export crash (P0, 2026-10-15).** Gate run beadd07 failed in export with laspy
 `OverflowError`: the old LAS header used offset = min and a fixed 1 mm scale, which overflows
@@ -115,3 +116,57 @@ So a change that only moves the sampling grid can swing room by ~6 pp, and the o
 happens to be a good phase for it. Notre-dame (30 fps drone) stays at 100 % either way. P2a
 therefore keeps the old grid exactly (`frames.pts_select`); a sampler change (e.g. parallax
 keyframes) should be judged on several videos, not on room alone.
+
+## Mykolaiv (P3c, 2026-10-16)
+
+**Verdict: stays not gated.** 1 model with ≥ 90 % registered is not reachable on this video
+without a wrong model; full diagnosis in `docs/notes/p3c-mykolaiv-plan.md`.
+
+**Why: the frames.** `mykolaiv_oil_tanks.webm` is not a drone survey. It is an edited night
+news clip of an oil depot fire (State Emergency Service of Ukraine): ~18 shots with hard cuts
+(burning tanks, fire trucks, firefighters with hoses), title cards at frames 0–18 and 284–299,
+and a broadcaster logo burned into the top-left corner of every frame. Of 300 extracted frames,
+90 are dropped as too dark (night, fades to black), 210 kept: 178 frames of footage + 32 of the
+title card.
+
+**Two runs, pipeline CLI, product defaults, same code (dev at 0f867c2, uncommitted P3c docs
+only), M1 Pro shared with other agents:**
+
+| Run | Frames used | Registered | Models | Points | Reproj. px | Mapper models | Merge accepted | Reconstr. s |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 210 | 178 (84.8 %) | 2 | 13 957 | 0.739 | 3 / 178 / 17 | `mapped` (none better) | 992 |
+| 2 | 210 | 178 (84.8 %) | 2 | 11 188 | 0.854 | 3 / 32 / 19 / 90 | `leftover_registration` (90 → 178, 84 bridges) | 1 150 |
+
+**Run-to-run spread:** registered 0 pp and models 0 (both 178 / 2), but the route there differs
+(mapper output 3 vs 4 models; the P3 join was needed in run 2 only); points −19.8 %, reproj
++15.6 %, export reprojection check mean 16.7 vs 2.8 px; cameras more than 20 units from the
+origin 15 vs 39 (frames 231–245 vs 179–245; median distance 0.68 / 1.2). Earlier gate runs on identical frames gave
+178/210 and 81/210 (see Variance). Points and reproj exceed the gate's thresholds (−10 %,
++10 %) between identical runs.
+
+**Why the registered % is stuck at 84.8 % and why that number is not trustworthy:**
+
+- In both runs the second model / the unregistered frames are exactly the 32 title-card frames.
+  They match the footage only through fade frame 283 (dropped as dark). 178/210 is therefore
+  the ceiling for any model without the title card; ≥ 90 % would need the title graphic
+  registered into the fire scene.
+- The main model holds **all 178 footage frames of 16 different shots**, which is not one
+  scene. 2 398 (run 1) / 3 852 (run 2) of its points are seen in more than one shot; 68 % /
+  61 % of their observations lie in the logo strip (x < 160 px, y < 240 px). COLMAP flags
+  33 533 of 44 850 matched pairs as `WATERMARK` and ignores them, but mixed logo + scene pairs
+  pass and chain the shots. Measured symptom: whole shots of cameras thrown far off (above).
+- Each shot is short (0.5–11 s) from a ground camera, mostly hand-held; flames, smoke and
+  water are non-rigid; most texture is dark. An honest model is one shot at a time: the
+  longest has 25 kept frames (12 %).
+
+**Tried** (all automatically in both runs, P3 merge path): dropped frames as bridges (90),
+GLOMAP join over all 300 frames (43 / 32 kept frames: it does not chain unrelated shots),
+relaxed leftover registration (+0 / +88). Not tried, with reason: denser sampling (the gaps are
+cuts and black frames, not sampling holes), wider matching (already exhaustive), looser mapper
+or merge thresholds (would register more frames through the logo: a higher % on a worse
+model).
+
+**What would make it gateable:** a continuous survey video in its place (owner decision:
+data and licence; mykolaiv's source licence is not recorded in `docs/notes/`). A static-overlay
+mask (no features on burned-in logos/OSD) is a real product fix for drone footage with
+on-screen text, but on this clip it lowers registered %.
