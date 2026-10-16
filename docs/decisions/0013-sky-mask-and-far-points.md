@@ -97,6 +97,11 @@ them. The viewer (`web/src/lib/bundle.ts`) reads only the keys it knows, so it d
 | aegviidu, run 1 | 100 (dev 100) | 84 915 → 77 545 | 905 | 6 465 | 0.661 (dev 0.533) | 16 202 of 77 545 |
 | aegviidu, run 2 | 100 | 61 821 → 60 728 | 1 093 | 0 | 0.532 | 17 530 of 60 728 |
 | aegviidu, no mask | 100 | 62 169 → 60 831 | 1 338 | 0 | 0.532 | 17 302 of 60 831 |
+| aegviidu, final code | 100 | 62 067 → 60 501 | 1 453 | 113 | 0.525 | 17 085 of 60 501 |
+| notre-dame, final code | 100 | 43 355 → 43 355 | 0 | 0 | 0.394 | 4 515 of 43 355 |
+
+Final code (ADR 0011 addendum) on aegviidu: merge step 353 s instead of 612–754 s, total
+1 346 s (dev 1 329 s) of the 1 800 s per-video budget.
 
 Aegviidu's incremental mapping splits (132 of 150) and the GLOMAP join (ADR 0011) is
 accepted. That join varies between runs on near-identical features: run 1 attached frames
@@ -104,4 +109,28 @@ accepted. That join varies between runs on near-identical features: run 1 attach
 filter), run 2 and the no-mask run reproduce dev (0.53 px). Not caused by the mask: the
 masks change 255 features, and the same code with the mask gives 0.532 px again. The
 variance of the GLOMAP join is a known risk for the reprojection gate on aegviidu, with or
-without this change.
+without this change (ADR 0011 addendum: the BA after the join now runs only when bridges were
+removed, with Huber loss).
+
+Why run 1's mean stayed at 0.661 px after the filter dropped 6 465 points over 4 px: the mean
+is measured on the filtered model (after `filter_points`, same as the benchmark row), and the
+excess is not in a few outliers but spread over the ~17 joined frames, 1.0–1.5 px per image on
+thousands of points each. Removing the > 4 px tail lowers the mean only a little; a further
+BA on that model reaches 0.62 px (100–300 iterations; a Cauchy loss diverged).
+
+## Default view in the app (finding for dev_app, `web/` is out of this task's scope)
+
+Reproduced offline from the bundles with the viewer's own rules (`engine.ts`, `geometry.ts`):
+
+- The viewer opens at **frame 0 with build-up on** (`ViewerScreen.tsx`), so every point first
+  seen after frame 0 is drawn `#2A3240`: **93 % of notre-dame's and 95 % of aegviidu's**
+  object points. The structure is there but reads as a dark blob. The design prototype opens
+  mid-video (frame 64); opening at the last frame, or with build-up off until play, fixes it.
+- Frustums are `0.04 × bounds radius`, and the bounds include every camera centre. The
+  viewer's own focus puts the default eye at the notre-dame orbit (a ring of frustums around
+  the ruin) and next to aegviidu's vertical climb (frustums across the tower).
+- No far band occludes the structure: with the far layer split off, notre-dame's bounds radius
+  drops from 25.6 to 11.4 and the band of horizon points above the ruin is gone from the
+  object cloud. A `world.focus` written by the pipeline was tried (structure centre, eye inside
+  the camera envelope, world yaw towards the cameras): it does not help while 93–95 % of the
+  points are in the not-yet-seen colour, so the framing stays the viewer's.

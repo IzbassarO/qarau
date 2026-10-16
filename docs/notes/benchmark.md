@@ -29,3 +29,5 @@ Rows appended by `python -m qarau_pipeline benchmark --record` (method: `docs/no
 | aegviidu | 4087789+dirty | 150 | 100.0 | 1 | 77545 | 84915 | 905 | 6465 | 0.661 |  | 1526.5 | max_frames 150 |
 | notre-dame | 4087789+dirty | 109 | 100.0 | 1 | 43298 | 43298 | 0 | 0 | 0.395 |  | 141.3 |  |
 | aegviidu | 4087789+dirty | 150 | 100.0 | 1 | 60728 | 61821 | 1093 | 0 | 0.532 |  | 1722.4 | max_frames 150; same code, re-run (`run`, not `--record`): GLOMAP join variance, ADR 0013 |
+| aegviidu | bfa1ef6+dirty | 150 | 100.0 | 1 | 60501 | 62067 | 1453 | 113 | 0.525 |  | 1346.3 | max_frames 150 |
+| notre-dame | bfa1ef6+dirty | 109 | 100.0 | 1 | 43355 | 43355 | 0 | 0 | 0.394 |  | 135.6 |  |

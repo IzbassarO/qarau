@@ -114,7 +114,11 @@ def stub_pycolmap(result: dict[int, FakeRec]) -> tuple[Any, dict[str, Any]]:
             ),
         ),
         incremental_mapping=incremental_mapping,
-        bundle_adjustment=lambda rec: calls.setdefault("ba", rec),
+        bundle_adjustment=lambda rec, opts: calls.setdefault("ba", (rec, opts)),
+        BundleAdjustmentOptions=lambda: SimpleNamespace(
+            print_summary=True, ceres=SimpleNamespace(loss_function_type="TRIVIAL")
+        ),
+        LossFunctionType=SimpleNamespace(HUBER="HUBER"),
     )
     return pc, calls
 
@@ -142,7 +146,14 @@ def test_drop_bridges_then_global_ba() -> None:
     rec = FakeRec(imgs(0, 98) | {"b1.jpg", "b2.jpg"})  # two bridge frames got registered
     pc, calls = stub_pycolmap({})
     assert rc.drop_bridges(pc, rec, {"b1.jpg", "b2.jpg", "b3.jpg"}) == 2
-    assert rec.reg_names() == imgs(0, 98) and calls["ba"] is rec
+    assert rec.reg_names() == imgs(0, 98) and calls["ba"][0] is rec
+    assert calls["ba"][1].ceres.loss_function_type == "HUBER"  # robust, like GLOMAP's own BA
+
+
+def test_no_bridge_in_model_no_second_ba() -> None:
+    rec = FakeRec(imgs(0, 98))
+    pc, calls = stub_pycolmap({})
+    assert rc.drop_bridges(pc, rec, {"b1.jpg"}) == 0 and "ba" not in calls
 
 
 def patch_colmap(

@@ -70,11 +70,17 @@ def register_leftovers(pc: Any, db: Path, frames_dir: Path, main_dir: Path, out_
 
 def drop_bridges(pc: Any, rec: Any, bridges: set[str]) -> int:
     """Deregister the bridge frames (blurred: they tie the map together but are never
-    evidence), then a global bundle adjustment. Returns how many were in the model."""
+    evidence), then a global bundle adjustment with GLOMAP's robust Huber loss (the default
+    trivial loss lets outlier points pull the poses). No bridge in the model: the model is
+    already adjusted, nothing to do. Returns how many were in the model."""
     used = [rec.image(i) for i in rec.reg_image_ids() if rec.image(i).name in bridges]
     for img in used:
         rec.deregister_frame(img.frame_id)
-    pc.bundle_adjustment(rec)
+    if used:
+        opts = pc.BundleAdjustmentOptions()
+        opts.print_summary = False
+        opts.ceres.loss_function_type = pc.LossFunctionType.HUBER
+        pc.bundle_adjustment(rec, opts)
     return len(used)
 
 
@@ -149,7 +155,7 @@ class ColmapReconstructor:
         """1) add the bridge frames; 2) one global (GLOMAP) mapping over all images: rotation
         averaging crosses fast pans where incremental registration finds too few 3D points;
         3) if kept frames are still missing, relaxed leftover registration into the best model
-        so far; 4) keep the candidate with the most kept frames, drop bridges, global BA."""
+        so far; 4) keep the candidate with the most kept frames, drop bridges (BA if any)."""
         if bridges:
             self._extract(db, frames_dir, bridges, bridge=True, masks=masks)
             self._match(db, len(names) + len(bridges))
