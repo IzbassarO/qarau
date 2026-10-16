@@ -311,7 +311,12 @@ tasks:
   goal: 'Real colours <-> height-blue toggle; the initial view frames the object, not the whole scene.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261016-165310
+  branch: devteam/A4
+  pr: https://github.com/IzbassarO/qarau/pull/22
+  done_at: '2026-10-16'
 - id: A5
   area: app
   title: Far-point layer in the viewer
