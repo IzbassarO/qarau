@@ -35,7 +35,7 @@ only when point counts require LOD (ADR 0005).
 ## Addendum 2026-10-16 (P3b): `far` layer
 
 Manifest key `far = {count, position: "web/far.position.f32", color: "web/far.color.u8",
-rule}`: points farther from the nearest registered camera than 4 × the median such distance
+rule}`: points farther from the nearest registered camera than 2.5 × the median such distance
 (ADR 0013). Same encoding and world frame as `points.position` / `points.color`; no tracks,
 no first-seen. These points are never in the `points` arrays, the tracks, `world.bounds` or
 `cloud.laz`. Additive key, so `version` is unchanged; viewers that do not know `far` ignore

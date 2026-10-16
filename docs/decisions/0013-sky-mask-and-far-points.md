@@ -65,11 +65,25 @@ and in every video of the benchmark `results.json` and table.
 ### 3. Far layer — `export.py`
 
 A point is **far** when its distance to the **nearest** registered camera centre is more than
-**K = 4 × the median** of that distance over all points. Nearest camera, not the trajectory
+**K = 2.5 × the median** of that distance over all points. Nearest camera, not the trajectory
 centroid: a long walk along a pipeline keeps the points at both ends. The median, not a high
-percentile: a sky wall can be more than 10 % of the points, so a P90 can sit inside it. K = 4
-keeps the structure and its surroundings (in an orbit the farthest useful ground is ~2–3 ×
-the typical viewing distance) and moves the horizon and the hills out.
+percentile: a sky wall can be more than 10 % of the points, so a P90 can sit inside it.
+
+K was 4 in the first round; the tester's screenshots still showed a band above the notre-dame
+ruin. Distance to the nearest camera / median on notre-dame: P50 1.0, P75 1.37, P90 4.1,
+P95 6.9: structure and near ground sit below ~1.5, the band is the hillside at 2.5–4. Rendered
+with the viewer's rules (default view, build-up off):
+
+| K | notre-dame far | band above the ruin | aegviidu far | bounds radius nd / ae |
+| --- | --- | --- | --- | --- |
+| 4 | 4 515 of 43 355 (10 %) | visible | 17 085 of 60 501 (28 %) | 11.3 / 14.1 |
+| 2.5 | 6 943 (16 %) | mostly gone | 25 374 (42 %) | 8.4 / 9.2 |
+| 2 | 8 241 (19 %) | gone, edges of the near ground start to go | — | 7.2 / — |
+
+K = 2.5: the band goes, the near ground stays, and the smaller bounds also shrink the viewer's
+frustums (sized 0.04 × bounds radius). On aegviidu the far layer then holds the village and
+forest seen from altitude (4–6 × the close-up distance): context, still in the bundle for A5,
+not the inspected tower.
 
 Far points are written as their own arrays (`web/far.position.f32`, `web/far.color.u8`, same
 encoding and world frame as the object cloud) under manifest key `far` (ADR 0003 addendum).
@@ -97,8 +111,10 @@ them. The viewer (`web/src/lib/bundle.ts`) reads only the keys it knows, so it d
 | aegviidu, run 1 | 100 (dev 100) | 84 915 → 77 545 | 905 | 6 465 | 0.661 (dev 0.533) | 16 202 of 77 545 |
 | aegviidu, run 2 | 100 | 61 821 → 60 728 | 1 093 | 0 | 0.532 | 17 530 of 60 728 |
 | aegviidu, no mask | 100 | 62 169 → 60 831 | 1 338 | 0 | 0.532 | 17 302 of 60 831 |
-| aegviidu, final code | 100 | 62 067 → 60 501 | 1 453 | 113 | 0.525 | 17 085 of 60 501 |
-| notre-dame, final code | 100 | 43 355 → 43 355 | 0 | 0 | 0.394 | 4 515 of 43 355 |
+| aegviidu, final code | 100 | 62 067 → 60 501 | 1 453 | 113 | 0.525 | 25 374 of 60 501 (K 2.5) |
+| notre-dame, final code | 100 | 43 355 → 43 355 | 0 | 0 | 0.394 | 6 943 of 43 355 (K 2.5) |
+
+Rows above "final code" were exported with K = 4.
 
 Final code (ADR 0011 addendum) on aegviidu: merge step 353 s instead of 612–754 s, total
 1 346 s (dev 1 329 s) of the 1 800 s per-video budget.
@@ -129,8 +145,12 @@ Reproduced offline from the bundles with the viewer's own rules (`engine.ts`, `g
 - Frustums are `0.04 × bounds radius`, and the bounds include every camera centre. The
   viewer's own focus puts the default eye at the notre-dame orbit (a ring of frustums around
   the ruin) and next to aegviidu's vertical climb (frustums across the tower).
-- No far band occludes the structure: with the far layer split off, notre-dame's bounds radius
-  drops from 25.6 to 11.4 and the band of horizon points above the ruin is gone from the
-  object cloud. A `world.focus` written by the pipeline was tried (structure centre, eye inside
-  the camera envelope, world yaw towards the cameras): it does not help while 93–95 % of the
-  points are in the not-yet-seen colour, so the framing stays the viewer's.
+- No far band occludes the structure: with the far layer split off (K = 2.5), notre-dame's
+  bounds radius drops from 25.6 (dev) to 8.4 and the hillside band above the ruin leaves the
+  object cloud. With build-up off, the same renders show the ruin and the tower clearly. A
+  `world.focus` written by the pipeline was tried (structure centre, eye inside the camera
+  envelope, world yaw towards the cameras): it does not help while 93–95 % of the points are
+  in the not-yet-seen colour, so the framing stays the viewer's.
+- Needs a decision outside this task (owner / tech lead): either the viewer default change
+  above as its own `web/` task for dev_app, or the P3b visual criterion judged with build-up
+  off. This task may only edit `pipeline/`, `backend/`, `infra/`, `docs/`.

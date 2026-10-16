@@ -18,7 +18,7 @@ from .interfaces import stage_seconds
 
 NEVER = 65535
 THUMB_W = 960
-FAR_K = 4.0  # far layer: nearest-camera distance > FAR_K x median (ADR 0013)
+FAR_K = 2.5  # far layer: nearest-camera distance > FAR_K x median (ADR 0013)
 
 
 # ---------------------------------------------------------------- geometry
