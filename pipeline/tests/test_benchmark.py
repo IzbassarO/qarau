@@ -98,8 +98,14 @@ def test_results_schema(env: dict[str, Any]) -> None:
 
 
 class FakeModel:
-    def __init__(self, reg: int, pts: int) -> None:
-        self.reg, self.pts = reg, pts
+    def __init__(self, reg: int, pts: int, first: int = 0) -> None:
+        self.reg, self.pts, self.first = reg, pts, first
+
+    def reg_image_ids(self) -> list[int]:
+        return list(range(self.first, self.first + self.reg))
+
+    def image(self, i: int) -> Any:
+        return type("Image", (), {"name": f"{i:06d}.jpg"})
 
     def num_reg_images(self) -> int:
         return self.reg
@@ -121,10 +127,11 @@ def test_largest_model_selected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     pc = reconstruction.pycolmap
     monkeypatch.setattr(pc, "extract_features", lambda *a, **k: None)
     monkeypatch.setattr(pc, "match_exhaustive", lambda *a, **k: None)
-    models = {0: FakeModel(10, 900), 1: FakeModel(80, 4000), 2: FakeModel(30, 9000)}
+    models = {0: FakeModel(10, 900, 80), 1: FakeModel(80, 4000), 2: FakeModel(30, 9000, 90)}
     monkeypatch.setattr(pc, "incremental_mapping", lambda *a, **k: models)
     names = [f"{i:06d}.jpg" for i in range(100)]
-    m = reconstruction.ColmapReconstructor().reconstruct(tmp_path, names, tmp_path / "colmap")
+    rc = reconstruction.ColmapReconstructor(merge=False)
+    m = rc.reconstruct(tmp_path, names, tmp_path / "colmap")
     row = benchmark.video_row(m, 12.34)
     assert (row["models"], row["registered"], row["points"]) == (3, 80, 4000)
     assert (row["frames_used"], row["registered_pct"], row["reproj_px"]) == (100, 80.0, 0.58)

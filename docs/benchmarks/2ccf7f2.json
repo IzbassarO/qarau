@@ -1,0 +1,34 @@
+{
+  "commit": "2ccf7f2",
+  "dirty": true,
+  "pipeline_version": "0.1.0",
+  "started_at": "2026-10-15T22:55:14+00:00",
+  "videos": {
+    "notre-dame": {
+      "registered_pct": 100.0,
+      "models": 1,
+      "reproj_px": 0.394,
+      "points": 43170,
+      "scale_err_cm": null,
+      "time_s": 133.6,
+      "frames_used": 109,
+      "registered": 109,
+      "max_frames": null,
+      "dropped_points": 0
+    },
+    "room": {
+      "registered_pct": 100.0,
+      "models": 1,
+      "reproj_px": 0.936,
+      "points": 26482,
+      "scale_err_cm": null,
+      "time_s": 348.3,
+      "frames_used": 269,
+      "registered": 269,
+      "max_frames": null,
+      "dropped_points": 0
+    }
+  },
+  "errors": {},
+  "skipped": []
+}

@@ -31,7 +31,27 @@ evidence: `prototypes/Finding.dc.html`.
 | Two-finger trackpad scroll | orbit around the current pivot |
 | Shift + two-finger scroll / wheel | screen-space pan |
 | Toolbar | reset, top, side, view through current video camera |
-| Keyboard (when canvas focused) | `F` frame selection, `Home` reset, numpad-style 1/3/7 front/side/top |
+| Keyboard (when canvas focused) | `F` toggle fly, `Escape` exit fly, `Home` reset, numpad-style 1/3/7 front/right/top |
+| Fly mode | `W/S` forward/back in the viewing direction, `A/D` strafe, `Shift` faster; mouse look (drag if pointer lock is unavailable) |
+| Axis gizmo (bottom-left) | Click ±X/±Y/±Z for right/left/back/front/top/bottom around the current pivot |
+
+The viewer uses +Z as world-up. Axis flights preserve pivot distance, use quaternion
+slerp with exponential damping, and choose a stable screen-up at the top/bottom poles.
+The six red/green/blue axis buttons rotate with the camera and have localized accessible
+labels. Existing top/side toolbar buttons use the same flights.
+Projected buttons are spread apart when axes overlap in diagonal or pole views, so
+all six directions remain clickable; connecting lines follow the adjusted positions.
+
+Fly speed is 15% of the cloud bounding-box diagonal per second, with a 4× Shift boost.
+Velocity and mouse look use exponential damping. Fly shares orbit's expanded bounds
+and swept point-collision constraint. Leaving fly keeps the camera pose and places
+the orbit pivot ahead of it at the previous pivot distance. F does not repeat-toggle;
+keys are ignored in editable controls. Losing pointer lock, window focus, or page
+visibility exits fly and clears held movement keys. A localized hint describes the
+controls while fly is active.
+Entering fly preserves the camera orientation until the first mouse-look input,
+including top/bottom views and recorded camera roll. At the poles, mouse look uses
+the camera's existing screen-right direction to choose a stable yaw.
 
 Pick the nearest cloud point within the cursor ray's tolerance once at pointer-down.
 If the ray misses, use the ray point at the current target distance. A drag keeps this
