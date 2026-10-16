@@ -93,6 +93,7 @@ def cmd_run(a: argparse.Namespace) -> None:
         peak_threshold=a.peak_threshold,
         mapper=a.mapper,
         merge=a.merge,
+        sky_mask=a.sky_mask,
     )
     res = run_stage(
         out, "reconstruction", f"pycolmap {pycolmap.__version__}", rc.params(),
@@ -143,6 +144,8 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--mapper", choices=["incremental", "global"], default="incremental")
     r.add_argument("--no-merge", dest="merge", action="store_false",
                    help="largest model only, no leftover registration (pre-P3)")  # fmt: skip
+    r.add_argument("--no-sky-mask", dest="sky_mask", action="store_false",
+                   help="extract features in the sky too (pre-P3b, ADR 0013)")  # fmt: skip
     r.set_defaults(fn=cmd_run)
     e = sub.add_parser("export", help="COLMAP model -> LAZ/PLY + viewer bundle")
     e.add_argument("--sparse", required=True)

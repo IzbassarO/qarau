@@ -23,3 +23,9 @@ Rows appended by `python -m qarau_pipeline benchmark --record` (method: `docs/no
 | room | a8efcc9+dirty | 269 | 95.5 | 2 | 26706 | 0.93 |  | 464.9 |  |
 | notre-dame | 2ccf7f2+dirty | 109 | 100.0 | 1 | 43170 | 0.394 |  | 133.6 |  |
 | room | 2ccf7f2+dirty | 269 | 100.0 | 1 | 26482 | 0.936 |  | 348.3 |  |
+
+| Video | Commit | Frames used | Registered % | Models | Points | Points total | Low parallax | Reproj. drop | Reproj. px | Scale err cm | Time s | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| aegviidu | 4087789+dirty | 150 | 100.0 | 1 | 77545 | 84915 | 905 | 6465 | 0.661 |  | 1526.5 | max_frames 150 |
+| notre-dame | 4087789+dirty | 109 | 100.0 | 1 | 43298 | 43298 | 0 | 0 | 0.395 |  | 141.3 |  |
+| aegviidu | 4087789+dirty | 150 | 100.0 | 1 | 60728 | 61821 | 1093 | 0 | 0.532 |  | 1722.4 | max_frames 150; same code, re-run (`run`, not `--record`): GLOMAP join variance, ADR 0013 |

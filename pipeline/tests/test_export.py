@@ -225,4 +225,30 @@ def test_export_bundle_survives_far_point(tmp_path: Path) -> None:
     """The mykolaiv crash: a far point used to overflow the LAS int32 coordinates."""
     out, m, *_ = run_export(tmp_path, far=1e12)
     assert len(laspy.read(out / "cloud.laz").x) == m["points"]["count"]
-    assert m["stats"]["points"] + sum(m["stats"]["dropped_points"].values()) == N
+    s = m["stats"]
+    assert s["points"] + s["far_points"] + sum(s["dropped_points"].values()) == N
+    assert s["far_points"] == 1  # 1 of 40 is > 1 %: not a sanitize outlier, still kept out
+
+
+def test_far_layer_own_arrays(tmp_path: Path) -> None:
+    """A point 200 units out (others at depth 4-6) goes to manifest key `far`, not the cloud."""
+    out, m, truth, *_ = run_export(tmp_path, far=200.0)
+    W = np.array(m["world"]["world_from_colmap"]).reshape(4, 4)
+    aligned = truth["pts"] @ W[:3, :3].T + W[:3, 3]
+    far = m["far"]
+    assert far["count"] == m["stats"]["far_points"] == 1
+    fpos = np.fromfile(out / far["position"], "<f4").reshape(-1, 3)
+    fcol = np.fromfile(out / far["color"], "u1").reshape(-1, 3)
+    assert np.allclose(fpos, aligned[:1], atol=1e-3) and fcol.tolist() == [[10, 20, 30]]
+    # the object cloud, its tracks and the LAZ hold every other point and never the far one
+    assert m["points"]["count"] == m["stats"]["points"] == N - 1
+    pos = np.fromfile(out / m["points"]["position"], "<f4").reshape(-1, 3)
+    assert np.allclose(pos, aligned[1:], atol=1e-4)
+    assert len(np.fromfile(out / m["tracks"]["point_offsets"], "<u4")) == N
+    assert len(laspy.read(out / "cloud.laz").x) == N - 1
+
+
+def test_no_far_points_in_a_compact_scene(bundle) -> None:
+    out, m, *_ = bundle
+    assert m["far"]["count"] == 0 and (out / m["far"]["position"]).stat().st_size == 0
+    assert m["points"]["count"] == N

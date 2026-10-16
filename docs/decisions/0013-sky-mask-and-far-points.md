@@ -1,0 +1,107 @@
+# 0013 — Classical sky mask, post-mapping point filter, separate far layer
+
+- Status: accepted (dev team, P3b)
+- Date: 2026-10-16
+
+## Context
+
+Owner's review 2026-10-15: long outdoor drone shots (notre-dame, aegviidu) grow a "sky wall":
+far, badly triangulated points (clouds, horizon, distant hills) that sit between the default
+camera and the structure and hide it. Three causes, three fixes:
+
+1. features are extracted in the sky and matched along the clouds' and horizon's edges;
+2. some points survive mapping with almost no parallax or a large reprojection error (the
+   GLOMAP join and the bridge removal + global BA of ADR 0011 are not followed by COLMAP's
+   own incremental filter);
+3. correct but far points (horizon forest, hills kilometres away) are mixed into the object
+   cloud and stretch its bounds.
+
+## Decision
+
+### 1. Sky mask before feature extraction — `pipeline/qarau_pipeline/sky.py`
+
+Classical detector, OpenCV + NumPy, no learned model:
+
+- work at ≤ 480 px wide; a pixel is a sky candidate when it is **smooth** (mean Sobel
+  magnitude < 12 grey levels in a 9 × 9 window) **and** sky-coloured: bright (HSV V ≥ 170,
+  any hue), blue (OpenCV hue 85–135 with V ≥ 90) or overcast grey (S ≤ 40, V ≥ 120);
+- keep only candidate components (8-connected) that touch the **top** image border;
+- close holes with a 7 × 7 kernel (wires, birds), dilate by 2 px (≈ 4–8 px at full size) so
+  features on the horizon edge are not kept;
+- safety caps: more than 70 % of the frame, or nothing touching the top → keep the whole frame
+  (reason `cap` / `no_sky`, counted in `run.json` → `reconstruction.metrics.sky_mask`);
+- masks are written as `colmap/masks/<image name>.png` (COLMAP's naming, 0 = no features) and
+  passed via `ImageReaderOptions.mask_path` to every feature extraction (bridges included).
+
+On by default; `qarau_pipeline run --no-sky-mask` restores the pre-P3b behaviour.
+
+**Why no model:** a blue-or-white, untextured region touching the top of a drone or phone
+frame is sky in all our footage (checked on all 41 sampled notre-dame frames and 8 aegviidu
+frames: the masks cover the sky and stop at the horizon line). A segmentation model adds
+weights, a licence review and a GPU dependency for no measured gain. If one is ever needed,
+both code and weights must be Apache-2.0, MIT or BSD, recorded here, and cleared with the
+owner first. **NVIDIA SegFormer (NVIDIA Source Code License, non-commercial) is forbidden**;
+no model weights are referenced or downloaded by this change.
+
+**Licences:** OpenCV (`opencv-python-headless`, Apache-2.0, already a dependency), NumPy
+(BSD-3-Clause), pycolmap/COLMAP (BSD-3-Clause). No new dependency.
+
+### 2. Point filter after mapping — `pipeline/qarau_pipeline/point_filter.py`
+
+Run on the final model, before `sparse/0` is written:
+
+- max triangulation angle over all pairs of observing camera centres (tracks longer than 40
+  images are subsampled evenly, ends kept) **< 1.5°** → dropped, `points_dropped_low_parallax`;
+- else mean reprojection error (recomputed with `update_point_3d_errors`) **>
+  `filter_max_reproj_error`** read from pycolmap's mapper options (4 px) →
+  `points_dropped_reproj`;
+- each point counts in one bucket; `points_total` (before), `points` (kept).
+
+Same thresholds as COLMAP's own incremental filter (`filter_min_tri_angle` 1.5°,
+`filter_max_reproj_error` 4 px), applied to whole points at the end, so the GLOMAP join and
+the bridge removal cannot leave unfiltered points behind. The three counts are in `run.json`
+and in every video of the benchmark `results.json` and table.
+
+### 3. Far layer — `export.py`
+
+A point is **far** when its distance to the **nearest** registered camera centre is more than
+**K = 4 × the median** of that distance over all points. Nearest camera, not the trajectory
+centroid: a long walk along a pipeline keeps the points at both ends. The median, not a high
+percentile: a sky wall can be more than 10 % of the points, so a P90 can sit inside it. K = 4
+keeps the structure and its surroundings (in an orbit the farthest useful ground is ~2–3 ×
+the typical viewing distance) and moves the horizon and the hills out.
+
+Far points are written as their own arrays (`web/far.position.f32`, `web/far.color.u8`, same
+encoding and world frame as the object cloud) under manifest key `far` (ADR 0003 addendum).
+The object cloud, its tracks, bounds, `z_range` and `cloud.laz`/`cloud.ply` never contain
+them. The viewer (`web/src/lib/bundle.ts`) reads only the keys it knows, so it does not load
+`far` until task A5 renders it as a separate, toggleable layer.
+
+## Consequences
+
+- No sky features → no sky points and fewer wrong matches; frames that are mostly sky keep
+  every feature (cap), so registration cannot fall below the unmasked run because of the mask.
+- `points` in the benchmark is the filtered object model; compare it with `points_total` to
+  see what the filter removed.
+- Far context (horizon) is still in the bundle for A5, but never changes the default view.
+- SIFT rarely fires in a smooth sky, so on our videos the mask removes few features (aegviidu:
+  255 of 1.98 M, about the run-to-run noise of extraction itself). It is a cheap guard
+  (≈ 2 s per 150 frames) for skies with clouds, haze and compression noise; the sky wall
+  the owner saw is mostly far terrain and horizon, which the far layer takes out of the view.
+
+## Measured (quick benchmark, 2026-10-16, `docs/notes/benchmark.md`)
+
+| Video | Registered % | Points total → kept | Low parallax | Reproj. drop | Reproj. px | Far layer |
+| --- | --- | --- | --- | --- | --- | --- |
+| notre-dame | 100 (dev 100) | 43 298 → 43 298 | 0 | 0 | 0.395 (dev 0.40) | 4 518 of 43 298 |
+| aegviidu, run 1 | 100 (dev 100) | 84 915 → 77 545 | 905 | 6 465 | 0.661 (dev 0.533) | 16 202 of 77 545 |
+| aegviidu, run 2 | 100 | 61 821 → 60 728 | 1 093 | 0 | 0.532 | 17 530 of 60 728 |
+| aegviidu, no mask | 100 | 62 169 → 60 831 | 1 338 | 0 | 0.532 | 17 302 of 60 831 |
+
+Aegviidu's incremental mapping splits (132 of 150) and the GLOMAP join (ADR 0011) is
+accepted. That join varies between runs on near-identical features: run 1 attached frames
+106–122 with many points at 1.0–1.5 px per image (6 465 points over 4 px, removed by the
+filter), run 2 and the no-mask run reproduce dev (0.53 px). Not caused by the mask: the
+masks change 255 features, and the same code with the mask gives 0.532 px again. The
+variance of the GLOMAP join is a known risk for the reprojection gate on aegviidu, with or
+without this change.

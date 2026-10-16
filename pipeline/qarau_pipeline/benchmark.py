@@ -24,9 +24,11 @@ MANIFEST = PKG / "benchmark_set.toml"
 REPO = PKG.parents[1]
 SECTION = "## Automated benchmark (P1)"
 HEAD = (
-    "| Video | Commit | Frames used | Registered % | Models | Points | Reproj. px "
-    "| Scale err cm | Time s | Notes |\n" + "| --- " * 10 + "|"
-)
+    "| Video | Commit | Frames used | Registered % | Models | Points | Points total "
+    "| Low parallax | Reproj. drop | Reproj. px | Scale err cm | Time s | Notes |\n"
+    + "| --- " * 13
+    + "|"
+)  # points = kept by the point filter; points total = before it (P3b, ADR 0013)
 
 
 def load_manifest(path: Path = MANIFEST) -> list[dict[str, Any]]:
@@ -64,6 +66,9 @@ def video_row(m: dict[str, Any], time_s: float, max_frames: int | None = None) -
         "models": m["models"],
         "reproj_px": m["mean_reproj_error_px"],
         "points": m["points"],
+        "points_total": m["points_total"],
+        "points_dropped_low_parallax": m["points_dropped_low_parallax"],
+        "points_dropped_reproj": m["points_dropped_reproj"],
         "scale_err_cm": None,  # P5/P7: needs a reference scale
         "time_s": round(time_s, 1),
         "frames_used": used,
@@ -75,7 +80,10 @@ def video_row(m: dict[str, Any], time_s: float, max_frames: int | None = None) -
 
 def md_rows(res: dict[str, Any]) -> list[str]:
     tag = res["commit"] + ("+dirty" if res["dirty"] else "")
-    keys = "frames_used registered_pct models points reproj_px scale_err_cm time_s".split()
+    keys = (
+        "frames_used registered_pct models points points_total points_dropped_low_parallax"
+        " points_dropped_reproj reproj_px scale_err_cm time_s"
+    ).split()
     rows = []
     for n, v in res["videos"].items():
         cells = ["" if v[k] is None else str(v[k]) for k in keys]
@@ -122,8 +130,10 @@ def _record(res: dict[str, Any], repo: Path) -> None:
         text += (
             f"\n{SECTION}\n\nRows appended by `python -m qarau_pipeline benchmark --record`"
             " (method: `docs/notes/benchmark-method.md`). `+dirty` = uncommitted changes on"
-            " top of the commit.\n\n" + HEAD + "\n"
+            " top of the commit.\n"
         )
+    if HEAD not in text:  # new columns: start a new table, the old rows keep their header
+        text += "\n" + HEAD + "\n"
     md.write_text(text + "".join(r + "\n" for r in md_rows(res)))
 
 
