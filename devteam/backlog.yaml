@@ -85,12 +85,21 @@ tasks:
     (dev_app); until then the viewer does not load it.
 
 
+    Re-test (owner 2026-10-16): the pipeline work is done on branch devteam/P3b (sky mask, triangulation-angle
+    / reprojection filter, far layer, counters, ADR 0013). Continue on that branch with dev merged in
+    (A4''s viewer fix; devteam merges, never rebases), rerun the checks and the quick benchmark. No new
+    pipeline changes unless the tester finds a real pipeline defect.
+
+
     Acceptance:
 
-    - The tester MUST take its own screenshots of the viewer on the benchmark videos with sky, notre-dame
-    and aegviidu (water towers): routes /viewer/notre-dame and /viewer/aegviidu, and judge that no sky
-    wall occludes the structure in the default view. A pass on the criteria without those screenshots
-    is a fail.
+
+    - The tester MUST take its own screenshots of /viewer/notre-dame and /viewer/aegviidu; a pass without
+    them is a fail. In the default view (after A4), compared with dev from the same camera: no wall or
+    band of points in the sky; far points appear only in the separate far layer. (The orchestrator adds
+    dev-*.png screenshots of the same routes on dev''s gate benchmark.) Sparse clouds are never expected
+    to look like the object: do not judge recognisability before dense reconstruction (P4).
+
 
     - Registered-frames ratio is not below dev on any gated video.
 
@@ -109,14 +118,20 @@ tasks:
 
     '
   status: blocked
+  depends_on:
+  - A4
   run: run-20261016-115433
   branch: devteam/P3b
-  blocked_reason: 'tester: The default-view criterion is not met. Both screenshots show the structure
-    dark and partly hidden by frustum wireframes, even though the far points are gone. The developer says
-    the pipeline cannot fix this and that web/ is out of scope. That may be right, but the task acceptance
-    still requires a clear default view, and I judge only what the screenshots show. A waiver needs the
-    owner''s decision, not the developer''s. Everything else is in order: the mask, the filter, the far
-    layer, the tes'
+  blocked_reason: Pipeline work done on devteam/P3b; re-test after A4 viewer fix
+- id: P2b
+  area: core
+  title: Parallax keyframes and a footage quality report
+  goal: 'Keyframes are chosen by parallax (enough camera motion), not a fixed rate. A quality report lists
+    problems with plain re-shoot advice: blur, moving too fast, pure rotation (turning on the spot), low
+    texture.
+
+    '
+  status: todo
 - id: P3c
   area: core
   title: Re-gate mykolaiv
@@ -129,15 +144,6 @@ tasks:
     '
   owner: dev_pipeline
   status: todo
-- id: P2b
-  area: core
-  title: Parallax keyframes and a footage quality report
-  goal: 'Keyframes are chosen by parallax (enough camera motion), not a fixed rate. A quality report lists
-    problems with plain re-shoot advice: blur, moving too fast, pure rotation (turning on the spot), low
-    texture.
-
-    '
-  status: todo
 - id: P4a
   area: core
   title: Dense reconstruction stage (commercial licence)
@@ -147,11 +153,12 @@ tasks:
     id, with a test. Exported to the viewer bundle.
 
     '
-  status: todo
   licence: 'Depth Anything V2 Small code and weights: Apache-2.0 (owner confirmed 2026-10-15). Base/Large:
     CC-BY-NC-4.0, forbidden.
 
     '
+  status: blocked
+  blocked_reason: Waits for a GPU machine (owner 2026-10-16); set to todo when one is available.
 - id: P4b
   area: core
   title: Frame-to-point links for dense points
@@ -189,7 +196,7 @@ tasks:
 
     '
   status: blocked
-  blocked_by:
+  depends_on:
   - P4a
   blocked_reason: 'Waits for P4a (dense stage): the queue runs the full pipeline, including the dense
     stage.'
@@ -308,9 +315,34 @@ tasks:
 - id: A4
   area: app
   title: Colour toggle and object framing
-  goal: 'Real colours <-> height-blue toggle; the initial view frames the object, not the whole scene.
+  goal: 'Owner 2026-10-16: P3b''s pipeline work is done but its tester failed the default view: ~93-95
+    % of points are drawn in the dark "not yet seen" timeline colour and large camera frustums cross the
+    scene. Make the default viewer view honest and readable. No change to the pipeline output format (viewer
+    bundle, ADR 0003).
+
+
+    Acceptance:
+
+    - The default point colour is the real RGB from the bundle. The "first seen / not yet seen" timeline
+    colouring is an opt-in mode, never the default.
+
+    - Camera frustums are hidden by default, with a toggle to show them (text via i18n RU/KK/EN). When
+    shown, frustum size scales to the scene extent.
+
+    - The initial camera frames the main point layer using robust bounds (2-98 % percentiles per axis,
+    the far layer excluded), +Z up, no roll.
+
+    - Unit tests for the framing bounds (outliers and far points do not move the framed box; +Z up, no
+    roll) and for the defaults (RGB colour, frustums hidden).
+
+    - The tester takes its own screenshots of /viewer/notre-dame, /viewer/aegviidu and /viewer/room (the
+    room run) in the default view: the structure is clearly visible, no frustums, no error banner. Sparse
+    clouds are not expected to look like the object: judge readability, not recognisability.
+
+    - No change to the pipeline output format; only web/ (and docs/) change.
 
     '
+  owner: dev_app
   status: todo
 - id: A5
   area: app
@@ -323,7 +355,7 @@ tasks:
     '
   owner: dev_app
   status: blocked
-  blocked_by:
+  depends_on:
   - P3b
   blocked_reason: 'Waits for P3b: the pipeline must first export the `far` layer.'
 - id: A1b
