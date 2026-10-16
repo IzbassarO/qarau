@@ -127,30 +127,87 @@ export function pickNearest(
 // nearer points win ties: penalise by log depth (about 1 px per 2x depth)
 const depthPenalty = (cw: number) => Math.log2(Math.max(cw, 1e-6));
 
-/**
- * Robust bounds: 2-98 percentile per axis of (a sample of) the points, widened to include the
- * camera centres. Manifest bounds are inflated by outliers, so framing never uses them.
- */
-export function robustBounds(pos: Float32Array, centers: number[][], maxSample = 200000) {
-  const n = pos.length / 3;
-  const step = Math.max(1, Math.floor(n / maxSample));
+export interface Bounds {
+  min: number[];
+  max: number[];
+  center: number[];
+  radius: number;
+}
+
+/** Point-only bounds at exact, linearly interpolated per-axis percentiles (0–100). */
+export function robustBounds(
+  pos: ArrayLike<number>,
+  { lowPct = 2, highPct = 98 }: { lowPct?: number; highPct?: number } = {},
+): Bounds {
+  if (
+    !Number.isFinite(lowPct) ||
+    !Number.isFinite(highPct) ||
+    lowPct < 0 ||
+    highPct > 100 ||
+    lowPct > highPct
+  )
+    throw new RangeError('Percentiles must satisfy 0 <= lowPct <= highPct <= 100');
+  const n = Math.floor(pos.length / 3);
   const min: number[] = [];
   const max: number[] = [];
   for (let k = 0; k < 3; k++) {
-    const v: number[] = [];
-    for (let p = 0; p < n; p += step) v.push(pos[p * 3 + k]);
-    v.sort((a, b) => a - b);
-    min.push(v[Math.floor(v.length * 0.02)] ?? 0);
-    max.push(v[Math.min(v.length - 1, Math.floor(v.length * 0.98))] ?? 0);
-  }
-  for (const c of centers)
-    for (let k = 0; k < 3; k++) {
-      min[k] = Math.min(min[k], c[k]);
-      max[k] = Math.max(max[k], c[k]);
+    const values = new Float64Array(n);
+    let count = 0;
+    for (let p = 0; p < n; p++) {
+      const at = p * 3;
+      if (Number.isFinite(pos[at]) && Number.isFinite(pos[at + 1]) && Number.isFinite(pos[at + 2]))
+        values[count++] = pos[at + k];
     }
+    const sorted = values.subarray(0, count).sort();
+    const percentile = (pct: number) => {
+      if (!count) return 0;
+      const index = ((count - 1) * pct) / 100;
+      const lo = Math.floor(index);
+      const hi = Math.ceil(index);
+      return sorted[lo] + (sorted[hi] - sorted[lo]) * (index - lo);
+    };
+    min.push(percentile(lowPct));
+    max.push(percentile(highPct));
+  }
   const center = min.map((m, k) => (m + max[k]) / 2);
   const radius = Math.max(1e-6, Math.hypot(...min.map((m, k) => max[k] - m)) / 2);
   return { min, max, center, radius };
+}
+
+/**
+ * Fit all eight box corners with a 10% margin, looking diagonally with world +Z up.
+ * fovY is the vertical field of view in degrees, matching PerspectiveCamera.
+ */
+export function frameBounds(bounds: Pick<Bounds, 'min' | 'max'>, fovY: number, aspect: number) {
+  if (!Number.isFinite(fovY) || fovY <= 0 || fovY >= 180 || !Number.isFinite(aspect) || aspect <= 0)
+    throw new RangeError('Framing requires 0 < fovY < 180 and a positive aspect ratio');
+  const target = bounds.min.map((v, k) => (v + bounds.max[k]) / 2);
+  const direction = new Vector3(1, -1.3, 0.8).normalize();
+  const right = new Vector3().crossVectors(new Vector3(0, 0, 1), direction).normalize();
+  const up = new Vector3().crossVectors(direction, right);
+  const tanY = Math.tan((fovY * Math.PI) / 360);
+  const tanX = tanY * aspect;
+  const diagonal = Math.hypot(...bounds.min.map((value, axis) => bounds.max[axis] - value));
+  const minDepth = diagonal * 1e-6;
+  // Only point-sized/empty boxes need an absolute fallback; small objects scale normally.
+  let distance = diagonal > 0 ? minDepth : 1e-3;
+  for (const x of [bounds.min[0], bounds.max[0]])
+    for (const y of [bounds.min[1], bounds.max[1]])
+      for (const z of [bounds.min[2], bounds.max[2]]) {
+        const offset = new Vector3(x - target[0], y - target[1], z - target[2]);
+        const depth = offset.dot(direction);
+        distance = Math.max(
+          distance,
+          depth + minDepth,
+          depth + (1.1 * Math.abs(offset.dot(right))) / tanX,
+          depth + (1.1 * Math.abs(offset.dot(up))) / tanY,
+        );
+      }
+  const position = direction
+    .multiplyScalar(distance)
+    .add(new Vector3(...target))
+    .toArray();
+  return { position, target };
 }
 
 /** Median of a numeric array (mutates order). */
@@ -163,7 +220,7 @@ export function median(a: number[]): number {
 export interface Focus {
   center: number[];
   radius: number;
-  method: 'converge' | 'density' | 'manifest';
+  method: 'converge' | 'density' | 'manifest' | 'bounds';
 }
 
 export interface Ray {

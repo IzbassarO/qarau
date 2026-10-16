@@ -39,18 +39,30 @@ export function LangSwitch() {
 export function Toggle({
   on,
   onChange,
+  disabled = false,
+  label,
+  title,
+  describedBy,
   children,
 }: {
   on: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
+  label?: string;
+  title?: string;
+  describedBy?: string;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
+      disabled={disabled}
+      aria-label={label}
+      aria-describedby={describedBy}
       aria-pressed={on}
+      title={title}
       onClick={() => onChange(!on)}
-      className={`flex min-h-9 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink ${on ? 'bg-raised' : 'bg-transparent'}`}
+      className={`flex min-h-9 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink disabled:cursor-not-allowed disabled:opacity-50 ${on ? 'bg-raised' : 'bg-transparent'}`}
     >
       <span
         className={`relative h-4 w-7 shrink-0 rounded-full ${on ? 'bg-inspected' : 'bg-line-strong'}`}

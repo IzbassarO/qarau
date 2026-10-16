@@ -105,6 +105,25 @@ Data comes straight from reconstruction — nothing is guessed:
 - Click marker → select; panel shows timecodes; "Open evidence" → finding screen.
 - Timeline ticks show where the selected finding (or all findings) appears.
 
+### Colours and object framing
+
+- The display controls include a localized **Point colours** toggle with **Height-blue**
+  and **Real colours** states. Height-blue is the default; explicit choices persist in
+  localStorage (`qarau.viewer.colorMode`) for this browser user's viewer session.
+- Real colours require a complete RGB triplet for every point. When RGB is absent,
+  unreadable or incomplete, the toggle remains visible and disabled with a localized
+  explanation. The viewer uses height-blue and preserves any saved RGB preference for
+  the next compatible bundle. The synthetic demo has no captured RGB.
+- Switching swaps two precomputed geometry colour attributes, without reloading points.
+  Finding colours stay red/orange and never-observed points stay gray in either mode;
+  build-up and current-frame highlighting retain their existing priority.
+- Initial and reset views frame point-only 2nd–98th percentile bounds on each axis,
+  excluding stray points and camera-path extents. The target is the box centre, and
+  the fit accounts for vertical FOV, canvas aspect and a 10% margin. If navigation room
+  shortens the distance, FOV is refitted against all eight corners.
+- Navigation limits still include every point and registered camera centre, expanded
+  by half the full diagonal on each side. Framing does not restrict access to outliers.
+
 ## Performance targets
 
 - 5 M points at 60 fps on a 2022 MacBook Air (Potree-style octree LOD, point budget).
@@ -114,9 +133,10 @@ Data comes straight from reconstruction — nothing is guessed:
 
 ## Implementation notes
 
-- Three.js with a custom `ShaderMaterial` for points: attributes `height`, `firstSeen`
-  (frame index), `findingId`, `neverSeen`; uniforms `currentFrame`, toggles. All state
-  changes are uniform updates, not geometry rebuilds.
+- Three.js with a custom `ShaderMaterial` for points: attributes `color`, `firstSeen`
+  (frame index), `fid`, `findingColor`, `visibleNow`; uniforms for the current frame and
+  display toggles. Colour mode swaps the existing `color` attribute; display flags use
+  uniform updates. Geometry and position buffers are retained.
 - Per-frame "visible now" set: a texture or SSBO-free approach — store, for each frame,
   a range into a sorted index buffer and upload a `visibleNow` attribute on frame change
   (or use a bitmask texture lookup in the vertex shader).

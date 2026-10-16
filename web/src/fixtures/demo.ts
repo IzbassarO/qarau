@@ -68,7 +68,7 @@ function createBundle(): Bundle {
         z_range: [0, 6],
         focus: { center: [0, 0, 2], radius: 16 },
       },
-      points: { count, position: '', color: '', first_seen: '', num_obs: '' },
+      points: { count, position: '', first_seen: '', num_obs: '' },
       tracks: { frame_offsets: '', frame_points: '', point_offsets: '', point_frames: '' },
       frames,
       stats: {
@@ -80,7 +80,6 @@ function createBundle(): Bundle {
       },
     },
     position,
-    color: new Uint8Array(count * 3).fill(180),
     firstSeen: new Uint16Array(count),
     frameOffsets: offsets,
     frameInPoints: framePoints,
