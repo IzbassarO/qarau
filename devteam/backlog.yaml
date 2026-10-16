@@ -128,7 +128,11 @@ tasks:
 
     '
   owner: dev_pipeline
-  status: todo
+  status: done
+  run: run-20261016-165310
+  branch: devteam/P3c
+  pr: https://github.com/IzbassarO/qarau/pull/23
+  done_at: '2026-10-16'
 - id: P2b
   area: core
   title: Parallax keyframes and a footage quality report
