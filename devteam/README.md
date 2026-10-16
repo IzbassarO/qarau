@@ -27,7 +27,10 @@ uv run pytest                  # 47 tests, incl. gates, crash + resume, forbidde
   `.env`), `dev_app` = Codex (`codex exec`, your saved ChatGPT login; `codex login` once; no
   API key is ever passed). Codex has no network in its sandbox: `setup` installs first.
 - Benchmark: developers run only the quick set (`quick_only`); the full set runs at the merge
-  gate and at release, cached per `pipeline/` tree. Web tasks: the tester sees screenshots.
+  gate and at release, cached per `pipeline/` tree; a task may set its own `quick_only`.
+- Screenshots: any task whose criteria mention the viewer lists `routes`; the tester
+  screenshots them (pipeline tasks: the viewer on the quick benchmark output). A missing
+  screenshot fails the task even if the judge passed.
 - Daily report: merged / blocked tasks, API cost, **subscription load per task** (rounds,
   minutes, tokens, ≈ API $), latest benchmark, last release.
 - Models, budget, gates, developer folders and checks: `config.yaml`.

@@ -157,7 +157,7 @@ def bench_table(res: dict) -> str:
     return "\n".join(rows)
 
 
-# --- screenshots (web tasks) -----------------------------------------------------------------
+# --- screenshots (web and pipeline tasks) ---------------------------------------------------
 def screenshots(team, s, routes: list[str]) -> tuple[list[str], list[str]]:
     """One PNG per route of the dev server in the task's worktree, for the tester (it sees
     them) and the packet. Returns (paths, problems); a route that fails is a problem, never
@@ -168,7 +168,10 @@ def screenshots(team, s, routes: list[str]) -> tuple[list[str], list[str]]:
     out = team.home / "packets" / s["task"]["id"]
     out.mkdir(parents=True, exist_ok=True)
     srv = subprocess.Popen(  # {data}: the main checkout's data/ (runs to show, read-only)
-        sc["serve"].format(data=shlex.quote(str(team.root / "data"))),
+        sc["serve"].format(  # {runs}: the developer's quick benchmark output (pipeline tasks)
+            data=shlex.quote(str(team.root / "data")),
+            runs=shlex.quote(str(team.home / "bench-dev" / s["task"]["id"])),
+        ),
         shell=True,
         cwd=s["worktree"],
         stdout=subprocess.DEVNULL,
