@@ -151,6 +151,23 @@ Reproduced offline from the bundles with the viewer's own rules (`engine.ts`, `g
   `world.focus` written by the pipeline was tried (structure centre, eye inside the camera
   envelope, world yaw towards the cameras): it does not help while 93–95 % of the points are
   in the not-yet-seen colour, so the framing stays the viewer's.
-- Needs a decision outside this task (owner / tech lead): either the viewer default change
-  above as its own `web/` task for dev_app, or the P3b visual criterion judged with build-up
-  off. This task may only edit `pipeline/`, `backend/`, `infra/`, `docs/`.
+- Framing hints the current viewer honours were evaluated (round 4), rendered with the
+  viewer's rules and build-up on: `world.focus` (centre + radius) plus a world yaw about Z
+  (the export owns the azimuth) so the fixed default direction looks from the frame-0 side,
+  where the frame-0 (bright) points face the viewer. Centres: the viewer's own focus, or frame
+  0's optical axis at the median depth of its points; eye at 0.7–1.5 × the frame-0 camera
+  distance. Best case (viewer centre, 0.7 ×): the notre-dame frustum ring moves to the top
+  edge and the ruin fills the view; on aegviidu the tower fills the view but the drone's
+  vertical climb puts frustums across it from that side. In every variant 93–95 % of the
+  points stay `#2A3240`: framing cannot change which points frame 0 observed. Not shipped:
+  it moves the camera, not the colour, and adds a second copy of the viewer's focus logic.
+- Not done on purpose: redefining `first_seen` as "inside frame i's view" would light the
+  whole frame-0 field of view, but it would mark unmatched and occluded points as seen,
+  breaking ADR 0003's meaning (first observing frame) and blurring it with coverage (trust
+  rule: coverage is shown, not assumed).
+- **Decision needed (owner):** the P3b criterion "structure clearly visible in the default
+  view" cannot be met from the bundle while the viewer opens at frame 0 with build-up on.
+  Either (1) a `web/` task for dev_app: open at the last frame, or build-up off until play,
+  and frustum size from the point cloud, not the camera envelope; then re-shoot; or (2) waive
+  the criterion for P3b and judge "no sky wall occludes the structure" with build-up off.
+  This task may only edit `pipeline/`, `backend/`, `infra/`, `docs/`.
