@@ -298,6 +298,7 @@ def p(tid, dev, criteria=("c",)):
         ([p("T-002", "dev_pipeline")], "area"),
         ([p("T-001", "dev_ghost")], "unknown developer"),
         ([p("T-001", "dev_pipeline", criteria=())], "must not be empty"),
+        ([p("T-001", "dev_pipeline", criteria=("/viewer/x shows no sky wall",))], "no routes"),
     ],
 )
 def test_invalid_plans_are_rejected(plans, why):
@@ -337,6 +338,38 @@ def test_judge_pass_is_not_enough_when_a_check_fails(repo):
     assert statuses(team)["T-001"] == "blocked"  # judge passed in round 2, `false` did not
     packet = (team.home / "packets" / "T-001.md").read_text()
     assert "judge: pass" in packet and "FAIL: `false`" in packet
+
+
+def test_visual_task_without_tester_screenshots_never_passes(repo):
+    cfg_devs = copy.deepcopy(CFG["developers"])
+    cfg_devs["dev_pipeline"].update(
+        setup=[],
+        checks=["true"],
+        # the server comes up, the screenshot fails: the tester sees nothing
+        screenshots={
+            "serve": "python3 -m http.server 8763 --bind 127.0.0.1",
+            "url": "http://127.0.0.1:8763",
+            "shoot": "exit 1",
+        },
+    )
+    agents = Quick()
+    agents.plan = lambda team, todo, feedback=None: [
+        {
+            **p("T-001", "dev_pipeline", ("/viewer/room shows no sky wall",)),
+            "routes": ["/viewer/room"],
+        }
+    ]
+    team, graph = make(repo, agents, fake=False, developers=cfg_devs, max_fix_loops=1)
+    graph.invoke({}, {"configurable": {"thread_id": "r6"}})
+    assert statuses(team)["T-001"] == "blocked"  # judge passed in round 2, no screenshot
+    assert "judge: pass" in (team.home / "packets" / "T-001.md").read_text()
+
+
+def test_routes_need_a_screenshots_config():
+    devs = copy.deepcopy(CFG["developers"])
+    devs["dev_pipeline"].pop("screenshots", None)
+    with pytest.raises(ValueError, match="no screenshots config"):
+        validate_plan([{**p("T-001", "dev_pipeline"), "routes": ["/"]}], TODO, {"developers": devs})
 
 
 def test_failed_setup_blocks_success_and_skips_checks(repo):

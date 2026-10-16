@@ -28,6 +28,7 @@ gates:
     # Developer rounds run only these (~11 min, low run-to-run noise); the full set runs only at the
     # merge gate and at release. Saves subscription limits and round time.
     quick_only: [notre-dame, room]
+    # A task may set its own `quick_only` in the backlog (e.g. videos its screenshots need).
     quick_min: 11
 daily_budget_usd: 3.0     # API spend cap (brain + tester); subscriptions are not counted
 
@@ -71,6 +72,10 @@ developers:
       - "Bash(git branch:*)"
       - "Bash(gh:*)"
     setup: []
+    screenshots:           # viewer on the developer's quick benchmark output ({runs}); routes /viewer/<video>
+      serve: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_RUNS_DIR={runs} pnpm exec vite --port 5197 --strictPort
+      url: http://localhost:5197
+      shoot: cd web && pnpm exec playwright screenshot --viewport-size=1440,900 --wait-for-timeout=4000 {url} {png}
     checks:                # same as GitHub CI, so CI rarely surprises
       - cd pipeline && uv run ruff check . && uv run ruff format --check . && uv run mypy .
       - cd pipeline && uv run pytest -q

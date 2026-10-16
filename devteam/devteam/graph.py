@@ -74,6 +74,9 @@ def is_protected(path: str) -> bool:
     return match(PROTECTED) and not match(PROTECTED_OK)
 
 
+VISUAL = re.compile(r"\b(viewer|screenshots?)\b", re.I)  # criteria the tester must see
+
+
 def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
     """The whole plan is valid or nothing happens. Returns assignments."""
     by_id = {t["id"]: t for t in todo}
@@ -97,6 +100,10 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
             )
         if not str(p.get("plan", "")).strip() or not p.get("criteria"):
             errors.append(f"{tid}: plan and acceptance criteria must not be empty")
+        if VISUAL.search(" ".join(map(str, p.get("criteria") or []))) and not p.get("routes"):
+            errors.append(f"{tid}: criteria mention the viewer or screenshots but list no routes")
+        if p.get("routes") and dev in devs and not devs[dev].get("screenshots"):
+            errors.append(f"{tid}: routes given but {dev} has no screenshots config")
     if errors:
         raise ValueError("invalid plan: " + "; ".join(errors))
     return [
@@ -651,7 +658,14 @@ def build_graph(team: Team, checkpointer):
         verdict["screenshots"], verdict["screenshot_problems"] = shots, problems
         failed = [c for c in checks if not c["ok"]]
         verdict["judge_passed"] = verdict["passed"]
-        verdict["passed"] = verdict["passed"] and not failed  # both, or it is not done
+        # a visual criterion passes only on the tester's own screenshots, one per route
+        no_shots = len(shots) < len(s.get("routes") or [])
+        verdict["passed"] = verdict["passed"] and not failed and not no_shots
+        if no_shots:
+            verdict["feedback"] = (
+                f"{verdict.get('feedback', '')}\n\nTester screenshots missing for "
+                f"{s['routes']}: visual criteria cannot pass without them.\n" + "\n".join(problems)
+            )
         if failed:
             logs = "\n".join(f"$ {c['cmd']}\n{c['output'][-1500:]}" for c in failed)
             verdict["feedback"] = f"{verdict.get('feedback', '')}\n\nFailing checks:\n{logs}"

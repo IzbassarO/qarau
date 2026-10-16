@@ -106,6 +106,8 @@ def test_quick_benchmark_brief_only_for_pipeline_and_with_dev_baseline(repo):
     assert "--only notre-dame,room" in text and "No cached dev baseline" in text
     G.benchmark(team, team.git("rev-parse", "devteam-fake/dev").strip())
     assert "| room | 90.0 |" in quick_benchmark(team, s, devs["dev_pipeline"])
+    s["task"]["quick_only"] = ["notre-dame", "aegviidu"]  # a task picks the videos it needs
+    assert "--only notre-dame,aegviidu" in quick_benchmark(team, s, devs["dev_pipeline"])
 
 
 def test_benchmark_cache_survives_merges_that_leave_pipeline_alone(repo):
