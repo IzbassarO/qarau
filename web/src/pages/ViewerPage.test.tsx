@@ -39,6 +39,7 @@ let nextFrame = 0;
 const pendingFrames = new Map<number, FrameRequestCallback>();
 
 beforeEach(() => {
+  localStorage.clear();
   setLang('en');
   vi.clearAllMocks();
   now = 0;
@@ -64,14 +65,32 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderDemo() {
+function renderViewer(runId: string) {
   return render(
-    <MemoryRouter initialEntries={['/viewer/demo']}>
+    <MemoryRouter initialEntries={[`/viewer/${runId}`]}>
       <Routes>
         <Route path="/viewer/:runId" element={<ViewerPage />} />
       </Routes>
     </MemoryRouter>,
   );
+}
+
+function renderDemo() {
+  return renderViewer('demo');
+}
+
+function colourBundle(color?: Uint8Array): bundleApi.Bundle {
+  return { ...createDemo('en').bundle, runId: 'colour-test', color };
+}
+
+async function renderColourBundle(bundle: bundleApi.Bundle) {
+  vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+  vi.spyOn(bundleApi, 'loadBundle').mockResolvedValue(bundle);
+  const view = renderViewer(bundle.runId);
+  const toggle = (await screen.findByRole('button', {
+    name: LANGS[document.documentElement.lang as Lang]['show.colorMode'],
+  })) as HTMLButtonElement;
+  return { ...view, toggle };
 }
 
 function advanceFrames(count: number) {
@@ -192,4 +211,117 @@ it.each<Lang>(['en', 'ru', 'kk'])('localizes axis controls and the fly hint in %
   expect(camera.getWorldDirection(new Vector3()).distanceTo(new Vector3(0, 0, -1))).toBeLessThan(
     0.001,
   );
+});
+
+it('switches between height-blue and real colours without replacing the engine', async () => {
+  const setColorMode = vi.spyOn(ViewerEngine.prototype, 'setColorMode');
+  const bundle = colourBundle(new Uint8Array(createDemo('en').bundle.position.length).fill(80));
+  const { toggle } = await renderColourBundle(bundle);
+  const engine = setColorMode.mock.contexts.at(-1) as ViewerEngine;
+  expect(toggle.disabled).toBe(false);
+  expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  expect(within(toggle).getByText(LANGS.en['show.heightBlue'])).toBeTruthy();
+  expect(engine.colorMode).toBe('height');
+
+  fireEvent.click(toggle);
+  expect(setColorMode).toHaveBeenLastCalledWith('rgb');
+  expect(setColorMode.mock.contexts.at(-1)).toBe(engine);
+  expect(engine.colorMode).toBe('rgb');
+  expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  expect(within(toggle).getByText(LANGS.en['show.rgb'])).toBeTruthy();
+
+  fireEvent.click(toggle);
+  expect(setColorMode).toHaveBeenLastCalledWith('height');
+  expect(engine.colorMode).toBe('height');
+  expect(toggle.getAttribute('aria-pressed')).toBe('false');
+});
+
+it.each<Lang>(['en', 'ru', 'kk'])(
+  'localizes the colour toggle and unavailable tooltip in %s',
+  (lang) => {
+    setLang(lang);
+    renderDemo();
+    const locale = LANGS[lang];
+    const toggle = screen.getByRole('button', {
+      name: locale['show.colorMode'],
+    }) as HTMLButtonElement;
+    expect(toggle.disabled).toBe(true);
+    expect(within(toggle).getByText(locale['show.heightBlue'])).toBeTruthy();
+    expect(toggle.title).toBe(locale['show.rgbUnavailable']);
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip.textContent).toBe(locale['show.rgbUnavailable']);
+    expect(toggle.getAttribute('aria-describedby')).toBe(tooltip.id);
+  },
+);
+
+it.each([undefined, new Uint8Array(3)])(
+  'keeps the toggle disabled when the bundle has missing or incomplete RGB (%s)',
+  async (color) => {
+    const setColorMode = vi.spyOn(ViewerEngine.prototype, 'setColorMode');
+    const { toggle } = await renderColourBundle(colourBundle(color));
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    setColorMode.mockClear();
+    fireEvent.click(toggle);
+    expect(setColorMode).not.toHaveBeenCalled();
+    expect(toggle.title).toBe(LANGS.en['show.rgbUnavailable']);
+  },
+);
+
+it('remembers an explicit colour choice when the viewer is mounted again', async () => {
+  const setColorMode = vi.spyOn(ViewerEngine.prototype, 'setColorMode');
+  const bundle = colourBundle(new Uint8Array(createDemo('en').bundle.position.length).fill(80));
+  const first = await renderColourBundle(bundle);
+  fireEvent.click(first.toggle);
+  expect(localStorage.getItem('qarau.viewer.colorMode')).toBe('rgb');
+  first.unmount();
+
+  const second = await renderColourBundle(bundle);
+  expect(second.toggle.getAttribute('aria-pressed')).toBe('true');
+  expect(setColorMode).toHaveBeenLastCalledWith('rgb');
+});
+
+it('uses height for a map without RGB while preserving the saved real-colour preference', async () => {
+  localStorage.setItem('qarau.viewer.colorMode', 'rgb');
+  const setColorMode = vi.spyOn(ViewerEngine.prototype, 'setColorMode');
+  const unavailable = await renderColourBundle(colourBundle());
+  expect(unavailable.toggle.disabled).toBe(true);
+  expect(unavailable.toggle.getAttribute('aria-pressed')).toBe('false');
+  expect(setColorMode).toHaveBeenLastCalledWith('height');
+  expect(localStorage.getItem('qarau.viewer.colorMode')).toBe('rgb');
+  unavailable.unmount();
+
+  const available = await renderColourBundle(
+    colourBundle(new Uint8Array(createDemo('en').bundle.position.length).fill(80)),
+  );
+  expect(available.toggle.getAttribute('aria-pressed')).toBe('true');
+  expect(setColorMode).toHaveBeenLastCalledWith('rgb');
+});
+
+it('defaults to height when a saved colour preference is invalid', async () => {
+  localStorage.setItem('qarau.viewer.colorMode', 'invalid');
+  const { toggle } = await renderColourBundle(
+    colourBundle(new Uint8Array(createDemo('en').bundle.position.length).fill(80)),
+  );
+  expect(toggle.disabled).toBe(false);
+  expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  expect(within(toggle).getByText(LANGS.en['show.heightBlue'])).toBeTruthy();
+});
+
+it('allows colour changes when browser storage is unavailable', async () => {
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('Storage unavailable');
+  });
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('Storage unavailable');
+  });
+  const setColorMode = vi.spyOn(ViewerEngine.prototype, 'setColorMode');
+  const { toggle } = await renderColourBundle(
+    colourBundle(new Uint8Array(createDemo('en').bundle.position.length).fill(80)),
+  );
+  expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  expect(setColorMode).toHaveBeenLastCalledWith('rgb');
+  expect(screen.queryByRole('alert')).toBeNull();
 });
