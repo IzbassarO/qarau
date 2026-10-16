@@ -6,6 +6,7 @@ import {
   convergePoint,
   csrSlice,
   cumulativeAssembled,
+  frameBounds,
   heightRamp,
   pickNearest,
   robustBounds,
@@ -103,13 +104,119 @@ it('pickNearest picks the point under the cursor, nearer one on ties, none when 
   expect(pickNearest(pos, vp.elements, 400, 400, 5, 5)).toBe(-1);
 });
 
-it('robustBounds ignores outliers but includes camera centres', () => {
-  const pos = new Float32Array(3 * 1000);
-  for (let p = 0; p < 1000; p++) pos.set([p / 1000, p / 1000, p / 1000], p * 3);
-  pos.set([500, 500, 500], 0);
-  const b = robustBounds(pos, [[-3, 0, 0]]);
-  expect(b.max[0]).toBeLessThan(1.01);
-  expect(b.min[0]).toBe(-3);
+describe('robustBounds', () => {
+  it('excludes a few far outliers on every axis without mutating the points', () => {
+    const points = Array.from({ length: 101 }, (_, p) => [p, p * 2, -p]).flat();
+    points.push(-10000, 50000, -90000, 20000, -60000, 70000);
+    const pos = new Float32Array(points);
+    const before = pos.slice();
+    const b = robustBounds(pos);
+    expect(b.min[0]).toBeCloseTo(1.04);
+    expect(b.max[0]).toBeCloseTo(98.96);
+    expect(b.min[1]).toBeCloseTo(2.08);
+    expect(b.max[1]).toBeCloseTo(197.92);
+    expect(b.min[2]).toBeCloseTo(-98.96);
+    expect(b.max[2]).toBeCloseTo(-1.04);
+    expect(b.center).toEqual([50, 100, -50]);
+    expect(pos).toEqual(before);
+  });
+
+  it('uses exact configurable per-axis percentiles, including the full range', () => {
+    const pos = new Float32Array(
+      Array.from({ length: 101 }, (_, p) => [p, 200 + p * 2, p - 100]).flat(),
+    );
+    const b = robustBounds(pos, { lowPct: 25, highPct: 75 });
+    expect(b.min).toEqual([25, 250, -75]);
+    expect(b.max).toEqual([75, 350, -25]);
+    expect(b.center).toEqual([50, 300, -50]);
+    expect(b.radius).toBeCloseTo(Math.hypot(50, 100, 50) / 2);
+    expect(robustBounds(pos, { lowPct: 0, highPct: 100 }).min).toEqual([0, 200, -100]);
+    expect(robustBounds(pos, { lowPct: 0, highPct: 100 }).max).toEqual([100, 400, 0]);
+  });
+
+  it('handles empty and coincident points with a finite positive radius', () => {
+    expect(robustBounds(new Float32Array())).toEqual({
+      min: [0, 0, 0],
+      max: [0, 0, 0],
+      center: [0, 0, 0],
+      radius: 1e-6,
+    });
+    expect(robustBounds(new Float32Array([4, -2, 9, 4, -2, 9]))).toEqual({
+      min: [4, -2, 9],
+      max: [4, -2, 9],
+      center: [4, -2, 9],
+      radius: 1e-6,
+    });
+  });
+
+  it('ignores invalid vertices and rejects invalid percentile options', () => {
+    const b = robustBounds(new Float32Array([1, 2, 3, NaN, 0, 0, 0, Infinity, 0]));
+    expect(b.min).toEqual([1, 2, 3]);
+    expect(b.max).toEqual([1, 2, 3]);
+    for (const options of [
+      { lowPct: -1 },
+      { highPct: 101 },
+      { lowPct: 80, highPct: 20 },
+      { lowPct: NaN },
+    ])
+      expect(() => robustBounds(new Float32Array(), options)).toThrow(RangeError);
+  });
+});
+
+describe('frameBounds', () => {
+  it.each([
+    { min: [-4, -2, 0], max: [4, 2, 20], aspect: 0.45 },
+    { min: [10, -3, -2], max: [90, 3, 2], aspect: 3.2 },
+    { min: [-2, -40, -1], max: [2, 40, 1], aspect: 1.6 },
+    { min: [-1e-9, -1e-9, -1e-9], max: [1e-9, 1e-9, 1e-9], aspect: 1.6 },
+  ])('centres and fits every corner of a box at aspect $aspect', ({ min, max, aspect }) => {
+    const original = { min: min.slice(), max: max.slice() };
+    const { position, target } = frameBounds({ min, max }, 55, aspect);
+    expect(target).toEqual(min.map((v, k) => (v + max[k]) / 2));
+    expect({ min, max }).toEqual(original);
+    const diagonal = Math.hypot(...min.map((value, axis) => max[axis] - value));
+    const camera = new PerspectiveCamera(55, aspect, diagonal * 1e-8, diagonal * 100);
+    camera.up.set(0, 0, 1);
+    camera.position.fromArray(position);
+    camera.lookAt(new Vector3(...target));
+    camera.updateMatrixWorld();
+    let largestProjection = 0;
+    for (const x of [min[0], max[0]])
+      for (const y of [min[1], max[1]])
+        for (const z of [min[2], max[2]]) {
+          const corner = new Vector3(x, y, z);
+          expect(corner.clone().applyMatrix4(camera.matrixWorldInverse).z).toBeLessThan(0);
+          const projected = corner.project(camera);
+          expect(Math.abs(projected.x)).toBeLessThanOrEqual(1 / 1.1 + 1e-6);
+          expect(Math.abs(projected.y)).toBeLessThanOrEqual(1 / 1.1 + 1e-6);
+          expect(Math.abs(projected.z)).toBeLessThan(1);
+          largestProjection = Math.max(
+            largestProjection,
+            Math.abs(projected.x),
+            Math.abs(projected.y),
+          );
+        }
+    // The box fills the available space rather than merely fitting somewhere far away.
+    expect(largestProjection).toBeCloseTo(1 / 1.1, 6);
+  });
+
+  it('gives empty and point-sized boxes a finite, distinct camera position', () => {
+    for (const points of [new Float32Array(), new Float32Array([4, -2, 9])]) {
+      const bounds = robustBounds(points);
+      const { position, target } = frameBounds(bounds, 55, 1);
+      expect(target).toEqual(bounds.center);
+      expect(position.every(Number.isFinite)).toBe(true);
+      expect(new Vector3(...position).distanceTo(new Vector3(...target))).toBeCloseTo(1e-3, 8);
+    }
+  });
+
+  it('rejects invalid field of view and aspect ratio', () => {
+    const bounds = { min: [0, 0, 0], max: [1, 1, 1] };
+    for (const fovY of [0, -1, 180, NaN])
+      expect(() => frameBounds(bounds, fovY, 1)).toThrow(RangeError);
+    for (const aspect of [0, -1, Infinity])
+      expect(() => frameBounds(bounds, 55, aspect)).toThrow(RangeError);
+  });
 });
 
 // ---- initial view focus
