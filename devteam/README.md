@@ -20,7 +20,7 @@ uv run devteam release         # dev -> main now (also runs automatically every 
 uv run devteam costs           # API spend per day / agent / model
 uv run devteam cleanup         # remove leftover worktrees of done/dropped tasks
 uv run devteam run --fake      # whole flow with fake agents and a local fake GitHub, no cost
-uv run pytest                  # 47 tests, incl. gates, crash + resume, forbidden actions
+uv run pytest                  # tests, incl. gates, crash + resume, forbidden actions
 ```
 
 - Developers, in parallel: `dev_pipeline` = Claude Code (`claude -p`, subscription token in
@@ -28,6 +28,9 @@ uv run pytest                  # 47 tests, incl. gates, crash + resume, forbidde
   API key is ever passed). Codex has no network in its sandbox: `setup` installs first.
 - Benchmark: developers run only the quick set (`quick_only`); the full set runs at the merge
   gate and at release, cached per `pipeline/` tree. Web tasks: the tester sees screenshots.
+- Task status lives in `backlog.yaml`. `devteam run` refuses to start while its status
+  fields differ from `origin/dev` (it prints them): get them into `dev` by a PR first.
+  The brain also skips any task whose `devteam/<id>` branch is already merged into `dev`.
 - Daily report: merged / blocked tasks, API cost, **subscription load per task** (rounds,
   minutes, tokens, ≈ API $), latest benchmark, last release.
 - Models, budget, gates, developer folders and checks: `config.yaml`.

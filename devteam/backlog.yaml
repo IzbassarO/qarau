@@ -41,7 +41,12 @@ tasks:
     on the dev Mac.
 
     '
-  status: todo
+  status: done
+  owner: dev_pipeline
+  run: run-20261015-121320
+  branch: devteam/P0
+  pr: https://github.com/IzbassarO/qarau/pull/14
+  done_at: '2026-10-15'
 - id: P3
   area: core
   title: One connected model per video
@@ -50,7 +55,12 @@ tasks:
     videos split into several models (aegviidu 3, mykolaiv 3, room 2 on a8efcc9).
 
     '
-  status: todo
+  status: done
+  owner: dev_pipeline
+  run: run-20261015-182436
+  branch: devteam/P3
+  pr: https://github.com/IzbassarO/qarau/pull/18
+  done_at: '2026-10-15'
 - id: P2b
   area: core
   title: Parallax keyframes and a footage quality report
@@ -162,7 +172,12 @@ tasks:
     orbit, pinch zoom, Shift+two-finger pan; smooth damping. Replaces the current controls.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261015-121320
+  branch: devteam/A2a
+  pr: https://github.com/IzbassarO/qarau/pull/15
+  done_at: '2026-10-15'
 - id: A2b
   area: app
   title: Fly mode and clickable axis gizmo
@@ -170,7 +185,12 @@ tasks:
     / front / side views as in Blender; both with damping and tests.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261015-182436
+  branch: devteam/A2b
+  pr: https://github.com/IzbassarO/qarau/pull/17
+  done_at: '2026-10-15'
 - id: A3
   area: app
   title: Processing status view

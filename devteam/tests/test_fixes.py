@@ -465,3 +465,26 @@ def test_tasks_without_area_are_reported_not_silently_skipped(repo):
     team.backlog_path.write_text(yaml.safe_dump(data))
     graph.invoke({}, {"configurable": {"thread_id": "r7"}})
     assert "skipping tasks without a known area" in (team.home / "events.log").read_text()
+
+
+# --- 2026-10-16: P0 and A2a re-planned after the backlog lost their status ------------------
+def test_brain_never_plans_done_or_already_merged_tasks(repo):
+    team, graph = make(repo)
+    graph.invoke({}, {"configurable": {"thread_id": "r1"}})  # T-001 and T-002 merge into dev
+    assert statuses(team)["T-001"] == "done"
+    team.update_task("T-001", status="todo")  # the status got lost, the branch is in dev
+    seen = []
+    agents = Quick()
+    agents.plan = lambda team, todo, feedback=None: seen.extend(t["id"] for t in todo) or []
+    team.agents = agents
+    graph.invoke({}, {"configurable": {"thread_id": "r2"}})
+    assert "T-001" not in seen and "T-002" not in seen and "T-003" in seen
+
+
+def test_backlog_status_drift_from_dev_is_reported(repo):
+    team, _ = make(repo)
+    assert team.backlog_drift() == []
+    team.update_task("T-001", status="done", pr="fake://pr/1")  # only in the working tree
+    drift = team.backlog_drift()
+    assert any(d.startswith("T-001.status: 'todo' on dev -> 'done'") for d in drift)
+    assert any(d.startswith("T-001.pr:") for d in drift) and len(drift) == 2

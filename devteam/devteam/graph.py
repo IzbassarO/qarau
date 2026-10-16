@@ -44,6 +44,8 @@ SNAPSHOT_SKIP = {
     ".vite",
 }
 # git commands the orchestrator may never run (history rewrite, deletion)
+# Task status lives in backlog.yaml; these fields must match origin/dev before a run.
+STATUS_FIELDS = ("status", "owner", "run", "branch", "pr", "done_at")
 FORBIDDEN_GIT = {"rebase", "filter-branch", "filter-repo", "replace", "update-ref"}
 FORBIDDEN_PUSH = {
     "--force",
@@ -327,6 +329,39 @@ class Team:
     def fetch(self, *branches: str):
         specs = [f"+refs/heads/{b}:refs/remotes/{self.remote_name}/{b}" for b in branches]
         self.git("fetch", "-q", self.remote_url, *specs)
+
+    def merged_tasks(self) -> set[str]:
+        """Task ids whose devteam/<id> branch on the remote is already merged into dev."""
+        rn, base, pre = self.remote_name, self.cfg["base_branch"], self.branch_prefix
+        self.git(
+            "fetch",
+            "-q",
+            self.remote_url,
+            f"+refs/heads/{base}:refs/remotes/{rn}/{base}",
+            f"+refs/heads/{pre}/*:refs/remotes/{rn}/{pre}/*",
+        )
+        out = self.git("branch", "-r", "--merged", f"{rn}/{base}", "--list", f"{rn}/{pre}/*")
+        return {line.strip().rsplit("/", 1)[1] for line in out.splitlines() if line.strip()}
+
+    def backlog_drift(self) -> list[str]:
+        """Status fields that differ between the backlog file and the one on origin/dev."""
+        base = self.cfg["base_branch"]
+        self.fetch(base)
+        theirs = yaml.safe_load(
+            self.git("show", f"{self.remote_name}/{base}:devteam/backlog.yaml")
+        )["tasks"]
+
+        def fields(tasks):
+            return {t["id"]: {k: t.get(k) for k in STATUS_FIELDS} for t in tasks}
+
+        mine, theirs = fields(self.load_backlog()), fields(theirs)
+        return [
+            f"{tid}.{k}: {theirs.get(tid, {}).get(k)!r} on {base} -> "
+            f"{mine.get(tid, {}).get(k)!r} here"
+            for tid in sorted(mine.keys() | theirs.keys())
+            for k in STATUS_FIELDS
+            if mine.get(tid, {}).get(k) != theirs.get(tid, {}).get(k)
+        ]
 
     def branch_for(self, task_id: str) -> str:
         return f"{self.branch_prefix}/{task_id}"
@@ -836,6 +871,10 @@ def build_graph(team: Team, checkpointer):
             for t in team.load_backlog()
             if t["status"] == "todo" or (t["status"] == "in_progress" and t.get("run") == run)
         ]
+        # Never redo landed work, even if the backlog lost its status (2026-10-16: P0, A2a).
+        if again := sorted(t["id"] for t in todo if t["id"] in team.merged_tasks()):
+            team.emit("brain", f"skipping tasks already merged into dev, mark them done: {again}")
+            todo = [t for t in todo if t["id"] not in again]
         if team.only:  # `devteam run --only P1`
             todo = [t for t in todo if t["id"] in team.only]
         areas = {a for d in cfg["developers"].values() for a in d["areas"]}

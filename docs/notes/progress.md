@@ -2,6 +2,19 @@
 
 Newest first. Keep it short.
 
+## 2026-10-16 — Dev team re-planned P0 and A2a (incident)
+
+- Cause: devteam writes task status only to the working copy of `devteam/backlog.yaml`; it
+  was never committed, so on `dev` P0, P3, A2a and A2b were still `todo`. Before today's run
+  the working copy was reset to `dev`, the statuses were lost and the brain planned P0 and
+  A2a again. The reruns committed only to local branches; the gate saw PR #14 / #15 already
+  merged and marked them done: nothing reached `dev`, no new PR.
+- Fix: backlog statuses for every merged devteam PR are now on `dev`. The brain skips tasks
+  whose `devteam/<id>` branch is merged into `dev`; `devteam run` refuses to start while
+  the backlog's status fields differ from `origin/dev`.
+- Open: devteam still writes statuses only locally, so after each run they must reach `dev`
+  by a PR before the next `devteam run`. Follow-up: let the orchestrator commit them.
+
 ## 2026-10-15 — Dev team: retries and tester-owned screenshots
 
 - A2a's tester crashed on one transient "Connection error". `llm_call` now retries
