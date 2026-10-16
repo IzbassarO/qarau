@@ -108,7 +108,15 @@ tasks:
     License (non-commercial): forbidden. Unclear -> ask the owner.
 
     '
-  status: todo
+  status: blocked
+  run: run-20261016-115433
+  branch: devteam/P3b
+  blocked_reason: 'tester: The default-view criterion is not met. Both screenshots show the structure
+    dark and partly hidden by frustum wireframes, even though the far points are gone. The developer says
+    the pipeline cannot fix this and that web/ is out of scope. That may be right, but the task acceptance
+    still requires a clear default view, and I judge only what the screenshots show. A waiver needs the
+    owner''s decision, not the developer''s. Everything else is in order: the mask, the filter, the far
+    layer, the tes'
 - id: P3c
   area: core
   title: Re-gate mykolaiv
