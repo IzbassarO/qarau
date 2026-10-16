@@ -384,15 +384,49 @@
   padding: 0;
   list-style: none;
 }
-.processing-steps li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.processing-step {
   padding: 12px 0;
   border-top: 1px solid var(--color-line);
 }
+.processing-step:last-child {
+  padding-bottom: 0;
+}
+.step-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.step-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  color: var(--color-ink-2);
+}
+.step-icon.done,
+.step-state.done {
+  color: var(--color-link);
+}
+.step-icon.running,
+.step-state.running {
+  color: var(--color-watch);
+}
+.step-icon.failed,
+.step-state.failed {
+  color: var(--color-critical);
+}
+.step-icon.pending {
+  color: var(--color-notseen);
+}
 .step-name {
   flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.step-state {
+  color: var(--color-ink-2);
+  font-size: 12px;
 }
 .step-time {
   min-width: 65px;
@@ -400,6 +434,78 @@
   color: var(--color-ink-2);
   font-size: 12px;
   font-family: var(--font-mono);
+}
+.step-error {
+  margin: 10px 0 4px 40px;
+  padding: 14px 16px;
+  border-left: 2px solid var(--color-critical);
+  border-radius: 0 8px 8px 0;
+  background: var(--color-surface);
+}
+.step-error h3 {
+  color: var(--color-critical);
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+.step-error dl {
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 20px;
+}
+.step-error dt {
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+.step-error dd,
+.step-unknown,
+.step-detail {
+  color: var(--color-ink-2);
+}
+.step-detail,
+.step-unknown {
+  margin: 8px 0 0 40px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.step-detail summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.step-detail p {
+  margin-top: 6px;
+}
+.step-raw {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+.step-raw-detail {
+  white-space: pre-wrap;
+}
+@media (max-width: 600px) {
+  .processing-section {
+    padding: 16px;
+  }
+  .step-row {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    gap: 4px 10px;
+  }
+  .step-state {
+    grid-column: 2;
+  }
+  .step-time {
+    grid-column: 3;
+    grid-row: 1 / 3;
+    min-width: 0;
+  }
+  .step-error {
+    margin-left: 0;
+    padding: 12px;
+  }
 }
 .inspection-dialog {
   position: fixed;
