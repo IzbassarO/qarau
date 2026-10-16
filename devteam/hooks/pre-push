@@ -2,10 +2,19 @@
 # Installed by devteam. Stand-in for GitHub branch protection (needs a paid plan on private
 # repos): for pushes to GitHub, refuse force-pushes, branch deletion and direct pushes to
 # main or dev (those change only through merged PRs), and moving an existing tag (release
-# tags are the rollback points).
+# tags are the rollback points). One exception: devteam's status commits may go straight to
+# dev, i.e. a fast-forward that changes nothing but devteam/backlog.yaml.
 case "$2" in *github.com*) ;; *) exit 0 ;; esac
 zero=0000000000000000000000000000000000000000
 while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/dev)
+      if [ "$remote_sha" != "$zero" ] && [ "$local_sha" != "$zero" ] \
+        && git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null \
+        && [ "$(git diff --name-only "$remote_sha" "$local_sha")" = devteam/backlog.yaml ]; then
+        continue  # a devteam status commit
+      fi ;;
+  esac
   case "$remote_ref" in
     refs/heads/main|refs/heads/dev)
       if [ "$remote_sha" != "$zero" ] || [ "$remote_ref" = refs/heads/main ]; then

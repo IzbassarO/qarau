@@ -521,3 +521,119 @@ def test_backlog_status_drift_from_dev_is_reported(repo):
     drift = team.backlog_drift()
     assert any(d.startswith("T-001.status: 'todo' on dev -> 'done'") for d in drift)
     assert any(d.startswith("T-001.pr:") for d in drift) and len(drift) == 2
+
+
+# --- devteam owns the statuses: pushed straight to dev; done only via this run's PR ---------
+def dev_backlog(repo):
+    out = git(repo, "--git-dir", remote_of(repo), "show", "dev:devteam/backlog.yaml")
+    return {t["id"]: t for t in yaml.safe_load(out)["tasks"]}
+
+
+def test_finished_task_status_is_committed_to_dev(repo):
+    team, graph = make(repo)
+    graph.invoke({}, {"configurable": {"thread_id": "r1"}})
+    t = dev_backlog(repo)["T-001"]
+    assert (t["status"], t["run"], t["branch"]) == ("done", "r1", "devteam-fake/T-001")
+    assert t["pr"].startswith("fake://pr/") and t["done_at"]
+    log = git(repo, "--git-dir", remote_of(repo), "log", "--format=%s", "dev")
+    assert f"backlog: T-001 done (#{t['pr'].rsplit('/', 1)[1]})" in log
+    assert team.backlog_drift() == []  # the next `devteam run` may start
+    sha = git(
+        repo, "--git-dir", remote_of(repo), "log", "-1", "--format=%H", "--grep=T-001 done", "dev"
+    )
+    assert git(
+        repo, "--git-dir", remote_of(repo), "diff", "--name-only", f"{sha.strip()}^", sha.strip()
+    ).split() == ["devteam/backlog.yaml"]
+
+
+def test_status_push_retries_when_dev_moves(repo, tmp_path):
+    team, _ = make(repo)
+    team.update_task("T-001", status="blocked", blocked_reason="x")
+    other = tmp_path / "other"
+    git(tmp_path, "clone", "-q", "-b", "dev", remote_of(repo), str(other))
+    real_git, raced = team.git, []
+
+    def racing_git(*args, **kw):
+        if args[0] == "push" and not raced:  # someone merges into dev right before our push
+            (other / "README.md").write_text("moved\n")
+            git(other, "commit", "-qam", "meanwhile")
+            git(other, "push", "-q", "origin", "dev")
+            raced.append(1)
+        return real_git(*args, **kw)
+
+    team.git = racing_git
+    assert team.push_status("T-001", "backlog: T-001 blocked")
+    assert dev_backlog(repo)["T-001"]["status"] == "blocked"
+    log = git(repo, "--git-dir", remote_of(repo), "log", "--format=%s", "-2", "dev").split("\n")
+    assert log[:2] == ["backlog: T-001 blocked", "meanwhile"]  # rebuilt on the new tip
+
+
+def test_only_the_status_commit_may_go_straight_to_dev(repo):
+    team, _ = make(repo)
+    url, sha = remote_of(repo), "a" * 40
+    for ref in (f"{sha}:refs/heads/dev", f"{sha}:refs/heads/main", "HEAD:refs/heads/dev"):
+        with pytest.raises(PermissionError):
+            team._guard(("push", "-q", url, ref))
+    team._status_commit = sha
+    team._guard(("push", "-q", url, f"{sha}:refs/heads/dev"))
+    with pytest.raises(PermissionError):
+        team._guard(("push", "-q", url, f"{sha}:refs/heads/main"))
+
+
+def test_pre_push_hook_lets_only_backlog_fast_forwards_into_dev(repo):
+    hook = Path(__file__).parents[1] / "hooks" / "pre-push"
+    base = git(repo, "rev-parse", "HEAD").strip()
+
+    def commit(path):
+        (repo / path).write_text(path + "\n")
+        git(repo, "add", path)
+        git(repo, "commit", "-qm", path)
+        return git(repo, "rev-parse", "HEAD").strip()
+
+    status = commit("devteam/backlog.yaml")
+    code = commit("pipeline/a.py")
+
+    def push(ref, local, remote=base):
+        line = f"refs/heads/x {local} {ref} {remote}\n"
+        return subprocess.run(
+            ["sh", str(hook), "origin", "https://github.com/x/y.git"],
+            cwd=repo,
+            input=line,
+            text=True,
+            capture_output=True,
+        ).returncode
+
+    assert push("refs/heads/dev", status) == 0  # backlog only, fast-forward
+    assert push("refs/heads/dev", code) == 1  # also changes code
+    assert push("refs/heads/dev", base, remote=status) == 1  # not a fast-forward
+    assert push("refs/heads/main", status) == 1  # main: never
+
+
+class Idle(Quick):
+    def develop(self, team, s):
+        return {"session": "idle", "summary": "nothing to do"}
+
+
+def rerun_merged_task(repo, agents):
+    """T-001 merged, then its status lost and the brain guard bypassed: the gate alone decides."""
+    team, graph = make(repo)
+    graph.invoke({}, {"configurable": {"thread_id": "r1"}})
+    first_pr = team.load_backlog()[0]["pr"]
+    team.update_task("T-001", status="todo")
+    team.agents, team.merged_tasks = agents, lambda: set()
+    agents.plan = lambda team, todo, feedback=None: [p("T-001", "dev_pipeline")]
+    graph.invoke({}, {"configurable": {"thread_id": "r2"}})
+    return team, first_pr, next(t for t in team.load_backlog() if t["id"] == "T-001")
+
+
+def test_gate_never_marks_done_without_this_runs_merged_pr(repo):
+    team, first_pr, t = rerun_merged_task(repo, Idle())
+    assert t["status"] == "blocked" and "nothing to merge, already done" in t["blocked_reason"]
+    assert len(team.gh.prs) == 2  # T-001 and T-002 of the first run; no new PR
+    assert dev_backlog(repo)["T-001"]["status"] == "blocked"
+
+
+def test_new_commits_on_a_merged_branch_get_a_new_pr(repo):
+    team, first_pr, t = rerun_merged_task(repo, Quick())
+    assert t["status"] == "done" and t["pr"] != first_pr  # a new PR, CI'd and merged
+    assert team.gh.prs[int(t["pr"].rsplit("/", 1)[1])]["state"] == "MERGED"

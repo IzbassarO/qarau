@@ -243,7 +243,7 @@ class GitHub:
                 "--state",
                 "all",
                 "--json",
-                "number,state,url",
+                "number,state,url,headRefOid",
             )
         )
         prs = [p for p in prs if p["state"] in ("OPEN", "MERGED")]
@@ -254,9 +254,7 @@ class GitHub:
         if pr and pr["state"] == "OPEN":
             self.gh("pr", "edit", str(pr["number"]), "--body-file", str(body_file))
             return pr
-        if pr:  # already merged (resume after a crash)
-            return pr
-        self.gh(
+        self.gh(  # an old merged PR is never reused: new commits get a new PR
             "pr",
             "create",
             "--head",
@@ -311,10 +309,10 @@ class FakeGitHub:
         self._lock = threading.Lock()  # GitHub serializes merges too
 
     def find_pr(self, head, base):
-        return next(
+        return next(  # newest first, like `gh pr list`
             (
                 p
-                for p in self.prs.values()
+                for p in reversed(self.prs.values())
                 if p["head"] == head and p["base"] == base and p["state"] in ("OPEN", "MERGED")
             ),
             None,
@@ -322,7 +320,7 @@ class FakeGitHub:
 
     def open_pr(self, head, base, title, body_file):
         pr = self.find_pr(head, base)
-        if not pr:
+        if not pr or pr["state"] != "OPEN":
             n = len(self.prs) + 1
             pr = self.prs[n] = {
                 "number": n,
@@ -357,7 +355,7 @@ class FakeGitHub:
             )
         finally:
             t.git("worktree", "remove", "--force", str(tmp))
-        pr["state"] = "MERGED"
+        pr["state"], pr["headRefOid"] = "MERGED", sha
         self.merged.append(number)
 
     def url(self, pr):
