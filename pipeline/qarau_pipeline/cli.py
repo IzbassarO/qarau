@@ -1,4 +1,4 @@
-"""CLI: python -m qarau_pipeline {run,quality,export,segment,project,benchmark} ..."""
+"""CLI: python -m qarau_pipeline {run,quality,export,segment,project,dense-remote,benchmark} ..."""
 
 from __future__ import annotations
 
@@ -144,6 +144,28 @@ def cmd_project(a: argparse.Namespace) -> None:
     print("project:", project_stage(Path(a.run).resolve(), a.scale))
 
 
+def cmd_dense_remote(a: argparse.Namespace) -> None:
+    import dataclasses
+    import tempfile
+    from datetime import UTC, datetime
+
+    from .dense_fake import FakeClock, FakeGpuProvider
+    from .dense_remote import GpuLedger, RemoteDenseExecutor, load_dense_remote_config
+
+    out = Path(a.out).resolve()
+    # The fake spends nothing: it may run while dense_remote is disabled, and books its hours
+    # in a ledger next to its output instead of the real one.
+    cfg = dataclasses.replace(load_dense_remote_config(Path(a.config)), enabled=True)
+    with tempfile.TemporaryDirectory() as remote:
+        p = FakeGpuProvider(Path(remote), FakeClock(datetime.now(UTC)))
+        ply = RemoteDenseExecutor(p, cfg, GpuLedger(out / "gpu_ledger.fake.json"), p.clock).run(
+            Path(a.frames), Path(a.sparse), out
+        )
+    for call in p.calls:
+        print(" ".join(call))
+    print("dense-remote:", ply)
+
+
 def cmd_benchmark(a: argparse.Namespace) -> None:
     from .benchmark import run_benchmark
 
@@ -195,6 +217,13 @@ def main(argv: list[str] | None = None) -> None:
     pj.add_argument("--run", required=True)
     pj.add_argument("--scale", type=float, help="metres per world unit (area in m2 only with it)")
     pj.set_defaults(fn=cmd_project)
+    dr = sub.add_parser("dense-remote", help="COLMAP dense on a remote GPU worker (ADR 0016)")
+    dr.add_argument("--provider", choices=["fake"], required=True, help="only fake exists yet")
+    dr.add_argument("--frames", required=True)
+    dr.add_argument("--sparse", required=True)
+    dr.add_argument("--out", required=True)
+    dr.add_argument("--config", default=str(Path(__file__).resolve().parent.parent / "config.yaml"))
+    dr.set_defaults(fn=cmd_dense_remote)
     b = sub.add_parser("benchmark", help="all reference videos -> <out>/results.json")
     b.add_argument("--data", required=True, help="dir with the reference videos (read-only)")
     b.add_argument("--out", required=True)
