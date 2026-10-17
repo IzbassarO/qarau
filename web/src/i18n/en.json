@@ -23,8 +23,8 @@
   "toolbar.camera": "View through the video camera",
   "toolbar.zoomIn": "Zoom in",
   "toolbar.zoomOut": "Zoom out",
-  "canvas.label": "Interactive 3D map with point cloud and camera path. Two-finger drag or mouse drag: orbit. Shift: pan. Pinch or mouse wheel: zoom. Alt/Option: precision. 1: Orbit. F: fly.",
-  "canvas.hint": "Two fingers / drag: orbit · Shift: pan · pinch / mouse wheel: zoom · Alt/Option: precision · F: fly",
+  "canvas.label": "Interactive 3D map with point cloud and camera path. Two-finger drag or mouse drag: orbit. Shift: pan. Pinch or mouse wheel: zoom. Alt/Option: precision. 1: Orbit. F: Observer.",
+  "canvas.hint": "Two fingers / drag: orbit · Shift: pan · pinch / mouse wheel: zoom · Alt/Option: precision · F: Observer",
   "legend.now": "Seen by the camera now",
   "legend.seen": "Already filmed (height colours)",
   "legend.later": "Filmed later",
@@ -147,7 +147,6 @@
   "language.ru": "RU",
   "language.kk": "KK",
   "language.en": "EN",
-  "canvas.flyHint": "Fly mode: WASD move, mouse look, Shift faster, F/Esc exit",
   "gizmo.label": "Axis views",
   "gizmo.positiveX": "Right view (+X)",
   "gizmo.negativeX": "Left view (−X)",
@@ -240,5 +239,13 @@
   "pointInfo.confidence": "Point confidence",
   "pointInfo.needsScale": "Not available: needs metric scale (P5a)",
   "pointInfo.needsConfidence": "Not available: needs point confidence (P6)",
-  "pointInfo.invalidPoint": "The point link is invalid or outside this map."
+  "pointInfo.invalidPoint": "The point link is invalid or outside this map.",
+  "canvas.observerHint": "WASD / arrows: move · Space / Shift: up / down · click: mouse look · two fingers / drag: look · Esc: release mouse · V: third person · F: Orbit",
+  "viewer.mode.observerHint": "Free spectator camera · F",
+  "viewer.observer.minimap": "Observer minimap — top view",
+  "viewer.observer.thirdPerson": "Third-person view · V",
+  "viewer.observer.humanFigure": "Human figure · 1.75 m",
+  "viewer.settings.observerBoost": "Observer speed boost key",
+  "viewer.settings.control": "Ctrl",
+  "viewer.settings.alt": "Alt / Option"
 }

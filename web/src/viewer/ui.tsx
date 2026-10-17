@@ -1,6 +1,6 @@
 import { useId, type MouseEvent, type ReactNode } from 'react';
 import { LANGS, setLang, useI18n, type Lang } from '../i18n';
-import { MAX_SENSITIVITY, MIN_SENSITIVITY } from './settings';
+import { MAX_SENSITIVITY, MIN_SENSITIVITY, type ObserverBoostKey } from './settings';
 
 export function ToolButton({
   label,
@@ -51,9 +51,11 @@ export function PointInfoTool({ active, onClick }: { active: boolean; onClick: (
 export function ModeSwitch({
   orbitActive = true,
   onOrbit,
+  onObserver,
 }: {
   orbitActive?: boolean;
   onOrbit: () => void;
+  onObserver: () => void;
 }) {
   const { t } = useI18n();
   return (
@@ -63,6 +65,12 @@ export function ModeSwitch({
       className="flex gap-0.5 rounded-lg border border-line-strong p-0.5"
       onKeyDown={(event) => {
         if (event.ctrlKey || event.metaKey || event.altKey) return;
+        if (event.key.toLowerCase() === 'f' || event.code === 'KeyF') {
+          if (!event.repeat) (orbitActive ? onObserver : onOrbit)();
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         if (!['1', '2', '3'].includes(event.key)) return;
         if (event.key === '1' && !event.repeat) onOrbit();
         event.preventDefault();
@@ -78,19 +86,26 @@ export function ModeSwitch({
       >
         {t('viewer.mode.orbit')}
       </button>
-      {(['walk', 'observer'] as const).map((mode) => (
-        <span key={mode} title={t('viewer.mode.comingSoon')}>
-          <button
-            type="button"
-            disabled
-            aria-pressed={false}
-            title={t('viewer.mode.comingSoon')}
-            className="h-8 cursor-not-allowed rounded-md px-3 text-xs text-ink-2 opacity-45"
-          >
-            {t(`viewer.mode.${mode}`)}
-          </button>
-        </span>
-      ))}
+      <span title={t('viewer.mode.comingSoon')}>
+        <button
+          type="button"
+          disabled
+          aria-pressed={false}
+          title={t('viewer.mode.comingSoon')}
+          className="h-8 cursor-not-allowed rounded-md px-3 text-xs text-ink-2 opacity-45"
+        >
+          {t('viewer.mode.walk')}
+        </button>
+      </span>
+      <button
+        type="button"
+        aria-pressed={!orbitActive}
+        title={t('viewer.mode.observerHint')}
+        onClick={onObserver}
+        className={`h-8 cursor-pointer rounded-md px-3 text-xs ${!orbitActive ? 'bg-line text-ink' : 'text-ink-2'}`}
+      >
+        {t('viewer.mode.observer')}
+      </button>
     </div>
   );
 }
@@ -98,9 +113,13 @@ export function ModeSwitch({
 export function NavigationSettings({
   sensitivity,
   onSensitivityChange,
+  boostKey,
+  onBoostKeyChange,
 }: {
   sensitivity: number;
   onSensitivityChange: (value: number) => void;
+  boostKey?: ObserverBoostKey;
+  onBoostKeyChange?: (value: ObserverBoostKey) => void;
 }) {
   const { t } = useI18n();
   const sensitivityId = useId();
@@ -138,6 +157,19 @@ export function NavigationSettings({
           />
         </div>
         <p className="m-0 text-xs leading-5 text-ink-2">{t('viewer.settings.precision')}</p>
+        {boostKey && onBoostKeyChange && (
+          <label className="flex flex-col gap-2 text-xs text-ink-2">
+            {t('viewer.settings.observerBoost')}
+            <select
+              value={boostKey}
+              onChange={(event) => onBoostKeyChange(event.target.value as ObserverBoostKey)}
+              className="border border-line-strong bg-bg p-2 text-ink"
+            >
+              <option value="control">{t('viewer.settings.control')}</option>
+              <option value="alt">{t('viewer.settings.alt')}</option>
+            </select>
+          </label>
+        )}
       </div>
     </details>
   );

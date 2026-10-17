@@ -1,7 +1,24 @@
 import { Box3, Matrix4, Plane, Quaternion, Vector3 } from 'three';
-import type { NavigationState } from './navigation';
+import { PointCloudIndex, type NavigationState, type PointSource } from './navigation';
 
 export type SurfacePoints = ArrayLike<number> | readonly Vector3[];
+
+/** Exact finite-cloud proximity; the shared spatial index avoids scanning every frame. */
+export function nearestPointDistance(points: PointSource, position: Vector3): number {
+  if (points instanceof PointCloudIndex) return points.nearestDistance(position);
+  const vectors = points.length > 0 && typeof points[0] !== 'number';
+  const count = vectors ? points.length : Math.floor(points.length / 3);
+  let nearestSq = Infinity;
+  for (let i = 0; i < count; i++) {
+    const candidate = vectors ? (points as readonly Vector3[])[i] : undefined;
+    const x = (candidate?.x ?? (points as ArrayLike<number>)[i * 3]) - position.x;
+    const y = (candidate?.y ?? (points as ArrayLike<number>)[i * 3 + 1]) - position.y;
+    const z = (candidate?.z ?? (points as ArrayLike<number>)[i * 3 + 2]) - position.z;
+    const distanceSq = x * x + y * y + z * z;
+    if (Number.isFinite(distanceSq)) nearestSq = Math.min(nearestSq, distanceSq);
+  }
+  return Math.sqrt(nearestSq);
+}
 
 const WORLD_UP = new Vector3(0, 0, 1);
 const COS_GROUND_TILT = Math.cos((25 * Math.PI) / 180);

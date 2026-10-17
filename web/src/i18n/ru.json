@@ -147,7 +147,6 @@
   "language.ru": "RU",
   "language.kk": "KK",
   "language.en": "EN",
-  "canvas.flyHint": "Режим полёта: WASD — движение, мышь — обзор, Shift — быстрее, F/Esc — выход",
   "gizmo.label": "Виды по осям",
   "gizmo.positiveX": "Вид справа (+X)",
   "gizmo.negativeX": "Вид слева (−X)",
@@ -240,5 +239,13 @@
   "pointInfo.confidence": "Уверенность точки",
   "pointInfo.needsScale": "Недоступно: нужен метрический масштаб (P5a)",
   "pointInfo.needsConfidence": "Недоступно: нужна уверенность точки (P6)",
-  "pointInfo.invalidPoint": "Ссылка на точку некорректна или точка вне этой карты."
+  "pointInfo.invalidPoint": "Ссылка на точку некорректна или точка вне этой карты.",
+  "canvas.observerHint": "WASD / стрелки: движение · Space / Shift: вверх / вниз · щелчок: обзор мышью · два пальца / перетаскивание: обзор · Esc: освободить мышь · V: вид от третьего лица · F: Орбита",
+  "viewer.mode.observerHint": "Свободная камера наблюдателя · F",
+  "viewer.observer.minimap": "Миникарта наблюдателя — вид сверху",
+  "viewer.observer.thirdPerson": "Вид от третьего лица · V",
+  "viewer.observer.humanFigure": "Фигура человека · 1,75 м",
+  "viewer.settings.observerBoost": "Клавиша ускорения наблюдателя",
+  "viewer.settings.control": "Ctrl",
+  "viewer.settings.alt": "Alt / Option"
 }

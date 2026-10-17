@@ -56,6 +56,7 @@ export function ViewerPage() {
         bundle={bundle}
         initialPoint={valid ? point : null}
         invalidPoint={search.has('point') && !valid}
+        initialMode={search.get('mode') === 'observer' ? 'observer' : 'orbit'}
       />
     );
   }

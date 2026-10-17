@@ -147,6 +147,39 @@ export class PointCloudIndex {
     this.root = groupCells([...cells.values()]);
   }
 
+  /** Exact nearest distance, pruning cells farther away than the best point found. */
+  nearestDistance(position: Vector3): number {
+    let nearestSq = Infinity;
+    const distanceSq = (bounds: Box3) => {
+      if (bounds.isEmpty()) return Infinity;
+      const x = Math.max(bounds.min.x - position.x, 0, position.x - bounds.max.x);
+      const y = Math.max(bounds.min.y - position.y, 0, position.y - bounds.max.y);
+      const z = Math.max(bounds.min.z - position.z, 0, position.z - bounds.max.z);
+      return x * x + y * y + z * z;
+    };
+    const traverse = (node: CellNode) => {
+      if (distanceSq(node.bounds) >= nearestSq) return;
+      if (node.children) {
+        const [a, b] = node.children;
+        const ordered = distanceSq(a.bounds) <= distanceSq(b.bounds) ? [a, b] : [b, a];
+        traverse(ordered[0]);
+        traverse(ordered[1]);
+      } else if (node.cells) {
+        for (const cell of node.cells) {
+          if (distanceSq(cell.bounds) >= nearestSq) continue;
+          for (const i of cell.indices) {
+            const x = this.positions[i] - position.x;
+            const y = this.positions[i + 1] - position.y;
+            const z = this.positions[i + 2] - position.z;
+            nearestSq = Math.min(nearestSq, x * x + y * y + z * z);
+          }
+        }
+      }
+    };
+    traverse(this.root);
+    return Math.sqrt(nearestSq);
+  }
+
   forEachNearRay(ray: Ray, radius: number, distance: number, visit: VisitPoint) {
     const box = new Box3();
     const hit = new Vector3();
@@ -350,7 +383,7 @@ export class NavigationControls {
   readonly target: Vector3;
   enabled = true;
   sensitivity = 1;
-  private readonly points: PointSource;
+  readonly points: PointSource;
   private readonly minDistance: number;
   private readonly radius: number;
   private readonly margin: number;

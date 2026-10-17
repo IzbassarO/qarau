@@ -83,6 +83,81 @@ function renderDemo() {
   return renderViewer('demo');
 }
 
+it('opens in Orbit by default without an observer minimap or human figure', () => {
+  const setSensitivity = vi.spyOn(ViewerEngine.prototype, 'setSensitivity');
+  renderDemo();
+  const engine = setSensitivity.mock.contexts.at(-1) as ViewerEngine;
+  expect(engine.observerMode).toBe(false);
+  expect(screen.queryByTestId('observer-minimap')).toBeNull();
+  expect(
+    screen
+      .getByRole('button', { name: LANGS.en['viewer.mode.orbit'] })
+      .getAttribute('aria-pressed'),
+  ).toBe('true');
+  expect(engine.scene.getObjectByName('observer-human')?.visible).not.toBe(true);
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it.each(['', '&point=0'])(
+  'opens /viewer/aegviidu?mode=observer%s with a minimap, Observer indicator and controls hint',
+  async (pointQuery) => {
+    const bundle = { ...createDemo('en').bundle, runId: 'aegviidu' };
+    vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+    vi.spyOn(bundleApi, 'loadBundle').mockResolvedValue(bundle);
+    const setSensitivity = vi.spyOn(ViewerEngine.prototype, 'setSensitivity');
+    renderViewer('aegviidu', `?mode=observer${pointQuery}`);
+    const minimap = await screen.findByTestId('observer-minimap');
+    expect(minimap.getAttribute('aria-label')).toBe(LANGS.en['viewer.observer.minimap']);
+    await waitFor(() => expect(setSensitivity).toHaveBeenCalled());
+    const engine = setSensitivity.mock.contexts.at(-1) as ViewerEngine;
+    expect(engine.observerMode).toBe(true);
+    expect(engine.controls.enabled).toBe(false);
+    expect(
+      screen
+        .getByRole('button', { name: LANGS.en['viewer.mode.observer'] })
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(screen.getByRole('status').textContent).toBe(LANGS.en['canvas.observerHint']);
+    expect(engine.scene.getObjectByName('observer-human')?.visible).not.toBe(true);
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: LANGS.en['viewer.mode.orbit'] }));
+    expect(engine.observerMode).toBe(false);
+    expect(screen.queryByTestId('observer-minimap')).toBeNull();
+  },
+);
+
+it('moves immediately after clicking third-person view and lets V return to first person', () => {
+  const setSensitivity = vi.spyOn(ViewerEngine.prototype, 'setSensitivity');
+  renderViewer('demo', '?mode=observer');
+  const engine = setSensitivity.mock.contexts.at(-1) as ViewerEngine;
+  const thirdPerson = screen.getByRole('button', { name: LANGS.en['viewer.observer.thirdPerson'] });
+  act(() => thirdPerson.focus());
+  fireEvent.click(thirdPerson);
+  expect(engine.thirdPerson).toBe(true);
+  const position = engine.observerView!.position.clone();
+  fireEvent.keyDown(document.activeElement!, { key: 'w', code: 'KeyW' });
+  advanceFrames(10);
+  fireEvent.keyUp(document.activeElement!, { key: 'w', code: 'KeyW' });
+  expect(engine.observerView!.position.distanceTo(position)).toBeGreaterThan(0);
+  fireEvent.keyDown(document.activeElement!, { key: 'v', code: 'KeyV' });
+  expect(engine.thirdPerson).toBe(false);
+  expect(screen.getByTestId('observer-minimap')).toBeTruthy();
+});
+
+it('keeps Observer and its minimap while changing the speed boost setting', () => {
+  const setSensitivity = vi.spyOn(ViewerEngine.prototype, 'setSensitivity');
+  renderViewer('demo', '?mode=observer');
+  const engine = setSensitivity.mock.contexts.at(-1) as ViewerEngine;
+  fireEvent.click(screen.getByText(LANGS.en['viewer.settings.title']));
+  const boost = screen.getByLabelText(LANGS.en['viewer.settings.observerBoost']);
+  act(() => boost.focus());
+  fireEvent.change(boost, { target: { value: 'alt' } });
+  fireEvent.keyDown(boost, { key: 'f', code: 'KeyF' });
+  expect(engine.observerMode).toBe(true);
+  expect(screen.getByTestId('observer-minimap')).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toBe(LANGS.en['canvas.observerHint']);
+});
+
 it('opens ?point=0 with the info tool, evidence panel and selected-point marker, and seeks its exact frame', async () => {
   const bundle = createDemo('en').bundle;
   const setPicked = vi.spyOn(ViewerEngine.prototype, 'setPicked');
@@ -357,20 +432,27 @@ it('offers five above-ground axis views around the same pivot and disables the b
   }
 });
 
-it('shows the fly controls after F and exits with F or Escape', () => {
+it('shows Observer controls and the minimap after F, keeps them after Esc and exits with F', () => {
   renderDemo();
   const canvas = screen.getByLabelText(/Interactive 3D map/);
-  const hint = 'Fly mode: WASD move, mouse look, Shift faster, F/Esc exit';
+  const hint = LANGS.en['canvas.observerHint'];
   canvas.focus();
   expect(screen.queryByText(hint)).toBeNull();
+  expect(screen.queryByTestId('observer-minimap')).toBeNull();
   fireEvent.keyDown(canvas, { key: 'f', code: 'KeyF' });
   expect(screen.getByRole('status').textContent).toBe(hint);
+  expect(screen.getByTestId('observer-minimap')).toBeTruthy();
   fireEvent.keyDown(canvas, { key: 'f', code: 'KeyF' });
   expect(screen.queryByText(hint)).toBeNull();
+  expect(screen.queryByTestId('observer-minimap')).toBeNull();
   fireEvent.keyDown(canvas, { key: 'f', code: 'KeyF' });
   expect(screen.getByText(hint)).toBeTruthy();
   fireEvent.keyDown(canvas, { key: 'Escape', code: 'Escape' });
+  expect(screen.getByRole('status').textContent).toBe(hint);
+  expect(screen.getByTestId('observer-minimap')).toBeTruthy();
+  fireEvent.keyDown(canvas, { key: 'f', code: 'KeyF' });
   expect(screen.queryByText(hint)).toBeNull();
+  expect(screen.queryByTestId('observer-minimap')).toBeNull();
 });
 
 it('keeps disabled modes unchanged for keys 2 and 3 and returns to Orbit with 1', () => {
@@ -413,11 +495,22 @@ it.each<Lang>(['en', 'ru', 'kk'])(
         .getByRole('button', { name: locale['viewer.mode.orbit'] })
         .getAttribute('aria-pressed'),
     ).toBe('true');
-    for (const key of ['viewer.mode.walk', 'viewer.mode.observer'] as const) {
-      const mode = within(modes).getByRole('button', { name: locale[key] }) as HTMLButtonElement;
-      expect(mode.disabled).toBe(true);
-      expect(mode.title).toBe(locale['viewer.mode.comingSoon']);
-    }
+    const walk = within(modes).getByRole('button', {
+      name: locale['viewer.mode.walk'],
+    }) as HTMLButtonElement;
+    expect(walk.disabled).toBe(true);
+    expect(walk.title).toBe(locale['viewer.mode.comingSoon']);
+    const observer = within(modes).getByRole('button', {
+      name: locale['viewer.mode.observer'],
+    }) as HTMLButtonElement;
+    expect(observer.disabled).toBe(false);
+    fireEvent.click(observer);
+    expect(observer.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('status').textContent).toBe(locale['canvas.observerHint']);
+    expect(screen.getByTestId('observer-minimap').getAttribute('aria-label')).toBe(
+      locale['viewer.observer.minimap'],
+    );
+    fireEvent.click(within(modes).getByRole('button', { name: locale['viewer.mode.orbit'] }));
     for (const key of [
       'toolbar.top',
       'toolbar.front',
@@ -479,7 +572,7 @@ it('loads and saves sensitivity for the signed-in identity without recreating th
   expect(resize.mock.calls.length).toBe(engineMounts);
 });
 
-it.each<Lang>(['en', 'ru', 'kk'])('localizes axis controls and the fly hint in %s', (lang) => {
+it.each<Lang>(['en', 'ru', 'kk'])('localizes axis controls and the Observer hint in %s', (lang) => {
   setLang(lang);
   renderDemo();
   const locale = LANGS[lang];
@@ -497,7 +590,7 @@ it.each<Lang>(['en', 'ru', 'kk'])('localizes axis controls and the fly hint in %
   const canvas = screen.getByLabelText(locale['canvas.label']);
   canvas.focus();
   fireEvent.keyDown(canvas, { key: 'f', code: 'KeyF' });
-  expect(screen.getByRole('status').textContent).toBe(locale['canvas.flyHint']);
+  expect(screen.getByRole('status').textContent).toBe(locale['canvas.observerHint']);
   fireEvent.click(within(gizmo).getByRole('button', { name: locale['gizmo.positiveZ'] }));
   expect(screen.getByRole('status').textContent).toBe(locale['canvas.hint']);
   expect(document.activeElement).toBe(canvas);
