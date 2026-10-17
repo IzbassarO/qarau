@@ -90,10 +90,11 @@ export const AxisGizmo = forwardRef<AxisGizmoHandle, { onSelect: (axis: Axis) =>
               else buttons.current.delete(axis);
             }}
             type="button"
+            disabled={axis === '-z'}
             aria-label={t(name)}
-            title={t(name)}
+            title={t(axis === '-z' ? 'gizmo.groundLimited' : name)}
             onClick={() => onSelect(axis)}
-            className="absolute left-1/2 top-1/2 flex cursor-pointer items-center justify-center rounded-full border font-mono text-[10px] font-semibold shadow-sm outline-offset-2 hover:brightness-125 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+            className="absolute left-1/2 top-1/2 flex cursor-pointer items-center justify-center rounded-full border font-mono text-[10px] font-semibold shadow-sm outline-offset-2 hover:brightness-125 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-40"
             style={{
               width: GIZMO_BUTTON_SIZE,
               height: GIZMO_BUTTON_SIZE,

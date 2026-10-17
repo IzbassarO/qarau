@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Box3, LineSegments, Points, PointsMaterial, ShaderMaterial, Vector3 } from 'three';
+import { Box3, Line, LineSegments, Points, PointsMaterial, ShaderMaterial, Vector3 } from 'three';
 import { createDemo } from '../fixtures/demo';
 import type { Bundle } from '../lib/bundle';
 import { heightRamp, robustBounds } from '../lib/geometry';
 import { ViewerEngine } from './engine';
 import { orientationFor, viewDirectionFor } from './gizmo';
+import { estimateGround } from './constraints';
 
 // Keep the actual camera, navigation, fly physics and gizmo math; jsdom has no GPU.
 vi.mock('three', async (importOriginal) => {
@@ -104,11 +105,12 @@ function setup(bundle = createDemo('en').bundle) {
     toJSON: () => ({}),
   });
   const onFlyModeChange = vi.fn();
+  const onAlignModeChange = vi.fn();
   const onPick = vi.fn();
-  const engine = new ViewerEngine(canvas, bundle, { onFlyModeChange, onPick });
+  const engine = new ViewerEngine(canvas, bundle, { onFlyModeChange, onPick, onAlignModeChange });
   engines.add(engine);
   canvas.focus();
-  return { canvas, engine, onFlyModeChange, onPick };
+  return { canvas, engine, onFlyModeChange, onPick, onAlignModeChange };
 }
 
 function key(
@@ -327,7 +329,8 @@ describe('ViewerEngine fly input', () => {
     ).toBeLessThan(1e-9);
     frame(30);
     expect(engine.camera.position.distanceTo(position)).toBeLessThan(1e-10);
-    expect(engine.camera.quaternion.angleTo(beforeExit)).toBeLessThan(1e-6);
+    // Exiting fly also removes the last sub-pixel residual roll from damping.
+    expect(engine.camera.quaternion.angleTo(beforeExit)).toBeLessThan(1e-5);
   });
 
   it.each(['z', '-z'] as const)(
@@ -572,7 +575,7 @@ describe('ViewerEngine axis flights', () => {
     ).toBeLessThan(1e-6);
   });
 
-  it.each(['z', '-z'] as const)(
+  it.each(['z'] as const)(
     'reaches the %s pole with stable screen-up and unchanged pivot/radius',
     (axis) => {
       const { engine } = setup(navigationBundle());
@@ -790,6 +793,27 @@ describe('ViewerEngine colour modes', () => {
 });
 
 describe('ViewerEngine opt-in display modes', () => {
+  it('uses a thin line and dots at every registered frame, with exactly one reusable frustum', () => {
+    const bundle = createDemo('en').bundle;
+    const { engine } = setup(bundle);
+    const line = engine.scene.getObjectByName('camera-path') as Line;
+    const dots = engine.scene.getObjectByName('camera-path-dots') as Points;
+    const count = bundle.manifest.frames.filter((f) => f.registered && f.pose).length;
+    expect(line).toBeInstanceOf(Line);
+    expect(dots).toBeInstanceOf(Points);
+    expect(dots.geometry.getAttribute('position').count).toBe(count);
+    const frustum = engine.scene.getObjectByName('current-camera-frustum') as LineSegments;
+    expect(frustum.geometry.getAttribute('position').count).toBe(16);
+    const geometry = frustum.geometry;
+    for (const i of [0, 4, 10]) {
+      engine.setFrame(i);
+      expect(engine.scene.children.filter((child) => child instanceof LineSegments)).toEqual([
+        frustum,
+      ]);
+      expect(frustum.geometry).toBe(geometry);
+    }
+  });
+
   it('keeps every frustum hidden across frame changes until enabled, and hides them again', () => {
     const demo = createDemo('en').bundle;
     const bundle = {
@@ -799,8 +823,8 @@ describe('ViewerEngine opt-in display modes', () => {
     bundle.manifest.frames[1] = { ...bundle.manifest.frames[1], registered: false };
     const { engine } = setup(bundle);
     const frustums = engine.scene.children.filter((child) => child instanceof LineSegments);
-    expect(frustums).toHaveLength(2);
-    const [pathFrustums, currentFrustum] = frustums;
+    expect(frustums).toHaveLength(1);
+    const [currentFrustum] = frustums;
     const cameraDot = engine.scene.children.find(
       (child) =>
         child instanceof Points &&
@@ -827,7 +851,6 @@ describe('ViewerEngine opt-in display modes', () => {
     expect(material.uniforms.uBuildUp.value).toBe(1);
     expect([...frustums, cameraDot].every((child) => child.visible)).toBe(true);
     engine.setFrame(1);
-    expect(pathFrustums.visible).toBe(true);
     expect(currentFrustum.visible).toBe(false);
     expect(cameraDot.visible).toBe(false);
     engine.setFrame(0);
@@ -840,7 +863,7 @@ describe('ViewerEngine opt-in display modes', () => {
     expect([...frustums, cameraDot].every((child) => !child.visible)).toBe(true);
   });
 
-  it('scales both historical and current frustums with the scene extent', () => {
+  it('scales the single current frustum with the scene extent', () => {
     const sizes = (scale: number) => {
       const demo = createDemo('en').bundle;
       const bundle = {
@@ -875,11 +898,97 @@ describe('ViewerEngine opt-in display modes', () => {
     };
     const original = sizes(1);
     const scaled = sizes(10);
-    expect(original).toHaveLength(2);
+    expect(original).toHaveLength(1);
     original.forEach((size, index) => {
       expect(size).toBeGreaterThan(0);
       expect(scaled[index] / size).toBeCloseTo(10, 4);
     });
+  });
+});
+
+describe('ViewerEngine constrained navigation', () => {
+  it('finishes a side preset at the terrain boundary instead of redrawing forever', () => {
+    const { engine } = setup(navigationBundle());
+    engine.controls.target.set(0, 0, -1);
+    engine.camera.position.set(0, 0, 1);
+    engine.controls.sync();
+    engine.sideView();
+    frame(180);
+    expect(engine.camera.position.z).toBeGreaterThan(-1);
+    expect(engine.camera.position.distanceTo(engine.controls.target)).toBeCloseTo(2, 8);
+    expect(engine.camera.position.x).toBeGreaterThan(1.9);
+    const render = vi.mocked(engine.renderer.render);
+    render.mockClear();
+    frame(60);
+    expect(render).not.toHaveBeenCalled();
+  });
+
+  it('aligns a real point pick to the local surface normal and cancels with Escape', () => {
+    const points: number[][] = [];
+    for (let x = -12; x <= 12; x += 3) for (let y = -12; y <= 12; y += 3) points.push([x, y, -4]);
+    for (let x = -2; x <= 2.01; x += 0.4)
+      for (let y = -2; y <= 2.01; y += 0.4) points.push([x, y, 1 + 0.3 * x + 0.2 * y]);
+    const { engine, canvas, onPick, onAlignModeChange } = setup(navigationBundle(points));
+    engine.controls.target.set(0, 0, 1);
+    engine.camera.position.set(5, -6, 5);
+    engine.controls.sync();
+    engine.beginSurfaceAlignment();
+    expect(engine.controls.enabled).toBe(false);
+    key(canvas, 'Escape');
+    expect(engine.controls.enabled).toBe(true);
+    expect(onAlignModeChange.mock.calls).toEqual([[true], [false]]);
+
+    const distance = engine.camera.position.distanceTo(engine.controls.target);
+    engine.beginSurfaceAlignment();
+    const pixel = engine.project([0, 0, 1]);
+    pointer(canvas, 'pointerdown', pixel.x, pixel.y);
+    pointer(canvas, 'pointerup', pixel.x, pixel.y);
+    frame(180);
+    expect(onPick).not.toHaveBeenCalled();
+    expect(engine.controls.enabled).toBe(true);
+    expect(onAlignModeChange.mock.calls.at(-1)).toEqual([false]);
+    expect(engine.controls.target.distanceTo(new Vector3(0, 0, 1))).toBeLessThan(1e-4);
+    expect(engine.camera.position.distanceTo(engine.controls.target)).toBeCloseTo(distance, 4);
+    const forward = engine.camera.getWorldDirection(new Vector3());
+    expect(forward.angleTo(new Vector3(0.3, 0.2, -1).normalize())).toBeLessThan(0.01);
+    expect(Math.abs(new Vector3(1, 0, 0).applyQuaternion(engine.camera.quaternion).z)).toBeLessThan(
+      1e-8,
+    );
+  });
+
+  it('clamps orbit, zoom and fly above terrain and inside the scene envelope', () => {
+    const bundle = navigationBundle();
+    const { engine, canvas } = setup(bundle);
+    const ground = estimateGround(bundle.position);
+    const { expanded } = navigationEnvelope(bundle);
+    const radius = robustBounds(bundle.position).radius;
+    for (const init of [
+      { ctrlKey: true, deltaY: 5000 },
+      { deltaX: 16, deltaY: 2000 },
+      { ctrlKey: true, deltaY: -5000 },
+      { shiftKey: true, deltaX: -2000, deltaY: 1500 },
+    ]) {
+      canvas.dispatchEvent(new WheelEvent('wheel', init));
+      for (let i = 0; i < 60; i++) {
+        frame();
+        expect(ground.distanceToPoint(engine.camera.position)).toBeGreaterThan(0);
+        expect(expanded.containsPoint(engine.camera.position)).toBe(true);
+        const distance = engine.camera.position.distanceTo(engine.controls.target);
+        expect(distance).toBeGreaterThanOrEqual(radius * 0.002 - 1e-8);
+        expect(distance).toBeLessThanOrEqual(radius * 20 + 1e-8);
+        expect(engine.camera.up.toArray()).toEqual([0, 0, 1]);
+        expect(
+          Math.abs(new Vector3(1, 0, 0).applyQuaternion(engine.camera.quaternion).z),
+        ).toBeLessThan(1e-7);
+      }
+    }
+    engine.topView();
+    frame(180);
+    key(canvas, 'f');
+    key(canvas, 'w', { code: 'KeyW' });
+    frame(180);
+    expect(ground.distanceToPoint(engine.camera.position)).toBeGreaterThan(0);
+    expect(expanded.containsPoint(engine.camera.position)).toBe(true);
   });
 });
 

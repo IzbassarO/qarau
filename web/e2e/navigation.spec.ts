@@ -42,6 +42,9 @@ test('demo axis views and fly keyboard/mouse controls', async ({ page }) => {
       ),
     )
     .toEqual([]);
+  await expect(
+    gizmo.getByRole('button', { name: en['gizmo.negativeZ'], exact: true }),
+  ).toBeDisabled();
   const pivot = await page.evaluate(() => window.__qarau!.engine!.controls.target.toArray());
   const distance = await page.evaluate(() => {
     const engine = window.__qarau!.engine!;
@@ -49,7 +52,6 @@ test('demo axis views and fly keyboard/mouse controls', async ({ page }) => {
   });
   for (const [label, direction] of [
     [en['gizmo.positiveZ'], [0, 0, -1]],
-    [en['gizmo.negativeZ'], [0, 0, 1]],
     [en['gizmo.positiveX'], [-1, 0, 0]],
     [en['gizmo.negativeX'], [1, 0, 0]],
     [en['gizmo.positiveY'], [0, -1, 0]],

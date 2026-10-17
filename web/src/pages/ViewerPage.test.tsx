@@ -3,10 +3,12 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { PerspectiveCamera, Vector3 } from 'three';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createDemo } from '../fixtures/demo';
+import { login, logout } from '../auth/auth';
 import { LANGS, setLang, type Lang } from '../i18n';
 import * as bundleApi from '../lib/bundle';
 import { ViewerEngine } from '../viewer/engine';
 import type { Axis } from '../viewer/gizmo';
+import { saveSensitivity } from '../viewer/settings';
 import { ViewerPage } from './ViewerPage';
 
 const { renderScene } = vi.hoisted(() => ({ renderScene: vi.fn() }));
@@ -40,6 +42,7 @@ const pendingFrames = new Map<number, FrameRequestCallback>();
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   setLang('en');
   vi.clearAllMocks();
   now = 0;
@@ -61,6 +64,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  sessionStorage.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -235,11 +239,18 @@ it.each<Lang>(['en', 'ru', 'kk'])(
   },
 );
 
-it('renders six axis buttons and rotates each view around the same pivot at the same distance', () => {
+it('offers five above-ground axis views around the same pivot and disables the bottom view', () => {
   const axisView = vi.spyOn(ViewerEngine.prototype, 'axisView');
   renderDemo();
   const gizmo = screen.getByRole('group', { name: 'Axis views' });
   expect(within(gizmo).getAllByRole('button')).toHaveLength(6);
+  const bottom = within(gizmo).getByRole('button', {
+    name: 'Bottom view (−Z)',
+  }) as HTMLButtonElement;
+  expect(bottom.disabled).toBe(true);
+  expect(bottom.title).toBe(LANGS.en['gizmo.groundLimited']);
+  fireEvent.click(bottom);
+  expect(axisView).not.toHaveBeenCalled();
   const camera = renderScene.mock.calls[0][1] as PerspectiveCamera;
   const canvas = screen.getByLabelText(/Interactive 3D map/);
   const views: { axis: Axis; name: string; direction: Vector3 }[] = [
@@ -248,7 +259,6 @@ it('renders six axis buttons and rotates each view around the same pivot at the 
     { axis: '-x', name: 'Left view (−X)', direction: new Vector3(1, 0, 0) },
     { axis: 'y', name: 'Back view (+Y)', direction: new Vector3(0, -1, 0) },
     { axis: '-y', name: 'Front view (−Y)', direction: new Vector3(0, 1, 0) },
-    { axis: '-z', name: 'Bottom view (−Z)', direction: new Vector3(0, 0, 1) },
   ];
   let pivot: Vector3 | undefined;
   let distance = 0;
@@ -294,6 +304,112 @@ it('shows the fly controls after F and exits with F or Escape', () => {
   expect(screen.getByText(hint)).toBeTruthy();
   fireEvent.keyDown(canvas, { key: 'Escape', code: 'Escape' });
   expect(screen.queryByText(hint)).toBeNull();
+});
+
+it('keeps disabled modes unchanged for keys 2 and 3 and returns to Orbit with 1', () => {
+  const setOrbitMode = vi.spyOn(ViewerEngine.prototype, 'setOrbitMode');
+  const setSensitivity = vi.spyOn(ViewerEngine.prototype, 'setSensitivity');
+  renderDemo();
+  const engine = setSensitivity.mock.contexts.at(-1) as ViewerEngine;
+  const canvas = screen.getByLabelText(LANGS.en['canvas.label']);
+  const orbit = screen.getByRole('button', { name: 'Orbit' });
+  canvas.focus();
+  const rotation = engine.camera.quaternion.clone();
+  for (const key of ['2', '3']) fireEvent.keyDown(canvas, { key, code: `Digit${key}` });
+  expect(setOrbitMode).not.toHaveBeenCalled();
+  expect(engine.flyMode).toBe(false);
+  expect(engine.camera.quaternion.equals(rotation)).toBe(true);
+  expect(orbit.getAttribute('aria-pressed')).toBe('true');
+
+  fireEvent.keyDown(canvas, { key: 'f', code: 'KeyF' });
+  expect(engine.flyMode).toBe(true);
+  expect(orbit.getAttribute('aria-pressed')).toBe('false');
+  for (const key of ['2', '3']) fireEvent.keyDown(canvas, { key, code: `Digit${key}` });
+  expect(engine.flyMode).toBe(true);
+  expect(setOrbitMode).not.toHaveBeenCalled();
+  fireEvent.keyDown(canvas, { key: '1', code: 'Digit1' });
+  expect(setOrbitMode).toHaveBeenCalledTimes(1);
+  expect(engine.flyMode).toBe(false);
+  expect(orbit.getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('status').textContent).toBe(LANGS.en['canvas.hint']);
+});
+
+it.each<Lang>(['en', 'ru', 'kk'])(
+  'localizes navigation modes, presets, surface alignment and settings (%s)',
+  (lang) => {
+    setLang(lang);
+    renderDemo();
+    const locale = LANGS[lang];
+    const modes = screen.getByRole('group', { name: locale['viewer.mode.label'] });
+    expect(
+      within(modes)
+        .getByRole('button', { name: locale['viewer.mode.orbit'] })
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
+    for (const key of ['viewer.mode.walk', 'viewer.mode.observer'] as const) {
+      const mode = within(modes).getByRole('button', { name: locale[key] }) as HTMLButtonElement;
+      expect(mode.disabled).toBe(true);
+      expect(mode.title).toBe(locale['viewer.mode.comingSoon']);
+    }
+    for (const key of [
+      'toolbar.top',
+      'toolbar.front',
+      'toolbar.side',
+      'toolbar.threeQuarter',
+      'toolbar.reset',
+    ] as const)
+      expect(screen.getByRole('button', { name: locale[key] })).toBeTruthy();
+
+    const align = screen.getByRole('button', { name: locale['toolbar.alignSurface'] });
+    fireEvent.click(align);
+    expect(align.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('status').textContent).toBe(locale['canvas.alignHint']);
+    fireEvent.keyDown(screen.getByLabelText(locale['canvas.label']), {
+      key: 'Escape',
+      code: 'Escape',
+    });
+    expect(align.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('status').textContent).toBe(locale['canvas.hint']);
+
+    fireEvent.click(screen.getByText(locale['viewer.settings.title']));
+    expect(
+      screen.getByRole('slider', { name: locale['viewer.settings.sensitivity'] }),
+    ).toBeTruthy();
+    expect(screen.getByText(locale['viewer.settings.precision'])).toBeTruthy();
+  },
+);
+
+it('loads and saves sensitivity for the signed-in identity without recreating the engine', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([])));
+  saveSensitivity('operator-a', 0.5);
+  saveSensitivity('operator-b', 2.5);
+  await login({ username: 'operator-a', password: 'test-viewer-credential' });
+  const setSensitivity = vi.spyOn(ViewerEngine.prototype, 'setSensitivity');
+  const resize = vi.spyOn(ViewerEngine.prototype, 'resize');
+  renderDemo();
+  const engine = setSensitivity.mock.contexts.at(-1) as ViewerEngine;
+  const engineMounts = resize.mock.calls.length;
+  expect(setSensitivity).toHaveBeenLastCalledWith(0.5);
+  expect(engine.controls.sensitivity).toBe(0.5);
+  fireEvent.click(screen.getByText('Settings'));
+  const slider = screen.getByRole('slider', { name: 'Navigation sensitivity' });
+  expect((slider as HTMLInputElement).value).toBe('0.5');
+  fireEvent.change(slider, { target: { value: '0.75' } });
+  expect(setSensitivity).toHaveBeenLastCalledWith(0.75);
+  expect(engine.controls.sensitivity).toBe(0.75);
+  expect(localStorage.getItem('qarau.viewer.sensitivity.operator-a')).toBe('0.75');
+
+  await act(async () => {
+    logout();
+    await login({ username: 'operator-b', password: 'test-viewer-credential' });
+  });
+  expect(setSensitivity).toHaveBeenLastCalledWith(2.5);
+  expect(engine.controls.sensitivity).toBe(2.5);
+  expect((slider as HTMLInputElement).value).toBe('2.5');
+  expect(localStorage.getItem('qarau.viewer.sensitivity.operator-a')).toBe('0.75');
+  expect(localStorage.getItem('qarau.viewer.sensitivity.operator-b')).toBe('2.5');
+  expect(setSensitivity.mock.contexts.every((context) => context === engine)).toBe(true);
+  expect(resize.mock.calls.length).toBe(engineMounts);
 });
 
 it.each<Lang>(['en', 'ru', 'kk'])('localizes axis controls and the fly hint in %s', (lang) => {

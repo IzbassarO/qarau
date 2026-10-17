@@ -1,5 +1,101 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { LANGS, setLang, useI18n, type Lang } from '../i18n';
+import { MAX_SENSITIVITY, MIN_SENSITIVITY } from './settings';
+
+export function ModeSwitch({
+  orbitActive = true,
+  onOrbit,
+}: {
+  orbitActive?: boolean;
+  onOrbit: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div
+      role="group"
+      aria-label={t('viewer.mode.label')}
+      className="flex gap-0.5 rounded-lg border border-line-strong p-0.5"
+      onKeyDown={(event) => {
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
+        if (!['1', '2', '3'].includes(event.key)) return;
+        if (event.key === '1' && !event.repeat) onOrbit();
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+    >
+      <button
+        type="button"
+        aria-pressed={orbitActive}
+        title={t('viewer.mode.orbitHint')}
+        onClick={onOrbit}
+        className={`h-8 cursor-pointer rounded-md px-3 text-xs ${orbitActive ? 'bg-line text-ink' : 'text-ink-2'}`}
+      >
+        {t('viewer.mode.orbit')}
+      </button>
+      {(['walk', 'observer'] as const).map((mode) => (
+        <span key={mode} title={t('viewer.mode.comingSoon')}>
+          <button
+            type="button"
+            disabled
+            aria-pressed={false}
+            title={t('viewer.mode.comingSoon')}
+            className="h-8 cursor-not-allowed rounded-md px-3 text-xs text-ink-2 opacity-45"
+          >
+            {t(`viewer.mode.${mode}`)}
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function NavigationSettings({
+  sensitivity,
+  onSensitivityChange,
+}: {
+  sensitivity: number;
+  onSensitivityChange: (value: number) => void;
+}) {
+  const { t } = useI18n();
+  const sensitivityId = useId();
+  return (
+    <details className="relative">
+      <summary className="flex h-9 cursor-pointer list-none items-center gap-2 rounded-lg border border-line-strong px-3 text-xs text-ink-2 hover:bg-raised [&::-webkit-details-marker]:hidden">
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 18 18"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          aria-hidden="true"
+        >
+          <path d="M3 4h12M3 9h12M3 14h12M6 2v4M12 7v4M7 12v4" />
+        </svg>
+        {t('viewer.settings.title')}
+      </summary>
+      <div className="absolute right-0 top-11 z-30 flex w-64 flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4 shadow-lg">
+        <div className="flex flex-col gap-3 text-[13px]">
+          <div className="flex items-center justify-between gap-4">
+            <label htmlFor={sensitivityId}>{t('viewer.settings.sensitivity')}</label>
+            <span className="font-mono text-xs">{sensitivity.toFixed(2)}×</span>
+          </div>
+          <input
+            id={sensitivityId}
+            type="range"
+            min={MIN_SENSITIVITY}
+            max={MAX_SENSITIVITY}
+            step={0.05}
+            value={sensitivity}
+            onChange={(event) => onSensitivityChange(Number(event.target.value))}
+            className="w-full"
+          />
+        </div>
+        <p className="m-0 text-xs leading-5 text-ink-2">{t('viewer.settings.precision')}</p>
+      </div>
+    </details>
+  );
+}
 
 export function Logo() {
   return (

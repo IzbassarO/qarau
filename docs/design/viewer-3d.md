@@ -13,7 +13,8 @@ evidence: `prototypes/Finding.dc.html`.
 ## Layout
 
 - Top bar: site / inspection, tabs **Обзор** | **3D и видео**.
-- Left vertical toolbar: reset view, top view, side view, **view through camera**, zoom ±.
+- Left vertical toolbar: reset, top, front, side, 3/4, align to surface, **view through camera**, zoom ±.
+- Canvas top-left: Orbit / Walk / Observer mode switch and navigation settings.
 - Centre: full-height black WebGL canvas.
 - Bottom: video timeline — play/pause, timecode, scrubber; ticks above the scrubber mark
   the video moments where findings are visible (colour = severity).
@@ -21,63 +22,69 @@ evidence: `prototypes/Finding.dc.html`.
   number of points visible in this frame, "map assembled so far" %, display toggles,
   findings list; selecting a finding lists the timecodes where it is visible.
 
-## Camera controls (Blender-like)
+## Camera controls
 
 | Input | Action |
 | --- | --- |
 | Left drag | orbit around the cloud point under the cursor at pointer-down |
 | Shift + left drag or middle drag | screen-space pan |
-| Mouse wheel or trackpad pinch | zoom towards the cursor |
-| Two-finger trackpad scroll | orbit around the current pivot |
-| Shift + two-finger scroll / wheel | screen-space pan |
-| Toolbar | reset, top, side, view through current video camera |
-| Keyboard (when canvas focused) | `F` toggle fly, `Escape` exit fly, `Home` reset, numpad-style 1/3/7 front/right/top |
-| Fly mode | `W/S` forward/back in the viewing direction, `A/D` strafe, `Shift` faster; mouse look (drag if pointer lock is unavailable) |
-| Axis gizmo (bottom-left) | Click ±X/±Y/±Z for right/left/back/front/top/bottom around the current pivot |
+| Mouse wheel | zoom towards the cursor (including Shift-remapped wheel ticks) |
+| Trackpad pinch (Ctrl-wheel) | zoom towards the cursor, even with Shift |
+| Two-finger trackpad drag | orbit around the current pivot, never zoom |
+| Shift + two-finger drag | screen-space pan |
+| Option / Alt | 4× slower orbit, pan and zoom |
+| Toolbar | reset initial framing; top, front, side, 3/4; align to surface; current camera; zoom ± |
+| Keyboard (canvas focused) | `1` Orbit; `2` Walk and `3` Observer reserved and disabled; `F` fly; `Escape` cancel alignment / exit fly; `Home` reset; `7` top |
+| Fly mode | `W/S` forward/back, `A/D` strafe, `Shift` faster; mouse look (drag when pointer lock is unavailable) |
+| Axis gizmo (bottom-left) | ±X/±Y/+Z views around the current pivot; underside −Z is disabled by the terrain constraint |
 
-The viewer uses +Z as world-up. Axis flights preserve pivot distance, use quaternion
-slerp with exponential damping, and choose a stable screen-up at the top/bottom poles.
-The six red/green/blue axis buttons rotate with the camera and have localized accessible
-labels. Existing top/side toolbar buttons use the same flights.
-Projected buttons are spread apart when axes overlap in diagonal or pole views, so
-all six directions remain clickable; connecting lines follow the adjusted positions.
+Orbit is the default. Walk (A8) and Observer (A9) remain visibly disabled with localized
+“coming soon” tooltips. The existing F fly controls remain available independently.
+Keyboard shortcuts ignore editable fields. Losing pointer lock, window focus or page
+visibility exits fly and clears held movement keys.
 
-Fly speed is 15% of the cloud bounding-box diagonal per second, with a 4× Shift boost.
-Velocity and mouse look use exponential damping. Fly shares orbit's expanded bounds
-and swept point-collision constraint. Leaving fly keeps the camera pose and places
-the orbit pivot ahead of it at the previous pivot distance. F does not repeat-toggle;
-keys are ignored in editable controls. Losing pointer lock, window focus, or page
-visibility exits fly and clears held movement keys. A localized hint describes the
-controls while fly is active.
-Entering fly preserves the camera orientation until the first mouse-look input,
-including top/bottom views and recorded camera roll. At the poles, mouse look uses
-the camera's existing screen-right direction to choose a stable yaw.
+Orbit, pan and zoom slow down near the target. Settings contain a sensitivity slider
+from 0.25× to 4× (default 1×); Option/Alt applies an additional 0.25× multiplier.
+The setting is stored at `qarau.viewer.sensitivity.<userId>`. The current shared-token
+auth system exposes the successful login username as a client session identity;
+anonymous viewers use an in-memory default. True server user IDs and per-user server
+persistence are follow-ups when backend accounts exist (outside this web-only task).
 
-Pick the nearest cloud point within the cursor ray's tolerance once at pointer-down.
-If the ray misses, use the ray point at the current target distance. A drag keeps this
-pivot; wheel gestures do not pick another one. Register no double-click action.
+The current reconstruction convention is +Z world-up. The horizon stays level in
+orbit, presets, alignment and source-camera viewing. The camera and target are kept
+above the estimated outer ground. Recovery from an underground pose also removes
+upward pitch; above-ground cameras may look up at elevated surfaces. Ground
+is estimated with seeded RANSAC over the lowest ~20% of points, preferring wide outer
+support over a raised interior slab, with a 2nd-percentile fallback. This is provisional
+until P5a supplies gravity. The camera stays within the full scene box (including source
+camera centres) plus half its diagonal, with zoom distance limited to 0.002–20 times
+the robust scene radius. Fly retains A2 orientation and movement with ground, bounds
+and swept point-collision checks.
 
-Orbit preserves the distance to the pivot and clamps the polar angle. Pan follows the
-camera's screen axes and scales with distance. Zoom moves towards the cursor ray; close
-to the pivot, it advances the pivot along the view ray while keeping a positive camera
-distance, so repeated zoom does not get stuck at a minimum orbit distance.
+“Align to surface” arms the next point click. The existing point picker selects the
+point and PCA over its 30 nearest neighbours estimates the normal. The camera moves
+to the normal on the current camera side at its current distance, with a level horizon;
+a normal within 10° of up uses top view. Ground/bounds limits take priority. Escape
+cancels. A click missing the cloud keeps alignment armed.
 
-Motion uses frame-rate-independent exponential damping. The camera stays inside the
-cloud's bounding box expanded on every side by 50% of its diagonal, stopping before the
-first nearby cloud point along the path. A spatial index accelerates picking/collision.
-Toolbar flights use collision checks; the explicit video-camera view retains its
-recorded pose and roll. Bounds include recorded camera centres.
+Preset flights preserve the current pivot and distance where constraints allow.
+Reset uses the initial robust framing from `defaults.ts`. Navigation uses exponential
+damping and the existing swept point collisions. A picked pivot stays fixed throughout
+a drag; wheel gestures never repick it. No double-click action is registered.
 
-Wheel events do not identify the device. Heuristic: Ctrl + wheel pinches; line/page
-deltas or integral vertical pixel deltas ≥40 without horizontal movement zoom;
-other unmodified pixel deltas orbit. Shift + wheel pans.
+Wheel events do not identify hardware. Ctrl-wheel always pinches; line/page deltas,
+large integral single-axis ticks (≥50 px), and confirmed stable mouse-step multiples
+zoom. Shift-remapped ticks in X remain mouse zoom. Other pixel deltas orbit or
+Shift-pan. History uses only confirmed mouse events, is local to each viewer, and expires
+after 250 ms or a trackpad gesture;
+see [ADR 0015](../decisions/0015-trackpad-wheel-classification.md) for ambiguity limits.
 
 ## Video ↔ map correspondence (the point of this screen)
 
 Data comes straight from reconstruction — nothing is guessed:
 
 - **Camera poses**: COLMAP gives the pose of every registered frame → camera path and
-  frustums are drawn exactly where the drone was.
+  a frustum for the current frame is drawn exactly where the drone was.
 - **Point tracks**: every COLMAP 3D point stores the list of images that observed it.
   This is the ground-truth link between video and map:
   - frame → points: highlight the points observed by the current frame;
@@ -95,13 +102,13 @@ Data comes straight from reconstruction — nothing is guessed:
    their base colours.
 2. **What the camera sees now** (default on): points observed by the current frame are
    brightened and slightly larger.
-3. **Camera frustums along the path** (default off, opt-in): a small pyramid every N
-   frames; the current registered camera has a larger pyramid in `#5B9BFF`. The toggle
-   hides both sets of pyramids and the current-camera dot, including after scrubbing.
-   Pyramid sizes scale with the scene's robust extent.
+3. **Current camera frustum** (default off, opt-in): one pyramid in `#5B9BFF`
+   for the current registered frame only, plus its highlighted dot. Scrubbing replaces
+   this geometry; unregistered frames hide it. No all-frame frustum collection exists.
+   Pyramid size scales with the scene's robust extent.
 
 - Points never observed by any usable frame are always gray `#6B727D` (coverage rule).
-- Camera path: travelled part solid light, remaining part dashed and dim.
+- Camera path: thin line, travelled part solid light and remaining part dashed/dim, with small dots at the registered frame centres.
 - An XYZ axis gizmo in the bottom-left corner.
 
 ### Findings
