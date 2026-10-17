@@ -4,6 +4,7 @@ import { Box3, Vector3 } from 'three';
 import { frameBounds, type Bounds } from '../lib/geometry';
 
 interface DefaultViewState {
+  mode: 'orbit';
   colorMode: ColorMode;
   buildUp: boolean;
   frustums: boolean;
@@ -13,6 +14,7 @@ interface DefaultViewState {
 /** Only explicit user choices should be passed as saved; missing storage is no preference. */
 export function defaultViewState(bundle: Bundle, saved?: ColorMode): DefaultViewState {
   return {
+    mode: 'orbit',
     colorMode: hasRgb(bundle) ? (saved ?? 'rgb') : 'height',
     buildUp: false,
     frustums: false,

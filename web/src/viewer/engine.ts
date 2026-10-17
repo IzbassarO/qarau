@@ -2,10 +2,14 @@ import {
   Box3,
   BufferAttribute,
   BufferGeometry,
+  CapsuleGeometry,
+  Group,
   Line,
   LineBasicMaterial,
   LineDashedMaterial,
   LineSegments,
+  Mesh,
+  MeshBasicMaterial,
   PerspectiveCamera,
   Points,
   PointsMaterial,
@@ -17,7 +21,15 @@ import {
   WebGLRenderer,
 } from 'three';
 import { damp, NavigationControls } from './navigation';
-import { applyMouseLook, createFlyState, flyOrientation, step, type FlyState } from './fly';
+import {
+  canShowHumanFigure,
+  createObserverState,
+  observerOrientation,
+  step,
+  type ObserverState,
+} from './observer';
+import { classifyWheel, observerKey, observerMovement, OBSERVER_MOVEMENT_KEYS } from './input';
+import { defaultObserverBoostKey, type ObserverBoostKey } from './settings';
 import {
   orientationFor,
   stepAxisView,
@@ -85,6 +97,7 @@ void main() {
 export interface Callbacks {
   onPick: (point: number | null) => void;
   onFlyModeChange?: (active: boolean) => void;
+  onThirdPersonChange?: (active: boolean) => void;
   onAlignModeChange?: (active: boolean) => void;
   onPointInfoModeChange?: (active: boolean) => void;
 }
@@ -121,8 +134,14 @@ export class ViewerEngine {
   private ground;
   private aligning = false;
   private pointInfoActive = false;
-  private flyState: FlyState | null = null;
+  private flyState: ObserverState | null = null;
   private flyLookActive = false;
+  private lookDelta = { x: 0, y: 0 };
+  private boostKey: ObserverBoostKey = defaultObserverBoostKey();
+  private thirdPersonActive = false;
+  private observerMarker = new Group();
+  private humanFigure?: Mesh<CapsuleGeometry, MeshBasicMaterial>;
+  private humanFigureVisible = false;
   private flyDistance = 1;
   private heldKeys = new Set<string>();
   private pointerLocked = false;
@@ -301,6 +320,39 @@ export class ViewerEngine {
     this.pickMark.frustumCulled = false;
     this.scene.add(this.pickMark);
 
+    // Z-up ring and direction tick. No assumed metres in uncalibrated bundles.
+    const markerRadius = Math.max(r * 0.012, 1e-6);
+    const ring: Vector3[] = [];
+    for (let i = 0; i <= 48; i++) {
+      const angle = (i / 48) * Math.PI * 2;
+      ring.push(new Vector3(Math.cos(angle) * markerRadius, Math.sin(angle) * markerRadius, 0));
+    }
+    const markerMaterial = new LineBasicMaterial({ color: 0x9bc4ff, depthTest: false });
+    this.observerMarker.add(
+      new Line(new BufferGeometry().setFromPoints(ring), markerMaterial),
+      new Line(
+        new BufferGeometry().setFromPoints([
+          new Vector3(0, markerRadius, 0),
+          new Vector3(0, markerRadius * 1.8, 0),
+        ]),
+        markerMaterial,
+      ),
+    );
+    this.observerMarker.name = 'observer-marker';
+    this.observerMarker.visible = false;
+    this.scene.add(this.observerMarker);
+    if (canShowHumanFigure(b)) {
+      const scale = 1 / b.manifest.world.scale_m_per_unit!;
+      this.humanFigure = new Mesh(
+        new CapsuleGeometry(0.2 * scale, 1.35 * scale, 4, 8),
+        new MeshBasicMaterial({ color: 0xb9c9dc, wireframe: true }),
+      );
+      this.humanFigure.name = 'observer-human';
+      this.humanFigure.rotation.x = Math.PI / 2;
+      this.humanFigure.visible = false;
+      this.scene.add(this.humanFigure);
+    }
+
     // ---- camera + controls (Blender-like)
     this.camera.up.set(0, 0, 1);
     this.camera.aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight) || 1;
@@ -325,6 +377,8 @@ export class ViewerEngine {
 
     canvas.tabIndex = 0;
     canvas.addEventListener('pointerdown', this.onDown);
+    canvas.addEventListener('click', this.onCanvasClick);
+    canvas.addEventListener('wheel', this.onObserverWheel, { passive: false });
     canvas.addEventListener('pointerup', this.onUp);
     canvas.addEventListener('pointermove', this.onLookDrag);
     canvas.addEventListener('pointercancel', this.onLookEnd);
@@ -541,6 +595,50 @@ export class ViewerEngine {
     this.controls.sensitivity = value;
   }
 
+  setBoostKey(key: ObserverBoostKey) {
+    this.boostKey = key;
+  }
+
+  get observerMode() {
+    return this.flyMode;
+  }
+
+  get observerView() {
+    return this.flyState
+      ? {
+          position: this.flyState.position,
+          yaw: this.flyState.yaw,
+          fov:
+            (Math.atan(Math.tan((this.camera.fov * Math.PI) / 360) * this.camera.aspect) * 360) /
+            Math.PI,
+        }
+      : null;
+  }
+
+  get thirdPerson() {
+    return this.thirdPersonActive;
+  }
+
+  toggleThirdPerson() {
+    if (!this.flyMode) return;
+    this.thirdPersonActive = !this.thirdPersonActive;
+    if (!this.thirdPersonActive && this.flyState) {
+      this.camera.position.copy(this.flyState.position);
+      this.camera.quaternion.copy(observerOrientation(this.flyState));
+    }
+    this.cb.onThirdPersonChange?.(this.thirdPersonActive);
+    this.dirty = true;
+  }
+
+  setHumanFigureVisible(visible: boolean) {
+    this.humanFigureVisible = visible && canShowHumanFigure(this.b);
+    this.dirty = true;
+  }
+
+  setObserverMode() {
+    this.enterFlyMode();
+  }
+
   setOrbitMode() {
     this.setPointInfoMode(false);
     this.cancelSurfaceAlignment();
@@ -674,16 +772,17 @@ export class ViewerEngine {
       this.camera.position.distanceTo(this.controls.target),
       this.bounds.radius * 0.002,
     );
-    this.flyState = createFlyState(
+    this.flyState = createObserverState(
       this.camera.position,
       this.camera.getWorldDirection(new Vector3()),
       new Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion),
     );
     this.flyLookActive = false;
+    this.lookDelta = { x: 0, y: 0 };
     this.heldKeys.clear();
     this.canvas.focus({ preventScroll: true });
     this.cb.onFlyModeChange?.(true);
-    this.requestPointerLock();
+    this.dirty = true;
   }
 
   private requestPointerLock() {
@@ -704,7 +803,16 @@ export class ViewerEngine {
 
   private exitFlyMode() {
     if (!this.flyMode) return;
+    // Leave third-person from the observer's own pose, keeping the heading.
+    if (this.thirdPersonActive && this.flyState) {
+      this.camera.position.copy(this.flyState.position);
+      this.camera.quaternion.copy(observerOrientation(this.flyState));
+    }
     this.flyState = null;
+    this.thirdPersonActive = false;
+    this.observerMarker.visible = false;
+    if (this.humanFigure) this.humanFigure.visible = false;
+    this.cb.onThirdPersonChange?.(false);
     this.heldKeys.clear();
     this.endLookDrag();
     this.controls.target
@@ -724,19 +832,35 @@ export class ViewerEngine {
       document.exitPointerLock?.();
       return;
     }
-    if (!locked && this.pointerLocked) this.exitFlyMode();
+    if (!locked && this.pointerLocked) {
+      this.heldKeys.clear();
+      this.endLookDrag();
+    }
     this.pointerLocked = locked;
   };
 
   private look(dx: number, dy: number) {
     if (!this.flyState || (!dx && !dy)) return;
     this.flyLookActive = true;
-    this.flyState = applyMouseLook(this.flyState, dx, dy, 0.002);
+    this.lookDelta.x += dx;
+    this.lookDelta.y += dy;
     this.dirty = true;
   }
 
   private onMouseLook = (e: MouseEvent) => {
     if (document.pointerLockElement === this.canvas) this.look(e.movementX, e.movementY);
+  };
+
+  private onCanvasClick = () => {
+    if (this.flyMode && !this.disposed) this.requestPointerLock();
+  };
+
+  private onObserverWheel = (e: WheelEvent) => {
+    if (!this.flyMode || this.disposed) return;
+    e.preventDefault();
+    if (classifyWheel(e, [], 'observer') !== 'look') return;
+    const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.canvas.clientHeight : 1;
+    this.look(e.deltaX * scale, e.deltaY * scale);
   };
 
   private onLookDrag = (e: PointerEvent) => {
@@ -823,51 +947,60 @@ export class ViewerEngine {
     );
   }
   private keyName(e: KeyboardEvent) {
-    // Physical WASD also works with Russian/Kazakh keyboard layouts.
-    return /^Key[WASD]$/.test(e.code) ? e.code.slice(3).toLowerCase() : e.key.toLowerCase();
+    return observerKey(e);
   }
   private onKey = (e: KeyboardEvent) => {
     const key = this.keyName(e);
-    const flyExit = this.flyMode && (key === 'f' || e.code === 'KeyF' || key === 'escape');
+    const flyShortcut = this.flyMode && (key === 'f' || key === 'escape');
     const alignExit = this.aligning && key === 'escape';
+    const movement = this.flyMode && OBSERVER_MOVEMENT_KEYS.has(key);
     if (
       this.isEditing(e.target) ||
       this.isEditing(document.activeElement) ||
-      e.ctrlKey ||
       e.metaKey ||
-      e.altKey ||
+      ((e.ctrlKey || e.altKey) && !movement) ||
       (document.activeElement !== this.canvas &&
         e.target !== this.canvas &&
         document.pointerLockElement !== this.canvas &&
-        !flyExit &&
+        !flyShortcut &&
         !alignExit)
     )
       return;
     if (alignExit) this.cancelSurfaceAlignment();
     else if (key === '1') this.setOrbitMode();
-    else if (key === '2' || key === '3')
-      return; // Walk / Observer are not implemented yet.
-    else if (key === 'f' || e.code === 'KeyF') {
+    else if (key === '2' || key === '3') return;
+    else if (key === 'f') {
       if (!e.repeat) {
-        if (this.flyMode) this.exitFlyMode();
+        if (this.flyMode) this.setOrbitMode();
         else this.enterFlyMode();
       }
     } else if (this.flyMode) {
-      if (key === 'escape') this.exitFlyMode();
-      else if (['w', 'a', 's', 'd', 'shift'].includes(key)) this.heldKeys.add(key);
+      if (key === 'escape') {
+        this.heldKeys.clear();
+        if (document.pointerLockElement === this.canvas) document.exitPointerLock?.();
+      } else if (key === 'v') {
+        if (!e.repeat) this.toggleThirdPerson();
+      } else if (movement) this.heldKeys.add(key);
       else return;
     } else if (key === 'home') this.resetView();
     else if (key === '7') this.topView();
     else return;
-    if (this.flyMode && e.shiftKey) this.heldKeys.add('shift');
+    if (this.flyMode) {
+      if (e.shiftKey) this.heldKeys.add('shift');
+      if (e.ctrlKey) this.heldKeys.add('control');
+      if (e.altKey) this.heldKeys.add('alt');
+    }
     e.preventDefault();
   };
   private onKeyUp = (e: KeyboardEvent) => {
     this.heldKeys.delete(this.keyName(e));
   };
   private onFocusIn = (e: FocusEvent) => {
-    if (this.isEditing(e.target)) this.exitFlyMode();
-    else if (e.target !== this.canvas) this.heldKeys.clear();
+    if (e.target === this.canvas) return;
+    this.heldKeys.clear();
+    this.endLookDrag();
+    if (this.isEditing(e.target) && document.pointerLockElement === this.canvas)
+      document.exitPointerLock?.();
   };
   private onBlur = () => this.exitFlyMode();
   private onVisibility = () => {
@@ -878,37 +1011,45 @@ export class ViewerEngine {
     if (!this.flyState) return;
     const previousPosition = this.camera.position.clone();
     const previousRotation = this.camera.quaternion.clone();
-    const diagonal = this.navigationBounds.getSize(new Vector3()).length();
     this.flyState = step(
       this.flyState,
       {
-        forward: this.heldKeys.has('w'),
-        backward: this.heldKeys.has('s'),
-        left: this.heldKeys.has('a'),
-        right: this.heldKeys.has('d'),
-        boost: this.heldKeys.has('shift'),
+        ...observerMovement(this.heldKeys, this.boostKey),
+        lookX: this.lookDelta.x,
+        lookY: this.lookDelta.y,
       },
       dt,
       {
-        baseSpeed: Math.max(diagonal * 0.15, 1e-6),
-        boostMultiplier: 4,
-        damping: 10,
+        points: this.controls.points,
         bounds: this.navigationBounds,
-        boundsMargin: this.navigationMargin,
+        sensitivity: 0.002 * this.controls.sensitivity,
       },
     );
-    const safe = this.controls.constrainMove(previousPosition, this.flyState.position);
-    if (!safe.equals(this.flyState.position)) this.flyState.velocity.set(0, 0, 0);
-    this.flyState.position.copy(safe);
-    this.camera.position.copy(safe);
-    if (this.flyLookActive) {
-      const target = flyOrientation(this.flyState);
-      this.camera.quaternion.slerp(target, damp(0, 1, 16, dt));
-      if (this.camera.quaternion.angleTo(target) < 1e-6) this.camera.quaternion.copy(target);
+    this.lookDelta = { x: 0, y: 0 };
+    this.camera.position.copy(this.flyState.position);
+    if (this.flyLookActive) this.camera.quaternion.copy(observerOrientation(this.flyState));
+    if (this.thirdPersonActive) {
+      const distance = Math.max(this.bounds.radius * 0.18, 1e-6);
+      const offset = new Vector3(
+        Math.sin(this.flyState.yaw) * distance,
+        -Math.cos(this.flyState.yaw) * distance,
+        distance * (0.5 - 0.4 * Math.sin(this.flyState.pitch)),
+      );
+      this.camera.position.add(offset);
+      this.camera.lookAt(this.flyState.position);
+    }
+    this.observerMarker.visible = this.thirdPersonActive;
+    this.observerMarker.position.copy(this.flyState.position);
+    this.observerMarker.rotation.z = this.flyState.yaw;
+    if (this.humanFigure) {
+      this.humanFigure.visible = this.thirdPersonActive && this.humanFigureVisible;
+      this.humanFigure.position.copy(this.flyState.position);
+      this.humanFigure.position.z += 0.875 / this.b.manifest.world.scale_m_per_unit!;
     }
     this.camera.updateMatrixWorld();
     this.dirty ||=
-      !previousPosition.equals(safe) || !previousRotation.equals(this.camera.quaternion);
+      !previousPosition.equals(this.camera.position) ||
+      !previousRotation.equals(this.camera.quaternion);
   }
 
   private updateAxisView(dt: number) {
@@ -987,28 +1128,22 @@ export class ViewerEngine {
     };
     const before = this.camera.position.clone();
     const rotation = this.camera.quaternion.clone();
-    if (this.flyState) {
-      const safe = clampPosition(this.camera.position, options);
-      if (!safe.equals(this.camera.position)) this.flyState.velocity.set(0, 0, 0);
-      this.camera.position.copy(safe);
-      this.flyState.position.copy(safe);
-    } else {
-      const state = clampCamera(
-        {
-          position: this.camera.position,
-          pivot: this.controls.target,
-          up: this.camera.up,
-          minDistance: this.bounds.radius * 0.002,
-          fov: this.camera.fov,
-          rotation: this.camera.quaternion,
-        },
-        { ...options, minDist: this.bounds.radius * 0.002, maxDist: this.bounds.radius * 20 },
-      );
-      this.camera.position.copy(state.position);
-      this.controls.target.copy(state.pivot);
-      this.camera.up.copy(state.up);
-      if (state.rotation) this.camera.quaternion.copy(state.rotation);
-    }
+    if (this.flyState) return;
+    const state = clampCamera(
+      {
+        position: this.camera.position,
+        pivot: this.controls.target,
+        up: this.camera.up,
+        minDistance: this.bounds.radius * 0.002,
+        fov: this.camera.fov,
+        rotation: this.camera.quaternion,
+      },
+      { ...options, minDist: this.bounds.radius * 0.002, maxDist: this.bounds.radius * 20 },
+    );
+    this.camera.position.copy(state.position);
+    this.controls.target.copy(state.pivot);
+    this.camera.up.copy(state.up);
+    if (state.rotation) this.camera.quaternion.copy(state.rotation);
     this.camera.updateMatrixWorld();
     this.dirty ||=
       !before.equals(this.camera.position) || rotation.angleTo(this.camera.quaternion) > 1e-7;
@@ -1100,6 +1235,8 @@ export class ViewerEngine {
     cancelAnimationFrame(this.raf);
     const c = this.canvas;
     c.removeEventListener('pointerdown', this.onDown);
+    c.removeEventListener('click', this.onCanvasClick);
+    c.removeEventListener('wheel', this.onObserverWheel);
     c.removeEventListener('pointerup', this.onUp);
     c.removeEventListener('pointermove', this.onLookDrag);
     c.removeEventListener('pointercancel', this.onLookEnd);
@@ -1125,6 +1262,14 @@ export class ViewerEngine {
       const materials = Array.isArray(object.material) ? object.material : [object.material];
       for (const material of materials) material.dispose();
     }
+    this.observerMarker.traverse((object) => {
+      if (object instanceof Line) {
+        object.geometry.dispose();
+        (object.material as LineBasicMaterial).dispose();
+      }
+    });
+    this.humanFigure?.geometry.dispose();
+    this.humanFigure?.material.dispose();
     this.farPoints?.geometry.dispose();
     this.farPoints?.material.dispose();
     this.farPoints?.removeFromParent();

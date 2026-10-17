@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 
-test('demo axis views and fly keyboard/mouse controls', async ({ page }) => {
+test('demo axis views and Observer keyboard/mouse controls', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript(() => {
@@ -76,7 +76,8 @@ test('demo axis views and fly keyboard/mouse controls', async ({ page }) => {
 
   await canvas.focus();
   await page.keyboard.press('f');
-  await expect(page.getByRole('status')).toHaveText(en['canvas.flyHint']);
+  await expect(page.getByRole('status')).toHaveText(en['canvas.observerHint']);
+  await expect(page.getByTestId('observer-minimap')).toBeVisible();
   const start = await page.evaluate(() => window.__qarau!.engine!.camera.position.toArray());
   await page.keyboard.down('w');
   await page.waitForFunction((position) => {
@@ -96,7 +97,12 @@ test('demo axis views and fly keyboard/mouse controls', async ({ page }) => {
     return Math.abs(after.reduce((dot, value, index) => dot + value * before[index], 0)) < 0.999;
   }, rotation);
   await page.keyboard.press('Escape');
+  await expect(page.getByRole('status')).toHaveText(en['canvas.observerHint']);
+  await expect(page.getByTestId('observer-minimap')).toBeVisible();
+  expect(await page.evaluate(() => window.__qarau!.engine!.observerMode)).toBe(true);
+  await page.keyboard.press('f');
   await expect(page.getByRole('status')).toHaveText(en['canvas.hint']);
-  expect(await page.evaluate(() => window.__qarau!.engine!.flyMode)).toBe(false);
+  await expect(page.getByTestId('observer-minimap')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__qarau!.engine!.observerMode)).toBe(false);
   expect(errors).toEqual([]);
 });

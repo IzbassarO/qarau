@@ -7,7 +7,7 @@ import { ViewerEngine } from './engine';
 import { orientationFor, viewDirectionFor } from './gizmo';
 import { estimateGround } from './constraints';
 
-// Keep the actual camera, navigation, fly physics and gizmo math; jsdom has no GPU.
+// Keep the actual camera, navigation, observer physics and gizmo math; jsdom has no GPU.
 vi.mock('three', async (importOriginal) => {
   const three = await importOriginal<typeof import('three')>();
   return {
@@ -121,7 +121,16 @@ function key(
     code,
     repeat = false,
     shiftKey = false,
-  }: { type?: string; code?: string; repeat?: boolean; shiftKey?: boolean } = {},
+    ctrlKey = false,
+    altKey = false,
+  }: {
+    type?: string;
+    code?: string;
+    repeat?: boolean;
+    shiftKey?: boolean;
+    ctrlKey?: boolean;
+    altKey?: boolean;
+  } = {},
 ) {
   target.dispatchEvent(
     new KeyboardEvent(type, {
@@ -129,6 +138,8 @@ function key(
       code,
       repeat,
       shiftKey,
+      ctrlKey,
+      altKey,
       bubbles: true,
       cancelable: true,
     }),
@@ -303,13 +314,19 @@ describe('ViewerEngine far layer', () => {
   });
 });
 
-describe('ViewerEngine fly input', () => {
-  it('boosts when Shift is already held before fly mode starts', () => {
-    const travel = (shiftKey: boolean) => {
+describe('ViewerEngine observer input', () => {
+  it.each(['control', 'alt'] as const)('uses the configured %s boost key', (boostKey) => {
+    const travel = (boost: boolean) => {
       const { canvas, engine } = setup(navigationBundle());
+      engine.setBoostKey(boostKey);
       const start = engine.camera.position.clone();
-      key(canvas, 'f', { code: 'KeyF', shiftKey });
-      key(canvas, 'w', { code: 'KeyW', shiftKey });
+      key(canvas, 'f', { code: 'KeyF' });
+      const modifiers = {
+        ctrlKey: boost && boostKey === 'control',
+        altKey: boost && boostKey === 'alt',
+      };
+      if (boost) key(canvas, boostKey === 'control' ? 'Control' : 'Alt', modifiers);
+      key(canvas, 'w', { code: 'KeyW', ...modifiers });
       frame(10);
       const distance = engine.camera.position.distanceTo(start);
       key(canvas, 'f');
@@ -317,10 +334,11 @@ describe('ViewerEngine fly input', () => {
     };
     const normal = travel(false);
     expect(normal).toBeGreaterThan(0);
-    expect(travel(true)).toBeCloseTo(normal * 4, 8);
+    // Adaptive speed can change as the two paths diverge from the cloud.
+    expect(travel(true)).toBeGreaterThan(normal * 2);
   });
 
-  it('toggles with F, ignores auto-repeat, and exits with Escape', () => {
+  it('toggles with F, ignores auto-repeat and keeps Observer active after Escape', () => {
     const { canvas, engine, onFlyModeChange } = setup();
     key(canvas, 'f', { code: 'KeyF' });
     expect(engine.flyMode).toBe(true);
@@ -329,14 +347,17 @@ describe('ViewerEngine fly input', () => {
     expect(engine.flyMode).toBe(true);
     expect(onFlyModeChange).toHaveBeenCalledTimes(1);
     key(canvas, 'Escape');
-    expect(engine.flyMode).toBe(false);
+    expect(engine.observerMode).toBe(true);
+    expect(engine.controls.enabled).toBe(false);
+    key(canvas, 'F', { code: 'KeyF' });
+    expect(engine.observerMode).toBe(false);
     expect(engine.controls.enabled).toBe(true);
     key(canvas, 'F', { code: 'KeyF' });
     key(canvas, 'F', { code: 'KeyF' });
     expect(onFlyModeChange.mock.calls).toEqual([[true], [false], [true], [false]]);
   });
 
-  it('ignores shortcuts in text controls and editable descendants, and exits when editing starts', () => {
+  it('ignores shortcuts in editors and keeps Observer active while settings have focus', () => {
     const { canvas, engine, onFlyModeChange } = setup();
     for (const tag of ['input', 'textarea', 'select', 'div']) {
       const editor = document.createElement(tag);
@@ -358,11 +379,24 @@ describe('ViewerEngine fly input', () => {
     expect(onFlyModeChange).not.toHaveBeenCalled();
     canvas.focus();
     key(canvas, 'f');
-    const input = document.createElement('input');
+    key(canvas, 'w', { code: 'KeyW' });
+    frame(10);
+    const input = document.createElement('select');
     document.body.append(input);
     input.focus();
-    expect(engine.flyMode).toBe(false);
-    expect(onFlyModeChange.mock.calls).toEqual([[true], [false]]);
+    key(input, 'f');
+    key(input, 'w', { code: 'KeyW' });
+    key(canvas, 'w', { code: 'KeyW' });
+    frame(120);
+    const rested = engine.camera.position.clone();
+    frame(30);
+    expect(engine.camera.position.distanceTo(rested)).toBeLessThan(1e-7);
+    expect(engine.observerMode).toBe(true);
+    expect(onFlyModeChange.mock.calls).toEqual([[true]]);
+    canvas.focus();
+    key(canvas, 'w', { code: 'KeyW' });
+    frame(10);
+    expect(engine.camera.position.distanceTo(rested)).toBeGreaterThan(0);
   });
 
   it('uses drag look without pointer lock and resumes orbit at the same camera pose', () => {
@@ -438,19 +472,25 @@ describe('ViewerEngine fly input', () => {
     expect(engine.camera.position.equals(position)).toBe(true);
   });
 
-  it('uses pointer-lock mouse deltas and exits when the browser releases the lock', () => {
+  it('requests pointer lock on a canvas click and keeps Observer active when Esc releases it', () => {
     const { canvas, engine, onFlyModeChange } = setup();
     const request = vi.fn(() => setLock(canvas));
     Object.defineProperty(canvas, 'requestPointerLock', { value: request });
     const orientation = engine.camera.quaternion.clone();
     key(canvas, 'f');
+    expect(request).not.toHaveBeenCalled();
+    canvas.dispatchEvent(new MouseEvent('click', { button: 0, bubbles: true }));
     expect(request).toHaveBeenCalledOnce();
     expect(document.pointerLockElement).toBe(canvas);
     mouseLook(90, -30);
     frame(20);
     expect(engine.camera.quaternion.angleTo(orientation)).toBeGreaterThan(0.1);
     setLock(null);
-    expect(engine.flyMode).toBe(false);
+    key(canvas, 'Escape');
+    expect(engine.observerMode).toBe(true);
+    expect(engine.controls.enabled).toBe(false);
+    expect(onFlyModeChange.mock.calls).toEqual([[true]]);
+    key(canvas, 'f');
     expect(engine.controls.enabled).toBe(true);
     expect(onFlyModeChange.mock.calls).toEqual([[true], [false]]);
   });
@@ -461,7 +501,9 @@ describe('ViewerEngine fly input', () => {
     Object.defineProperty(canvas, 'requestPointerLock', { value: request });
     const orientation = engine.camera.quaternion.clone();
     key(canvas, 'f');
+    canvas.dispatchEvent(new MouseEvent('click', { button: 0, bubbles: true }));
     await Promise.resolve();
+    expect(request).toHaveBeenCalledOnce();
     expect(engine.flyMode).toBe(true);
     expect(document.pointerLockElement).toBeNull();
     pointer(canvas, 'pointerdown', 40, 40);
@@ -475,11 +517,13 @@ describe('ViewerEngine fly input', () => {
     const { canvas, engine } = setup();
     const start = engine.camera.position.clone();
     const forward = engine.camera.getWorldDirection(new Vector3());
+    forward.z = 0;
+    forward.normalize();
     key(canvas, 'f');
     key(canvas, 'ц', { code: 'KeyW' });
     frame(20);
     const traveled = engine.camera.position.clone().sub(start);
-    expect(traveled.length()).toBeGreaterThan(0.5);
+    expect(traveled.length()).toBeGreaterThan(0);
     expect(traveled.normalize().dot(forward)).toBeCloseTo(1, 8);
     const beforeRelease = engine.camera.position.clone();
     key(canvas, 'ц', { code: 'KeyW', type: 'keyup' });
@@ -492,10 +536,111 @@ describe('ViewerEngine fly input', () => {
     expect(engine.camera.position.distanceTo(rested)).toBeLessThan(firstCoast * 0.001);
   });
 
+  it('looks with two-finger wheel input while continuing keyboard movement', () => {
+    const { canvas, engine } = setup(navigationBundle());
+    key(canvas, 'f');
+    key(canvas, 'ArrowUp', { code: 'ArrowUp' });
+    frame(10);
+    const position = engine.camera.position.clone();
+    const orientation = engine.camera.quaternion.clone();
+    const wheel = new WheelEvent('wheel', {
+      deltaX: 70,
+      deltaY: -25,
+      bubbles: true,
+      cancelable: true,
+    });
+    canvas.dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(true);
+    frame(20);
+    expect(engine.camera.quaternion.angleTo(orientation)).toBeGreaterThan(0.05);
+    expect(engine.camera.position.distanceTo(position)).toBeGreaterThan(0);
+    expect(engine.camera.position.z).toBeCloseTo(position.z, 8);
+    expect(engine.observerMode).toBe(true);
+  });
+
+  it('uses Shift to descend through a point and below terrain without horizontal movement', () => {
+    const bundle = navigationBundle();
+    const { canvas, engine } = setup(bundle);
+    engine.camera.position.set(1, 1, -0.99);
+    engine.camera.lookAt(1, 2, -0.99);
+    engine.setObserverMode();
+    const start = engine.camera.position.clone();
+    key(canvas, 'Shift', { code: 'ShiftLeft', shiftKey: true });
+    frame(180);
+    key(canvas, 'Shift', { code: 'ShiftLeft', type: 'keyup' });
+    expect(engine.camera.position.z).toBeLessThan(-1.01);
+    expect(estimateGround(bundle.position).distanceToPoint(engine.camera.position)).toBeLessThan(0);
+    expect(engine.camera.position.x).toBeCloseTo(start.x, 8);
+    expect(engine.camera.position.y).toBeCloseTo(start.y, 8);
+    key(canvas, ' ', { code: 'Space' });
+    frame(180);
+    expect(engine.camera.position.z).toBeGreaterThan(-1);
+    expect(engine.camera.position.x).toBeCloseTo(start.x, 8);
+    expect(engine.camera.position.y).toBeCloseTo(start.y, 8);
+  });
+
+  it('uses V for a third-person camera and keeps the marker at the moving observer position', () => {
+    const { canvas, engine } = setup(navigationBundle());
+    key(canvas, 'f');
+    const position = engine.camera.position.clone();
+    key(canvas, 'v', { code: 'KeyV' });
+    frame();
+    expect(engine.thirdPerson).toBe(true);
+    const marker = engine.scene.getObjectByName('observer-marker')!;
+    expect(marker.visible).toBe(true);
+    expect(marker.position.distanceTo(position)).toBeLessThan(1e-8);
+    expect(engine.camera.position.distanceTo(marker.position)).toBeGreaterThan(0);
+    key(canvas, 'v', { code: 'KeyV', repeat: true });
+    expect(engine.thirdPerson).toBe(true);
+    key(canvas, 'w', { code: 'KeyW' });
+    frame(20);
+    key(canvas, 'w', { code: 'KeyW', type: 'keyup' });
+    frame(90);
+    expect(marker.position.distanceTo(position)).toBeGreaterThan(0);
+    const moved = marker.position.clone();
+    key(canvas, 'v', { code: 'KeyV' });
+    frame();
+    expect(engine.thirdPerson).toBe(false);
+    expect(marker.visible).toBe(false);
+    expect(engine.camera.position.distanceTo(moved)).toBeLessThan(1e-7);
+    engine.setHumanFigureVisible(true);
+    key(canvas, 'v', { code: 'KeyV' });
+    frame();
+    expect(engine.scene.getObjectByName('observer-human')?.visible).not.toBe(true);
+    key(canvas, 'f');
+    expect(marker.visible).toBe(false);
+  });
+
+  it('shows an optional human only with explicit metric calibration and third-person view', () => {
+    const source = navigationBundle();
+    const bundle = {
+      ...source,
+      manifest: {
+        ...source.manifest,
+        world: { ...source.manifest.world, scale_m_per_unit: 0.5 },
+      },
+    };
+    const { canvas, engine } = setup(bundle);
+    engine.setObserverMode();
+    key(canvas, 'v', { code: 'KeyV' });
+    frame();
+    const human = engine.scene.getObjectByName('observer-human')!;
+    expect(human.visible).toBe(false);
+    engine.setHumanFigureVisible(true);
+    frame();
+    expect(human.visible).toBe(true);
+    human.updateMatrixWorld(true);
+    expect(new Box3().setFromObject(human).getSize(new Vector3()).z).toBeCloseTo(3.5, 5);
+    key(canvas, 'v', { code: 'KeyV' });
+    frame();
+    expect(human.visible).toBe(false);
+  });
+
   it('releases lock on blur and disposes keyboard, pointer-lock and animation listeners', () => {
     const { canvas, engine, onFlyModeChange } = setup();
     Object.defineProperty(canvas, 'requestPointerLock', { value: vi.fn(() => setLock(canvas)) });
     key(canvas, 'f');
+    canvas.dispatchEvent(new MouseEvent('click', { button: 0, bubbles: true }));
     key(canvas, 'w', { code: 'KeyW' });
     frame(5);
     window.dispatchEvent(new Event('blur'));
@@ -507,6 +652,7 @@ describe('ViewerEngine fly input', () => {
     expect(engine.camera.position.distanceTo(stopped)).toBeLessThan(1e-10);
     key(canvas, 'f');
     expect(engine.flyMode).toBe(true);
+    canvas.dispatchEvent(new MouseEvent('click', { button: 0, bubbles: true }));
     engine.dispose();
     engines.delete(engine);
     expect(document.pointerLockElement).toBeNull();
@@ -523,7 +669,7 @@ describe('ViewerEngine fly input', () => {
     expect(engine.camera.position.distanceTo(stopped)).toBeLessThan(1e-10);
   });
 
-  it('clears held movement on toolbar focus and lets F/Escape exit fly from that button', () => {
+  it('clears held movement on toolbar focus and lets F return to Orbit from that button', () => {
     const { canvas, engine } = setup(navigationBundle());
     const button = document.createElement('button');
     document.body.append(button);
@@ -545,7 +691,9 @@ describe('ViewerEngine fly input', () => {
     key(canvas, 'f');
     button.focus();
     key(button, 'Escape');
-    expect(engine.flyMode).toBe(false);
+    expect(engine.observerMode).toBe(true);
+    key(button, 'f');
+    expect(engine.observerMode).toBe(false);
   });
 
   it('releases a pointer lock request that resolves after disposal', async () => {
@@ -556,6 +704,7 @@ describe('ViewerEngine fly input', () => {
     });
     Object.defineProperty(canvas, 'requestPointerLock', { value: vi.fn(() => request) });
     key(canvas, 'f');
+    canvas.dispatchEvent(new MouseEvent('click', { button: 0, bubbles: true }));
     engine.dispose();
     engines.delete(engine);
     setLock(canvas);
@@ -1014,7 +1163,7 @@ describe('ViewerEngine constrained navigation', () => {
     );
   });
 
-  it('clamps orbit, zoom and fly above terrain and inside the scene envelope', () => {
+  it('clamps orbit and zoom above terrain and inside the scene envelope', () => {
     const bundle = navigationBundle();
     const { engine, canvas } = setup(bundle);
     const ground = estimateGround(bundle.position);
@@ -1040,13 +1189,6 @@ describe('ViewerEngine constrained navigation', () => {
         ).toBeLessThan(1e-7);
       }
     }
-    engine.topView();
-    frame(180);
-    key(canvas, 'f');
-    key(canvas, 'w', { code: 'KeyW' });
-    frame(180);
-    expect(ground.distanceToPoint(engine.camera.position)).toBeGreaterThan(0);
-    expect(expanded.containsPoint(engine.camera.position)).toBe(true);
   });
 });
 

@@ -8,6 +8,10 @@ function bundleWithRgb(): Bundle {
   return { ...bundle, color: new Uint8Array(bundle.manifest.points.count * 3).fill(80) };
 }
 
+it('keeps Orbit as the default navigation mode', () => {
+  expect(defaultViewState(createDemo('en').bundle).mode).toBe('orbit');
+});
+
 it('defaults to real colours when every point has RGB', () => {
   expect(defaultViewState(bundleWithRgb()).colorMode).toBe('rgb');
 });

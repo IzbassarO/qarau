@@ -1,4 +1,43 @@
-export type WheelAction = 'pinch-zoom' | 'trackpad-orbit' | 'trackpad-pan' | 'mouse-zoom';
+import type { ObserverInput } from './observer';
+import type { ObserverBoostKey } from './settings';
+
+export type WheelAction = 'pinch-zoom' | 'trackpad-orbit' | 'trackpad-pan' | 'mouse-zoom' | 'look';
+
+/** Physical WASD continues to work with Russian and Kazakh keyboard layouts. */
+export function observerKey(event: Pick<KeyboardEvent, 'key' | 'code'>): string {
+  if (/^Key[WASDFV]$/.test(event.code)) return event.code.slice(3).toLowerCase();
+  return event.code === 'Space' || event.key === ' ' ? 'space' : event.key.toLowerCase();
+}
+
+export const OBSERVER_MOVEMENT_KEYS = new Set([
+  'w',
+  'a',
+  's',
+  'd',
+  'arrowup',
+  'arrowdown',
+  'arrowleft',
+  'arrowright',
+  'space',
+  'shift',
+  'control',
+  'alt',
+]);
+
+export function observerMovement(
+  keys: ReadonlySet<string>,
+  boostKey: ObserverBoostKey,
+): ObserverInput {
+  return {
+    forward: keys.has('w') || keys.has('arrowup'),
+    backward: keys.has('s') || keys.has('arrowdown'),
+    left: keys.has('a') || keys.has('arrowleft'),
+    right: keys.has('d') || keys.has('arrowright'),
+    up: keys.has('space'),
+    down: keys.has('shift'),
+    boost: keys.has(boostKey),
+  };
+}
 
 export interface WheelInput {
   deltaX?: number;
@@ -27,8 +66,10 @@ export function wheelStep(event: WheelInput): number | undefined {
 export function classifyWheel(
   event: WheelInput,
   knownMouseSteps: readonly number[] = [],
+  mode: 'orbit' | 'observer' = 'orbit',
 ): WheelAction {
   if (event.ctrlKey) return 'pinch-zoom';
+  if (mode === 'observer') return 'look';
   if (event.deltaMode === 1 || event.deltaMode === 2) return 'mouse-zoom';
   const step = wheelStep(event);
   if (step !== undefined) {

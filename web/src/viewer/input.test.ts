@@ -1,5 +1,61 @@
 import { describe, expect, it } from 'vitest';
-import { classifyWheel, wheelStep } from './input';
+import { classifyWheel, observerKey, observerMovement, wheelStep } from './input';
+import { createObserverState, step } from './observer';
+import { Box3, Vector3 } from 'three';
+
+describe('Observer controls', () => {
+  it.each([
+    ['w', 'ArrowUp', 'forward'],
+    ['s', 'ArrowDown', 'backward'],
+    ['a', 'ArrowLeft', 'left'],
+    ['d', 'ArrowRight', 'right'],
+  ] as const)('maps %s and %s to %s and moves relative to yaw', (letter, arrow, action) => {
+    const physical = observerKey({ key: 'ц', code: `Key${letter.toUpperCase()}` });
+    const arrowKey = observerKey({ key: arrow, code: arrow });
+    const wasd = observerMovement(new Set([physical]), 'control');
+    const arrows = observerMovement(new Set([arrowKey]), 'control');
+    expect(wasd[action]).toBe(true);
+    expect(arrows).toEqual(wasd);
+    const state = createObserverState(new Vector3(), new Vector3(-1, 0, 0));
+    const ctx = {
+      bounds: new Box3(new Vector3(-10, -10, -10), new Vector3(10, 10, 10)),
+      points: [],
+      minSpeed: 1,
+      maxSpeed: 1,
+      damping: 0,
+    };
+    const moved = step(state, arrows, 1, ctx).position;
+    const expected = {
+      forward: [-1, 0, 0],
+      backward: [1, 0, 0],
+      left: [0, -1, 0],
+      right: [0, 1, 0],
+    }[action];
+    expect(moved.distanceTo(new Vector3(...expected))).toBeLessThan(1e-12);
+  });
+
+  it('maps Space/Shift to up/down and boosts only with the configured modifier', () => {
+    expect(observerKey({ key: ' ', code: 'Space' })).toBe('space');
+    expect(observerMovement(new Set(['space', 'shift']), 'control')).toMatchObject({
+      up: true,
+      down: true,
+      boost: false,
+    });
+    expect(observerMovement(new Set(['control']), 'control').boost).toBe(true);
+    expect(observerMovement(new Set(['alt']), 'alt').boost).toBe(true);
+    expect(observerMovement(new Set(['alt']), 'control').boost).toBe(false);
+  });
+
+  it.each([
+    { deltaX: 2.4, deltaY: -8 },
+    { deltaY: 120 },
+    { deltaY: 3, deltaMode: 1, shiftKey: true },
+  ])('routes wheel without Ctrl to Observer look, preserving pinch: %j', (event) => {
+    expect(classifyWheel(event, [], 'observer')).toBe('look');
+    expect(classifyWheel({ ...event, ctrlKey: true }, [], 'observer')).toBe('pinch-zoom');
+    expect(classifyWheel(event, [], 'orbit')).not.toBe('look');
+  });
+});
 
 describe('classifyWheel', () => {
   it.each([

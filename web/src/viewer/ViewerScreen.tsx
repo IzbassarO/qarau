@@ -27,9 +27,16 @@ import {
 } from './ui';
 import { buildPointInfo, frameTime } from './pointInfo';
 import { PointInfoPanel } from './PointInfoPanel';
+import { Minimap, type MinimapHandle } from './Minimap.tsx';
+import { canShowHumanFigure } from './observer';
 import { SessionImage } from '../auth/SessionImage';
 import { sessionUserId, subscribeToAuth } from '../auth/auth';
-import { loadSensitivity, saveSensitivity } from './settings';
+import {
+  loadSensitivity,
+  saveSensitivity,
+  loadObserverBoostKey,
+  saveObserverBoostKey,
+} from './settings';
 
 declare global {
   interface Window {
@@ -79,11 +86,13 @@ export function ViewerScreen({
   embedded = false,
   initialPoint = null,
   invalidPoint = false,
+  initialMode = 'orbit',
 }: {
   bundle: Bundle;
   embedded?: boolean;
   initialPoint?: number | null;
   invalidPoint?: boolean;
+  initialMode?: 'orbit' | 'observer';
 }) {
   const { t } = useI18n();
   const m = bundle.manifest;
@@ -92,9 +101,14 @@ export function ViewerScreen({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
   const gizmoRef = useRef<AxisGizmoHandle>(null);
-  const [flyMode, setFlyMode] = useState(false);
+  const minimapRef = useRef<MinimapHandle>(null);
+  const [flyMode, setFlyMode] = useState(initialMode === 'observer');
+  const [thirdPerson, setThirdPerson] = useState(false);
+  const [humanFigure, setHumanFigure] = useState(false);
   const [alignMode, setAlignMode] = useState(false);
-  const [pointInfoMode, setPointInfoMode] = useState(initialPoint !== null);
+  const [pointInfoMode, setPointInfoMode] = useState(
+    initialMode !== 'observer' && initialPoint !== null,
+  );
   const userId = useSyncExternalStore(subscribeToAuth, sessionUserId, () => null);
   const [sensitivitySetting, setSensitivitySetting] = useState(() => ({
     userId,
@@ -102,6 +116,12 @@ export function ViewerScreen({
   }));
   const sensitivity =
     sensitivitySetting.userId === userId ? sensitivitySetting.value : loadSensitivity(userId);
+  const [boostSetting, setBoostSetting] = useState(() => ({
+    userId,
+    value: loadObserverBoostKey(userId),
+  }));
+  const boostKey =
+    boostSetting.userId === userId ? boostSetting.value : loadObserverBoostKey(userId);
   const [frame, setFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [picked, setPicked] = useState<number | null>(initialPoint);
@@ -144,6 +164,7 @@ export function ViewerScreen({
       eng = new ViewerEngine(canvas, bundle, {
         onPick: (p) => setPicked(p),
         onFlyModeChange: setFlyMode,
+        onThirdPersonChange: setThirdPerson,
         onAlignModeChange: setAlignMode,
         onPointInfoModeChange: setPointInfoMode,
       });
@@ -152,6 +173,7 @@ export function ViewerScreen({
       return;
     }
     engineRef.current = eng;
+    if (initialMode === 'observer') eng.setObserverMode();
     const ro = new ResizeObserver(() => eng.resize());
     ro.observe(canvas);
     eng.resize();
@@ -177,7 +199,7 @@ export function ViewerScreen({
       ro.disconnect();
       eng.dispose();
     };
-  }, [bundle]);
+  }, [bundle, initialMode]);
 
   useEffect(() => engineRef.current?.setFrame(frame), [frame, bundle]);
   useEffect(() => engineRef.current?.setOptions(opts), [opts, bundle]);
@@ -190,6 +212,8 @@ export function ViewerScreen({
   useEffect(() => engineRef.current?.setPointInfoMode(pointInfoMode), [pointInfoMode, bundle]);
   useEffect(() => engineRef.current?.setSelectedFinding(sel ?? 0), [sel, bundle]);
   useEffect(() => engineRef.current?.setSensitivity(sensitivity), [sensitivity, bundle]);
+  useEffect(() => engineRef.current?.setBoostKey(boostKey), [boostKey, bundle]);
+  useEffect(() => engineRef.current?.setHumanFigureVisible(humanFigure), [humanFigure, bundle]);
 
   // finding markers are HTML on top of the canvas, re-placed after every render
   useEffect(() => {
@@ -197,6 +221,8 @@ export function ViewerScreen({
     if (!e) return;
     const place = () => {
       gizmoRef.current?.update(e.camera.quaternion);
+      const observer = e.observerView;
+      if (observer) minimapRef.current?.update(observer);
       for (const x of findings) {
         const el = markerEls.current.get(x.id);
         if (!el) continue;
@@ -210,7 +236,7 @@ export function ViewerScreen({
     return () => {
       e.onRender = undefined;
     };
-  }, [bundle, findings, frame, opts.buildUp, opts.findings]);
+  }, [bundle, findings, frame, opts.buildUp, opts.findings, flyMode]);
 
   // play: step in real time by frames[i].t (photo sets: 4 frames per second)
   useEffect(() => {
@@ -387,12 +413,49 @@ export function ViewerScreen({
 
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="relative z-20 flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-3 py-2">
-            <ModeSwitch orbitActive={!flyMode} onOrbit={() => eng()?.setOrbitMode()} />
+            <ModeSwitch
+              orbitActive={!flyMode}
+              onOrbit={() => eng()?.setOrbitMode()}
+              onObserver={() => eng()?.setObserverMode()}
+            />
+            {flyMode && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-pressed={thirdPerson}
+                  onClick={() => {
+                    eng()?.toggleThirdPerson();
+                    canvasRef.current?.focus({ preventScroll: true });
+                  }}
+                  className={`border border-line-strong px-2 py-1.5 text-xs ${thirdPerson ? 'bg-line text-ink' : 'text-ink-2'}`}
+                >
+                  {t('viewer.observer.thirdPerson')}
+                </button>
+                {thirdPerson && canShowHumanFigure(bundle) && (
+                  <button
+                    type="button"
+                    aria-pressed={humanFigure}
+                    onClick={() => {
+                      setHumanFigure((visible) => !visible);
+                      canvasRef.current?.focus({ preventScroll: true });
+                    }}
+                    className={`border border-line-strong px-2 py-1.5 text-xs ${humanFigure ? 'bg-line text-ink' : 'text-ink-2'}`}
+                  >
+                    {t('viewer.observer.humanFigure')}
+                  </button>
+                )}
+              </div>
+            )}
             <NavigationSettings
               sensitivity={sensitivity}
               onSensitivityChange={(value) => {
                 setSensitivitySetting({ userId, value });
                 saveSensitivity(userId, value);
+              }}
+              boostKey={boostKey}
+              onBoostKeyChange={(value) => {
+                setBoostSetting({ userId, value });
+                saveObserverBoostKey(userId, value);
               }}
             />
           </div>
@@ -448,14 +511,17 @@ export function ViewerScreen({
                 canvasRef.current?.focus({ preventScroll: true });
               }}
             />
+            {flyMode && (
+              <Minimap ref={minimapRef} bundle={bundle} label={t('viewer.observer.minimap')} />
+            )}
             <div
               role="status"
-              className="pointer-events-none absolute bottom-3 left-1/2 w-max max-w-[calc(100%-15rem)] -translate-x-1/2 rounded-md bg-bg/80 px-2.5 py-1.5 text-center text-xs leading-5 text-ink-2"
+              className={`pointer-events-none absolute bottom-3 bg-bg/80 px-2.5 py-1.5 text-xs leading-5 text-ink-2 ${flyMode ? 'left-3 right-[204px] max-w-xl' : 'left-1/2 w-max max-w-[calc(100%-15rem)] -translate-x-1/2 rounded-md text-center'}`}
             >
               {alignMode
                 ? t('canvas.alignHint')
                 : flyMode
-                  ? t('canvas.flyHint')
+                  ? t('canvas.observerHint')
                   : pointInfoMode
                     ? t('pointInfo.hint')
                     : t('canvas.hint')}

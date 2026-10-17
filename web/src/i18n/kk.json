@@ -147,7 +147,6 @@
   "language.ru": "RU",
   "language.kk": "KK",
   "language.en": "EN",
-  "canvas.flyHint": "Ұшу режимі: WASD — қозғалу, тінтуір — қарау, Shift — жылдамырақ, F/Esc — шығу",
   "gizmo.label": "Осьтер бойынша көріністер",
   "gizmo.positiveX": "Оң жақтан көрініс (+X)",
   "gizmo.negativeX": "Сол жақтан көрініс (−X)",
@@ -240,5 +239,13 @@
   "pointInfo.confidence": "Нүктенің сенімділігі",
   "pointInfo.needsScale": "Қолжетімсіз: метрлік масштаб қажет (P5a)",
   "pointInfo.needsConfidence": "Қолжетімсіз: нүктенің сенімділігі қажет (P6)",
-  "pointInfo.invalidPoint": "Нүкте сілтемесі жарамсыз немесе нүкте бұл картадан тыс."
+  "pointInfo.invalidPoint": "Нүкте сілтемесі жарамсыз немесе нүкте бұл картадан тыс.",
+  "canvas.observerHint": "WASD / бағыттауыштар: қозғалу · Space / Shift: жоғары / төмен · шерту: тінтуірмен қарау · екі саусақ / сүйреу: қарау · Esc: тінтуірді босату · V: үшінші жақ көрінісі · F: Орбита",
+  "viewer.mode.observerHint": "Бақылаушының еркін камерасы · F",
+  "viewer.observer.minimap": "Бақылаушының шағын картасы — үстінен көрініс",
+  "viewer.observer.thirdPerson": "Үшінші жақ көрінісі · V",
+  "viewer.observer.humanFigure": "Адам сұлбасы · 1,75 м",
+  "viewer.settings.observerBoost": "Бақылаушыны жылдамдату пернесі",
+  "viewer.settings.control": "Ctrl",
+  "viewer.settings.alt": "Alt / Option"
 }
