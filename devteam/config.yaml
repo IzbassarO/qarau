@@ -32,6 +32,13 @@ gates:
     quick_min: 11
 daily_budget_usd: 3.0     # API spend cap (brain + tester); subscriptions are not counted
 
+# `devteam run --continuous` (Kerege): per developer, plan the next task when one ends.
+# Stops at: no plannable task, daily budget, 2 tasks in a row blocked, these limits, Ctrl+C.
+continuous:
+  max_hours: 10              # then a clean stop (current steps finish, the next run resumes)
+  max_tasks: 8               # tasks taken per run; then no new ones, running ones finish
+  limit_wait_max_hours: 5    # subscription limit: wait for the reset, at most this long
+
 # provider: anthropic for now. Prices are $ per 1M tokens, used for the cost report.
 models:
   brain:

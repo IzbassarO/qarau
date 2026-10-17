@@ -2,6 +2,19 @@
 
 Newest first. Keep it short.
 
+## 2026-10-17 — Kerege: continuous mode, dashboard; home shows real runs again
+
+- Regression: since A3 (#20) the control center home always rendered the demo site and never
+  requested `/api/runs`, so real runs vanished from the sidebar. Fixed (home lists real runs,
+  demo only at `/inspections/demo`), with unit + e2e tests. `/viewer/<name>` was never broken.
+- Frustums / build-up "on" in the demo: not stored preferences (only the colour mode is stored,
+  under a v2 key). Cause: stale dev servers and an open tab that kept React state through hot
+  reload. A plain reload shows the A4b defaults (both off).
+- devteam is now called **Kerege** (README, CLI output). New: `devteam run --continuous`
+  (ADR 0014) and `devteam dashboard` (local read-only status page).
+- Backlog: dev_app A6, A6b, A7, A9, O1, A8 (after P5a), then A5; dev_pipeline P2b first
+  (existing branch, PR #25), new P4c (depends on P4a, A7).
+
 ## 2026-10-16 — P3b waits for the viewer fix (A4); task dependencies in devteam
 
 - P3b's pipeline work is done on `devteam/P3b`; it failed only the default view (dark

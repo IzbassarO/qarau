@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from devteam import costs
+from devteam.continuous import runs_of_day, summary_lines
 from devteam.gates import bench_table
 
 
@@ -16,7 +17,7 @@ def write_report(team, day: str | None = None) -> Path:
     open_ = [t for t in tasks if t["status"] in ("todo", "in_progress")]
 
     lines = [
-        f"# Dev team report — {day}",
+        f"# Kerege report — {day}",
         "",
         f"Done today: **{len(done)}** · blocked: **{len(blocked)}** · open: {len(open_)}",
         "",
@@ -73,6 +74,22 @@ def write_report(team, day: str | None = None) -> Path:
             + (f"{t:.2f}" if (t := sum(r[7] for r in mine)) else "—")
             + " |"
         )
+
+    runs = runs_of_day(team.home, day)
+    if runs:
+        lines += ["", "## Continuous runs", ""]
+        for r in runs:
+            lines += summary_lines(r)
+    limits = [r for r in costs.limit_rows(team.home, day) if r[0].startswith(day)]
+    if limits:
+        lines += ["", "## Subscription limits", "", "| Time | Developer | Task | Reset | Waited |"]
+        lines += ["| --- | --- | --- | --- | --- |"]
+        lines += [
+            f"| {ts[11:16]} | {a} | {t or '—'} | "
+            + (time.strftime("%H:%M", time.localtime(reset)) if reset else "unknown")
+            + f" | {waited / 60:.0f} min |"
+            for ts, a, t, reset, waited, _msg in limits
+        ]
 
     lines += ["", "## Benchmark (latest on dev)", ""]
     bench = sorted((team.home / "bench").glob("*/results.json"), key=lambda p: p.stat().st_mtime)

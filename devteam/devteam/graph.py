@@ -26,6 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
 from devteam import gates as G
+from devteam.costs import BudgetExceeded, SubscriptionLimit
 
 AGENTS = ["brain", "dev_pipeline", "dev_app", "tester"]
 SHARED_DIRS = ["docs/"]  # any developer may touch these besides its own folders
@@ -65,6 +66,11 @@ FORBIDDEN_BRANCH = {"-D", "-d", "--delete", "-M", "-m", "--move", "-f", "--force
 
 class Violation(RuntimeError):
     """The worktree or branch is not what the graph expects: stop, never commit."""
+
+
+class StopRun(Exception):
+    """A clean stop was asked (Ctrl+C in continuous mode, a run limit): raised at the start of
+    a node, so the steps before it stay checkpointed and nothing is half done."""
 
 
 def is_protected(path: str) -> bool:
@@ -156,6 +162,7 @@ class TaskState(TypedDict, total=False):
 
 
 class TeamState(TypedDict, total=False):
+    developers: list[str]  # plan only for these (continuous mode: the one that is free)
     assignments: list[dict]
     results: Annotated[list, operator.add]
 
@@ -188,6 +195,7 @@ class Team:
         self._procs: set[subprocess.Popen] = set()
         self._status_commit = None  # the only commit push_status may push straight to dev
         self.only: set[str] = set()
+        self.stopping = threading.Event()  # set: no node starts any more (clean stop)
         if remote is None and fake:
             remote = str(self.home / "remote.git")
             if not Path(remote).exists():
@@ -233,9 +241,10 @@ class Team:
                 text = text.replace(v, "***")
         return text
 
-    def emit(self, agent: str, msg: str, *, task: str = "", to: str = "", status: str = ""):
+    def emit(self, agent: str, msg: str, *, task: str = "", to: str = "", status: str = "") -> dict:
         event = {
             "t": time.strftime("%H:%M:%S"),
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),  # the dashboard needs the day too
             "agent": agent,
             "task": task,
             "to": to,
@@ -248,6 +257,7 @@ class Team:
             get_stream_writer()(event)
         except RuntimeError:  # called outside a graph run
             pass
+        return event
 
     # --- backlog -------------------------------------------------------------------------
     def load_backlog(self) -> list[dict]:
@@ -263,9 +273,10 @@ class Team:
                             t.pop(k, None)
                         else:
                             t[k] = v
-            self.backlog_path.write_text(
-                yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100)
-            )
+            # readers don't take the lock: replace the file whole, never truncate it in place
+            tmp = self.home / "backlog.yaml.tmp"  # same filesystem: os.replace is atomic
+            tmp.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100))
+            os.replace(tmp, self.backlog_path)
 
     # --- processes (all killable by `devteam stop`) --------------------------------------
     def run_proc(
@@ -983,8 +994,12 @@ def build_graph(team: Team, checkpointer):
         now, so the owner can `devteam stop`, fix and `resume`."""
 
         def node(s: TaskState):
+            if team.stopping.is_set():
+                raise StopRun(f"stopped before {name}")
             try:
                 return fn(s)
+            except (SubscriptionLimit, BudgetExceeded):  # the caller waits or stops, no crash
+                raise
             except Exception as e:
                 team.emit(
                     s.get("assignee", "brain"),
@@ -1017,6 +1032,9 @@ def build_graph(team: Team, checkpointer):
     def brain(s: TeamState, config: RunnableConfig):
         """Plans only; writes nothing. Tasks this run already claimed count as open again."""
         run = config["configurable"]["thread_id"]
+        if team.stopping.is_set():
+            raise StopRun("stopped before planning")
+        devs = {d: cfg["developers"][d] for d in s.get("developers") or cfg["developers"]}
         team.emit("brain", "reading the backlog", status="working")
         todo = [
             t
@@ -1036,15 +1054,16 @@ def build_graph(team: Team, checkpointer):
                 t["previous_work"] = work
         if team.only:  # `devteam run --only P1`
             todo = [t for t in todo if t["id"] in team.only]
-        areas = {a for d in cfg["developers"].values() for a in d["areas"]}
-        if no_area := [t["id"] for t in todo if t.get("area") not in areas]:
-            team.emit("brain", f"skipping tasks without a known area {sorted(areas)}: {no_area}")
-            todo = [t for t in todo if t["id"] not in no_area]
+        known = {a for d in cfg["developers"].values() for a in d["areas"]}
+        if no_area := [t["id"] for t in todo if t.get("area") not in known]:
+            team.emit("brain", f"skipping tasks without a known area {sorted(known)}: {no_area}")
+        areas = {a for d in devs.values() for a in d["areas"]}  # other developers' tasks wait
+        todo = [t for t in todo if t.get("area") in areas]
         assignments, feedback = [], None
         for attempt in range(2):  # one retry with the validation errors
-            plans = team.agents.plan(team, todo, feedback=feedback) if todo else []
+            plans = team.agents.plan(team, todo, feedback=feedback, devs=list(devs)) if todo else []
             try:
-                assignments = validate_plan(plans, todo, cfg)
+                assignments = validate_plan(plans, todo, {**cfg, "developers": devs})
                 break
             except ValueError as e:
                 if attempt:

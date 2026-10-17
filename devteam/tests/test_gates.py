@@ -28,7 +28,7 @@ v = {"registered_pct": pct, "models": 1, "reproj_px": 0.5, "points": 1000,
 """
 
 
-def only_core(team, todo, feedback=None):
+def only_core(team, todo, feedback=None, devs=None):
     return [{"task_id": "T-001", "assignee": "dev_pipeline", "plan": "p", "criteria": ["c"]}]
 
 

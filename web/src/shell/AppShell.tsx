@@ -13,7 +13,8 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
   const { t, lang } = useI18n();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const showDemo = demo || !id;
+  // Home lists the real runs; the demo lives only at /inspections/demo (never mixed in).
+  const showDemo = demo;
   const runs = useRuns(!showDemo);
   const demoData = useMemo(() => (showDemo ? createDemo(lang) : null), [showDemo, lang]);
   const sites = useMemo(
