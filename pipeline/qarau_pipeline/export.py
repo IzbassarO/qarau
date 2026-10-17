@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -301,6 +302,7 @@ def export_bundle(
     manifest: dict[str, Any] = {
         "version": 1,
         "run_id": run_id,
+        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),  # when exported
         "source": source,
         "world": {
             "up": [0, 0, 1], "world_from_colmap": W.flatten().tolist(),

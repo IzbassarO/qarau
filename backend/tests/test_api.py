@@ -1,4 +1,5 @@
 import json
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -56,9 +57,19 @@ def test_health_degraded(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_list_manifest_file(runs_dir: Path) -> None:
     c = client()
+    manifest = runs_dir / "r1" / "web" / "manifest.json"
+    os.utime(manifest, (1760630400, 1760630400))  # 2025-10-16T16:00:00Z
     assert c.get("/api/runs").json() == [
-        {"run_id": "r1", "source": {"kind": "video"}, "stats": {"a": 1}}
+        {
+            "run_id": "r1",
+            "source": {"kind": "video"},
+            "stats": {"a": 1},
+            "created_at": "2025-10-16T16:00:00+00:00",  # old run: the file's mtime
+        }
     ]
+    m = json.loads(manifest.read_text())
+    manifest.write_text(json.dumps({**m, "created_at": "2026-10-16T09:30:00+00:00"}))
+    assert c.get("/api/runs").json()[0]["created_at"] == "2026-10-16T09:30:00+00:00"
     assert c.get("/api/runs/r1/manifest.json").json()["stats"] == {"a": 1}
     r = c.get("/api/runs/r1/files/web/points.position.f32")
     assert r.status_code == 200

@@ -48,6 +48,9 @@ export function InspectionView({
             ) : (
               t('inspection.dateUnknown')
             )}
+            {!demoBundle && inspection.source && (
+              <span className="inspection-source">{inspection.source}</span>
+            )}
             <span className={`status-label ${inspection.status}`}>
               <span className={`status-dot ${inspection.status}`} aria-hidden="true" />
               {t(`status.${inspection.status}`)}

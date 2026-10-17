@@ -102,16 +102,18 @@ it('shows the failed demo stages at /inspections/demo without backend requests',
 it('lists the real runs on home, not the demo', async () => {
   const fetch = vi.fn().mockResolvedValue(
     Response.json([
-      { run_id: 'notre-dame', source: { name: 'notre-dame.mp4' } },
-      { run_id: 'room', source: { name: 'room.mov' } },
+      { run_id: 'notre-dame-p3', source: { name: 'notre_dame.webm' } },
+      { run_id: 'room', source: { name: 'IMG_8315.MOV' }, created_at: '2026-10-16T15:00:00Z' },
     ]),
   );
   vi.stubGlobal('fetch', fetch);
   renderRoute('/');
-  expect(await screen.findByRole('link', { name: /notre-dame\.mp4/ })).toBeTruthy();
-  expect(screen.getByRole('link', { name: /room\.mov/ }).getAttribute('href')).toBe(
-    '/inspections/room',
-  );
+  // the run name and its date; the source file only as a tooltip
+  const notreDame = await screen.findByRole('link', { name: /^notre-dame-p3/ });
+  expect(notreDame.getAttribute('title')).toBe('notre_dame.webm');
+  const room = screen.getByRole('link', { name: /^room/ });
+  expect(room.textContent).toMatch(/^room · 16 Oct/);
+  expect(room.getAttribute('href')).toBe('/inspections/room');
   expect(screen.queryByText('Tank farm survey')).toBeNull();
   expect(screen.queryByTestId('embedded-viewer')).toBeNull();
   expect(fetch).toHaveBeenCalledWith('/api/runs', expect.anything());
@@ -214,7 +216,8 @@ it('loads a selected backend run into the existing embedded viewer with truthful
   expect(viewer.getAttribute('data-embedded')).toBe('true');
   expect(manifest).toHaveBeenCalledWith('backend-run');
   expect(load).toHaveBeenCalledWith('backend-run', bundle.manifest, expect.any(Function));
-  expect(screen.getByRole('heading', { name: 'survey.mp4' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'backend-run' })).toBeTruthy();
+  expect(screen.getByText('survey.mp4')).toBeTruthy(); // the source file, beside the date
   expect(screen.getByText('Date unavailable')).toBeTruthy();
   expect(screen.getAllByText('Status unavailable').length).toBeGreaterThan(0);
   expect(screen.queryByText('Completed')).toBeNull();

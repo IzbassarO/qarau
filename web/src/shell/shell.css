@@ -200,6 +200,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.inspection-source {
+  font-family: var(--font-mono);
+}
+.inspection-link-date {
+  color: var(--color-ink-2);
+}
 .status-dot {
   display: inline-block;
   width: 6px;

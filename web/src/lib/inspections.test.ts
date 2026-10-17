@@ -27,6 +27,7 @@ describe('groupRunsIntoSites', () => {
       id: 'a',
       siteId: 'north',
       title: 'Walkdown',
+      source: null,
       createdAt: '2026-10-14T10:00:00Z',
       status: 'running',
     });
@@ -42,7 +43,8 @@ describe('groupRunsIntoSites', () => {
     expect(sites[0].inspections).toContainEqual({
       id: 'video',
       siteId: UNASSIGNED_SITE_ID,
-      title: 'survey.mp4',
+      title: 'video',
+      source: 'survey.mp4',
       createdAt: null,
       status: 'unknown',
     });

@@ -5,6 +5,14 @@ import { UNASSIGNED_SITE_ID, type Site } from '../lib/inspections';
 import { LangSwitch, Logo } from '../viewer/ui';
 import { useAuth } from '../auth/AuthProvider';
 
+/** "16 Oct" / "16 окт." — day first in every UI language. */
+export function shortDate(iso: string, lang: string): string {
+  return new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : lang, {
+    day: 'numeric',
+    month: 'short',
+  }).format(new Date(iso));
+}
+
 interface SidebarProps {
   sites: Site[];
   onNewInspection: () => void;
@@ -14,7 +22,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: SidebarProps) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { signOut } = useAuth();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (id: string) => {
@@ -77,10 +85,18 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
                     to={`/inspections/${encodeURIComponent(inspection.id)}`}
                     className={({ isActive }) => `inspection-link${isActive ? ' active' : ''}`}
                     onClick={onNavigate}
-                    title={inspection.title}
+                    title={inspection.source ?? inspection.title}
                   >
                     <span className={`status-dot ${inspection.status}`} aria-hidden="true" />
-                    <span className="inspection-link-title">{inspection.title}</span>
+                    <span className="inspection-link-title">
+                      {inspection.title}
+                      {inspection.createdAt && (
+                        <span className="inspection-link-date">
+                          {' · '}
+                          {shortDate(inspection.createdAt, lang)}
+                        </span>
+                      )}
+                    </span>
                     <span className="sr-only">{t(`status.${inspection.status}`)}</span>
                   </NavLink>
                 </li>
