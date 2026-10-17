@@ -1,0 +1,12 @@
+# Pipeline settings. Relative paths are relative to this file.
+
+dense_remote:
+  # COLMAP dense stage on a rented GPU worker (ADR 0016). Stays false until the owner approves
+  # a paid GPU account; no real provider exists yet, only the fake one used in tests.
+  enabled: false
+  timeout_s: 7200 # one wall-clock deadline for the whole job (start, upload, dense, download)
+  est_hours_per_job: 2.0 # booked against the budget per job; must cover timeout_s
+  daily_gpu_hours_budget: 4.0 # per UTC day; a job that would go over is refused before start
+  gpu_type: any-24gb
+  image: qarau/colmap-cuda:4.2.1 # infra/colmap-cuda, built locally, never pushed publicly
+  ledger_path: ../data/dense_remote/gpu_ledger.json # GPU hours per UTC day (data/ is gitignored)

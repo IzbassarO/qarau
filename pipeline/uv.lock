@@ -733,6 +733,7 @@ dependencies = [
     { name = "numpy" },
     { name = "opencv-python-headless" },
     { name = "pycolmap" },
+    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -753,6 +754,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2" },
     { name = "opencv-python-headless", specifier = ">=4.10" },
     { name = "pycolmap", specifier = "==4.2.1" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 
 [package.metadata.requires-dev]

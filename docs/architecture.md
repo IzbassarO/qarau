@@ -108,6 +108,18 @@ sentence), `advice_key` (`quality.advice.<kind>`, for the web's translations)}. 
 (grid cells without a corner). `run` and `python -m qarau_pipeline quality --video V --out
 O` (frames stage only) print a short summary.
 
+**Dense reconstruction on a remote GPU (`dense_remote.py`, ADR 0016).** COLMAP dense
+(`image_undistorter` → `patch_match_stereo` with geometric consistency → `stereo_fusion`)
+needs CUDA, so it runs on a GPU worker from the image `infra/colmap-cuda` (COLMAP 4.2.1).
+`RemoteDenseExecutor` drives any `GpuProvider` (start, upload frames + sparse model, run,
+download `fused.ply` + `fused.ply.vis`, stop). Guarantees: a started worker is always stopped
+(`finally`, 3 tries, then an error naming the worker id); one wall-clock deadline
+`timeout_s` for the whole job, the remaining time passed to every call, `DenseTimeoutError`
+past it; before any start, `used today + est_hours_per_job > daily_gpu_hours_budget` (UTC
+day, JSON ledger under `data/`) raises `BudgetExceededError`. Config: `pipeline/config.yaml`
+→ `dense_remote` (`enabled: false`). Only a fake provider exists until a paid GPU account is
+approved; the default `run`/`benchmark` path does not use it.
+
 ## Benchmark
 
 `python -m qarau_pipeline benchmark --data D --out O` runs every reference video in
