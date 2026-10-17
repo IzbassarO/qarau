@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { authHeader, login, logout, sessionHeader } from './auth';
+import { authHeader, login, logout, sessionHeader, sessionUserId } from './auth';
 
 const credentials = { username: 'test-operator', password: 'test-api-value' };
 
@@ -26,7 +26,8 @@ it('validates the backend Bearer contract before storing the session only in ses
   expect(sessionStorage.getItem('qarau.auth.session')).toBe(`Bearer ${credentials.password}`);
   expect(authHeader()).toEqual({ Authorization: `Bearer ${credentials.password}` });
   expect(localStorage.length).toBe(0);
-  expect(JSON.stringify(Object.values(sessionStorage))).not.toContain(credentials.username);
+  expect(sessionUserId()).toBe(credentials.username);
+  expect(sessionStorage.getItem('qarau.auth.userId')).toBe(credentials.username);
 });
 
 it('does not store an unvalidated session while the request is pending', async () => {
@@ -37,6 +38,7 @@ it('does not store an unvalidated session while the request is pending', async (
   );
   const request = login(credentials);
   expect(sessionHeader()).toBeNull();
+  expect(sessionUserId()).toBeNull();
   expect(sessionStorage.length).toBe(0);
   finish(Response.json([]));
   await request;
@@ -83,6 +85,8 @@ it('clears the session and authorization header on logout, preserving unrelated 
   sessionStorage.setItem('unrelated', 'keep');
   logout();
   expect(sessionStorage.getItem('qarau.auth.session')).toBeNull();
+  expect(sessionUserId()).toBeNull();
+  expect(sessionStorage.getItem('qarau.auth.userId')).toBeNull();
   expect(authHeader()).toEqual({});
   expect(sessionStorage.getItem('unrelated')).toBe('keep');
 });
@@ -94,4 +98,15 @@ it('reports unavailable session storage instead of signing in', async () => {
   });
   await expect(login(credentials)).rejects.toMatchObject({ code: 'storage' });
   expect(sessionHeader()).toBeNull();
+});
+
+it('uses the validated session username as a preference id, never the Bearer credential', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([])));
+  await login({ ...credentials, username: '  operator-a  ' });
+  expect(sessionUserId()).toBe('operator-a');
+  await login({ ...credentials, username: 'operator-b' });
+  expect(sessionUserId()).toBe('operator-b');
+  logout();
+  sessionStorage.setItem('qarau.auth.userId', 'stale-operator');
+  expect(sessionUserId()).toBeNull();
 });

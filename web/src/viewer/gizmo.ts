@@ -86,6 +86,16 @@ export interface AxisViewState {
   quaternion: Quaternion;
 }
 
+/** The diagonal used by initial framing, expressed relative to the world up axis. */
+export function threeQuarterDirection(up: Vector3): AxisViewTarget {
+  const direction = new Vector3(1, -1.3, 0.8)
+    .normalize()
+    .applyQuaternion(
+      new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), up.clone().normalize()),
+    );
+  return { direction, up: up.clone().normalize() };
+}
+
 /**
  * Positive buttons look from the positive world axis towards the pivot. At a pole,
  * world-up cannot also be screen-up: Z-up uses +Y for top and -Y for bottom. The

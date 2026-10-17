@@ -1,4 +1,5 @@
 import { Box3, PerspectiveCamera, Quaternion, Ray, Spherical, Vector3 } from 'three';
+import { classifyWheel, wheelStep } from './input';
 
 /** Positions and pivots are world-space; fov is the vertical field of view in degrees. */
 export interface NavigationState {
@@ -23,35 +24,44 @@ export interface NavigationInput {
   button?: number;
   shiftKey?: boolean;
   ctrlKey?: boolean;
+  altKey?: boolean;
+  metaKey?: boolean;
   deltaMode?: number;
   deltaX?: number;
   deltaY?: number;
 }
 
-/**
- * WheelEvent cannot identify the hardware. Browsers report trackpad pinches as
- * Ctrl+wheel. Line/page deltas, or large (>=40) integer vertical pixel ticks with
- * no horizontal component, are treated as a mouse wheel. Other pixel deltas are
- * two-finger orbit. High-resolution mice can therefore look like trackpads;
- * Ctrl+wheel always provides an explicit zoom override. Shift+wheel pans.
- */
-export function mapInput(event: NavigationInput): NavigationAction {
+/** Keep mouse buttons unchanged; delegate wheel hardware inference to input.ts. */
+export function mapInput(
+  event: NavigationInput,
+  knownMouseSteps: readonly number[] = [],
+): NavigationAction {
   if (event.type === 'wheel') {
-    if (event.ctrlKey) return NavigationAction.Zoom;
-    if (event.shiftKey) return NavigationAction.Pan;
-    const y = event.deltaY ?? 0;
-    if (
-      (event.deltaMode ?? 0) !== 0 ||
-      (!(event.deltaX ?? 0) && Number.isInteger(y) && Math.abs(y) >= 40)
-    )
-      return NavigationAction.Zoom;
-    return NavigationAction.Orbit;
+    const action = classifyWheel(event, knownMouseSteps);
+    return action === 'trackpad-pan'
+      ? NavigationAction.Pan
+      : action === 'trackpad-orbit'
+        ? NavigationAction.Orbit
+        : NavigationAction.Zoom;
   }
   if (event.type.startsWith('pointer') || event.type.startsWith('mouse')) {
     if (event.button === 1) return NavigationAction.Pan;
     if (event.button === 0) return event.shiftKey ? NavigationAction.Pan : NavigationAction.Orbit;
   }
   return NavigationAction.None;
+}
+
+/** A scene-relative multiplier shared by orbit, pan and zoom. */
+export function speedScale(
+  distanceToTarget: number,
+  sceneRadius: number,
+  { precision = false, sensitivity = 1 }: { precision?: boolean; sensitivity?: number } = {},
+): number {
+  const distance = Number.isFinite(distanceToTarget) ? Math.max(0, distanceToTarget) : 0;
+  const radius = Number.isFinite(sceneRadius) ? Math.max(sceneRadius, 1e-9) : 1;
+  const distanceScale = Math.max(0.05, Math.min(1, distance / radius));
+  const setting = Number.isFinite(sensitivity) ? Math.max(0.25, Math.min(4, sensitivity)) : 1;
+  return distanceScale * setting * (precision ? 0.25 : 1);
 }
 
 type VisitPoint = (x: number, y: number, z: number) => void;
@@ -328,6 +338,8 @@ export interface NavigationOptions {
   minDistance?: number;
   collisionRadius?: number;
   boundsMargin?: number;
+  sceneRadius?: number;
+  sensitivity?: number;
   onChange?: () => void;
   /** Called on valid input even while disabled, so an engine can leave a source-camera pose. */
   onStart?: () => void;
@@ -337,10 +349,14 @@ export interface NavigationOptions {
 export class NavigationControls {
   readonly target: Vector3;
   enabled = true;
+  sensitivity = 1;
   private readonly points: PointSource;
   private readonly minDistance: number;
   private readonly radius: number;
   private readonly margin: number;
+  private readonly sceneRadius: number;
+  private wheelHistory: number[] = [];
+  private wheelHistoryAt = -Infinity;
   private readonly previousTouchAction: string;
   private disposed = false;
   private drag: { id: number; x: number; y: number; button: number } | null = null;
@@ -354,6 +370,8 @@ export class NavigationControls {
   ) {
     this.target = options.target?.clone() ?? new Vector3();
     const diagonal = options.bounds.isEmpty() ? 1 : options.bounds.getSize(new Vector3()).length();
+    this.sceneRadius = options.sceneRadius ?? Math.max(diagonal / 2, 1e-6);
+    this.sensitivity = options.sensitivity ?? 1;
     this.minDistance = options.minDistance ?? Math.max(diagonal * 0.001, 1e-6);
     this.radius = options.collisionRadius ?? Math.max(diagonal * 0.0015, 1e-6);
     this.margin = options.boundsMargin ?? Math.max(diagonal * 0.5, this.minDistance * 10);
@@ -416,6 +434,7 @@ export class NavigationControls {
   /** Cancel residual input/capture before another camera mode takes ownership. */
   stop() {
     this.clearPending();
+    this.wheelHistory = [];
     const drag = this.drag;
     this.drag = null;
     if (drag && this.canvas.hasPointerCapture?.(drag.id))
@@ -423,12 +442,19 @@ export class NavigationControls {
   }
 
   /** Toolbar zoom follows the same damped, bounded, collision-tested path as pinch. */
-  zoom(factor: number) {
+  zoom(factor: number, precision = false) {
     if (this.disposed || !this.enabled || !Number.isFinite(factor) || factor <= 0) return;
     const rect = this.canvas.getBoundingClientRect();
     this.cursor = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
     const distance = Math.max(this.camera.position.distanceTo(this.target), this.minDistance * 10);
-    this.pending.zoom += distance * (1 - factor);
+    this.pending.zoom += distance * (1 - factor) * this.speed(precision);
+  }
+
+  private speed(precision: boolean): number {
+    return speedScale(this.camera.position.distanceTo(this.target), this.sceneRadius, {
+      precision,
+      sensitivity: this.sensitivity,
+    });
   }
 
   private onPointerDown = (event: PointerEvent) => {
@@ -458,8 +484,9 @@ export class NavigationControls {
   private onPointerMove = (event: PointerEvent) => {
     if (!this.enabled || !this.drag || this.drag.id !== event.pointerId) return;
     const height = Math.max(1, this.canvas.getBoundingClientRect().height);
-    const dx = (event.clientX - this.drag.x) / height;
-    const dy = (event.clientY - this.drag.y) / height;
+    const speed = this.speed(event.altKey);
+    const dx = ((event.clientX - this.drag.x) / height) * speed;
+    const dy = ((event.clientY - this.drag.y) / height) * speed;
     const action = mapInput({
       type: 'pointermove',
       button: this.drag.button,
@@ -486,28 +513,42 @@ export class NavigationControls {
 
   private onWheel = (event: WheelEvent) => {
     if (this.disposed) return;
+    // Block document scrolling/browser pinch zoom even while a source pose owns the camera.
+    event.preventDefault();
     this.options.onStart?.();
     if (!this.enabled) return;
-    event.preventDefault();
-    const action = mapInput(event);
+    if (event.timeStamp - this.wheelHistoryAt > 250 || event.timeStamp < this.wheelHistoryAt)
+      this.wheelHistory = [];
+    this.wheelHistoryAt = event.timeStamp;
+    const action = mapInput(event, this.wheelHistory);
     const height = Math.max(1, this.canvas.getBoundingClientRect().height);
     const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? height : 1;
+    const tick = wheelStep(event);
+    // Only confirmed mouse ticks train the heuristic. Repetition alone must
+    // never turn plain small pixel trackpad scrolling into zoom.
+    this.wheelHistory =
+      action === NavigationAction.Zoom && !event.ctrlKey && tick !== undefined
+        ? [...this.wheelHistory.slice(-5), tick * scale]
+        : [];
     const dx = event.deltaX * scale;
     const dy = event.deltaY * scale;
+    const speed = this.speed(event.altKey);
     if (action === NavigationAction.Zoom) {
       const distance = Math.max(
         this.camera.position.distanceTo(this.target),
         this.minDistance * 10,
       );
-      this.pending.zoom += Math.expm1(-Math.min(2, Math.max(-2, dy * 0.002))) * distance;
+      const wheelDelta = dy || (event.shiftKey ? dx : 0);
+      this.pending.zoom +=
+        Math.expm1(-Math.min(2, Math.max(-2, wheelDelta * 0.002))) * distance * speed;
       this.cursor = { x: event.clientX, y: event.clientY };
     } else if (action === NavigationAction.Pan) {
       // Some browsers remap Shift+vertical-wheel to deltaX; retain both axes.
-      this.pending.panX += dx / height;
-      this.pending.panY += dy / height;
+      this.pending.panX += (dx / height) * speed;
+      this.pending.panY += (dy / height) * speed;
     } else {
-      this.pending.orbitX += (dx / height) * Math.PI;
-      this.pending.orbitY += (dy / height) * Math.PI;
+      this.pending.orbitX += (dx / height) * Math.PI * speed;
+      this.pending.orbitY += (dy / height) * Math.PI * speed;
     }
   };
 
