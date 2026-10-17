@@ -1,6 +1,7 @@
-# devteam
+# Kerege
 
-Qarau's multi-agent dev team on LangGraph. Dev tooling, not part of the product.
+**Kerege** is Qarau's multi-agent dev team on LangGraph (the package and command are still
+`devteam`; renaming them is task R0). Dev tooling, not part of the product.
 Plan and rules: `docs/notes/devteam-plan.md`, CLAUDE.md → "Delivery".
 
 **No human review.** Each task runs on `devteam/<task>`, becomes a PR into `dev` (the review
@@ -13,7 +14,9 @@ A red GitHub CI check sends back the last 150 lines of `gh run view <id> --log-f
 
 ```bash
 cd devteam && uv sync          # also needs: gitleaks (brew install gitleaks), gh, claude, codex
-uv run devteam run             # brain plans, developers build, tester + gates decide, auto-merge
+uv run devteam run             # one round: brain plans, developers build, tester + gates decide
+uv run devteam run --continuous  # keep going: next task per developer until a stop condition
+uv run devteam dashboard       # read-only status page on http://127.0.0.1:8765 (--port N)
 uv run devteam stop            # from any terminal: stop everything now (agents, checks, CI wait)
 uv run devteam resume          # continue after stop, crash, usage limit or budget cap
 uv run devteam status          # backlog with PR links / blocked reasons
@@ -25,6 +28,28 @@ uv run devteam run --fake      # whole flow with fake agents and a local fake Gi
 uv run pytest                  # tests, incl. gates, crash + resume, forbidden actions
 ```
 
+- Continuous mode (`run --continuous`, limits in `config.yaml` → `continuous`): one loop per
+  developer. When a developer's task ends (merged or blocked), the brain plans the next task
+  for that developer only; the others keep working. Stops when: no plannable task is left for
+  any developer; the daily API budget is reached; 2 tasks in a row end blocked; `max_hours`
+  (clean stop) or `max_tasks` (no new tasks, running ones finish); Ctrl+C. The first Ctrl+C
+  finishes the current steps cleanly (a running developer or check is not killed); a second
+  one kills everything now. A Claude Code / Codex plan limit is logged with its reset time
+  (when the tool prints one), the developer waits until the reset (every 30 min when unknown,
+  at most `limit_wait_max_hours`), then the same step runs again. Never automatically: a
+  release to `main`, paid services (developer env gets no RunPod / cloud keys, the brain may
+  not plan paid steps), edits to `devteam/` (no developer owns it; checked at start). Rounds
+  that did not finish are kept in `.state/continuous.json` and resumed first by the next
+  `run --continuous`. At the end it prints, and the daily report lists, every task, its
+  result, the spend and why the run stopped (`.state/runs/<run>.json`). Plain `devteam run`
+  is unchanged: one round, then the weekly release check.
+- Dashboard (`devteam dashboard`): one local read-only page (127.0.0.1 only, GET only,
+  refreshes every 20 s), real data only, no model calls: agents (status, current task, time on
+  it, from `.state/events.log`), today's API spend vs the budget, subscription load per task,
+  subscription-limit events and reset times, the queue (todo / in progress / blocked / done
+  with PR links), open PRs, CI on `dev` (`gh`, cached 60 s), the latest commits, and "Needs
+  your attention": red CI on `dev`, blocked tasks, PRs waiting for the owner, spend above
+  80 % of the budget. Every value from `.env` is redacted.
 - Developers, in parallel: `dev_pipeline` = Claude Code (`claude -p`, subscription token in
   `.env`), `dev_app` = Codex (`codex exec`, your saved ChatGPT login; `codex login` once; no
   API key is ever passed). Codex has no network in its sandbox: `setup` installs first.
