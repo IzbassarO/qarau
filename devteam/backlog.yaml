@@ -415,9 +415,13 @@ tasks:
 
     '
   owner: dev_app
-  status: todo
+  status: done
   depends_on:
   - P3b
+  run: cont-20261017-123453-dev_app-1
+  branch: devteam/A5
+  pr: https://github.com/IzbassarO/qarau/pull/32
+  done_at: '2026-10-17'
 - id: A6
   area: app
   title: Viewer navigation that feels natural
