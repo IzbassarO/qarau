@@ -88,13 +88,18 @@ Data comes straight from reconstruction — nothing is guessed:
 
 ### Display states (toggles)
 
-1. **Build-up along the video** (default on): points first seen *after* the current time
-   are drawn very dark (`#2A3240`), already-seen points in the height ramp. Scrubbing
-   shows the map assembling itself from the video.
+1. **Build-up along the video** (default off, opt-in): points first seen _after_ the
+   current time are drawn very dark (`#2A3240`) only while this mode is enabled;
+   already-seen points use the selected RGB or height-blue colours. Scrubbing shows the
+   map assembling itself from the video. With this mode off, future points retain
+   their base colours.
 2. **What the camera sees now** (default on): points observed by the current frame are
    brightened and slightly larger.
-3. **Camera frustums along the path**: a small pyramid every N frames; the current camera
-   always drawn as a larger pyramid in `#5B9BFF`.
+3. **Camera frustums along the path** (default off, opt-in): a small pyramid every N
+   frames; the current registered camera has a larger pyramid in `#5B9BFF`. The toggle
+   hides both sets of pyramids and the current-camera dot, including after scrubbing.
+   Pyramid sizes scale with the scene's robust extent.
+
 - Points never observed by any usable frame are always gray `#6B727D` (coverage rule).
 - Camera path: travelled part solid light, remaining part dashed and dim.
 - An XYZ axis gizmo in the bottom-left corner.
@@ -108,8 +113,12 @@ Data comes straight from reconstruction — nothing is guessed:
 ### Colours and object framing
 
 - The display controls include a localized **Point colours** toggle with **Height-blue**
-  and **Real colours** states. Height-blue is the default; explicit choices persist in
-  localStorage (`qarau.viewer.colorMode`) for this browser user's viewer session.
+  and **Real colours** states. Real RGB colours are the default when the bundle has RGB;
+  height-blue is the fallback without RGB or an explicit user choice. Only explicit
+  colour toggles persist in localStorage (`qarau.viewer.colorMode.v2`); opening a viewer
+  does not save its default. The old unversioned key is ignored so A4's stored height
+  default does not override the new behaviour. Build-up and frustums start off each time
+  the viewer is opened and remain available as localized RU/KK/EN toggles.
 - Real colours require a complete RGB triplet for every point. When RGB is absent,
   unreadable or incomplete, the toggle remains visible and disabled with a localized
   explanation. The viewer uses height-blue and preserves any saved RGB preference for
@@ -117,6 +126,7 @@ Data comes straight from reconstruction — nothing is guessed:
 - Switching swaps two precomputed geometry colour attributes, without reloading points.
   Finding colours stay red/orange and never-observed points stay gray in either mode;
   build-up and current-frame highlighting retain their existing priority.
+- These are web display defaults only; the viewer bundle format (ADR 0003) is unchanged.
 - Initial and reset views frame point-only 2nd–98th percentile bounds on each axis,
   excluding stray points and camera-path extents. The target is the box centre, and
   the fit accounts for vertical FOV, canvas aspect and a 10% margin. If navigation room

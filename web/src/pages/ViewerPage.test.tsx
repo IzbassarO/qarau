@@ -219,22 +219,47 @@ it('switches between height-blue and real colours without replacing the engine',
   const { toggle } = await renderColourBundle(bundle);
   const engine = setColorMode.mock.contexts.at(-1) as ViewerEngine;
   expect(toggle.disabled).toBe(false);
-  expect(toggle.getAttribute('aria-pressed')).toBe('false');
-  expect(within(toggle).getByText(LANGS.en['show.heightBlue'])).toBeTruthy();
-  expect(engine.colorMode).toBe('height');
-
-  fireEvent.click(toggle);
-  expect(setColorMode).toHaveBeenLastCalledWith('rgb');
-  expect(setColorMode.mock.contexts.at(-1)).toBe(engine);
-  expect(engine.colorMode).toBe('rgb');
   expect(toggle.getAttribute('aria-pressed')).toBe('true');
   expect(within(toggle).getByText(LANGS.en['show.rgb'])).toBeTruthy();
+  expect(engine.colorMode).toBe('rgb');
 
   fireEvent.click(toggle);
   expect(setColorMode).toHaveBeenLastCalledWith('height');
+  expect(setColorMode.mock.contexts.at(-1)).toBe(engine);
   expect(engine.colorMode).toBe('height');
   expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  expect(within(toggle).getByText(LANGS.en['show.heightBlue'])).toBeTruthy();
+
+  fireEvent.click(toggle);
+  expect(setColorMode).toHaveBeenLastCalledWith('rgb');
+  expect(engine.colorMode).toBe('rgb');
+  expect(toggle.getAttribute('aria-pressed')).toBe('true');
 });
+
+it.each<Lang>(['en', 'ru', 'kk'])(
+  'starts with localized timeline and frustum controls off and allows opting in (%s)',
+  (lang) => {
+    setLang(lang);
+    const setOptions = vi.spyOn(ViewerEngine.prototype, 'setOptions');
+    renderDemo();
+    const locale = LANGS[lang];
+    const timeline = screen.getByRole('button', { name: locale['show.buildUp'] });
+    const frustums = screen.getByRole('button', { name: locale['show.frustums'] });
+    expect(timeline.getAttribute('aria-pressed')).toBe('false');
+    expect(frustums.getAttribute('aria-pressed')).toBe('false');
+    expect(setOptions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ buildUp: false, frustums: false }),
+    );
+
+    fireEvent.click(timeline);
+    fireEvent.click(frustums);
+    expect(timeline.getAttribute('aria-pressed')).toBe('true');
+    expect(frustums.getAttribute('aria-pressed')).toBe('true');
+    expect(setOptions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ buildUp: true, frustums: true }),
+    );
+  },
+);
 
 it.each<Lang>(['en', 'ru', 'kk'])(
   'localizes the colour toggle and unavailable tooltip in %s',
@@ -272,23 +297,24 @@ it('remembers an explicit colour choice when the viewer is mounted again', async
   const setColorMode = vi.spyOn(ViewerEngine.prototype, 'setColorMode');
   const bundle = colourBundle(new Uint8Array(createDemo('en').bundle.position.length).fill(80));
   const first = await renderColourBundle(bundle);
+  expect(localStorage.getItem('qarau.viewer.colorMode.v2')).toBeNull();
   fireEvent.click(first.toggle);
-  expect(localStorage.getItem('qarau.viewer.colorMode')).toBe('rgb');
+  expect(localStorage.getItem('qarau.viewer.colorMode.v2')).toBe('height');
   first.unmount();
 
   const second = await renderColourBundle(bundle);
-  expect(second.toggle.getAttribute('aria-pressed')).toBe('true');
-  expect(setColorMode).toHaveBeenLastCalledWith('rgb');
+  expect(second.toggle.getAttribute('aria-pressed')).toBe('false');
+  expect(setColorMode).toHaveBeenLastCalledWith('height');
 });
 
 it('uses height for a map without RGB while preserving the saved real-colour preference', async () => {
-  localStorage.setItem('qarau.viewer.colorMode', 'rgb');
+  localStorage.setItem('qarau.viewer.colorMode.v2', 'rgb');
   const setColorMode = vi.spyOn(ViewerEngine.prototype, 'setColorMode');
   const unavailable = await renderColourBundle(colourBundle());
   expect(unavailable.toggle.disabled).toBe(true);
   expect(unavailable.toggle.getAttribute('aria-pressed')).toBe('false');
   expect(setColorMode).toHaveBeenLastCalledWith('height');
-  expect(localStorage.getItem('qarau.viewer.colorMode')).toBe('rgb');
+  expect(localStorage.getItem('qarau.viewer.colorMode.v2')).toBe('rgb');
   unavailable.unmount();
 
   const available = await renderColourBundle(
@@ -298,14 +324,23 @@ it('uses height for a map without RGB while preserving the saved real-colour pre
   expect(setColorMode).toHaveBeenLastCalledWith('rgb');
 });
 
-it('defaults to height when a saved colour preference is invalid', async () => {
-  localStorage.setItem('qarau.viewer.colorMode', 'invalid');
+it('ignores the legacy height preference and does not persist a default', async () => {
+  localStorage.setItem('qarau.viewer.colorMode', 'height');
+  const { toggle } = await renderColourBundle(
+    colourBundle(new Uint8Array(createDemo('en').bundle.position.length).fill(80)),
+  );
+  expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  expect(localStorage.getItem('qarau.viewer.colorMode.v2')).toBeNull();
+});
+
+it('defaults to real colours when a saved colour preference is invalid', async () => {
+  localStorage.setItem('qarau.viewer.colorMode.v2', 'invalid');
   const { toggle } = await renderColourBundle(
     colourBundle(new Uint8Array(createDemo('en').bundle.position.length).fill(80)),
   );
   expect(toggle.disabled).toBe(false);
-  expect(toggle.getAttribute('aria-pressed')).toBe('false');
-  expect(within(toggle).getByText(LANGS.en['show.heightBlue'])).toBeTruthy();
+  expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  expect(within(toggle).getByText(LANGS.en['show.rgb'])).toBeTruthy();
 });
 
 it('allows colour changes when browser storage is unavailable', async () => {
@@ -319,9 +354,9 @@ it('allows colour changes when browser storage is unavailable', async () => {
   const { toggle } = await renderColourBundle(
     colourBundle(new Uint8Array(createDemo('en').bundle.position.length).fill(80)),
   );
-  expect(toggle.getAttribute('aria-pressed')).toBe('false');
-  fireEvent.click(toggle);
   expect(toggle.getAttribute('aria-pressed')).toBe('true');
-  expect(setColorMode).toHaveBeenLastCalledWith('rgb');
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  expect(setColorMode).toHaveBeenLastCalledWith('height');
   expect(screen.queryByRole('alert')).toBeNull();
 });
