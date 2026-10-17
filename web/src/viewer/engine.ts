@@ -19,6 +19,7 @@ import {
 import { damp, NavigationControls } from './navigation';
 import { applyMouseLook, createFlyState, flyOrientation, step, type FlyState } from './fly';
 import { orientationFor, stepAxisView, viewDirectionFor, type Axis } from './gizmo';
+import { defaultViewState } from './defaults';
 import { hasRgb, type Bundle } from '../lib/bundle';
 import {
   colmapPoseToThree,
@@ -94,7 +95,7 @@ export class ViewerEngine {
   private pointGeometry: BufferGeometry;
   private heightColors: BufferAttribute;
   private rgbColors?: BufferAttribute;
-  private currentColorMode: ColorMode = 'height';
+  private currentColorMode: ColorMode;
   private visibleNow: Uint8Array;
   private visAttr: BufferAttribute;
   private prevFrame = -1;
@@ -103,6 +104,7 @@ export class ViewerEngine {
   private pathDash: Line;
   private frustumAll: LineSegments;
   private frustumNow: LineSegments;
+  private frustumsVisible: boolean;
   private dot: Points;
   private pickMark: Points;
   private navigationBounds: Box3;
@@ -143,6 +145,9 @@ export class ViewerEngine {
     private cb: Callbacks,
   ) {
     const m = b.manifest;
+    const defaults = defaultViewState(b);
+    this.currentColorMode = defaults.colorMode;
+    this.frustumsVisible = defaults.frustums;
     this.renderer = new WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x000000);
@@ -172,7 +177,7 @@ export class ViewerEngine {
       heightColors.set(heightRamp((b.position[p * 3 + 2] - low) / (high - low || 1)), p * 3);
     this.heightColors = new Uint8BufferAttribute(heightColors, 3, true);
     if (hasRgb(b)) this.rgbColors = new Uint8BufferAttribute(b.color!, 3, true);
-    g.setAttribute('color', this.heightColors);
+    g.setAttribute('color', this.rgbColors ?? this.heightColors);
     g.setAttribute('firstSeen', new BufferAttribute(b.firstSeen, 1));
     this.visibleNow = new Uint8Array(m.points.count);
     this.visAttr = new BufferAttribute(this.visibleNow, 1);
@@ -207,7 +212,7 @@ export class ViewerEngine {
       vertexColors: true,
       uniforms: {
         uCurrentFrame: { value: 0 },
-        uBuildUp: { value: 1 },
+        uBuildUp: { value: defaults.buildUp ? 1 : 0 },
         uShowCurrent: { value: 1 },
         uPointSize: { value: 2.5 },
         uPixelRatio: { value: this.renderer.getPixelRatio() },
@@ -354,9 +359,16 @@ export class ViewerEngine {
       a.needsUpdate = true;
       (this.dot.geometry.getAttribute('position') as BufferAttribute).set(f.center!);
       (this.dot.geometry.getAttribute('position') as BufferAttribute).needsUpdate = true;
-      this.frustumNow.visible = this.dot.visible = true;
-    } else this.frustumNow.visible = this.dot.visible = false;
+    }
+    this.updateFrustumVisibility();
     this.dirty = true;
+  }
+
+  private updateFrustumVisibility() {
+    const frame = this.b.manifest.frames[this.prevFrame];
+    this.frustumAll.visible = this.frustumsVisible;
+    this.frustumNow.visible = this.dot.visible =
+      this.frustumsVisible && !!frame?.registered && !!frame.pose;
   }
 
   setOptions(o: Options) {
@@ -365,7 +377,8 @@ export class ViewerEngine {
     u.uShowCurrent.value = o.showCurrent ? 1 : 0;
     u.uFindings.value = o.findings ? 1 : 0;
     u.uPointSize.value = o.pointSize;
-    this.frustumAll.visible = o.frustums;
+    this.frustumsVisible = o.frustums;
+    this.updateFrustumVisibility();
     this.dirty = true;
   }
 

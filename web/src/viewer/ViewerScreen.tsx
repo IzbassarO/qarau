@@ -4,6 +4,7 @@ import { useI18n } from '../i18n';
 import { hasRgb, runUrl, type Bundle, type Finding } from '../lib/bundle';
 import { csrSlice, heightRamp, RAMP } from '../lib/geometry';
 import { ViewerEngine, type ColorMode, type Options } from './engine';
+import { defaultViewState } from './defaults';
 import { AxisGizmo, type AxisGizmoHandle } from './AxisGizmo';
 import { H2, LangSwitch, Logo, Row, Toggle } from './ui';
 
@@ -19,12 +20,13 @@ declare global {
 }
 
 const mono = 'font-mono';
-const colorModeStorageKey = 'qarau.viewer.colorMode';
-function savedColorMode(): ColorMode {
+const colorModeStorageKey = 'qarau.viewer.colorMode.v2';
+function savedColorMode(): ColorMode | undefined {
   try {
-    return localStorage.getItem(colorModeStorageKey) === 'rgb' ? 'rgb' : 'height';
+    const saved = localStorage.getItem(colorModeStorageKey);
+    return saved === 'rgb' || saved === 'height' ? saved : undefined;
   } catch {
-    return 'height';
+    return undefined;
   }
 }
 
@@ -84,14 +86,15 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
   const [playing, setPlaying] = useState(false);
   const [picked, setPicked] = useState<number | null>(null);
   const [fps, setFps] = useState(0);
-  const [colorMode, setColorMode] = useState<ColorMode>(savedColorMode);
+  const [colorMode, setColorMode] = useState(savedColorMode);
+  const defaults = defaultViewState(bundle, colorMode);
   const rgbAvailable = hasRgb(bundle);
-  const activeColorMode = rgbAvailable ? colorMode : 'height';
+  const activeColorMode = defaults.colorMode;
   const colorModeHintId = useId();
   const [opts, setOpts] = useState<Options>({
-    buildUp: true,
+    buildUp: defaults.buildUp,
     showCurrent: true,
-    frustums: true,
+    frustums: defaults.frustums,
     findings: true,
     pointSize: 2.5,
   });

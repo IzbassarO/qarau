@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Box3, Points, ShaderMaterial, Vector3 } from 'three';
+import { Box3, LineSegments, Points, PointsMaterial, ShaderMaterial, Vector3 } from 'three';
 import { createDemo } from '../fixtures/demo';
 import type { Bundle } from '../lib/bundle';
 import { heightRamp, robustBounds } from '../lib/geometry';
@@ -613,6 +613,13 @@ describe('ViewerEngine colour modes', () => {
     const points = cloud(engine, bundle);
     const geometry = points.geometry;
     const positions = geometry.getAttribute('position');
+    const rgb = geometry.getAttribute('color');
+    expect(engine.colorMode).toBe('rgb');
+    expect(Array.from(rgb.array)).toEqual(Array.from(bundle.color));
+    expect(rgb.normalized).toBe(true);
+    expect((points.material as ShaderMaterial).uniforms.uBuildUp.value).toBe(0);
+
+    engine.setColorMode('height');
     const height = geometry.getAttribute('color');
     expect(engine.colorMode).toBe('height');
     const z = bundle.position[2];
@@ -620,8 +627,8 @@ describe('ViewerEngine colour modes', () => {
     expect(Array.from(height.array.slice(0, 3))).toEqual(heightRamp((z - low) / (high - low)));
 
     engine.setColorMode('rgb');
-    const rgb = geometry.getAttribute('color');
     expect(engine.colorMode).toBe('rgb');
+    expect(geometry.getAttribute('color')).toBe(rgb);
     expect(rgb).not.toBe(height);
     expect(Array.from(rgb.array)).toEqual(Array.from(bundle.color));
     expect(rgb.normalized).toBe(true);
@@ -691,6 +698,100 @@ describe('ViewerEngine colour modes', () => {
       expect(points.geometry.getAttribute('color')).toBe(height);
     },
   );
+});
+
+describe('ViewerEngine opt-in display modes', () => {
+  it('keeps every frustum hidden across frame changes until enabled, and hides them again', () => {
+    const demo = createDemo('en').bundle;
+    const bundle = {
+      ...demo,
+      manifest: { ...demo.manifest, frames: [...demo.manifest.frames] },
+    };
+    bundle.manifest.frames[1] = { ...bundle.manifest.frames[1], registered: false };
+    const { engine } = setup(bundle);
+    const frustums = engine.scene.children.filter((child) => child instanceof LineSegments);
+    expect(frustums).toHaveLength(2);
+    const [pathFrustums, currentFrustum] = frustums;
+    const cameraDot = engine.scene.children.find(
+      (child) =>
+        child instanceof Points &&
+        child.material instanceof PointsMaterial &&
+        child.material.color.getHex() === 0x5b9bff,
+    )!;
+    const cloud = engine.scene.children.find(
+      (child) => child instanceof Points && child.material instanceof ShaderMaterial,
+    ) as Points;
+    const material = cloud.material as ShaderMaterial;
+    const options = {
+      buildUp: false,
+      frustums: false,
+      showCurrent: true,
+      findings: true,
+      pointSize: 2.5,
+    };
+    expect(material.uniforms.uBuildUp.value).toBe(0);
+    expect([...frustums, cameraDot].every((child) => !child.visible)).toBe(true);
+    engine.setFrame(2);
+    expect([...frustums, cameraDot].every((child) => !child.visible)).toBe(true);
+
+    engine.setOptions({ ...options, frustums: true, buildUp: true });
+    expect(material.uniforms.uBuildUp.value).toBe(1);
+    expect([...frustums, cameraDot].every((child) => child.visible)).toBe(true);
+    engine.setFrame(1);
+    expect(pathFrustums.visible).toBe(true);
+    expect(currentFrustum.visible).toBe(false);
+    expect(cameraDot.visible).toBe(false);
+    engine.setFrame(0);
+    expect(currentFrustum.visible).toBe(true);
+    expect(cameraDot.visible).toBe(true);
+
+    engine.setOptions(options);
+    engine.setFrame(2);
+    expect(material.uniforms.uBuildUp.value).toBe(0);
+    expect([...frustums, cameraDot].every((child) => !child.visible)).toBe(true);
+  });
+
+  it('scales both historical and current frustums with the scene extent', () => {
+    const sizes = (scale: number) => {
+      const demo = createDemo('en').bundle;
+      const bundle = {
+        ...demo,
+        position: demo.position.map((value) => value * scale),
+        manifest: {
+          ...demo.manifest,
+          frames: demo.manifest.frames.map((frame) => ({
+            ...frame,
+            center: frame.center?.map((value) => value * scale),
+            camera: frame.camera && { ...frame.camera, K: [500, 500, 320, 180] },
+          })),
+        },
+      };
+      const { engine } = setup(bundle);
+      engine.setOptions({
+        buildUp: false,
+        frustums: true,
+        showCurrent: true,
+        findings: true,
+        pointSize: 2.5,
+      });
+      return engine.scene.children
+        .filter((child) => child instanceof LineSegments)
+        .map((frustum) => {
+          expect(frustum.visible).toBe(true);
+          const positions = frustum.geometry.getAttribute('position');
+          return new Vector3()
+            .fromBufferAttribute(positions, 0)
+            .distanceTo(new Vector3().fromBufferAttribute(positions, 1));
+        });
+    };
+    const original = sizes(1);
+    const scaled = sizes(10);
+    expect(original).toHaveLength(2);
+    original.forEach((size, index) => {
+      expect(size).toBeGreaterThan(0);
+      expect(scaled[index] / size).toBeCloseTo(10, 4);
+    });
+  });
 });
 
 describe('ViewerEngine object framing', () => {
