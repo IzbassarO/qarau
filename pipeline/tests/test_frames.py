@@ -46,9 +46,13 @@ def test_frames_stage(video: Path, tmp_path: Path) -> None:
 
 
 def test_max_frames_caps(video: Path, tmp_path: Path) -> None:
+    # 20 < 3 s * 6 (60 by the minimum): a capped budget is sparse already, every frame stays
     m = frames.run(video, tmp_path, max_frames=20)
-    assert m["frames_extracted"] == 30 and 2 <= m["keyframes"] <= 20
-    assert frames.run(video, tmp_path, 20, FIXED)["frames_extracted"] == 20
+    assert m["frames_extracted"] == 20 and m["keyframes"] == 20 - m["frames_dropped"]
+    assert m["keyframe_mode"].endswith("-> fixed") and m["keyframe_selection"]["budget_capped"]
+    m = frames.run(video, tmp_path, max_frames=100)  # cap above the budget: parallax
+    assert m["frames_extracted"] == 75 and 2 <= m["keyframes"] <= 60
+    assert not m["keyframe_selection"]["budget_capped"]
     assert frames.target_frames(1000, 120) == 120 and frames.target_frames(10, None) == 60
 
 

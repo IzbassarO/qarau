@@ -63,7 +63,8 @@ the rotation gap: 24 966, so not that. At 1.5 ×: 26 632, then 26 729 in the ben
 below. With 2 × the frames bunch into the fast parts; 1.5 × is the default.
 
 1.5 × candidates, keyframe gaps in seconds (notre-dame/room from the benchmark below,
-aegviidu/orono frames stage only via the `quality` command with their `max_frames` 150):
+aegviidu/orono frames stage only via the `quality` command with their `max_frames` 150;
+since round 3 those two run the fixed grid, see below):
 
 | Video | Candidates | Keyframes (budget) | θ fitted | Gap median / p90 / max | Fixed grid gap |
 | --- | --- | --- | --- | --- | --- |
@@ -90,8 +91,30 @@ Round 2 quick benchmark (`9fb3c5f+dirty`, parallax fit to budget, 1.5 × candida
 | room (P2b) | 282 | 100.0 | 1 | 26729 (−2.3 %) | 0.98 | 432.2 |
 
 More frames used than the dev rows: the blur drops now come out of 1.5 × candidates, so
-the full budget survives them (notre-dame 121 instead of 109). Not measured here: aegviidu
-and orono reconstruction (≈ 20 min each), left to the merge gate.
+the full budget survives them (notre-dame 121 instead of 109).
+
+### Round 3: merge gate on round 2
+
+`orono: reprojection 0.57 -> 0.67 px` (+17 %, gate +10 %). Orono's budget is 150 frames
+over 91 s (1.65 fps, capped by `max_frames`); the fit moved frames out of the slow
+pan/hover parts into the fast ones, and with frames this sparse the slow parts lost
+accuracy. The redistribution only pays where the budget has surplus density. So: a budget
+capped below 6 fps (long video or `--max-frames`) runs as `fixed`, the exact dev path for
+orono and aegviidu (verified: orono 150 frames at 1.6534 fps, all kept, mode
+`... budget capped below 6 fps -> fixed`). The round-2 bridge cap (30 % of the keyframes)
+now applies to parallax runs only, so it cannot cut orono's bridges below dev's. (A cap of
+30 % of keyframes + bridges for both was tried: more bridges on room, points 25 406 /
+reproj 0.99 in one run, so the parallax cap stayed as measured in round 2.) Parallax stays on for videos whose budget is the full
+6 fps: notre-dame, room, every clip under 50 s.
+
+Round 3 quick benchmark (`4d121b5+dirty`):
+
+| Video | Frames used | Registered % | Models | Points | Reproj. px | Time s |
+| --- | --- | --- | --- | --- | --- | --- |
+| notre-dame (dev) | 109 | 100.0 | 1 | 43426 | 0.40 | 159.9 |
+| notre-dame (P2b) | 121 | 100.0 | 1 | 50064 (+15.3 %) | 0.395 | 174.7 |
+| room (dev) | 269 | 100.0 | 1 | 27349 | 0.94 | 442.9 |
+| room (P2b) | 282 | 100.0 | 1 | 26397 (−3.5 %) | 0.982 | 357.1 |
 
 Round 1 quick benchmark (`23cf1a2+dirty`, fixed θ 0.0003, old grid) vs dev baseline:
 

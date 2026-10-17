@@ -103,11 +103,13 @@ def cmd_run(a: argparse.Namespace) -> None:
         )  # fmt: skip
     fj = json.loads((out / "frames.json").read_text())
     names = [Path(f["file"]).name for f in fj["frames"] if f["kept"]]
-    # bridges = quality drops only, at most as many as the fixed grid allowed (30 % of the
-    # budget): the denser parallax candidates must not add merge matching time
+    # bridges = quality drops only. The denser parallax candidates must not add merge
+    # matching time: there at most MAX_DROP of the keyframes. The fixed grid stays as it was
+    # (decide_drops already keeps drops <= MAX_DROP of all frames).
     dropped = [Path(f["file"]).name for f in fj["frames"]
                if not f["kept"] and f["drop_reason"] != "not_keyframe"]  # fmt: skip
-    dropped = subsample(dropped, max(1, round(frames_stage.MAX_DROP * len(names))))
+    if any(f["drop_reason"] == "not_keyframe" for f in fj["frames"]):
+        dropped = subsample(dropped, max(1, round(frames_stage.MAX_DROP * len(names))))
     rc = ColmapReconstructor(
         mode="video" if a.video else "images",
         max_image_size=a.max_image_size,

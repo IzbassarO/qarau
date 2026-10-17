@@ -67,8 +67,12 @@ A frame with a sudden blur drop is `blur`, else a frame with few corners is `low
 - room: `ok`, 9 minor issues: plain walls (`low_texture` 21, 25–26, 32–34, 40–43 s),
   motion blur in fast pans (`blur` 5.0–5.5 s, 31.2–32.0 s), a fast pan to the curtain
   (`too_fast` 44.4–45.0 s), short turns in place (`pure_rotation` start, 45 s).
-- aegviidu: `reshoot_recommended`: `pure_rotation` 34.2–67.3 s (major) is a panorama
-  filmed from the tower top, turning in place over a distant landscape.
-- orono: `reshoot_recommended`: from 11 s the drone hovers by the tower top and pans over
-  distant land (`pure_rotation`, 44.1–59.1 s major); `too_fast` 1.4–5.0 s is the fast
-  sweep past the tank. Both reconstruct, but those stretches add little depth.
+- aegviidu (`max_frames` 150, 2.1 fps fixed grid): `reshoot_recommended`: `pure_rotation`
+  34.3–66.4 s (major) is a panorama filmed from the tower top, turning in place over a
+  distant landscape; two short `too_fast` turns at 57.5 and 65.0 s.
+- orono (`max_frames` 150, 1.65 fps fixed grid): `ok`; `too_fast` 1.5–5.1 s is the fast
+  sweep past the tank, `pure_rotation` 11.2–22.1 s and two shorter ones later: the drone
+  hovers by the tower top and pans over distant land. On the denser parallax grid the
+  same video gave a major `pure_rotation` 44.1–59.1 s: on a 0.6 s grid the 1 s rotation
+  window shrinks to one 0.6 s step, less motion to judge, so a capped video reports turns
+  less readily.
