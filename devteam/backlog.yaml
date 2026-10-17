@@ -136,11 +136,12 @@ tasks:
     that blocked it is fixed in dev.
 
     '
-  status: todo
+  status: done
   owner: dev_pipeline
-  run: run-20261016-215415
+  run: cont-20261017-123453-dev_pipeline-1
   branch: devteam/P2b
-  blocked_reason: CI web failure fixed in dev; re-run gates on the existing branch
+  pr: https://github.com/IzbassarO/qarau/pull/25
+  done_at: '2026-10-17'
 - id: P4a-1
   area: core
   title: Dense stage executor without spending money
