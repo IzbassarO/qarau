@@ -19,6 +19,13 @@ function createBundle(): Bundle {
     for (let angle = 0; angle < Math.PI * 2; angle += 0.15)
       points.push(x, -5 + 0.4 * Math.cos(angle), 1.5 + 0.4 * Math.sin(angle));
   const position = new Float32Array(points);
+  const farCount = 96;
+  const farPosition = new Float32Array(farCount * 3);
+  const farColor = new Uint8Array(farCount * 3).fill(160);
+  for (let i = 0; i < farCount; i++) {
+    const angle = (i / farCount) * Math.PI * 2;
+    farPosition.set([40 * Math.cos(angle), 40 * Math.sin(angle), 2], i * 3);
+  }
   const count = position.length / 3;
   const frameCount = 12;
   const offsets = new Uint32Array(frameCount + 1);
@@ -69,6 +76,12 @@ function createBundle(): Bundle {
         focus: { center: [0, 0, 2], radius: 16 },
       },
       points: { count, position: '', first_seen: '', num_obs: '' },
+      far: {
+        count: farCount,
+        position: 'web/far.position.f32',
+        color: 'web/far.color.u8',
+        rule: 'synthetic distant ring',
+      },
       tracks: { frame_offsets: '', frame_points: '', point_offsets: '', point_frames: '' },
       frames,
       stats: {
@@ -80,6 +93,7 @@ function createBundle(): Bundle {
       },
     },
     position,
+    far: { position: farPosition, color: farColor },
     firstSeen: new Uint16Array(count),
     frameOffsets: offsets,
     frameInPoints: framePoints,

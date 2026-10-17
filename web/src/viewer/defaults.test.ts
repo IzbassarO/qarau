@@ -38,3 +38,10 @@ it.each([true, false])(
     expect(defaultViewState(bundle)).toMatchObject({ buildUp: false, frustums: false });
   },
 );
+
+it.each([true, false])('defaults to far points hidden in Quick Scan (far: %s)', (far) => {
+  const bundle = createDemo('en').bundle;
+  expect(defaultViewState({ ...bundle, far: far ? bundle.far : undefined }).showFarLayer).toBe(
+    false,
+  );
+});

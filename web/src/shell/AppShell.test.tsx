@@ -223,3 +223,22 @@ it('loads a selected backend run into the existing embedded viewer with truthful
   expect(screen.queryByText('Completed')).toBeNull();
   expect(screen.queryByText(/Synthetic map/)).toBeNull();
 });
+
+it('keeps the embedded object viewer available after a recoverable far-layer failure', async () => {
+  const bundle: bundleApi.Bundle = {
+    ...createDemo('en').bundle,
+    runId: 'backend-run',
+    far: undefined,
+    farError: 'broken',
+  };
+  vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+  vi.spyOn(bundleApi, 'loadBundle').mockRejectedValue(
+    new bundleApi.FarLayerError('broken', 'wrong far array length', bundle),
+  );
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([{ run_id: 'backend-run' }])));
+  renderRoute('/inspections/backend-run');
+  expect((await screen.findByTestId('embedded-viewer')).getAttribute('data-run-id')).toBe(
+    'backend-run',
+  );
+  expect(screen.queryByText('Could not load the inspection')).toBeNull();
+});

@@ -128,6 +128,60 @@ it('loads /viewer/demo from the existing local point cloud without requesting a 
   expect(load).not.toHaveBeenCalled();
 });
 
+it.each<Lang>(['en', 'ru', 'kk'])(
+  'starts with the localized far toggle unchecked and switches the layer on (%s)',
+  (lang) => {
+    setLang(lang);
+    const setFarVisible = vi.spyOn(ViewerEngine.prototype, 'setFarVisible');
+    renderDemo();
+    const toggle = screen.getByRole('button', { name: LANGS[lang]['viewer.show.farPoints'] });
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(setFarVisible).toHaveBeenLastCalledWith(false);
+    const engine = setFarVisible.mock.contexts.at(-1) as ViewerEngine;
+    expect(engine.hasFarLayer()).toBe(true);
+    expect(engine.scene.getObjectByName('far')!.visible).toBe(false);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(setFarVisible).toHaveBeenLastCalledWith(true);
+    expect(setFarVisible.mock.contexts.at(-1)).toBe(engine);
+    expect(engine.scene.getObjectByName('far')!.visible).toBe(true);
+  },
+);
+
+it.each([undefined, { position: new Float32Array(), color: new Uint8Array() }])(
+  'hides the far toggle without usable far points (%s)',
+  async (far) => {
+    await renderColourBundle({ ...colourBundle(), far });
+    expect(screen.queryByRole('button', { name: LANGS.en['viewer.show.farPoints'] })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  },
+);
+
+it.each<Lang>(['en', 'ru', 'kk'])(
+  'recovers the object cloud with a localized far-layer warning (%s)',
+  async (lang) => {
+    setLang(lang);
+    for (const reason of ['missing', 'broken'] as const) {
+      const bundle: bundleApi.Bundle = { ...colourBundle(), far: undefined, farError: reason };
+      vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+      vi.spyOn(bundleApi, 'loadBundle').mockRejectedValue(
+        new bundleApi.FarLayerError(reason, 'invalid far layer', bundle),
+      );
+      const view = renderViewer(bundle.runId);
+      expect((await screen.findByRole('alert')).textContent).toBe(
+        LANGS[lang][reason === 'missing' ? 'viewer.far.errorMissing' : 'viewer.far.errorBroken'],
+      );
+      await waitFor(() => expect(renderScene).toHaveBeenCalled());
+      expect(screen.getByLabelText(LANGS[lang]['canvas.label'])).toBeTruthy();
+      expect(
+        screen.queryByRole('button', { name: LANGS[lang]['viewer.show.farPoints'] }),
+      ).toBeNull();
+      view.unmount();
+      renderScene.mockClear();
+    }
+  },
+);
+
 it('renders six axis buttons and rotates each view around the same pivot at the same distance', () => {
   const axisView = vi.spyOn(ViewerEngine.prototype, 'axisView');
   renderDemo();
