@@ -8,7 +8,10 @@ export type InspectionStatus = 'queued' | 'running' | 'completed' | 'failed' | '
 export interface InspectionSummary {
   id: string;
   siteId: string;
+  /** The run name (run id unless the API gives a title). */
   title: string;
+  /** The uploaded file the run was made from, if known. */
+  source: string | null;
   createdAt: string | null;
   status: InspectionStatus;
 }
@@ -63,7 +66,8 @@ export function groupRunsIntoSites(runs: readonly RunSummary[]): Site[] {
     site.inspections.push({
       id: run.run_id,
       siteId,
-      title: run.title || run.source?.name || run.run_id,
+      title: run.title || run.run_id,
+      source: run.source?.name || null,
       createdAt:
         run.created_at && Number.isFinite(Date.parse(run.created_at)) ? run.created_at : null,
       status: inspectionStatus(run.status),

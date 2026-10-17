@@ -45,3 +45,11 @@ rule}`: points farther from the nearest registered camera than 2.5 × the median
 no first-seen. These points are never in the `points` arrays, the tracks, `world.bounds` or
 `cloud.laz`. Additive key, so `version` is unchanged; viewers that do not know `far` ignore
 it (the current viewer does; A5 renders it).
+
+## Addendum 2026-10-17: `created_at`
+
+Manifest key `created_at`: ISO 8601 UTC time the export stage wrote the bundle (e.g.
+`"2026-10-16T09:30:00+00:00"`). `GET /api/runs` (and the Vite dev stand-in) returns it as the
+run date; for runs exported before this key existed it falls back to the manifest file's
+modification time. The control center shows runs as "run name · date". Additive key, `version`
+unchanged.

@@ -61,11 +61,21 @@ test('home lists the real runs, not the demo', async ({ page }) => {
     sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
   });
   await page.route('**/api/runs', (route) =>
-    route.fulfill({ json: [{ run_id: 'notre-dame', source: { name: 'notre-dame.mp4' } }] }),
+    route.fulfill({
+      json: [
+        {
+          run_id: 'notre-dame',
+          source: { name: 'notre_dame.webm' },
+          created_at: '2026-10-16T15:00:00Z',
+        },
+      ],
+    }),
   );
   await page.goto('/');
   const navigation = page.getByRole('navigation');
-  await expect(navigation.getByRole('link', { name: /notre-dame\.mp4/ })).toBeVisible();
+  await expect(navigation.getByRole('link', { name: /^notre-dame/ })).toContainText(
+    'notre-dame · 16 Oct',
+  );
   await expect(navigation.getByRole('link', { name: /Tank farm survey/ })).toHaveCount(0);
 });
 

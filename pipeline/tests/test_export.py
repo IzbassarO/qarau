@@ -155,6 +155,14 @@ def test_outputs_exist(bundle) -> None:
     assert len(las.x) == N and (out / "cloud.ply").stat().st_size > 0
 
 
+def test_manifest_records_when_it_was_exported(bundle) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    _out, m, *_ = bundle
+    t = datetime.fromisoformat(m["created_at"])
+    assert t.tzinfo is not None and abs(datetime.now(UTC) - t) < timedelta(minutes=5)
+
+
 def test_reexport_drops_findings(bundle, tmp_path: Path) -> None:
     out, m, _, rec, _ = bundle
     mp = out / "web/manifest.json"

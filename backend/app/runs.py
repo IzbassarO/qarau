@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,12 @@ def read_manifest(d: Path) -> dict[str, Any]:
     return data
 
 
+def exported_at(d: Path) -> str:
+    """Fallback for runs exported before the manifest had created_at: the file's mtime."""
+    t = (d / "web" / "manifest.json").stat().st_mtime
+    return datetime.fromtimestamp(t, UTC).isoformat(timespec="seconds")
+
+
 @router.get("")
 def list_runs() -> list[dict[str, Any]]:
     root = Path(get_settings().qarau_runs_dir)
@@ -39,7 +46,14 @@ def list_runs() -> list[dict[str, Any]]:
     for d in sorted(root.iterdir()) if root.is_dir() else []:
         if RUN_ID.fullmatch(d.name) and (d / "web" / "manifest.json").is_file():
             m = read_manifest(d)
-            out.append({"run_id": d.name, "source": m.get("source"), "stats": m.get("stats")})
+            out.append(
+                {
+                    "run_id": d.name,
+                    "source": m.get("source"),
+                    "stats": m.get("stats"),
+                    "created_at": m.get("created_at") or exported_at(d),
+                }
+            )
     return out
 
 
