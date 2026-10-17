@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ import laspy
 import numpy as np
 import pycolmap
 
-from .interfaces import stage_seconds
+from .interfaces import DensePoints, stage_seconds
 
 NEVER = 65535
 THUMB_W = 960
@@ -180,12 +181,57 @@ def las_offset_scale(xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return (lo + hi) / 2, np.maximum(0.001, (hi - lo) / 2 / (2**31 - 1) * 1.1)
 
 
+def filter_rows(
+    offsets: np.ndarray, ids: np.ndarray, keep: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Keep the CSR rows where keep is True, so rows stay in step with the kept points."""
+    counts = np.diff(offsets).astype(np.int64)
+    new = np.concatenate([[0], np.cumsum(counts[keep])]).astype(np.uint32)
+    return new, ids[np.repeat(keep, counts)].astype(np.uint32)
+
+
+def dense_layer(
+    dense: DensePoints,
+    centers: np.ndarray,
+    A: np.ndarray,
+    c: np.ndarray,
+    n_frames: int,
+    w: Callable[[str, np.ndarray, str], str],
+) -> dict[str, Any]:
+    """Manifest key `dense` (ADR 0017): same sanitize and far rules as the sparse points; the
+    far ones are dropped (counted), never moved to the far layer. Rows filtered in step."""
+    keep, rep = sanitize_points(dense.xyz)
+    far = np.zeros(len(keep), bool)
+    far[keep] = far_mask(dense.xyz[keep], centers)
+    keep &= ~far
+    off, ids = filter_rows(dense.frame_offsets, dense.frame_ids, keep)
+    if len(ids) and int(ids.max()) >= n_frames:
+        raise ValueError(f"dense frame link {int(ids.max())} >= {n_frames} frames")
+    n = int(keep.sum())
+    return {
+        "count": n,
+        "position": w("dense.position.f32", dense.xyz[keep] @ A.T - c, "<f4"),
+        "color": w("dense.color.u8", dense.rgb[keep], "u1"),
+        "densifier": dense.densifier,
+        "frame_links_source": dense.links_source,
+        "max_frames_per_point": dense.max_frames_per_point,
+        "frame_offsets": {"path": w("dense.frame_offsets.u32", off, "<u4"), "dtype": "<u4",
+                          "length": n + 1},
+        "frame_ids": {"path": w("dense.frame_ids.u32", ids, "<u4"), "dtype": "<u4",
+                      "length": len(ids)},
+        "linked_points": int((np.diff(off) > 0).sum()),
+        "dropped": {"non_finite": rep["non_finite"], "far_outliers": rep["far_outliers"],
+                    "far": int(far.sum())},
+    }  # fmt: skip
+
+
 def export_bundle(
     rec: pycolmap.Reconstruction,
     frames: list[dict[str, Any]],
     out: Path,
     source: dict[str, Any],
     run_id: str,
+    dense: DensePoints | None = None,
 ) -> dict[str, Any]:
     t0 = time.perf_counter()
     web = out / "web"
@@ -300,7 +346,7 @@ def export_bundle(
     mean_err = float(rec.compute_mean_reprojection_error())
     secs = stage_seconds(out)
     manifest: dict[str, Any] = {
-        "version": 1,
+        "version": 2,  # 2: optional `dense` layer with frame links (ADR 0017)
         "run_id": run_id,
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),  # when exported
         "source": source,
@@ -341,13 +387,18 @@ def export_bundle(
             "processing_s": {k: v for k, v in secs.items() if k in ("frames", "reconstruction")},
         },
     }  # fmt: skip
+    extra: dict[str, Any] = {}
+    if dense is not None:
+        d = manifest["dense"] = dense_layer(dense, centers, A, c, F, w)
+        extra = {"dense_points": d["count"], "dense_linked_points": d["linked_points"],
+                 "frame_links_source": d["frame_links_source"]}  # fmt: skip
 
     write_laz_ply(out, xyz_a, rgb)
     manifest["stats"]["processing_s"]["export"] = round(time.perf_counter() - t0, 2)
     (web / "manifest.json").write_text(json.dumps(manifest))
 
     check = check_projection(rec, out, manifest, reg, pids)
-    return {**manifest["stats"], "reproj_check_px": check}
+    return {**manifest["stats"], **extra, "reproj_check_px": check}
 
 
 def write_laz_ply(out: Path, xyz: np.ndarray, rgb: np.ndarray) -> None:

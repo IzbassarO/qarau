@@ -1,5 +1,10 @@
 # Pipeline settings. Relative paths are relative to this file.
 
+dense:
+  # Frame links kept per dense point, best first (ADR 0017). Bounds the bundle: links cost
+  # 4 bytes each, so 8 per point add at most 32 bytes per dense point (+ 4 for the offset).
+  max_frames_per_point: 8
+
 dense_remote:
   # COLMAP dense stage on a rented GPU worker (ADR 0016). Stays false until the owner approves
   # a paid GPU account; no real provider exists yet, only the fake one used in tests.
