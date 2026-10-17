@@ -13,25 +13,29 @@
 
 ## Design
 
-1. **Candidates = the old fixed-rate grid** (same decode, HDR, rotation). Decoding a denser
-   grid for capped videos would add bridges and matching time on orono/aegviidu (they were
-   near the timeout at 300 frames); not worth it now.
+1. **Budget and candidates.** The old frame count (`clamp(duration·6, 60, 300)` or
+   `--max-frames`) stays the budget COLMAP gets. Parallax mode decodes 1.5 × that many
+   candidates (same decode path, HDR, rotation; at most the source fps). Merge bridges stay
+   quality drops, capped at 30 % of the keyframes, so the denser grid adds no merge
+   matching time on orono/aegviidu (they were near the timeout at 300 frames).
 2. **One KLT pass** (`keyframes.track`): 640 px long-side grey, `goodFeaturesToTrack` +
    `calcOpticalFlowPyrLK` frame to frame, track ids, re-detect when tracks thin out. Both
    keyframe selection and the quality checks read these tracks.
 3. **Pair geometry** between two frames over their common tracks: median raw flow,
    RANSAC homography, median residual after it (= parallax), inlier ratio.
-4. **Keyframes** (`select_keyframes`, mode `parallax`): walk usable (not dropped)
-   candidates; new keyframe when parallax since the last keyframe ≥ `parallax_frac` of the
-   diagonal, or fewer than `min_track_frac` of the keyframe's tracks survive. If the
-   homography explains the motion (pure rotation), the track-loss rule may fire only
-   `rotation_min_gap_s` after the last keyframe. First and last usable frame always kept;
-   more than the cap → uniform subsample. Non-keyframes: `kept=False`,
+4. **Keyframes** (`keyframes.fit`, mode `parallax`): walk usable (not dropped)
+   candidates; new keyframe when parallax since the last keyframe ≥ θ · diagonal, or fewer
+   than `min_track_frac` of the keyframe's tracks survive. If the homography explains the
+   motion (pure rotation), the track-loss rule may fire only `rotation_min_gap_s` after the
+   last keyframe. θ starts at `parallax_frac` (0.0003, the floor above a still camera) and
+   is raised by log bisection until the keyframes fit the budget: the same number of frames
+   as before, placed by camera motion instead of the clock. Track-loss keyframes alone over
+   the budget → uniform subsample. First and last usable frame always kept. Non-keyframes: `kept=False`,
    `drop_reason="not_keyframe"`; they are not bridges (bridges stay quality drops).
    Mode `fixed` = old behaviour. Mode + thresholds go to the frames stage metrics and the
    benchmark Notes.
 5. **Quality** (`quality.py`): per candidate blur (Laplacian variance at 640 px), too fast
-   (flow to the next candidate / diagonal, or track loss), pure rotation (pair over a ~1 s
+   (flow over 1/6 s / diagonal, or track loss, whatever the candidate density), pure rotation (pair over a ~1 s
    window: homography explains it, motion but no parallax), low texture (Shi-Tomasi
    min-eigenvalue per grid cell, fraction of empty cells). Consecutive flagged frames →
    time ranges → `quality_report.json` (format: `docs/notes/quality-report.md`).
@@ -47,15 +51,49 @@ the report may say "turning on the spot". Noted in the report doc.
 
 Parallax per 1/6 s at 640 px is tiny on our videos (median residual / diagonal: notre-dame
 0.0018, room 0.0011, aegviidu 0.0004 at its 2 fps cap); a still camera measures ~5e-5.
-`parallax_frac` 0.005 would keep 40/109 notre-dame frames, 0.01 only 22: far fewer points,
-and the gate fails at -10 %. Default 0.0003 keeps notre-dame 109/109, room 264/269,
-aegviidu 134/150 (dropped: the still hover at the start/end and a few frames of the pan
-from the tower top, 35-55 s, which the report flags as `pure_rotation`). Larger thresholds
-are for when matching time matters more than points (`KeyframeParams`).
+A fixed `parallax_frac` cannot fit all videos: 0.005 keeps 40/109 notre-dame frames (far
+fewer points; the gate fails at -10 %), while 0.0003 keeps 109/109, i.e. it changes
+nothing (round 1, sent back by the tester for that). Hence the budget fit (round 2).
+
+### Round 2: denser candidates, threshold fitted to the budget
+
+Room at 2 × candidates (quick benchmark, 283 frames): 100 %, 1 model, but points 24 317
+(−11 % vs dev 27 349; room's recorded runs spread 26 482–27 349) and reproj 0.992. Without
+the rotation gap: 24 966, so not that. At 1.5 ×: 26 632, then 26 729 in the benchmark
+below. With 2 × the frames bunch into the fast parts; 1.5 × is the default.
+
+1.5 × candidates, keyframe gaps in seconds (notre-dame/room from the benchmark below,
+aegviidu/orono frames stage only via the `quality` command with their `max_frames` 150):
+
+| Video | Candidates | Keyframes (budget) | θ fitted | Gap median / p90 / max | Fixed grid gap |
+| --- | --- | --- | --- | --- | --- |
+| notre-dame | 182 | 121 (121) | 0.0012 | 0.13 / 0.23 / 1.77 | 0.17 |
+| room | 424 | 282 (283) | 0.00081 | 0.12 / 0.23 / 0.88 | 0.17 |
+| aegviidu (cap 150) | 225 | 150 (150) | 0.00038 | 0.33 / 0.93 / 4.44 | 0.47 |
+| orono (cap 150) | 225 | 150 (150) | 0.00032 | 0.40 / 0.83 / 1.63 | 0.60 |
+
+Same frame count as the fixed grid, different frames: the fitted θ is 1.1–4 × the floor;
+gaps shrink to 0.12–0.13 s where the camera moves and grow to ~0.9 s in turns and pans
+(aegviidu's tower-top panorama) and 4.4 s in its final hover. Track-loss keyframes keep
+≥ 60 % shared tracks between neighbours, so the map stays connected. The notre-dame 1.8 s
+gap is the blurred stretch (17.5–19.7 s) the quality drops remove in both modes.
 
 ## Results
 
-Quick benchmark (`23cf1a2+dirty`, keyframes parallax 0.0003 / 0.6 / 0.3 s) vs dev baseline:
+Round 2 quick benchmark (`9fb3c5f+dirty`, parallax fit to budget, 1.5 × candidates):
+
+| Video | Frames used | Registered % | Models | Points | Reproj. px | Time s |
+| --- | --- | --- | --- | --- | --- | --- |
+| notre-dame (dev) | 109 | 100.0 | 1 | 43426 | 0.40 | 159.9 |
+| notre-dame (P2b) | 121 | 100.0 | 1 | 49895 (+14.9 %) | 0.394 | 189.2 |
+| room (dev) | 269 | 100.0 | 1 | 27349 | 0.94 | 442.9 |
+| room (P2b) | 282 | 100.0 | 1 | 26729 (−2.3 %) | 0.98 | 432.2 |
+
+More frames used than the dev rows: the blur drops now come out of 1.5 × candidates, so
+the full budget survives them (notre-dame 121 instead of 109). Not measured here: aegviidu
+and orono reconstruction (≈ 20 min each), left to the merge gate.
+
+Round 1 quick benchmark (`23cf1a2+dirty`, fixed θ 0.0003, old grid) vs dev baseline:
 
 | Video | Frames used | Registered % | Models | Points | Reproj. px | Time s |
 | --- | --- | --- | --- | --- | --- | --- |

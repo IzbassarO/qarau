@@ -100,8 +100,10 @@ def test_frames_stage_writes_report(tmp_path: Path) -> None:
     m = frames.run(v, tmp_path / "out")
     rep = json.loads((tmp_path / "out/quality_report.json").read_text())
     check_shape(rep)
-    assert rep["video"] == "t.mp4" and rep["candidate_frames"] == m["frames_extracted"] == 60
-    assert rep["keyframes"] == m["keyframes"] and rep["keyframe_selection"]["mode"] == "parallax"
+    # budget 60 (3 s), 1.5x candidates = all 90 source frames (30 fps)
+    assert rep["video"] == "t.mp4" and rep["candidate_frames"] == m["frames_extracted"] == 90
+    assert rep["keyframes"] == m["keyframes"] <= rep["keyframe_selection"]["budget"] == 60
+    assert rep["keyframe_selection"]["mode"] == "parallax"
     assert m["keyframe_mode"].startswith("parallax") and m["quality_verdict"] == rep["verdict"]
     fj = json.loads((tmp_path / "out/frames.json").read_text())["frames"]
     assert sum(f["kept"] for f in fj) == m["keyframes"] >= 2

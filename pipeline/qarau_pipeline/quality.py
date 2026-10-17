@@ -36,8 +36,9 @@ class QualityParams:
 
     blur_min: float = 15.0  # Laplacian variance (frames.score): below = blurred ...
     blur_rel: float = 0.35  # ... or below this share of the video's median (drop rule)
-    fast_flow_frac: float = 0.15  # median flow to the next candidate frame
-    fast_lost_frac: float = 0.7  # share of tracks lost to the next candidate frame
+    fast_step_s: float = 1 / 6
+    fast_flow_frac: float = 0.15  # median flow over fast_step_s
+    fast_lost_frac: float = 0.7  # share of tracks lost over fast_step_s
     rotation_window_s: float = 1.0
     rotation_inliers: float = 0.9
     rotation_max_parallax_frac: float = 0.002
@@ -79,9 +80,11 @@ def frame_flags(
         elif blur[i] < thr:
             flags["blur"][i] = ("laplacian_var", blur[i], thr)
     for i in range(1, n):
-        if not len(tracks[i - 1][0]):
+        # over one fast_step_s (one candidate if they are sparser), whatever the grid density
+        j = min(bisect.bisect_left(times, times[i] - prm.fast_step_s - 1e-3), i - 1)
+        if not len(tracks[j][0]):
             continue  # nothing to track (flat image): low_texture says it
-        p = kf.pair(tracks[i - 1], tracks[i])
+        p = kf.pair(tracks[j], tracks[i])
         if p.flow >= prm.fast_flow_frac * diag:
             flags["too_fast"][i] = ("flow_frac", p.flow / diag, prm.fast_flow_frac)
         elif 1 - p.survival >= prm.fast_lost_frac:

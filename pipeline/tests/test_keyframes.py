@@ -36,11 +36,22 @@ def test_rotation_only_gives_few_keyframes() -> None:
 
 def test_max_frames_cap() -> None:
     greys = synth.translate(40)
-    full = select(greys, parallax_frac=0.005)
-    capped = select(greys, cap=6, parallax_frac=0.005)
-    assert len(full) > 6 and len(capped) == 6
-    assert capped[0] == 0 and capped[-1] == 39 and set(capped) <= set(full)
+    assert len(select(greys, parallax_frac=0.005)) > 6
+    prm = kf.KeyframeParams(parallax_frac=0.005)
+    keys, theta = kf.fit(kf.track(greys), synth.times(40), [True] * 40, 800.0, prm, cap=6)
+    # the threshold rises until the keyframes fit, still evenly spaced by parallax
+    assert 4 <= len(keys) <= 6 and keys[0] == 0 and keys[-1] == 39 and theta > 0.005
     assert select(greys, cap=6, mode="fixed") == [0, 8, 16, 23, 31, 39]
+    # track-loss keyframes alone above the cap: uniform subsample
+    assert len(select(synth.translate(25, (30, 60, 30, 60, 30, 60)), cap=5)) == 5
+
+
+def test_budget_goes_where_the_camera_moves() -> None:
+    greys = synth.static(20) + synth.translate(40)[1:21]  # still for 20 frames, then moving
+    keys = select(greys, cap=10)
+    assert len(keys) <= 10 and keys[0] == 0 and keys[-1] == 39
+    assert sum(k >= 20 for k in keys) >= len(keys) - 2  # still part: first frame (+1 at most)
+    assert len(select(greys, cap=10, mode="fixed")) == 10  # by the clock: half wasted
 
 
 def test_unusable_frames_never_keyframes() -> None:

@@ -9,9 +9,11 @@ import pytest
 
 from qarau_pipeline import frames
 from qarau_pipeline.interfaces import StageError, read_run, run_stage
+from qarau_pipeline.keyframes import KeyframeParams
 from qarau_pipeline.probe import parse, probe_video
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+FIXED = KeyframeParams(mode="fixed")
 
 
 @pytest.fixture(scope="module")
@@ -29,20 +31,24 @@ def test_frames_stage(video: Path, tmp_path: Path) -> None:
     m = frames.run(video, tmp_path)
     fj = json.loads((tmp_path / "frames.json").read_text())
     fr = fj["frames"]
-    assert m["frames_extracted"] == len(fr) == 60  # clamp(3 s * 2.5, 60, 300)
-    assert [f["i"] for f in fr] == list(range(60))
+    # budget clamp(3 s * 6, 60, 300) = 60 keyframes; 1.5x candidates, capped at the 25 fps source
+    assert m["frames_extracted"] == len(fr) == 75
+    assert [f["i"] for f in fr] == list(range(75))
     ts = [f["t"] for f in fr]
     assert ts == sorted(ts) and 0 <= ts[0] < 0.1 and 2.8 < ts[-1] <= 3.0
     assert all((tmp_path / f["file"]).exists() for f in fr)
     assert all(f["blur"] > 0 and 0 < f["exposure"]["mean"] < 255 for f in fr)
     assert fj["source"]["width"] == 640 and abs(fj["source"]["duration_s"] - 3) < 0.1
-    assert sum(f["drop_reason"] in ("blur", "exposure") for f in fr) <= 0.3 * 60
-    assert sum(f["kept"] for f in fr) == m["keyframes"]
+    assert sum(f["drop_reason"] in ("blur", "exposure") for f in fr) <= 0.3 * 75
+    assert sum(f["kept"] for f in fr) == m["keyframes"] <= 60
+    m = frames.run(video, tmp_path, keys=FIXED)
+    assert m["frames_extracted"] == 60 and m["keyframes"] == 60 - m["frames_dropped"]
 
 
 def test_max_frames_caps(video: Path, tmp_path: Path) -> None:
     m = frames.run(video, tmp_path, max_frames=20)
-    assert m["frames_extracted"] == 20 and 2 <= m["keyframes"] <= 20
+    assert m["frames_extracted"] == 30 and 2 <= m["keyframes"] <= 20
+    assert frames.run(video, tmp_path, 20, FIXED)["frames_extracted"] == 20
     assert frames.target_frames(1000, 120) == 120 and frames.target_frames(10, None) == 60
 
 
@@ -94,7 +100,7 @@ def need_x265() -> None:
 
 
 def extract(video: Path, out: Path, max_frames: int | None = None) -> dict:
-    frames.run(video, out, max_frames)
+    frames.run(video, out, max_frames, FIXED)  # decoding tests: the plain fixed-rate grid
     m = json.loads((out / "frames/manifest.json").read_text())
     assert {"source", "conversions", "frames", "warnings"} <= m.keys()
     assert all({"file", "pts_s"} <= f.keys() for f in m["frames"])

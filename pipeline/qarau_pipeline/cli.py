@@ -11,7 +11,7 @@ from typing import Any
 
 from . import frames as frames_stage
 from .interfaces import StageError, run_stage
-from .keyframes import MODES, KeyframeParams
+from .keyframes import MODES, KeyframeParams, subsample
 from .segmentation import GroundedSam2, ManualMasks, SamApiSegmenter, parse_prompt, segment_stage
 
 
@@ -103,9 +103,11 @@ def cmd_run(a: argparse.Namespace) -> None:
         )  # fmt: skip
     fj = json.loads((out / "frames.json").read_text())
     names = [Path(f["file"]).name for f in fj["frames"] if f["kept"]]
-    # bridges = quality drops only; skipped keyframes would add matching time, no new view
+    # bridges = quality drops only, at most as many as the fixed grid allowed (30 % of the
+    # budget): the denser parallax candidates must not add merge matching time
     dropped = [Path(f["file"]).name for f in fj["frames"]
                if not f["kept"] and f["drop_reason"] != "not_keyframe"]  # fmt: skip
+    dropped = subsample(dropped, max(1, round(frames_stage.MAX_DROP * len(names))))
     rc = ColmapReconstructor(
         mode="video" if a.video else "images",
         max_image_size=a.max_image_size,

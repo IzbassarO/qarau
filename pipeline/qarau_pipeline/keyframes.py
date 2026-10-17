@@ -25,13 +25,17 @@ Tracks = tuple[np.ndarray, np.ndarray]  # track ids (N,), points (N, 2) in grey-
 class KeyframeParams:
     """Thresholds are fractions of the grey image diagonal (resolution independent).
 
-    parallax_frac is low on purpose: on the reference videos every 6 fps frame of a moving
-    camera adds points COLMAP keeps (0.5 % kept 40 of 109 notre-dame frames, and the gate
-    fails on -10 % points), while a still camera measures ~5e-5. So the default drops frames
-    only where the camera stands still or turns on the spot (docs/notes/p2b-plan.md)."""
+    The frame budget (the old fixed-rate frame count) sets how many keyframes COLMAP gets:
+    fewer frames lose points (the gate fails on -10 %). frames.run decodes `oversample` x
+    that many candidates and `fit` raises the parallax threshold above `parallax_frac` until
+    the keyframes fit the budget, so they go where the camera moves, not by the clock.
+    parallax_frac itself is the floor: a still camera measures ~5e-5 (docs/notes/p2b-plan.md)."""
 
     mode: str = "parallax"
     parallax_frac: float = 0.0003  # median residual after the best homography -> new keyframe
+    # candidates per budgeted keyframe; room at 2.0: frames bunch into the fast parts and
+    # points fall 11 % (1.5: -2.6 %, within run-to-run spread; docs/notes/p2b-plan.md)
+    oversample: float = 1.5
     min_track_frac: float = 0.6  # fewer of the keyframe's tracks left -> new keyframe
     rotation_min_gap_s: float = 0.3  # pure rotation: track-loss keyframes at most this often
     rotation_inliers: float = 0.9  # homography inlier ratio: "the homography explains it"
@@ -45,7 +49,8 @@ class KeyframeParams:
     def label(self) -> str:
         if self.mode == "fixed":
             return "fixed"
-        return (f"parallax {self.parallax_frac:g}, tracks {self.min_track_frac:g}, "
+        return (f"parallax >= {self.parallax_frac:g} fit to budget, {self.oversample:g}x "
+                f"candidates, tracks {self.min_track_frac:g}, "
                 f"rotation gap {self.rotation_min_gap_s:g} s")  # fmt: skip
 
 
@@ -142,8 +147,8 @@ def is_rotation(p: Pair, diag: float, inliers: float, max_par: float, min_motion
     return p.inliers >= inliers and p.parallax < max_par * diag and p.flow >= min_motion * diag
 
 
-def subsample(keys: list[int], cap: int | None) -> list[int]:
-    """Uniform by keyframe index, first and last kept."""
+def subsample[T](keys: list[T], cap: int | None) -> list[T]:
+    """Uniform by list index, first and last kept."""
     if not cap or len(keys) <= cap:
         return keys
     pick = np.unique(np.linspace(0, len(keys) - 1, max(cap, 2)).round().astype(int))
@@ -158,23 +163,53 @@ def select(
     prm: KeyframeParams,
     cap: int | None = None,
 ) -> list[int]:
-    """Indices of the keyframes among the usable candidates."""
+    """Indices of the keyframes among the usable candidates (see fit)."""
+    return fit(tracks, times, usable, diag, prm, cap)[0]
+
+
+def fit(
+    tracks: list[Tracks],
+    times: list[float],
+    usable: list[bool],
+    diag: float,
+    prm: KeyframeParams,
+    cap: int | None = None,
+) -> tuple[list[int], float]:
+    """(keyframes, parallax threshold used). With a cap, the threshold rises from
+    prm.parallax_frac until the keyframes fit it (bisection); track-loss keyframes alone
+    over the cap -> uniform subsample. Without a cap, prm.parallax_frac as is."""
     idx = [i for i, u in enumerate(usable) if u]
     if prm.mode == "fixed" or len(idx) <= 2:
-        return subsample(idx, cap)
-    keys = [idx[0]]
-    for i in idx[1:-1]:
-        k = keys[-1]
-        p = pair(tracks[k], tracks[i])
-        if p.parallax >= prm.parallax_frac * diag:
-            keys.append(i)
-        elif p.survival < prm.min_track_frac:
-            rot = is_rotation(p, diag, prm.rotation_inliers, prm.rotation_max_parallax_frac,
-                              prm.min_motion_frac)  # fmt: skip
-            if not rot or times[i] - times[k] >= prm.rotation_min_gap_s:
+        return subsample(idx, cap), 0.0
+    cache: dict[tuple[int, int], Pair] = {}  # a pair does not depend on the threshold
+
+    def walk(theta: float) -> list[int]:
+        keys = [idx[0]]
+        for i in idx[1:-1]:
+            k = keys[-1]
+            p = cache.get((k, i)) or cache.setdefault((k, i), pair(tracks[k], tracks[i]))
+            if p.parallax >= theta * diag:
                 keys.append(i)
-    keys.append(idx[-1])
-    return subsample(keys, cap)
+            elif p.survival < prm.min_track_frac:
+                rot = is_rotation(p, diag, prm.rotation_inliers, prm.rotation_max_parallax_frac,
+                                  prm.min_motion_frac)  # fmt: skip
+                if not rot or times[i] - times[k] >= prm.rotation_min_gap_s:
+                    keys.append(i)
+        return [*keys, idx[-1]]
+
+    lo, keys = prm.parallax_frac, walk(prm.parallax_frac)
+    if cap and len(keys) > cap:
+        hi = 0.05  # 5 % of the diagonal: far above any 6-12 fps candidate step
+        best = walk(hi)
+        for _ in range(14):  # log bisection: smallest threshold whose keyframes fit
+            mid = float(np.sqrt(lo * hi))
+            got = walk(mid)
+            if len(got) > cap:
+                lo = mid
+            else:
+                hi, best = mid, got
+        lo, keys = hi, best
+    return subsample(keys, cap), lo
 
 
 def params_dict(prm: KeyframeParams) -> dict[str, Any]:

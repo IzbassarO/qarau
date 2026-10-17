@@ -130,9 +130,10 @@ def run(
     max_frames: int | None = None,
     keys: kf.KeyframeParams | None = None,
 ) -> dict[str, Any]:
-    """Candidates on the fixed-rate grid -> quality drops -> keyframes among the usable ones
-    (keys.mode 'parallax' by default, 'fixed' = every usable candidate) -> frames.json and
-    quality_report.json. Candidates that are not keyframes: kept=False, 'not_keyframe'."""
+    """Candidates -> quality drops -> keyframes among the usable ones -> frames.json and
+    quality_report.json. 'parallax' (default): keys.oversample x the frame budget decoded,
+    keyframes fit to the budget by parallax; 'fixed': the budget decoded, every usable
+    candidate kept (pre-P2b). Candidates that are not keyframes: kept=False, 'not_keyframe'."""
     keys = keys or kf.KeyframeParams()
     if shutil.which("ffmpeg") is None:
         raise StageError("ffmpeg not found on PATH: install FFmpeg (brew/apt install ffmpeg)")
@@ -142,8 +143,9 @@ def run(
     fdir.mkdir(exist_ok=True)
     for old in [*fdir.glob("*.jpg"), fdir / "manifest.json"]:
         old.unlink(missing_ok=True)
-    n_target = target_frames(info.duration_s, max_frames)
-    rate = min(n_target / info.duration_s, info.avg_fps or 1e9)
+    n_target = target_frames(info.duration_s, max_frames)  # frame budget for COLMAP
+    n_cand = n_target * (keys.oversample if keys.mode == "parallax" else 1)
+    rate = min(n_cand / info.duration_s, info.avg_fps or 1e9)
     vf, conv, warn = decode_plan(info, rate, has_zscale())
     p = subprocess.run(
         ["ffmpeg", "-hide_banner", "-y", "-i", str(video), "-map", "0:v:0", "-an", "-vf", vf,
@@ -182,9 +184,10 @@ def run(
     greys = [kf.load_grey(f) for f in files]
     tracks = kf.track(greys)
     usable = [r is None for r in reasons]
-    chosen = set(kf.select(tracks, times, usable, kf.diagonal(greys[0]), keys, n_target))
+    picked, theta = kf.fit(tracks, times, usable, kf.diagonal(greys[0]), keys, n_target)
+    chosen = set(picked)
     reasons = [r or (None if i in chosen else "not_keyframe") for i, r in enumerate(reasons)]
-    selection = kf.params_dict(keys)
+    selection = {**kf.params_dict(keys), "budget": n_target, "parallax_frac_used": theta}
     rep = quality.report(video.name, info.duration_s, times, blur, greys, tracks, len(chosen),
                          selection)  # fmt: skip
     (out / "quality_report.json").write_text(json.dumps(rep, indent=1))
@@ -207,7 +210,8 @@ def run(
     (out / "frames.json").write_text(json.dumps({"source": source, "frames": frames}, indent=1))
     return {
         "frames_extracted": len(files), "frames_dropped": dropped, "keyframes": len(chosen),
-        "keyframe_mode": keys.label(), "keyframe_selection": selection,
+        "keyframe_mode": f"{keys.label()}; used {theta:.2g}" if theta else keys.label(),
+        "keyframe_selection": selection,
         "quality_verdict": rep["verdict"], "quality_issues": [i["code"] for i in rep["issues"]],
         "rate_fps": round(rate, 4), "median_blur": round(float(np.median(blur)), 2),
         "conversions": conv, "warnings": warn,
