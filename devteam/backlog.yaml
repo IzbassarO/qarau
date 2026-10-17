@@ -440,7 +440,12 @@ tasks:
     \ until it\n  exists), Observer (A9).\n- All text via i18n (RU/KK/EN).\n- Unit tests for the event\
     \ handling (pinch vs scroll, Shift pan, Alt precision) and for the\n  constraints (ground, bounds,\
     \ zoom limits, no roll). Tester screenshots of /viewer/notre-dame, /viewer/aegviidu and /viewer/room.\n"
-  status: todo
+  status: done
+  owner: dev_app
+  run: cont-20261017-123453-dev_app-2
+  branch: devteam/A6
+  pr: https://github.com/IzbassarO/qarau/pull/33
+  done_at: '2026-10-17'
 - id: A6b
   area: app
   title: Point info
