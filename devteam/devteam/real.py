@@ -330,6 +330,9 @@ Rules:
   that is expected. If a request needs a commit, say so instead of trying to commit.
 - Do not try to take screenshots: the tester screenshots the app pages itself and judges
   visual criteria from them.
+- Stop every server you start (dev server, preview, test server) as soon as its check is
+  done; never leave a listening port. When your run ends, the orchestrator kills anything
+  you left and reports each port it had to close.
 {quick_benchmark(team, s, dev)}- Run these checks and make them pass before you finish:
 {checks}
 - Finish with a short summary: what you changed, how you verified it, what is left."""
@@ -373,7 +376,12 @@ Rules:
         else:
             prompt = self._brief(team, s, dev)
         r = team.run_proc(
-            cmd, cwd=s["worktree"], timeout=dev["timeout_min"] * 60, input=prompt, env=env
+            cmd,
+            cwd=s["worktree"],
+            timeout=dev["timeout_min"] * 60,
+            input=prompt,
+            env=env,
+            agent=s["assignee"],
         )
         try:
             out = json.loads(r["stdout"])
@@ -424,7 +432,12 @@ Rules:
             cmd += ["-"]
             prompt = self._brief(team, s, dev)
         r = team.run_proc(
-            cmd, cwd=s["worktree"], timeout=dev["timeout_min"] * 60, input=prompt, env=env
+            cmd,
+            cwd=s["worktree"],
+            timeout=dev["timeout_min"] * 60,
+            input=prompt,
+            env=env,
+            agent=s["assignee"],
         )
         return parse_codex(r["stdout"], r["ok"], r["stderr"], s.get("session", ""))
 

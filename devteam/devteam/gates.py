@@ -12,12 +12,14 @@ import os
 import re
 import shlex
 import shutil
-import signal
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
+
+from devteam import procs
 
 FORBIDDEN_GH_FLAGS = {"--admin", "--delete-branch", "-d"}
 FORBIDDEN_GH_COMMANDS = {"api", "ruleset", "secret", "variable", "repo", "workflow", "release"}
@@ -170,6 +172,12 @@ def screenshots(
         return [], []
     out = team.home / "packets" / s["task"]["id"]
     out.mkdir(parents=True, exist_ok=True)
+    if _answers(sc["url"]):  # never screenshot a server left over from earlier (old :5199)
+        return [], [
+            f"{sc['url']} already answers before our dev server started: a stale server holds "
+            "the port. Stop it; screenshots are only taken of a fresh server."
+        ]
+    marker = procs.new_marker()
     srv = subprocess.Popen(  # {data}: the main checkout's data/ (runs to show, read-only)
         sc["serve"].format(  # {runs}: the developer's quick benchmark output (pipeline tasks)
             data=shlex.quote(str(team.root / "data")),
@@ -180,17 +188,18 @@ def screenshots(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
+        env={**os.environ, procs.MARKER: marker},
     )
     with team._lock:
         team._procs.add(srv)  # `devteam stop` kills it too
     paths, problems = [], []
     try:
         for _ in range(60):
-            try:
-                urllib.request.urlopen(sc["url"], timeout=2)
+            if srv.poll() is not None:  # exited, e.g. --strictPort on a busy port
+                return [], [f"dev server exited with {srv.returncode}: {sc['serve']}"]
+            if _answers(sc["url"]):
                 break
-            except OSError:
-                time.sleep(1)
+            time.sleep(1)
         else:
             return [], [f"dev server did not start: {sc['serve']}"]
         for route in routes:
@@ -206,17 +215,21 @@ def screenshots(
             else:
                 problems.append(f"{route}: {r['output'][-300:]}")
     finally:
-        os.killpg(srv.pid, signal.SIGTERM)
+        procs.reap(srv.pid, marker)  # the server and anything it started; the port is free
         srv.wait()
-        for sig in [0] * 50 + [signal.SIGKILL]:  # the shell exits first; wait for the server
-            try:
-                os.killpg(srv.pid, sig)
-            except ProcessLookupError:
-                break
-            time.sleep(0.1)
         with team._lock:
             team._procs.discard(srv)
     return paths, problems
+
+
+def _answers(url: str) -> bool:
+    try:
+        urllib.request.urlopen(url, timeout=2)
+        return True
+    except urllib.error.HTTPError:  # a server answered, with an error status
+        return True
+    except OSError:
+        return False
 
 
 def dev_screenshots(team, s, routes: list[str]) -> tuple[list[str], list[str]]:

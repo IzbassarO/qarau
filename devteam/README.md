@@ -50,6 +50,13 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   with PR links), open PRs, CI on `dev` (`gh`, cached 60 s), the latest commits, and "Needs
   your attention": red CI on `dev`, blocked tasks, PRs waiting for the owner, spend above
   80 % of the budget. Every value from `.env` is redacted.
+- No leftover servers (owner rule): every developer and tester step runs in its own process
+  group with `KEREGE_STEP=<id>` in its environment (`devteam/procs.py`). When the step ends
+  (success, failure, timeout, Ctrl+C), everything in the group or carrying the marker is
+  killed, and each TCP port it still listened on is logged as a warning (`left port N
+  listening`). Output goes to files, so a background server can't hold the step open until
+  its timeout. Screenshots refuse to run when the URL already answers before Kerege starts its
+  own dev server (a stale server), and stop the server afterwards.
 - Developers, in parallel: `dev_pipeline` = Claude Code (`claude -p`, subscription token in
   `.env`), `dev_app` = Codex (`codex exec`, your saved ChatGPT login; `codex login` once; no
   API key is ever passed). Codex has no network in its sandbox: `setup` installs first.
