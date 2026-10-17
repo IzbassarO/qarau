@@ -53,3 +53,12 @@ Manifest key `created_at`: ISO 8601 UTC time the export stage wrote the bundle (
 run date; for runs exported before this key existed it falls back to the manifest file's
 modification time. The control center shows runs as "run name · date". Additive key, `version`
 unchanged.
+
+## Addendum 2026-10-17 (P4b): `dense` layer, version 2
+
+Export now writes `version: 2` (the viewer reads 1 and 2; projection already wrote 2).
+Optional manifest key `dense`, present when export ran with `--dense`:
+`{count, position: "web/dense.position.f32", color: "web/dense.color.u8", densifier,
+frame_links_source, max_frames_per_point, frame_offsets: {path, dtype: "<u4", length},
+frame_ids: {path, dtype: "<u4", length}, linked_points, dropped}`. Layout, cap and the two
+link sources: ADR 0017. Every v1 key is unchanged; viewers that do not know `dense` ignore it.

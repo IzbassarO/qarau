@@ -28,16 +28,28 @@ def _ffmpeg_version() -> str:
 # torch abort in the same process (segment stage), so the segment path must not load it.
 
 
-def _export(out: Path, sparse: Path, frames: list[dict[str, Any]], source: dict[str, Any]) -> None:
+def _export(
+    out: Path,
+    sparse: Path,
+    frames: list[dict[str, Any]],
+    source: dict[str, Any],
+    dense: Path | None = None,
+) -> None:
     import pycolmap
 
     from .export import export_bundle
 
     def go() -> dict[str, Any]:
         rec = pycolmap.Reconstruction(str(sparse))
-        return export_bundle(rec, frames, out, source, out.name)
+        dp = None
+        if dense is not None:
+            from .visibility import load_dense, max_frames_per_point
 
-    res = run_stage(out, "export", f"pycolmap {pycolmap.__version__}", {"sparse": str(sparse)}, go)
+            dp = load_dense(dense, rec, frames, max_frames_per_point())
+        return export_bundle(rec, frames, out, source, out.name, dp)
+
+    params = {"sparse": str(sparse), **({"dense": str(dense)} if dense else {})}
+    res = run_stage(out, "export", f"pycolmap {pycolmap.__version__}", params, go)
     print("export:", res.metrics)
 
 
@@ -62,7 +74,7 @@ def cmd_export(a: argparse.Namespace) -> None:
     else:
         frames = frames_from_json(out)
         source = json.loads((out / "frames.json").read_text())["source"]
-    _export(out, Path(a.sparse), frames, source)
+    _export(out, Path(a.sparse), frames, source, Path(a.dense).resolve() if a.dense else None)
 
 
 def _frames(a: argparse.Namespace, out: Path) -> dict[str, Any]:
@@ -197,6 +209,8 @@ def main(argv: list[str] | None = None) -> None:
     e.add_argument("--sparse", required=True)
     e.add_argument("--images", help="image dir (image-set input); omit to use <out>/frames.json")
     e.add_argument("--out", required=True)
+    e.add_argument("--dense", help="dir with fused.ply (+ fused.ply.vis): dense layer + frame "
+                   "links (ADR 0017)")  # fmt: skip
     e.set_defaults(fn=cmd_export)
     q = sub.add_parser("quality", help="video -> frames + <out>/quality_report.json only")
     q.add_argument("--video", required=True)
