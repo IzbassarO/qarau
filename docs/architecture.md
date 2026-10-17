@@ -36,10 +36,10 @@ failure local.
 
 | Stage | Inputs | Outputs |
 | --- | --- | --- |
-| frames | video (or image set) | `probe.probe_video()` → `VideoInfo` (codec, coded and display size, `rotation_deg` from the displaymatrix or `tags.rotate`, transfer/primaries/bit depth, `is_hdr`, fps, `is_vfr` from the pts of the first 120 packets: any interval > 25 % off the median; `frame_dt_s` = that median interval). Then one ffmpeg decode: autorotate (once, ffmpeg default; first frame checked against the display size), HDR (HLG/PQ) → 8-bit SDR BT.709 (`zscale`+`tonemap=hable` when the build has zscale, else `colorspace` with a warning), frames picked by presentation time with `select` on the same grid as the former `fps` filter (per tick k the last source frame before (k+½)/rate, taken as the first frame at or after that boundary minus the median frame interval; no duplicates, `-fps_mode passthrough`; rate `clamp(duration·6, 60, 300)` frames). Outputs: `frames/000000.jpg…` (long side ≤ 1920 px), `frames/manifest.json` (`source` VideoInfo, `conversions` e.g. `autorotate:90`, `tonemap:hable`/`tonemap:colorspace`, `vfr:pts_sampling`; `frames[{file, pts_s}]` = source pts; `warnings`), `frames.json` (`source`; per frame `i`, `file`, `t`, `blur`, `exposure{mean,clip_low,clip_high}`, `kept`, `drop_reason`; GPS later). Unprobeable file, decode failure or 0 frames → `StageError` with a readable message |
+| frames | video (or image set) | `probe.probe_video()` → `VideoInfo` (codec, coded and display size, `rotation_deg` from the displaymatrix or `tags.rotate`, transfer/primaries/bit depth, `is_hdr`, fps, `is_vfr` from the pts of the first 120 packets: any interval > 25 % off the median; `frame_dt_s` = that median interval). Then one ffmpeg decode: autorotate (once, ffmpeg default; first frame checked against the display size), HDR (HLG/PQ) → 8-bit SDR BT.709 (`zscale`+`tonemap=hable` when the build has zscale, else `colorspace` with a warning), frames picked by presentation time with `select` on the same grid as the former `fps` filter (per tick k the last source frame before (k+½)/rate, taken as the first frame at or after that boundary minus the median frame interval; no duplicates, `-fps_mode passthrough`; rate `clamp(duration·6, 60, 300)` frames). Outputs: `frames/000000.jpg…` (long side ≤ 1920 px), `frames/manifest.json` (`source` VideoInfo, `conversions` e.g. `autorotate:90`, `tonemap:hable`/`tonemap:colorspace`, `vfr:pts_sampling`; `frames[{file, pts_s}]` = source pts; `warnings`), `frames.json` (`source`; per frame `i`, `file`, `t`, `blur`, `exposure{mean,clip_low,clip_high}`, `kept`, `drop_reason`; GPS later). The frame count above is the **budget** COLMAP gets; which frames fill it is decided by **parallax keyframes**, and the same pass writes the **footage quality report** `quality_report.json` next to `frames.json` (both: "Key techniques" below; the `quality` row is that report, run inside this stage). Unprobeable file, decode failure or 0 frames → `StageError` with a readable message |
 | quality | frames.json | `quality.json`: usable frames, re-shoot list (time ranges + reason) |
 | reconstruction | kept frames | Sky masks first (ADR 0013, classical OpenCV; off with `--no-sky-mask`): `colmap/masks/<image>.png`, 0 = sky, passed to feature extraction (`ImageReaderOptions.mask_path`). `colmap/database.db`, `colmap/sparse/0/*.bin` (main model; pycolmap in-process, `Reconstructor` interface; exhaustive matching ≤ 300 frames, else sequential with overlap 20 + quadratic overlap, no vocabulary tree; mapper `incremental` (default) or `global` (GLOMAP)). If the video splits into several models, it is joined again (ADR 0011 + P3b addendum): the frames the quality check dropped are added as temporary bridges, one GLOMAP pass maps everything, relaxed leftover registration follows if kept frames are still missing, the candidate with the most kept frames wins, bridges are deregistered and, if any were in the model, a global BA with Huber loss. Then the point filter (ADR 0013) deletes points whose max triangulation angle < 1.5° or whose mean reprojection error > the mapper's `filter_max_reproj_error` (4 px); `points_total`, `points_dropped_low_parallax`, `points_dropped_reproj` go to `run.json` and the benchmark. Models that still stand apart are written to `colmap/sparse/1..` and counted, never dropped silently; metrics: registered images, models, mapped model sizes, separate models, merge attempts/candidates, points, mean track length, mean reprojection error, seconds per step |
-| export | `colmap/sparse/0`, `frames.json` | `cloud.laz` (xyz+rgb), `cloud.ply`, `web/` viewer bundle: `manifest.json` + raw typed arrays + `thumbs/` (format: ADR 0003, `docs/notes/m1-plan.md` §3); world is Z-up, centroid at origin, `world_from_colmap` stored. Before writing, points with a non-finite coordinate or farther from the per-axis median than max(100 × the 99th-percentile distance, 1) are dropped, counted in `manifest.stats.dropped_points` and printed. Points farther from the nearest registered camera than 2.5 × the median such distance form the `far` layer (`web/far.*`, manifest key `far`, ADR 0013); the object cloud, tracks, bounds and LAZ/PLY never contain them. LAS offset = middle of the kept extent, scale = max(1 mm, half extent / (2³¹−1) × 1.1), so quantized coordinates always fit in int32 |
+| export | `colmap/sparse/0`, `frames.json` | `cloud.laz` (xyz+rgb), `cloud.ply`, `web/` viewer bundle: `manifest.json` + raw typed arrays + `thumbs/` (format: ADR 0003, `docs/notes/m1-plan.md` §3); world is Z-up, centroid at origin, `world_from_colmap` stored. Before writing, points with a non-finite coordinate or farther from the per-axis median than max(100 × the 99th-percentile distance, 1) are dropped, counted in `manifest.stats.dropped_points` and printed. Points farther from the nearest registered camera than 2.5 × the median such distance form the `far` layer (`web/far.*`, manifest key `far`, ADR 0013); the object cloud, tracks, bounds and LAZ/PLY never contain them. With `--dense D`: the `dense` layer with per-point frame links (ADR 0017, below). Manifest `version` 2. LAS offset = middle of the kept extent, scale = max(1 mm, half extent / (2³¹−1) × 1.1), so quantized coordinates always fit in int32 |
 | segmentation | bundle frames, text prompts, a `Segmenter` | `segmentation/observations.json` + `segmentation/masks/<frame>_<k>.png` (prompt, confidence, bbox per instance); implementations: manual masks, Grounded SAM 2 (dev only), SAM 3.1 API stub (ADR 0009) |
 | projection | masks, poses, tracks | `findings/findings.json` + `findings/points.finding.u16`, manifest `findings` key; visibility from tracks, voting, clustering (ADR 0009) |
 | measurement | clustered points, scale | area is part of the findings file: m² only with a known scale, else `rel` (ADR 0009) |
@@ -73,6 +73,69 @@ align" rather than guessing.
 **Change detection.** Match findings by 3D proximity and class. Report new, grew (area
 increase above noise threshold), shrank (usually a measurement artefact — flag it), and
 stable. Noise thresholds are calibrated per asset type from repeated scans.
+
+**Parallax keyframes (frames stage, `keyframes.py`, ADR 0015).** Keyframes are chosen by
+measured camera motion, not a fixed rate (`run --keyframes parallax`, default). ffmpeg
+decodes `oversample` (1.5) × the frame budget as candidates (at most the source fps; same
+HDR→SDR, rotation and VFR handling), the blur/exposure drops run, then KLT tracks
+(`goodFeaturesToTrack` + pyramidal LK with a forward-backward check, 640 px long side) run
+over all candidates. Walking the usable candidates, a new keyframe starts when, since the
+last keyframe: the median residual after the best RANSAC homography (the parallax: ~0 for a
+still camera and for turning on the spot) reaches θ · diagonal; or fewer than
+`min_track_frac` (0.6) of its tracks survive (if the homography explains the motion, at most
+every `rotation_min_gap_s`, 0.3 s); or `max_gap_s` (2 s) passed while the image moved
+≥ `min_motion_frac` (1 % of the diagonal), so a still camera's near-duplicates never become
+keyframes. θ starts at `parallax_frac` (0.0003, above a still camera's ~5e-5) and is raised
+by log bisection until the keyframes fit the budget (`--max-frames` / 300 cap included);
+track-loss keyframes alone over it → uniform subsample. First and last usable frame are
+always kept. Other candidates get `kept=false`, `drop_reason="not_keyframe"` and are not
+merge bridges (bridges = quality drops, at most 30 % of the keyframes). A budget capped
+below 6 fps (long videos, `--max-frames`) runs as `fixed`: those frames are already sparse,
+and moving them out of slow parts raised orono's reprojection 0.57 → 0.67 px.
+`--keyframes fixed` keeps every usable frame of the budget (pre-P2b). All thresholds are
+`KeyframeParams` fields; mode, thresholds and the fitted θ are in the frames stage metrics
+(`keyframe_mode`, `keyframe_selection.parallax_frac_used`) and in the report.
+
+**Footage quality report (frames stage, `quality.py`).** From the same candidates and
+tracks, `<run>/quality_report.json` (the table's `quality` row; version 2, full format:
+`docs/notes/quality-report.md`): `version`; `summary` {`frames_total`, `keyframes`,
+`issues_count`, `verdict` `ok` / `reshoot_recommended`}; `issues[]` {`kind`, `start_s`,
+`end_s`, `frames` (flagged `frames.json` indices), `severity` `info` / `warn` (≥ 15 % of the
+video, re-shoot), `metric`, `value`, `threshold`, `advice` (plain-English re-shoot
+sentence), `advice_key` (`quality.advice.<kind>`, for the web's translations)}. Kinds:
+`blur` (variance of the Laplacian), `too_fast` (flow or track loss over 1/6 s),
+`pure_rotation` (the homography explains a 1 s window, no residual parallax), `low_texture`
+(grid cells without a corner). `run` and `python -m qarau_pipeline quality --video V --out
+O` (frames stage only) print a short summary.
+
+**Dense reconstruction on a remote GPU (`dense_remote.py`, ADR 0016).** COLMAP dense
+(`image_undistorter` → `patch_match_stereo` with geometric consistency → `stereo_fusion`)
+needs CUDA, so it runs on a GPU worker from the image `infra/colmap-cuda` (COLMAP 4.2.1).
+`RemoteDenseExecutor` drives any `GpuProvider` (start, upload frames + sparse model, run,
+download `fused.ply` + `fused.ply.vis`, stop). Guarantees: a started worker is always stopped
+(`finally`, 3 tries, then an error naming the worker id); one wall-clock deadline
+`timeout_s` for the whole job, the remaining time passed to every call, `DenseTimeoutError`
+past it; before any start, `used today + est_hours_per_job > daily_gpu_hours_budget` (UTC
+day, JSON ledger under `data/`) raises `BudgetExceededError`. Config: `pipeline/config.yaml`
+→ `dense_remote` (`enabled: false`). Only a fake provider exists until a paid GPU account is
+approved; the default `run`/`benchmark` path does not use it.
+
+**Dense points and their frame links (`visibility.py`, ADR 0017).** `python -m
+qarau_pipeline export --sparse S --out O --dense D` reads `D/fused.ply` and adds the bundle
+layer `manifest.dense` (`web/dense.position.f32`, `web/dense.color.u8`, same world frame as
+`points`). Every dense point carries the frames that saw it as CSR: frames of point i =
+`frame_ids[frame_offsets[i]:frame_offsets[i+1]]` (`web/dense.frame_offsets.u32`, N+1
+entries; `web/dense.frame_ids.u32`, indices into `manifest.frames`), best first (smallest
+angle between the point normal and the ray to the camera; nearest camera without normals),
+at most `pipeline/config.yaml` → `dense.max_frames_per_point` (8). `dense.frame_links_source`
+says how they were made: `colmap_fusion` (exact, from `D/fused.ply.vis`, workspace image
+index → frame by image name) or `sparse_tracks` (fallback for a densifier without `.vis`:
+union of the tracks of the 8 nearest sparse points within 5 × the median sparse spacing,
+kept only where the point projects inside the frame with positive depth; no occlusion test).
+`dense.densifier` is `fake` for the fake provider's synthetic points, which must never be
+shown as a reconstruction. Dense points go through the same sanitize and far rules as the
+sparse ones (far ones are dropped and counted in `dense.dropped`), their link rows filtered
+in step. The sparse `points`/`tracks` arrays, `cloud.laz` and `cloud.ply` are unchanged.
 
 ## Benchmark
 

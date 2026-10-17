@@ -2,16 +2,21 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
 import pytest
+import synth
 
-from qarau_pipeline import frames
+from qarau_pipeline import frames, quality
+from qarau_pipeline import keyframes as kf
 from qarau_pipeline.interfaces import StageError, read_run, run_stage
+from qarau_pipeline.keyframes import KeyframeParams
 from qarau_pipeline.probe import parse, probe_video
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+FIXED = KeyframeParams(mode="fixed")
 
 
 @pytest.fixture(scope="module")
@@ -29,18 +34,28 @@ def test_frames_stage(video: Path, tmp_path: Path) -> None:
     m = frames.run(video, tmp_path)
     fj = json.loads((tmp_path / "frames.json").read_text())
     fr = fj["frames"]
-    assert m["frames_extracted"] == len(fr) == 60  # clamp(3 s * 2.5, 60, 300)
-    assert [f["i"] for f in fr] == list(range(60))
+    # budget clamp(3 s * 6, 60, 300) = 60 keyframes; 1.5x candidates, capped at the 25 fps source
+    assert m["frames_extracted"] == len(fr) == 75
+    assert [f["i"] for f in fr] == list(range(75))
     ts = [f["t"] for f in fr]
     assert ts == sorted(ts) and 0 <= ts[0] < 0.1 and 2.8 < ts[-1] <= 3.0
     assert all((tmp_path / f["file"]).exists() for f in fr)
     assert all(f["blur"] > 0 and 0 < f["exposure"]["mean"] < 255 for f in fr)
     assert fj["source"]["width"] == 640 and abs(fj["source"]["duration_s"] - 3) < 0.1
-    assert sum(not f["kept"] for f in fr) <= 0.3 * 60
+    assert sum(f["drop_reason"] in ("blur", "exposure") for f in fr) <= 0.3 * 75
+    assert sum(f["kept"] for f in fr) == m["keyframes"] <= 60
+    m = frames.run(video, tmp_path, keys=FIXED)
+    assert m["frames_extracted"] == 60 and m["keyframes"] == 60 - m["frames_dropped"]
 
 
 def test_max_frames_caps(video: Path, tmp_path: Path) -> None:
-    assert frames.run(video, tmp_path, max_frames=20)["frames_extracted"] == 20
+    # 20 < 3 s * 6 (60 by the minimum): a capped budget is sparse already, every frame stays
+    m = frames.run(video, tmp_path, max_frames=20)
+    assert m["frames_extracted"] == 20 and m["keyframes"] == 20 - m["frames_dropped"]
+    assert m["keyframe_mode"].endswith("-> fixed") and m["keyframe_selection"]["budget_capped"]
+    m = frames.run(video, tmp_path, max_frames=100)  # cap above the budget: parallax
+    assert m["frames_extracted"] == 75 and 2 <= m["keyframes"] <= 60
+    assert not m["keyframe_selection"]["budget_capped"]
     assert frames.target_frames(1000, 120) == 120 and frames.target_frames(10, None) == 60
 
 
@@ -92,7 +107,7 @@ def need_x265() -> None:
 
 
 def extract(video: Path, out: Path, max_frames: int | None = None) -> dict:
-    frames.run(video, out, max_frames)
+    frames.run(video, out, max_frames, FIXED)  # decoding tests: the plain fixed-rate grid
     m = json.loads((out / "frames/manifest.json").read_text())
     assert {"source", "conversions", "frames", "warnings"} <= m.keys()
     assert all({"file", "pts_s"} <= f.keys() for f in m["frames"])
@@ -244,3 +259,180 @@ def test_portrait_hdr_video(tmp_path: Path) -> None:
     img = cv2.imread(str(tmp_path / "out/frames/000000.jpg"))
     assert img is not None
     assert img.shape[:2] == (1920, 1080)  # upright portrait, long side capped
+
+
+# Parallax keyframes (keyframes.py) on synthetic sequences (tests/synth.py, 6 fps)
+
+
+def select(greys: list[np.ndarray], cap: int | None = None, **kw: object) -> list[int]:
+    prm = kf.KeyframeParams(**kw)  # type: ignore[arg-type]
+    n = len(greys)
+    return kf.select(kf.track(greys), synth.times(n), [True] * n, kf.diagonal(greys[0]), prm, cap)
+
+
+def test_static_camera_at_most_two_keyframes() -> None:
+    assert select(synth.static(30)) == [0, 29]
+    # 10 s still: five max_gap_s spans, but near-duplicates never become keyframes
+    assert select(synth.static(60)) == [0, 59]
+
+
+def test_translation_gives_several_keyframes() -> None:
+    assert len(select(synth.translate(40))) >= 10
+    assert len(select(synth.translate(40), cap=10)) == 10  # fit to the budget
+
+
+def test_translation_spaced_by_threshold() -> None:
+    greys = synth.translate(40)
+    fine, coarse = select(greys, parallax_frac=0.005), select(greys, parallax_frac=0.01)
+    gap_f, gap_c = np.diff(fine[:-1]), np.diff(coarse[:-1])
+    # ~0.8 px of parallax per frame against a 4 px / 8 px threshold (diagonal 800 px)
+    assert set(gap_f) <= {4, 5, 6, 7} and set(gap_c) <= {8, 9, 10, 11, 12}
+    assert 1.6 < np.mean(gap_c) / np.mean(gap_f) < 2.5
+    assert len(select(greys, mode="fixed")) == 40
+
+
+def test_max_time_gap() -> None:
+    # parallax threshold out of reach (40 px), tracks survive: only the 2 s gap adds frames
+    assert select(synth.translate(40), parallax_frac=0.05) == [0, 12, 24, 36, 39]
+
+
+def test_rotation_only_gives_few_keyframes() -> None:
+    greys = synth.rotate(40)  # 30 deg turn: no parallax, tracks leave the view
+    keys = select(greys)
+    assert keys[0] == 0 and keys[-1] == 39 and len(keys) <= 5
+    # a moving camera over a scene with depth, same defaults: many more
+    assert len(select(synth.translate(40))) > 3 * len(keys)
+
+
+def test_max_frames_cap() -> None:
+    greys = synth.translate(40)
+    assert len(select(greys, parallax_frac=0.005)) > 6
+    prm = kf.KeyframeParams(parallax_frac=0.005)
+    keys, theta = kf.fit(kf.track(greys), synth.times(40), [True] * 40, 800.0, prm, cap=6)
+    # the threshold rises until the keyframes fit, still evenly spaced by parallax
+    assert 4 <= len(keys) <= 6 and keys[0] == 0 and keys[-1] == 39 and theta > 0.005
+    assert select(greys, cap=6, mode="fixed") == [0, 8, 16, 23, 31, 39]
+    # track-loss keyframes alone above the cap: uniform subsample
+    assert len(select(synth.translate(25, (30, 60, 30, 60, 30, 60)), cap=5)) == 5
+
+
+def test_budget_goes_where_the_camera_moves() -> None:
+    greys = synth.static(20) + synth.translate(40)[1:21]  # still for 20 frames, then moving
+    keys = select(greys, cap=10)
+    assert len(keys) <= 10 and keys[0] == 0 and keys[-1] == 39
+    assert sum(k >= 20 for k in keys) >= len(keys) - 2  # still part: first frame (+1 at most)
+    assert len(select(greys, cap=10, mode="fixed")) == 10  # by the clock: half wasted
+
+
+def test_unusable_frames_never_keyframes() -> None:
+    greys = synth.translate(20)
+    usable = [i not in (0, 5, 19) for i in range(20)]
+    keys = kf.select(kf.track(greys), synth.times(20), usable, 800.0, kf.KeyframeParams())
+    assert keys[0] == 1 and keys[-1] == 18 and 5 not in keys
+
+
+def test_unknown_mode() -> None:
+    with pytest.raises(StageError, match="keyframe mode"):
+        kf.KeyframeParams(mode="every-third")
+
+
+# Footage quality report (quality.py), format: docs/notes/quality-report.md
+
+
+def report(greys: list[np.ndarray]) -> dict[str, Any]:
+    t = synth.times(len(greys))
+    blur = [float(cv2.Laplacian(g, cv2.CV_64F).var()) for g in greys]
+    sel = kf.params_dict(kf.KeyframeParams())
+    rep = quality.report("synthetic.mp4", t[-1], t, blur, greys, kf.track(greys), 2, sel)
+    check_shape(rep)
+    return rep
+
+
+def issues(greys: list[np.ndarray], kind: str) -> list[dict[str, Any]]:
+    return [i for i in report(greys)["issues"] if i["kind"] == kind]
+
+
+def check_shape(rep: dict[str, Any]) -> None:
+    """The documented fields, with their types and ranges."""
+    assert rep["version"] == quality.VERSION == 2
+    assert {"video", "duration_s", "summary", "keyframe_selection", "thresholds",
+            "issues"} <= rep.keys()  # fmt: skip
+    s = rep["summary"]
+    assert set(s) == {"frames_total", "keyframes", "issues_count", "verdict"}
+    assert s["issues_count"] == len(rep["issues"]) and 0 <= s["keyframes"] <= s["frames_total"]
+    assert s["verdict"] == ("reshoot_recommended" if any(
+        i["severity"] == "warn" for i in rep["issues"]) else "ok")  # fmt: skip
+    for i in rep["issues"]:
+        assert {"kind", "start_s", "end_s", "frames", "severity", "metric", "value",
+                "threshold", "advice", "advice_key"} == i.keys()  # fmt: skip
+        assert i["kind"] in quality.KINDS and i["severity"] in ("info", "warn")
+        assert 0 <= i["start_s"] <= i["end_s"] <= rep["duration_s"] + 1e-6
+        assert i["frames"] == sorted(i["frames"]) and 0 <= i["frames"][0] < s["frames_total"]
+        assert isinstance(i["value"], float) and isinstance(i["threshold"], float)
+        assert i["advice"].endswith(".") and " s" in i["advice"]  # names the time range
+        assert i["advice_key"] == f"quality.advice.{i['kind']}"
+    json.dumps(rep)
+
+
+def test_clean_translation_has_no_issues() -> None:
+    rep = report(synth.translate(30))
+    assert rep["issues"] == [] and rep["summary"]["verdict"] == "ok"
+
+
+def test_blur() -> None:
+    greys = synth.translate(30)
+    greys[12:24] = [cv2.GaussianBlur(g, (0, 0), 3) for g in greys[12:24]]
+    rep = report(greys)
+    [b] = [i for i in rep["issues"] if i["kind"] == "blur"]
+    assert b["frames"] == list(range(12, 24)) and (b["start_s"], b["end_s"]) == (2.0, 3.83)
+    assert b["metric"] == "laplacian_var" and b["value"] < b["threshold"]
+    assert b["severity"] == "warn" and rep["summary"]["verdict"] == "reshoot_recommended"
+    assert "blurred" in b["advice"] and "2.0–3.8 s" in b["advice"]
+    assert "[warn] blur: Hold the camera steadier" in quality.text(rep)
+
+
+def test_too_fast() -> None:
+    tex = synth.texture()
+    greys = [tex[:480, 140 * k : 140 * k + 640] for k in range(12)]  # 140 px per frame
+    [f] = issues(greys, "too_fast")
+    assert f["frames"][0] == 1 and f["frames"][-1] == 11
+    assert f["value"] >= f["threshold"] and "slower" in f["advice"]
+
+
+def test_pure_rotation() -> None:
+    rep = report(synth.rotate(30))  # K R K^-1 warps: a homography explains all motion
+    assert {i["kind"] for i in rep["issues"]} == {"pure_rotation"}
+    [r] = rep["issues"]
+    assert r["frames"] == list(range(30)) and r["metric"] == "parallax_frac"
+    assert r["value"] < r["threshold"] and "turning on the spot" in r["advice"]
+
+
+def test_low_texture() -> None:
+    rng = np.random.default_rng(1)
+    greys = [np.clip(128 + rng.normal(0, 0.5, (480, 640)), 0, 255).astype(np.uint8)] * 12
+    rep = report(greys)
+    assert {i["kind"] for i in rep["issues"]} == {"low_texture"}  # plain is not blurred
+    [t] = rep["issues"]
+    assert t["value"] == 1.0 and t["metric"] == "empty_cells_frac"
+
+
+def test_ranges() -> None:
+    assert quality.ranges([False, True, True, False, True, False, False, True]) == [(1, 4), (7, 7)]
+
+
+def test_frames_stage_writes_report(tmp_path: Path) -> None:
+    v = clip(tmp_path / "t.mp4", "-pix_fmt", "yuv420p")
+    m = frames.run(v, tmp_path / "out")
+    rep = json.loads((tmp_path / "out/quality_report.json").read_text())
+    check_shape(rep)
+    s = rep["summary"]
+    # budget 60 (3 s), 1.5x candidates = all 90 source frames (30 fps)
+    assert rep["video"] == "t.mp4" and s["frames_total"] == m["frames_extracted"] == 90
+    assert s["keyframes"] == m["keyframes"] <= rep["keyframe_selection"]["budget"] == 60
+    assert rep["keyframe_selection"]["mode"] == "parallax"
+    assert m["keyframe_mode"].startswith("parallax") and m["quality_verdict"] == s["verdict"]
+    fj = json.loads((tmp_path / "out/frames.json").read_text())["frames"]
+    assert sum(f["kept"] for f in fj) == m["keyframes"] >= 2
+    assert all(f["drop_reason"] in (None, "blur", "exposure", "not_keyframe") for f in fj)
+    fixed = frames.run(v, tmp_path / "fixed", keys=FIXED)
+    assert fixed["keyframes"] == 60 - fixed["frames_dropped"] and fixed["keyframe_mode"] == "fixed"

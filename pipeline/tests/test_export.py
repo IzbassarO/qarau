@@ -15,6 +15,7 @@ from qarau_pipeline.export import (
     sanitize_points,
     write_laz_ply,
 )
+from qarau_pipeline.interfaces import DensePoints
 
 F, N = 4, 40
 REGISTERED = [0, 1, 3]  # frame 2 is dropped/unregistered
@@ -171,7 +172,7 @@ def test_reexport_drops_findings(bundle, tmp_path: Path) -> None:
                "kept": i != 2, "drop_reason": None, "blur": 1.0} for i in range(F)]  # fmt: skip
     export_bundle(rec, frames, out, m["source"], "run")
     again = json.loads(mp.read_text())
-    assert "findings" not in again and again["version"] == 1
+    assert "findings" not in again and again["version"] == 2
 
 
 # ---------------------------------------------------------------- far / invalid points
@@ -260,3 +261,73 @@ def test_no_far_points_in_a_compact_scene(bundle) -> None:
     out, m, *_ = bundle
     assert m["far"]["count"] == 0 and (out / m["far"]["position"]).stat().st_size == 0
     assert m["points"]["count"] == N
+
+
+# ---------------------------------------------------------------- dense layer (ADR 0017)
+
+V1_KEYS = {"version", "run_id", "created_at", "source", "world", "points", "far", "tracks",
+           "frames", "stats"}  # fmt: skip
+
+
+def dense_points(truth: dict, extra: np.ndarray) -> DensePoints:
+    """Dense = every sparse point twice (jittered) + the given extra rows. Row k links frames
+    [k % 4, (k + 1) % 4] so a row that drifted to another point is detectable."""
+    rng = np.random.default_rng(5)
+    xyz = np.vstack([np.repeat(truth["pts"], 2, 0) + rng.normal(0, 0.01, (2 * N, 3)), extra])
+    n = len(xyz)
+    ids = np.array([[k % F, (k + 1) % F] for k in range(n)], np.uint32).ravel()
+    return DensePoints(xyz, np.full((n, 3), 7, np.uint8), None,
+                       np.arange(0, 2 * n + 1, 2, dtype=np.uint32), ids, "sparse_tracks", 8,
+                       "fake")  # fmt: skip
+
+
+def export_dense(tmp_path: Path, extra: np.ndarray):
+    sparse, truth = make_model(tmp_path)
+    rec = pycolmap.Reconstruction(str(sparse))
+    frames = [{"i": i, "name": f"f{i}.jpg", "file": f"frames/{i:06d}.jpg", "t": float(i),
+               "kept": True, "drop_reason": None, "blur": 1.0} for i in range(F)]  # fmt: skip
+    out = tmp_path / "run"
+    out.mkdir()
+    dp = dense_points(truth, extra)
+    metrics = export_bundle(rec, frames, out, {"kind": "images"}, "run", dp)
+    return out, json.loads((out / "web/manifest.json").read_text()), dp, metrics
+
+
+def test_dense_links_in_bundle(tmp_path: Path) -> None:
+    out, m, dp, metrics = export_dense(tmp_path, np.zeros((0, 3)))
+    assert m["version"] == 2 and V1_KEYS <= set(m)
+    d = m["dense"]
+    assert d["frame_links_source"] == "sparse_tracks" and d["max_frames_per_point"] == 8
+    assert d["count"] == 2 * N and d["densifier"] == "fake"
+    fo = np.fromfile(out / d["frame_offsets"]["path"], d["frame_offsets"]["dtype"])
+    fi = np.fromfile(out / d["frame_ids"]["path"], d["frame_ids"]["dtype"])
+    assert len(fo) == d["frame_offsets"]["length"] == d["count"] + 1
+    assert len(fi) == d["frame_ids"]["length"] and fo[0] == 0 and fo[-1] == len(fi)
+    assert (np.diff(fo.astype(np.int64)) >= 0).all() and (fi < len(m["frames"])).all()
+    pos = np.fromfile(out / d["position"], "<f4").reshape(-1, 3)
+    W = np.array(m["world"]["world_from_colmap"]).reshape(4, 4)
+    assert np.allclose(pos, dp.xyz @ W[:3, :3].T + W[:3, 3], atol=1e-4)
+    assert metrics["dense_points"] == d["linked_points"] == 2 * N
+
+
+def test_dense_filtering_keeps_rows_in_step(tmp_path: Path) -> None:
+    """A non-finite and a far dense point are dropped together with their link rows."""
+    extra = np.array([[np.nan, 0, 0], [0.0, 0, 300.0], [0.0, 0, 5.0]])
+    out, m, dp, _ = export_dense(tmp_path, extra)
+    d = m["dense"]
+    assert d["dropped"] == {"non_finite": 1, "far_outliers": 0, "far": 1}
+    keep = np.r_[np.arange(2 * N), 2 * N + 2]  # original rows that survive
+    assert d["count"] == len(keep)
+    fo = np.fromfile(out / d["frame_offsets"]["path"], "<u4")
+    fi = np.fromfile(out / d["frame_ids"]["path"], "<u4")
+    assert len(fo) == d["count"] + 1 and fo[-1] == len(fi) and (fi < F).all()
+    for row, k in enumerate(keep):  # no index drift: row `row` is original point k
+        assert fi[fo[row] : fo[row + 1]].tolist() == [k % F, (k + 1) % F]
+    pos = np.fromfile(out / d["position"], "<f4").reshape(-1, 3)
+    W = np.array(m["world"]["world_from_colmap"]).reshape(4, 4)
+    assert np.allclose(pos, dp.xyz[keep] @ W[:3, :3].T + W[:3, 3], atol=1e-4)
+
+
+def test_no_dense_layer_without_dense_input(bundle) -> None:
+    _, m, *_ = bundle
+    assert "dense" not in m and m["version"] == 2 and set(m) == V1_KEYS
