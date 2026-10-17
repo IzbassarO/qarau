@@ -107,6 +107,7 @@ export class ViewerEngine {
   private frustumsVisible: boolean;
   private dot: Points;
   private pickMark: Points;
+  private farPoints?: Points<BufferGeometry, PointsMaterial>;
   private navigationBounds: Box3;
   private navigationMargin: number;
   private flyState: FlyState | null = null;
@@ -224,6 +225,20 @@ export class ViewerEngine {
     const pts = new Points(g, this.mat);
     pts.frustumCulled = false;
     this.scene.add(pts);
+
+    // ---- far layer: flat not-seen colour, independent of object colours and tracks
+    if (b.far && b.far.position.length > 0) {
+      const farGeometry = new BufferGeometry();
+      farGeometry.setAttribute('position', new BufferAttribute(b.far.position, 3));
+      const color = getComputedStyle(canvas).getPropertyValue('--color-notseen').trim();
+      this.farPoints = new Points(
+        farGeometry,
+        new PointsMaterial({ color: color || '#6B727D', size: 2.5, sizeAttenuation: false }),
+      );
+      this.farPoints.name = 'far';
+      this.farPoints.visible = defaults.showFarLayer;
+      this.scene.add(this.farPoints);
+    }
 
     // ---- camera path: solid up to the current frame, dashed for the rest
     const pathPts = new Float32Array(this.regIdx.length * 3);
@@ -377,8 +392,18 @@ export class ViewerEngine {
     u.uShowCurrent.value = o.showCurrent ? 1 : 0;
     u.uFindings.value = o.findings ? 1 : 0;
     u.uPointSize.value = o.pointSize;
+    if (this.farPoints) this.farPoints.material.size = o.pointSize;
     this.frustumsVisible = o.frustums;
     this.updateFrustumVisibility();
+    this.dirty = true;
+  }
+
+  hasFarLayer(): boolean {
+    return !!this.farPoints;
+  }
+
+  setFarVisible(visible: boolean) {
+    if (this.farPoints) this.farPoints.visible = visible;
     this.dirty = true;
   }
 
@@ -943,6 +968,9 @@ export class ViewerEngine {
     window.removeEventListener('blur', this.onBlur);
     c.removeEventListener('contextmenu', this.noCtx);
     this.controls.dispose();
+    this.farPoints?.geometry.dispose();
+    this.farPoints?.material.dispose();
+    this.farPoints?.removeFromParent();
     this.renderer.dispose();
   }
 }

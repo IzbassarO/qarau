@@ -92,6 +92,8 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
   const rgbAvailable = hasRgb(bundle);
   const activeColorMode = defaults.colorMode;
   const colorModeHintId = useId();
+  const [showFarLayer, setShowFarLayer] = useState(defaults.showFarLayer);
+  const farAvailable = !!bundle.far?.position.length;
   const [opts, setOpts] = useState<Options>({
     buildUp: defaults.buildUp,
     showCurrent: true,
@@ -154,6 +156,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
 
   useEffect(() => engineRef.current?.setFrame(frame), [frame, bundle]);
   useEffect(() => engineRef.current?.setOptions(opts), [opts, bundle]);
+  useEffect(() => engineRef.current?.setFarVisible(showFarLayer), [showFarLayer, bundle]);
   useEffect(() => engineRef.current?.setColorMode(activeColorMode), [activeColorMode, bundle]);
   useEffect(() => engineRef.current?.setPicked(picked), [picked, bundle]);
   useEffect(() => engineRef.current?.setSelectedFinding(sel ?? 0), [sel, bundle]);
@@ -268,6 +271,12 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
           </span>
           <LangSwitch />
         </header>
+      )}
+
+      {bundle.farError && (
+        <p role="alert" className="m-0 border-b border-line bg-surface px-4 py-2 text-watch">
+          {t(bundle.farError === 'missing' ? 'viewer.far.errorMissing' : 'viewer.far.errorBroken')}
+        </p>
       )}
 
       <div className="flex min-h-0 grow">
@@ -563,6 +572,11 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
             <Toggle on={opts.frustums} onChange={(v) => setOpts({ ...opts, frustums: v })}>
               {t('show.frustums')}
             </Toggle>
+            {farAvailable && (
+              <Toggle on={showFarLayer} onChange={setShowFarLayer}>
+                {t('viewer.show.farPoints')}
+              </Toggle>
+            )}
             {findings.length > 0 && (
               <Toggle on={opts.findings} onChange={(v) => setOpts({ ...opts, findings: v })}>
                 {t('show.findings')}

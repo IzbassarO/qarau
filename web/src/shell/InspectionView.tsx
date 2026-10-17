@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useI18n, type Key } from '../i18n';
-import { BundleError, loadBundle, loadManifest, type Bundle } from '../lib/bundle';
+import { BundleError, FarLayerError, loadBundle, loadManifest, type Bundle } from '../lib/bundle';
 import type { InspectionSummary, RunSummary } from '../lib/inspections';
 import { processingSteps } from '../lib/processing';
 import { ProcessingSteps } from './ProcessingSteps';
@@ -20,7 +20,12 @@ export function InspectionView({
     queryKey: ['inspection-bundle', inspection.id],
     queryFn: async () => {
       const manifest = await loadManifest(inspection.id);
-      return loadBundle(inspection.id, manifest, () => {});
+      try {
+        return await loadBundle(inspection.id, manifest, () => {});
+      } catch (error) {
+        if (error instanceof FarLayerError) return error.bundle;
+        throw error;
+      }
     },
     enabled: !demoBundle,
     retry: false,

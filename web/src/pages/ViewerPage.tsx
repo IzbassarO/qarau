@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { createDemo } from '../fixtures/demo';
 import { useI18n, type Key } from '../i18n';
-import { BundleError, loadBundle, loadManifest, type Bundle } from '../lib/bundle';
+import { BundleError, FarLayerError, loadBundle, loadManifest, type Bundle } from '../lib/bundle';
 import { ViewerScreen } from '../viewer/ViewerScreen';
 
 type State =
@@ -26,6 +26,10 @@ export function ViewerPage() {
         if (!dead) setSt({ s: 'ready', bundle });
       } catch (e) {
         if (dead) return;
+        if (e instanceof FarLayerError) {
+          setSt({ s: 'ready', bundle: e.bundle });
+          return;
+        }
         const code = e instanceof BundleError ? e.code : 'generic';
         setSt({ s: 'error', code, msg: String(e) });
       }

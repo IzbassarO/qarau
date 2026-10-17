@@ -154,6 +154,95 @@ function mouseLook(dx: number, dy: number) {
   document.dispatchEvent(event);
 }
 
+describe('ViewerEngine far layer', () => {
+  const farPoints = (engine: ViewerEngine) =>
+    engine.scene.getObjectByName('far') as Points<import('three').BufferGeometry, PointsMaterial>;
+
+  it('renders separate gray points, hidden by default, with an independent visibility toggle', () => {
+    const bundle = createDemo('en').bundle;
+    const { engine } = setup(bundle);
+    const far = farPoints(engine);
+    const object = engine.scene.children.find(
+      (child) => child instanceof Points && child.material instanceof ShaderMaterial,
+    ) as Points;
+    expect(engine.hasFarLayer()).toBe(true);
+    expect(far).toBeInstanceOf(Points);
+    expect(far).not.toBe(object);
+    expect(far.geometry.getAttribute('position').array).toBe(bundle.far!.position);
+    expect(far.geometry.getAttribute('position').count).toBe(bundle.manifest.far!.count);
+    expect(object.geometry.getAttribute('position').array).toBe(bundle.position);
+    expect(object.geometry.getAttribute('position').count).toBe(bundle.manifest.points.count);
+    expect(far.geometry.getAttribute('color')).toBeUndefined();
+    expect(far.material.vertexColors).toBe(false);
+    expect(far.material.color.getHexString()).toBe('6b727d');
+    expect(far.visible).toBe(false);
+    engine.setFarVisible(true);
+    expect(far.visible).toBe(true);
+    engine.setFrame(5);
+    engine.setColorMode('height');
+    expect(far.visible).toBe(true);
+    expect(far.material.color.getHexString()).toBe('6b727d');
+    engine.setFarVisible(false);
+    expect(far.visible).toBe(false);
+    expect(object.visible).toBe(true);
+  });
+
+  it('reads the not-seen CSS token from the canvas', () => {
+    const style = document.createElement('style');
+    style.textContent = 'canvas { --color-notseen: #123456; }';
+    document.body.append(style);
+    const { engine } = setup();
+    expect(farPoints(engine).material.color.getHexString()).toBe('123456');
+  });
+
+  it.each([undefined, { position: new Float32Array(), color: new Uint8Array() }])(
+    'has no far object for an absent or empty layer (%s)',
+    (far) => {
+      const { engine } = setup({ ...createDemo('en').bundle, far });
+      expect(engine.hasFarLayer()).toBe(false);
+      expect(farPoints(engine)).toBeUndefined();
+      expect(() => engine.setFarVisible(true)).not.toThrow();
+    },
+  );
+
+  it('keeps framing and navigation bounds identical with very distant far points', () => {
+    const bundle = navigationBundle();
+    const { engine: without } = setup({ ...bundle, far: undefined });
+    const { engine: withFar } = setup({
+      ...bundle,
+      far: { position: new Float32Array([1e6, -1e6, 1e6]), color: new Uint8Array(3) },
+    });
+    expect(withFar.focus).toEqual(without.focus);
+    expect(withFar.camera.position.toArray()).toEqual(without.camera.position.toArray());
+    expect(withFar.camera.projectionMatrix.toArray()).toEqual(
+      without.camera.projectionMatrix.toArray(),
+    );
+    expect(withFar.controls.target.toArray()).toEqual(without.controls.target.toArray());
+    withFar.setFarVisible(true);
+    for (const engine of [without, withFar]) {
+      engine.camera.position.set(1e5, -1e5, 1e5);
+      engine.controls.sync();
+    }
+    expect(withFar.camera.position.toArray()).toEqual(without.camera.position.toArray());
+    expect(withFar.camera.position.length()).toBeLessThan(10);
+    withFar.resetView(false);
+    without.resetView(false);
+    expect(withFar.camera.position.toArray()).toEqual(without.camera.position.toArray());
+  });
+
+  it('disposes and removes the far geometry and material on unload', () => {
+    const { engine } = setup();
+    const far = farPoints(engine);
+    const geometry = vi.spyOn(far.geometry, 'dispose');
+    const material = vi.spyOn(far.material, 'dispose');
+    engine.dispose();
+    engines.delete(engine);
+    expect(geometry).toHaveBeenCalledOnce();
+    expect(material).toHaveBeenCalledOnce();
+    expect(far.parent).toBeNull();
+  });
+});
+
 describe('ViewerEngine fly input', () => {
   it('boosts when Shift is already held before fly mode starts', () => {
     const travel = (shiftKey: boolean) => {
