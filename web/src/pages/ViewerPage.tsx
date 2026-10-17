@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 import { createDemo } from '../fixtures/demo';
 import { useI18n, type Key } from '../i18n';
 import { BundleError, FarLayerError, loadBundle, loadManifest, type Bundle } from '../lib/bundle';
@@ -14,6 +14,7 @@ export function ViewerPage() {
   const { runId = '' } = useParams();
   const { t, lang } = useI18n();
   const [st, setSt] = useState<State>({ s: 'loading', p: 0 });
+  const [search] = useSearchParams();
 
   useEffect(() => {
     if (runId === 'demo') return;
@@ -40,8 +41,24 @@ export function ViewerPage() {
   }, [runId]);
 
   // The demo reuses the local bundle and does not need a backend manifest.
-  if (runId === 'demo') return <ViewerScreen bundle={createDemo(lang).bundle} />;
-  if (st.s === 'ready') return <ViewerScreen bundle={st.bundle} />;
+  const bundle = runId === 'demo' ? createDemo(lang).bundle : st.s === 'ready' ? st.bundle : null;
+  if (bundle) {
+    const value = search.get('point');
+    const point = value !== null && /^\d+$/.test(value) ? Number(value) : null;
+    const valid =
+      point !== null &&
+      Number.isSafeInteger(point) &&
+      point < bundle.manifest.points.count &&
+      point * 3 + 2 < bundle.position.length;
+    return (
+      <ViewerScreen
+        key={`${runId}:${search}`}
+        bundle={bundle}
+        initialPoint={valid ? point : null}
+        invalidPoint={search.has('point') && !valid}
+      />
+    );
+  }
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 bg-bg p-6 text-center">
       {st.s === 'loading' ? (
@@ -57,7 +74,7 @@ export function ViewerPage() {
             <div className="h-1 rounded-full bg-inspected" style={{ width: `${st.p * 100}%` }} />
           </div>
         </>
-      ) : (
+      ) : st.s === 'error' ? (
         <>
           <p className="max-w-md text-watch" role="alert">
             {t(`error.${st.code}` as Key)}
@@ -69,7 +86,7 @@ export function ViewerPage() {
             {t('error.back')}
           </Link>
         </>
-      )}
+      ) : null}
     </div>
   );
 }

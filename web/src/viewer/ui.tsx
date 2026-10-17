@@ -1,6 +1,52 @@
-import { useId, type ReactNode } from 'react';
+import { useId, type MouseEvent, type ReactNode } from 'react';
 import { LANGS, setLang, useI18n, type Lang } from '../i18n';
 import { MAX_SENSITIVITY, MIN_SENSITIVITY } from './settings';
+
+export function ToolButton({
+  label,
+  onClick,
+  pressed,
+  children,
+}: {
+  label: string;
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+  pressed?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      aria-pressed={pressed}
+      className={`flex size-9 cursor-pointer items-center justify-center rounded-lg border-0 text-xl text-[#c9ced6] hover:bg-raised ${pressed ? 'bg-line' : 'bg-transparent'}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function PointInfoTool({ active, onClick }: { active: boolean; onClick: () => void }) {
+  const { t } = useI18n();
+  return (
+    <ToolButton label={t('pointInfo.tool')} pressed={active} onClick={onClick}>
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 18 18"
+        aria-hidden="true"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
+        <circle cx="9" cy="9" r="7" />
+        <path d="M9 8v5M8 13h2" />
+        <circle cx="9" cy="5" r="0.7" fill="currentColor" />
+      </svg>
+    </ToolButton>
+  );
+}
 
 export function ModeSwitch({
   orbitActive = true,

@@ -86,6 +86,7 @@ export interface Callbacks {
   onPick: (point: number | null) => void;
   onFlyModeChange?: (active: boolean) => void;
   onAlignModeChange?: (active: boolean) => void;
+  onPointInfoModeChange?: (active: boolean) => void;
 }
 
 export class ViewerEngine {
@@ -119,6 +120,7 @@ export class ViewerEngine {
   private navigationMargin: number;
   private ground;
   private aligning = false;
+  private pointInfoActive = false;
   private flyState: FlyState | null = null;
   private flyLookActive = false;
   private flyDistance = 1;
@@ -291,8 +293,10 @@ export class ViewerEngine {
     mg.setAttribute('position', new BufferAttribute(new Float32Array(3), 3));
     this.pickMark = new Points(
       mg,
-      new PointsMaterial({ color: 0xffffff, size: 16, sizeAttenuation: false }),
+      new PointsMaterial({ color: 0xffffff, size: 10, sizeAttenuation: false, depthTest: false }),
     );
+    this.pickMark.name = 'selected-point';
+    this.pickMark.renderOrder = 1;
     this.pickMark.visible = false;
     this.pickMark.frustumCulled = false;
     this.scene.add(this.pickMark);
@@ -538,6 +542,7 @@ export class ViewerEngine {
   }
 
   setOrbitMode() {
+    this.setPointInfoMode(false);
     this.cancelSurfaceAlignment();
     this.exitFlyMode();
     this.exitSourcePose();
@@ -557,6 +562,17 @@ export class ViewerEngine {
     this.aligning = true;
     this.cb.onAlignModeChange?.(true);
     this.canvas.focus({ preventScroll: true });
+  }
+
+  /** Point inspection shares orbit navigation; only an unmodified click selects. */
+  setPointInfoMode(active: boolean) {
+    if (active) {
+      this.cancelSurfaceAlignment();
+      this.exitFlyMode();
+    }
+    if (this.pointInfoActive === active) return;
+    this.pointInfoActive = active;
+    this.cb.onPointInfoModeChange?.(active);
   }
 
   private cancelSurfaceAlignment() {
@@ -647,6 +663,7 @@ export class ViewerEngine {
 
   private enterFlyMode() {
     if (this.flyMode || this.disposed) return;
+    this.setPointInfoMode(false);
     this.cancelSurfaceAlignment();
     this.tween = null;
     this.axisAnimation = null;
@@ -723,6 +740,11 @@ export class ViewerEngine {
   };
 
   private onLookDrag = (e: PointerEvent) => {
+    if (
+      this.down?.id === e.pointerId &&
+      Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 4
+    )
+      this.down.moved = true;
     if (!this.flyMode || !this.lookDrag || document.pointerLockElement === this.canvas) return;
     if (e.pointerId !== this.lookDrag.id) return;
     this.look(e.clientX - this.lookDrag.x, e.clientY - this.lookDrag.y);
@@ -738,12 +760,26 @@ export class ViewerEngine {
       this.canvas.releasePointerCapture(drag.id);
   }
   private onLookEnd = (e: PointerEvent) => {
+    // Navigation releases capture on pointerup before our bubble listener runs.
+    // A release with no held buttons must not erase that pending click.
+    if (e.pointerId === this.down?.id && (e.type === 'pointercancel' || e.buttons !== 0))
+      this.down = null;
     if (e.pointerId === this.lookDrag?.id) this.endLookDrag();
   };
 
-  private down = { x: 0, y: 0 };
+  private down: { id: number; x: number; y: number; moved: boolean; modified: boolean } | null =
+    null;
   private onDown = (e: PointerEvent) => {
-    this.down = { x: e.clientX, y: e.clientY };
+    this.down =
+      e.button === 0
+        ? {
+            id: e.pointerId,
+            x: e.clientX,
+            y: e.clientY,
+            moved: false,
+            modified: e.shiftKey || e.ctrlKey || e.metaKey || e.altKey,
+          }
+        : null;
     if (this.flyMode && e.button === 0 && document.pointerLockElement !== this.canvas) {
       this.canvas.focus({ preventScroll: true });
       this.lookDrag = { id: e.pointerId, x: e.clientX, y: e.clientY };
@@ -752,12 +788,21 @@ export class ViewerEngine {
     }
   };
   private onUp = (e: PointerEvent) => {
-    this.onLookEnd(e);
+    const down = this.down;
+    this.down = null;
+    if (e.pointerId === this.lookDrag?.id) this.endLookDrag();
     if (
+      !down ||
+      down.id !== e.pointerId ||
+      down.moved ||
+      down.modified ||
       this.flyMode ||
       e.button !== 0 ||
       e.shiftKey ||
-      Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 4
+      e.ctrlKey ||
+      e.metaKey ||
+      e.altKey ||
+      Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4
     )
       return;
     if (this.aligning) {
@@ -765,7 +810,7 @@ export class ViewerEngine {
       if (point !== undefined) this.alignToPoint(point);
       return;
     }
-    this.cb.onPick(this.pickAt(e) ?? null);
+    if (this.pointInfoActive) this.cb.onPick(this.pickAt(e) ?? null);
   };
   private noCtx = (e: Event) => e.preventDefault();
 

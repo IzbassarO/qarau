@@ -156,6 +156,64 @@ function mouseLook(dx: number, dy: number) {
   document.dispatchEvent(event);
 }
 
+describe('ViewerEngine point info tool', () => {
+  it('selects through the existing picker only when active and preserves orbit during drags', () => {
+    const { canvas, engine, onPick } = setup(navigationBundle());
+    const pixel = engine.project([1, -1, 1]);
+    pointer(canvas, 'pointerdown', pixel.x, pixel.y);
+    pointer(canvas, 'pointerup', pixel.x, pixel.y);
+    expect(onPick).not.toHaveBeenCalled();
+    engine.setPointInfoMode(true);
+    expect(engine.controls.enabled).toBe(true);
+    pointer(canvas, 'pointerdown', pixel.x, pixel.y);
+    pointer(canvas, 'pointerup', pixel.x, pixel.y);
+    expect(onPick).toHaveBeenCalledOnce();
+    expect(onPick.mock.calls[0][0]).toBeTypeOf('number');
+    onPick.mockClear();
+    const rotation = engine.camera.quaternion.clone();
+    pointer(canvas, 'pointerdown', pixel.x, pixel.y);
+    pointer(canvas, 'pointermove', pixel.x + 50, pixel.y + 20);
+    frame(3);
+    pointer(canvas, 'pointerup', pixel.x + 50, pixel.y + 20);
+    frame(60);
+    expect(onPick).not.toHaveBeenCalled();
+    expect(engine.camera.quaternion.angleTo(rotation)).toBeGreaterThan(0.01);
+  });
+
+  it('rejects an out-and-back drag, cancelled or unmatched pointers, and double-click events', () => {
+    const { canvas, engine, onPick } = setup(navigationBundle());
+    engine.setPointInfoMode(true);
+    const p = engine.project([1, -1, 1]);
+    pointer(canvas, 'pointerdown', p.x, p.y);
+    pointer(canvas, 'pointermove', p.x + 50, p.y);
+    pointer(canvas, 'pointermove', p.x, p.y);
+    pointer(canvas, 'pointerup', p.x, p.y);
+    pointer(canvas, 'pointerdown', p.x, p.y);
+    pointer(canvas, 'pointercancel', p.x, p.y);
+    pointer(canvas, 'pointerup', p.x, p.y);
+    pointer(canvas, 'pointerup', p.x, p.y);
+    canvas.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: p.x, clientY: p.y }));
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it('keeps info, fly and alignment modes exclusive without disabling orbit', () => {
+    const { canvas, engine, onPick } = setup(navigationBundle());
+    key(canvas, 'f');
+    engine.setPointInfoMode(true);
+    expect(engine.flyMode).toBe(false);
+    expect(engine.controls.enabled).toBe(true);
+    engine.beginSurfaceAlignment();
+    engine.setPointInfoMode(true);
+    expect(engine.controls.enabled).toBe(true);
+    key(canvas, 'f');
+    key(canvas, 'Escape');
+    const p = engine.project([1, -1, 1]);
+    pointer(canvas, 'pointerdown', p.x, p.y);
+    pointer(canvas, 'pointerup', p.x, p.y);
+    expect(onPick).not.toHaveBeenCalled();
+  });
+});
+
 describe('ViewerEngine far layer', () => {
   const farPoints = (engine: ViewerEngine) =>
     engine.scene.getObjectByName('far') as Points<import('three').BufferGeometry, PointsMaterial>;

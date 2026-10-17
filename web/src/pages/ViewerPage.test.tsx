@@ -69,9 +69,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderViewer(runId: string) {
+function renderViewer(runId: string, query = '') {
   return render(
-    <MemoryRouter initialEntries={[`/viewer/${runId}`]}>
+    <MemoryRouter initialEntries={[`/viewer/${runId}${query}`]}>
       <Routes>
         <Route path="/viewer/:runId" element={<ViewerPage />} />
       </Routes>
@@ -82,6 +82,73 @@ function renderViewer(runId: string) {
 function renderDemo() {
   return renderViewer('demo');
 }
+
+it('opens ?point=0 with the info tool, evidence panel and selected-point marker, and seeks its exact frame', async () => {
+  const bundle = createDemo('en').bundle;
+  const setPicked = vi.spyOn(ViewerEngine.prototype, 'setPicked');
+  const viewThroughFrame = vi.spyOn(ViewerEngine.prototype, 'viewThroughFrame');
+  renderViewer('demo', '?point=0');
+  const tool = screen.getByRole('button', { name: LANGS.en['pointInfo.tool'] });
+  expect(tool.getAttribute('aria-pressed')).toBe('true');
+  const panel = screen.getByRole('region', { name: LANGS.en['pointInfo.title'] });
+  expect(within(panel).getByText(`${bundle.position[0].toFixed(3)} model units`)).toBeTruthy();
+  expect(within(panel).getAllByText(LANGS.en['pointInfo.needsScale'])).toHaveLength(2);
+  expect(within(panel).getByText(LANGS.en['pointInfo.needsConfidence'])).toBeTruthy();
+  expect(setPicked).toHaveBeenLastCalledWith(0);
+  const engine = setPicked.mock.contexts.at(-1) as ViewerEngine;
+  expect(engine.scene.getObjectByName('selected-point')!.visible).toBe(true);
+  const indices = bundle.pointFrames.subarray(bundle.pointOffsets[0], bundle.pointOffsets[1]);
+  expect(indices.length).toBeGreaterThan(0);
+  const target = indices.at(-1)!;
+  fireEvent.click(
+    within(panel).getByRole('button', {
+      name: `${LANGS.en['pointInfo.seekFrame']} ${bundle.manifest.frames[target].i}`,
+    }),
+  );
+  expect(
+    (screen.getByRole('slider', { name: LANGS.en['timeline.position'] }) as HTMLInputElement).value,
+  ).toBe(String(target));
+  expect(viewThroughFrame).toHaveBeenLastCalledWith(target);
+  expect(screen.queryByRole('alert')).toBeNull();
+  fireEvent.click(within(panel).getByRole('button', { name: LANGS.en['pointInfo.close'] }));
+  expect(screen.queryByRole('region', { name: LANGS.en['pointInfo.title'] })).toBeNull();
+  expect(tool.getAttribute('aria-pressed')).toBe('false');
+  expect(engine.scene.getObjectByName('selected-point')!.visible).toBe(false);
+});
+
+it.each(['', '-1', '1.5', 'no-point', '999999999', '999999999999999999999'])(
+  'ignores invalid ?point=%s with a small notice and no error',
+  (value) => {
+    renderViewer('demo', `?point=${value}`);
+    expect(screen.getByRole('note').textContent).toBe(LANGS.en['pointInfo.invalidPoint']);
+    expect(screen.queryByRole('region', { name: LANGS.en['pointInfo.title'] })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: LANGS.en['pointInfo.tool'] }).getAttribute('aria-pressed'),
+    ).toBe('false');
+    expect(screen.queryByRole('alert')).toBeNull();
+  },
+);
+
+it('ignores a point index equal to the bundle point count', () => {
+  renderViewer('demo', `?point=${createDemo('en').bundle.manifest.points.count}`);
+  expect(screen.getByRole('note').textContent).toBe(LANGS.en['pointInfo.invalidPoint']);
+  expect(screen.queryByRole('region', { name: LANGS.en['pointInfo.title'] })).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it.each<Lang>(['en', 'ru', 'kk'])(
+  'localizes the point tool and invalid-link notice in %s',
+  (lang) => {
+    setLang(lang);
+    renderViewer('demo', '?point=');
+    const button = screen.getByRole('button', { name: LANGS[lang]['pointInfo.tool'] });
+    expect(button.title).toBe(LANGS[lang]['pointInfo.tool']);
+    expect(screen.getByRole('note').textContent).toBe(LANGS[lang]['pointInfo.invalidPoint']);
+    fireEvent.click(button);
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('status').textContent).toBe(LANGS[lang]['pointInfo.hint']);
+  },
+);
 
 function colourBundle(color?: Uint8Array): bundleApi.Bundle {
   return { ...createDemo('en').bundle, runId: 'colour-test', color };
@@ -173,10 +240,10 @@ it('loads the served P3b manifest and arrays through to the Russian far-points t
   const arrays = new Map<string, ArrayBuffer>([
     [manifest.points.position, demo.position.slice().buffer],
     [manifest.points.first_seen, demo.firstSeen.slice().buffer],
-    [manifest.tracks.frame_offsets, demo.frameOffsets.slice().buffer],
-    [manifest.tracks.frame_points, demo.frameInPoints.slice().buffer],
-    [manifest.tracks.point_offsets, demo.pointOffsets.slice().buffer],
-    [manifest.tracks.point_frames, demo.pointFrames.slice().buffer],
+    [manifest.tracks!.frame_offsets, demo.frameOffsets.slice().buffer],
+    [manifest.tracks!.frame_points, demo.frameInPoints.slice().buffer],
+    [manifest.tracks!.point_offsets, demo.pointOffsets.slice().buffer],
+    [manifest.tracks!.point_frames, demo.pointFrames.slice().buffer],
     [manifest.far!.position, demo.far!.position.slice().buffer],
     [manifest.far!.color, demo.far!.color.slice().buffer],
   ]);
