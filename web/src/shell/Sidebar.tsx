@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation } from 'react-router';
 import { useI18n } from '../i18n';
 import { UNASSIGNED_SITE_ID, type Site } from '../lib/inspections';
 import { LangSwitch, Logo } from '../viewer/ui';
+import { useAuth } from '../auth/AuthProvider';
 
 interface SidebarProps {
   sites: Site[];
@@ -14,6 +15,7 @@ interface SidebarProps {
 
 export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: SidebarProps) {
   const { t } = useI18n();
+  const { signOut } = useAuth();
   const { pathname } = useLocation();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (id: string) => {
@@ -97,6 +99,9 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
           {t('shell.openDemo')} <span className="demo-badge">{t('shell.demo')}</span>
         </Link>
         <LangSwitch />
+        <button type="button" className="shell-button" onClick={signOut}>
+          {t('auth.signOut')}
+        </button>
       </footer>
     </nav>
   );

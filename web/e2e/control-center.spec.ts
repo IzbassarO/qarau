@@ -7,7 +7,10 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
   test(`control center default processing demo: ${lang}`, async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
-    await page.addInitScript((locale) => localStorage.setItem('qarau.lang', locale), lang);
+    await page.addInitScript((locale) => {
+      localStorage.setItem('qarau.lang', locale);
+      sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
+    }, lang);
     await page.route('**/api/runs', (route) => route.fulfill({ status: 503, body: '' }));
     await page.goto('/');
     await expect(page.getByRole('heading', { name: t['demo.inspectionTitle'] })).toBeVisible();
@@ -54,7 +57,10 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
 
 test('mobile sidebar collapses, opens and closes with navigation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.addInitScript(() => localStorage.setItem('qarau.lang', 'en'));
+  await page.addInitScript(() => {
+    localStorage.setItem('qarau.lang', 'en');
+    sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
+  });
   await page.route('**/api/runs', (route) => route.fulfill({ json: [] }));
   await page.goto('/inspections/demo');
   const navigation = page.getByRole('navigation');

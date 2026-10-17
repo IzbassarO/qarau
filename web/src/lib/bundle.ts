@@ -1,4 +1,5 @@
 import { cumulativeAssembled } from './geometry';
+import { authHeader } from '../auth/auth';
 
 export interface FrameInfo {
   i: number;
@@ -132,7 +133,9 @@ export function hasRgb(bundle: Bundle): boolean {
 }
 
 export async function loadManifest(runId: string): Promise<Manifest> {
-  const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/manifest.json`);
+  const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/manifest.json`, {
+    headers: authHeader(),
+  });
   if (res.status === 404) throw new BundleError('noManifest', 'manifest.json not found');
   if (!res.ok) throw new BundleError('generic', `manifest: HTTP ${res.status}`);
   const m = (await res.json()) as Manifest;
@@ -142,7 +145,7 @@ export async function loadManifest(runId: string): Promise<Manifest> {
 }
 
 async function fetchBuffer(url: string, onBytes: (loaded: number, total: number) => void) {
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: authHeader() });
   if (!res.ok || !res.body) throw new BundleError('generic', `${url}: HTTP ${res.status}`);
   const total = Number(res.headers.get('content-length') ?? 0);
   const chunks: Uint8Array[] = [];

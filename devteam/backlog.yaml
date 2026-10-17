@@ -389,4 +389,9 @@ tasks:
     credentials never hard-coded.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261017-085251
+  branch: devteam/A1b
+  pr: https://github.com/IzbassarO/qarau/pull/27
+  done_at: '2026-10-17'

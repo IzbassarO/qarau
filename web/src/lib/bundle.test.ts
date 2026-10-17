@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { hasRgb, loadBundle, runUrl, type Finding, type Manifest } from './bundle';
+import { hasRgb, loadBundle, loadManifest, runUrl, type Finding, type Manifest } from './bundle';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  sessionStorage.clear();
+  vi.unstubAllGlobals();
+});
 
 const routeId = 'copied run';
 const rgb = new Uint8Array([12, 34, 56, 78, 90, 123]);
@@ -63,6 +66,23 @@ function serveFiles(assets = files()) {
   return fetch;
 }
 
+it('sends the session header with the protected manifest and every bundle file', async () => {
+  sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
+  const fetchManifest = vi.fn().mockResolvedValue(Response.json(manifest()));
+  vi.stubGlobal('fetch', fetchManifest);
+  await loadManifest(routeId);
+  expect(fetchManifest).toHaveBeenCalledWith(
+    `/api/runs/${encodeURIComponent(routeId)}/manifest.json`,
+    {
+      headers: { Authorization: 'Bearer test-api-value' },
+    },
+  );
+  const fetchFiles = serveFiles();
+  await loadBundle(routeId, manifest(), vi.fn());
+  for (const [, options] of fetchFiles.mock.calls as unknown as [string, RequestInit][])
+    expect(options.headers).toEqual({ Authorization: 'Bearer test-api-value' });
+});
+
 describe('optional bundle RGB', () => {
   it('loads real RGB without changing point, track or assembly data', async () => {
     const fetch = serveFiles();
@@ -78,7 +98,7 @@ describe('optional bundle RGB', () => {
     expect(bundle.pointOffsets).toEqual(new Uint32Array([0, 1, 1]));
     expect(bundle.pointFrames).toEqual(new Uint16Array([0]));
     expect(bundle.assembled).toEqual(new Uint32Array([1]));
-    expect(fetch).toHaveBeenCalledWith(runUrl(routeId, 'color.bin'));
+    expect(fetch).toHaveBeenCalledWith(runUrl(routeId, 'color.bin'), { headers: {} });
     expect(progress).toHaveBeenLastCalledWith(1);
   });
 
