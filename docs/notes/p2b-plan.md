@@ -32,8 +32,9 @@
    as before, placed by camera motion instead of the clock. Track-loss keyframes alone over
    the budget → uniform subsample. First and last usable frame always kept. Non-keyframes: `kept=False`,
    `drop_reason="not_keyframe"`; they are not bridges (bridges stay quality drops).
-   Mode `fixed` = old behaviour. Mode + thresholds go to the frames stage metrics and the
-   benchmark Notes.
+   Mode `fixed` = old behaviour. Mode + thresholds go to the frames stage metrics
+   (`run.json`) and `quality_report.json` (the benchmark Notes column for it was dropped in
+   round 5: it overlapped dev's P3b benchmark columns).
 5. **Quality** (`quality.py`): per candidate blur (Laplacian variance at 640 px), too fast
    (flow over 1/6 s / diagonal, or track loss, whatever the candidate density), pure rotation (pair over a ~1 s
    window: homography explains it, motion but no parallax), low texture (Shi-Tomasi
@@ -138,6 +139,39 @@ Quick benchmark, before (round-3 code, `d02a466`) → after (round 4, `d02a466+d
 Same fitted θ (0.0012 / 0.00081) and identical keyframe sets before and after (the gap rule
 did not fire on either video), so the point difference on room is COLMAP run-to-run spread. Reports unchanged in content: notre-dame `ok`, 1
 `info` blur (17.5–19.7 s); room `ok`, 9 `info` issues, blur only 5.0–5.5 and 31.2–32.0 s.
+
+### Round 5: conflict-free with dev (P3b sky mask / point filter, A5 far layer)
+
+The tester sent round 4 back: not tested together with dev, and the branch conflicted with
+dev in `tests/test_benchmark.py` (overlapping lines) and `docs/architecture.md` (the
+frames/quality rows sit right next to dev's reconstruction/export rows). The dev agent may
+not run `git merge`, so:
+
+- the benchmark "keyframes" Notes column is gone (`benchmark.py`, `test_benchmark.py` back
+  to the merge-base; the mode stays in `run.json` and `quality_report.json`);
+- `architecture.md` keeps the base `quality` row untouched (a separator line between this
+  branch's frames row and dev's rows); the keyframe and report description moved to "Key
+  techniques";
+- every remaining hunk in a file dev also changed (`cli.py`, `architecture.md`) is at least
+  one unchanged line away from dev's, so `git merge origin/dev` (9750a3d) applies without
+  conflicts.
+
+Verified on the combined code: dev's pipeline/backend files laid over this branch in the
+working tree, then removed again (`git diff origin/dev` empty for every dev file,
+`cli.py` = dev + this branch only). ruff, mypy, pytest green (pipeline 98 passed, backend 10).
+Dev baseline = the same combined code with `--keyframes fixed` as the default (identical to
+dev's frames stage: same grid, every usable frame, same bridges).
+
+| Video | Frames used | Registered % | Models | Points | Reproj. px | Time s |
+| --- | --- | --- | --- | --- | --- | --- |
+| notre-dame (dev 9750a3d) | 109 | 100.0 | 1 | 43355 | 0.395 | 117.3 |
+| notre-dame (P2b + dev) | 121 | 100.0 | 1 | 49854 (+15.0 %) | 0.394 | 154.1 |
+| room (dev 9750a3d) | 269 | 100.0 | 1 | 27284 | 0.908 | 337.3 |
+| room (P2b + dev) | 282 | 100.0 | 1 | 26524 (−2.8 %) | 0.947 (+4.3 %) | 326.4 |
+
+Reports: notre-dame `ok`, 1 `info` blur 17.5–19.7 s; room `ok`, 9 `info` issues, blur
+1.3 s of 47 s. Both viewer bundles have their object cloud (42 766 / 26 205 points) and
+dev's far layer (7 088 / 319).
 
 Round 1 quick benchmark (`23cf1a2+dirty`, fixed θ 0.0003, old grid) vs dev baseline:
 
