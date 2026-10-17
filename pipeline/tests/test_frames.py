@@ -36,11 +36,13 @@ def test_frames_stage(video: Path, tmp_path: Path) -> None:
     assert all((tmp_path / f["file"]).exists() for f in fr)
     assert all(f["blur"] > 0 and 0 < f["exposure"]["mean"] < 255 for f in fr)
     assert fj["source"]["width"] == 640 and abs(fj["source"]["duration_s"] - 3) < 0.1
-    assert sum(not f["kept"] for f in fr) <= 0.3 * 60
+    assert sum(f["drop_reason"] in ("blur", "exposure") for f in fr) <= 0.3 * 60
+    assert sum(f["kept"] for f in fr) == m["keyframes"]
 
 
 def test_max_frames_caps(video: Path, tmp_path: Path) -> None:
-    assert frames.run(video, tmp_path, max_frames=20)["frames_extracted"] == 20
+    m = frames.run(video, tmp_path, max_frames=20)
+    assert m["frames_extracted"] == 20 and 2 <= m["keyframes"] <= 20
     assert frames.target_frames(1000, 120) == 120 and frames.target_frames(10, None) == 60
 
 

@@ -54,7 +54,8 @@ def run_video(
         raise StageError(f"exit {p.returncode}: {lines[-1] if lines else 'no output'}")
     stages = {s["name"]: s["metrics"] for s in read_run(out)}
     dropped = stages.get("export", {}).get("dropped_points", {})
-    return {**stages["reconstruction"], "dropped_points": sum(dropped.values())}
+    keys = stages.get("frames", {}).get("keyframe_mode")
+    return {**stages["reconstruction"], "dropped_points": sum(dropped.values()), "keyframes": keys}
 
 
 def video_row(m: dict[str, Any], time_s: float, max_frames: int | None = None) -> dict[str, Any]:
@@ -70,6 +71,7 @@ def video_row(m: dict[str, Any], time_s: float, max_frames: int | None = None) -
         "registered": reg,
         "max_frames": max_frames,  # benchmark profile from benchmark_set.toml; None = default
         "dropped_points": m.get("dropped_points", 0),  # export: non-finite + far outliers
+        "keyframes": m.get("keyframes"),  # selection mode + thresholds (frames stage)
     }
 
 
@@ -82,6 +84,8 @@ def md_rows(res: dict[str, Any]) -> list[str]:
         notes = [f"max_frames {v['max_frames']}"] if v.get("max_frames") else []
         if v.get("dropped_points"):
             notes.append(f"dropped {v['dropped_points']}")
+        if v.get("keyframes"):
+            notes.append(f"keyframes {v['keyframes']}")
         rows.append(f"| {n} | {tag} | " + " | ".join([*cells, "; ".join(notes)]) + " |")
     dash = " | ".join(["—"] * len(keys))
     return rows + [f"| {n} | {tag} | {dash} | FAILED: {r} |" for n, r in res["errors"].items()]

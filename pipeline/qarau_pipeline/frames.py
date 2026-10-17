@@ -1,4 +1,5 @@
-"""frames stage: video -> JPEG frames at an adaptive rate + blur/exposure scores.
+"""frames stage: video -> JPEG candidate frames at an adaptive rate + blur/exposure scores ->
+parallax keyframes (keyframes.py) + footage quality report (quality.py).
 
 Decoding is driven by probe.VideoInfo: ffmpeg autorotates, HDR is tone-mapped to 8-bit
 BT.709, frames are picked by presentation time. frames/manifest.json records what was done.
@@ -18,6 +19,8 @@ from typing import Any
 import cv2
 import numpy as np
 
+from . import keyframes as kf
+from . import quality
 from .interfaces import StageError
 from .probe import VideoInfo, probe_video
 
@@ -121,7 +124,16 @@ def decide_drops(blur: list[float], expo: list[dict[str, float]]) -> list[str | 
     return reasons
 
 
-def run(video: Path, out: Path, max_frames: int | None = None) -> dict[str, Any]:
+def run(
+    video: Path,
+    out: Path,
+    max_frames: int | None = None,
+    keys: kf.KeyframeParams | None = None,
+) -> dict[str, Any]:
+    """Candidates on the fixed-rate grid -> quality drops -> keyframes among the usable ones
+    (keys.mode 'parallax' by default, 'fixed' = every usable candidate) -> frames.json and
+    quality_report.json. Candidates that are not keyframes: kept=False, 'not_keyframe'."""
+    keys = keys or kf.KeyframeParams()
     if shutil.which("ffmpeg") is None:
         raise StageError("ffmpeg not found on PATH: install FFmpeg (brew/apt install ffmpeg)")
     info = probe_video(video)
@@ -166,6 +178,16 @@ def run(video: Path, out: Path, max_frames: int | None = None) -> dict[str, Any]
     scores = [score(f) for f in files]
     blur, expo = [s[0] for s in scores], [s[1] for s in scores]
     reasons = decide_drops(blur, expo)
+    dropped = sum(1 for r in reasons if r)
+    greys = [kf.load_grey(f) for f in files]
+    tracks = kf.track(greys)
+    usable = [r is None for r in reasons]
+    chosen = set(kf.select(tracks, times, usable, kf.diagonal(greys[0]), keys, n_target))
+    reasons = [r or (None if i in chosen else "not_keyframe") for i, r in enumerate(reasons)]
+    selection = kf.params_dict(keys)
+    rep = quality.report(video.name, info.duration_s, times, blur, greys, tracks, len(chosen),
+                         selection)  # fmt: skip
+    (out / "quality_report.json").write_text(json.dumps(rep, indent=1))
     frames = [
         {"i": i, "file": f"frames/{f.name}", "t": round(times[i], 4), "blur": round(blur[i], 2),
          "exposure": expo[i], "kept": reasons[i] is None, "drop_reason": reasons[i]}
@@ -183,10 +205,12 @@ def run(video: Path, out: Path, max_frames: int | None = None) -> dict[str, Any]
         "is_hdr": info.is_hdr,
     }
     (out / "frames.json").write_text(json.dumps({"source": source, "frames": frames}, indent=1))
-    dropped = sum(1 for r in reasons if r)
     return {
-        "frames_extracted": len(files), "frames_dropped": dropped, "rate_fps": round(rate, 4),
-        "median_blur": round(float(np.median(blur)), 2), "conversions": conv, "warnings": warn,
+        "frames_extracted": len(files), "frames_dropped": dropped, "keyframes": len(chosen),
+        "keyframe_mode": keys.label(), "keyframe_selection": selection,
+        "quality_verdict": rep["verdict"], "quality_issues": [i["code"] for i in rep["issues"]],
+        "rate_fps": round(rate, 4), "median_blur": round(float(np.median(blur)), 2),
+        "conversions": conv, "warnings": warn,
     }  # fmt: skip
 
 
