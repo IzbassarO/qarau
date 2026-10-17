@@ -14,6 +14,7 @@ import re
 import shutil
 import signal
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -26,6 +27,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
 from devteam import gates as G
+from devteam import procs
 from devteam.costs import BudgetExceeded, SubscriptionLimit
 
 AGENTS = ["brain", "dev_pipeline", "dev_app", "tester"]
@@ -62,6 +64,15 @@ FORBIDDEN_PUSH = {
 }
 RELEASE_TAG = re.compile(r"refs/tags/release-\d{4}-\d{2}-\d{2}(\.\d+)?")  # pushed, never moved
 FORBIDDEN_BRANCH = {"-D", "-d", "--delete", "-M", "-m", "--move", "-f", "--force"}
+
+
+def _feed(pipe, text: str):
+    """stdin for a step, from a thread: a large brief must not block the wait."""
+    try:
+        pipe.write(text.encode("utf-8", "surrogateescape"))
+        pipe.close()
+    except (BrokenPipeError, OSError):
+        pass
 
 
 class Violation(RuntimeError):
@@ -280,38 +291,62 @@ class Team:
 
     # --- processes (all killable by `devteam stop`) --------------------------------------
     def run_proc(
-        self, cmd, cwd: str, timeout: int, input: str | None = None, env: dict | None = None
+        self,
+        cmd,
+        cwd: str,
+        timeout: int,
+        input: str | None = None,
+        env: dict | None = None,
+        agent: str = "tester",
     ) -> dict:
-        """Runs in its own process group, registered so stop() can kill the whole tree."""
-        p = subprocess.Popen(
-            cmd,
-            shell=isinstance(cmd, str),
-            cwd=cwd,
-            text=True,
-            stdin=subprocess.PIPE if input else subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
-            env=env,
-        )
-        with self._lock:
-            self._procs.add(p)
-        try:
-            out, err = p.communicate(input, timeout=timeout)
-            ok = p.returncode == 0
-        except subprocess.TimeoutExpired:
-            os.killpg(p.pid, signal.SIGKILL)
-            out, err = p.communicate()
-            ok, err = False, (err or "") + f"\ntimed out after {timeout // 60} min"
-        finally:
+        """Runs in its own process group, registered so stop() can kill the whole tree. When it
+        ends (any way), everything it started is killed; a port it left listening is a warning
+        (owner rule: no agent leaves a server running)."""
+        marker = procs.new_marker()
+        env = {**(os.environ if env is None else env), procs.MARKER: marker}
+        # Output goes to files, not pipes: a server the step leaves in the background keeps a
+        # pipe open, and reading it to EOF would wait for the timeout instead of the step.
+        with tempfile.TemporaryFile() as fo, tempfile.TemporaryFile() as fe:
+            p = subprocess.Popen(
+                cmd,
+                shell=isinstance(cmd, str),
+                cwd=cwd,
+                stdin=subprocess.PIPE if input else subprocess.DEVNULL,
+                stdout=fo,
+                stderr=fe,
+                start_new_session=True,
+                env=env,
+            )
             with self._lock:
-                self._procs.discard(p)
+                self._procs.add(p)
+            if input:
+                threading.Thread(target=_feed, args=(p.stdin, input), daemon=True).start()
+            note = ""
+            try:
+                p.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                note = f"\ntimed out after {timeout // 60} min"
+            finally:
+                with self._lock:
+                    self._procs.discard(p)
+                for port, pid in procs.reap(p.pid, marker):  # the whole step, any outcome
+                    label = cmd if isinstance(cmd, str) else " ".join(cmd[:3])
+                    self.emit(
+                        agent,
+                        f"WARNING: `{label[:80]}` left port {port} listening (pid {pid}); "
+                        "killed it",
+                    )
+                p.wait()
+            fo.seek(0)
+            fe.seek(0)
+            out = fo.read().decode("utf-8", "replace")
+            err = fe.read().decode("utf-8", "replace") + note
         return {
-            "ok": ok,
+            "ok": p.returncode == 0 and not note,
             "code": p.returncode,
-            "stdout": out or "",
-            "stderr": err or "",
-            "output": (out or "") + (err or ""),
+            "stdout": out,
+            "stderr": err,
+            "output": out + err,
         }
 
     def kill_all(self):
@@ -743,7 +778,7 @@ def build_graph(team: Team, checkpointer):
         team.emit(dev, what, task=tid, status="working")
         if not team.fake:  # e.g. pnpm install: the Codex sandbox has no network
             for cmd in team.cfg["developers"][dev].get("setup", []):
-                r = team.run_proc(cmd, cwd=wt, timeout=1800)
+                r = team.run_proc(cmd, cwd=wt, timeout=1800, agent=dev)
                 if not r["ok"]:
                     raise RuntimeError(f"setup `{cmd}` failed: {team.redact(r['output'][-800:])}")
         out = team.agents.develop(team, s)

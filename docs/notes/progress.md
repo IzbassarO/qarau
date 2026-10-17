@@ -2,6 +2,15 @@
 
 Newest first. Keep it short.
 
+## 2026-10-17 — Owner rule: no agent leaves a server running
+
+- CLAUDE.md / AGENTS.md: any server an agent starts is stopped when its check is done.
+- Kerege kills everything a developer / tester step started (process group + `KEREGE_STEP`
+  marker) and warns with the port number of any server it had to close; step output goes to
+  files, so a background server no longer holds a step open until its timeout.
+- Playwright and Kerege screenshots always use a fresh server; a port that already answers
+  fails loudly instead of testing a stale server.
+
 ## 2026-10-17 — Kerege: continuous mode, dashboard; home shows real runs again
 
 - Regression: since A3 (#20) the control center home always rendered the demo site and never
