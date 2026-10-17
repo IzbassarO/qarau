@@ -167,7 +167,7 @@ test('Notre Dame exposes ROI, draws in top view, hides outside points and restor
   expect(errors).toEqual([]);
 });
 
-test('a fresh Notre Dame route displays a previously saved fixture outline without drawing first', async ({
+test('a Notre Dame permalink displays the saved outline and clips outside points before interaction', async ({
   page,
 }) => {
   // Derive a fixture from the actual object buffer. This is an explicit mocked
@@ -217,7 +217,7 @@ test('a fresh Notre Dame route displays a previously saved fixture outline witho
     await route.fulfill({ status: 200, json: { ...roi, site_id: site } });
   });
   await page.addInitScript(() => localStorage.setItem('qarau.lang', 'en'));
-  await page.goto('/viewer/notre-dame');
+  await page.goto('/viewer/notre-dame?view=top&hideOutside=1');
   await page.waitForFunction(() => window.__qarau?.engine?.scene.getObjectByName('roi-box'), null, {
     timeout: 120_000,
   });
@@ -226,17 +226,39 @@ test('a fresh Notre Dame route displays a previously saved fixture outline witho
   await expect(panel.getByText(en['roi.saved'], { exact: true })).toBeVisible();
   await expect(panel.getByRole('button', { name: en['roi.save'], exact: true })).toBeDisabled();
   const outline = await page.evaluate(() => {
-    const helper = window.__qarau!.engine!.scene.getObjectByName('roi-box') as Box3Helper;
+    const engine = window.__qarau!.engine!;
+    const helper = engine.scene.getObjectByName('roi-box') as Box3Helper;
+    const cloud = engine.scene.children.find(
+      (object) =>
+        'geometry' in object &&
+        (object as Points<BufferGeometry>).geometry.hasAttribute('firstSeen'),
+    ) as Points<BufferGeometry, ShaderMaterial>;
+    const positions = cloud.geometry.getAttribute('position');
+    const point = engine.camera.position.clone();
+    let inside = 0;
+    for (let i = 0; i < positions.count; i++) {
+      point.fromBufferAttribute(positions, i);
+      if (helper.box.containsPoint(point)) inside++;
+    }
     return {
       min: helper.box.min.toArray(),
       max: helper.box.max.toArray(),
       visible: helper.visible,
+      hide: cloud.material.uniforms.uHideOutside.value as number,
+      inside,
+      outside: positions.count - inside,
     };
   });
-  expect(outline).toEqual({ ...box, visible: true });
+  expect(outline).toMatchObject({ ...box, visible: true, hide: 1 });
+  expect(outline.inside).toBeGreaterThan(0);
+  expect(outline.outside).toBeGreaterThan(0);
   const hide = panel.getByRole('button', { name: en['roi.hideOutside'], exact: true });
   await expect(hide).toBeEnabled();
-  await hide.click();
   await expect(hide).toHaveAttribute('aria-pressed', 'true');
+  await page.waitForFunction(() => {
+    const camera = window.__qarau!.engine!.camera;
+    const direction = camera.getWorldDirection(camera.position.clone());
+    return Math.abs(direction.x) < 1e-6 && Math.abs(direction.y) < 1e-6 && direction.z < -0.999;
+  });
   await expect(page.getByRole('alert')).toHaveCount(0);
 });

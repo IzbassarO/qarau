@@ -121,3 +121,33 @@ the production router adds no dependencies.
   configured owner, and point the tester's `QARAU_RUNS_DIR` at the prepared review
   catalog. The current ownership list and fixed screenshot command were not
   modified or bypassed. Their effects are explicit in `roi-format.md`.
+
+## Blocked backend delivery and review permalink
+
+The next tester return confirms the same ownership rollback. The active
+configuration still permits only `web/` for `dev_app`. No supported grant,
+handoff or assignment command exists in the orchestrator CLI/dashboard, and A7's
+`app` area cannot be assigned directly to the `core` developer. Reapplying the
+patch in this worktree cannot produce a delivered backend change. Keep backend
+delivery blocked until an external operator grants A7 backend ownership or
+creates a `core` backend companion task for `dev_pipeline`; do not alter guards
+or repeat local-only backend restorations as a purported fix.
+
+Complete the independent viewer review-state improvement while awaiting that
+external action: support the ordinary permalink
+`/viewer/notre-dame?view=top&hideOutside=1`. Once an existing saved ROI loads,
+select the real top view and enable its normal shader filter/toggle. If no saved
+ROI exists, preserve the missing-ROI state rather than fabricating a box. Test
+the requested state with a real ViewerScreen/engine and update the saved-first
+browser scenario. Document the exact prepared-catalog URL so a later tester can
+capture the intended state without manual clicks. No product fixture fallback,
+sample writes, screenshot capture or controller configuration changes.
+
+Current checks: web lint, typecheck and production build pass; 549 Vitest tests
+and five fixture-preparation tests pass. The retained backend patch was applied
+only to a fresh isolated scratch copy of the backend baseline (Git repository
+discovery was explicitly bounded so patch paths were not silently skipped).
+That copy passes ruff lint/format, strict mypy and all 73 pytest cases. The actual
+delivered backend remains unmodified and still has no ROI router. No server was
+started in this round; actual browser/screenshot confirmation remains pending
+external backend delivery and the tester's prepared-catalog selection.

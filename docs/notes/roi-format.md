@@ -170,11 +170,15 @@ pnpm roi:prepare --source /path/to/read-only/runs --out /path/to/A7-scratch/notr
 QARAU_RUNS_DIR=/path/to/A7-scratch/notre-dame-roi-review pnpm exec vite --port 5198 --strictPort
 ```
 
-Open `http://localhost:5198/viewer/notre-dame`. The ordinary site-ROI GET reads
+Open `http://localhost:5198/viewer/notre-dame?view=top&hideOutside=1`.
+The ordinary site-ROI GET reads
 `sites/notre-dame/roi.json` from this catalog, so the saved wireframe is present
-before drawing. Enable **Hide points outside region** for the filtered view,
-then stop the server after checking. The application has no fixture fallback or
-automatic sample seeding.
+before drawing. The explicit view parameters select top view and enable
+**Hide points outside region** after the saved ROI loads, so the toggle and the
+filtered geometry are already in the requested review state. The normal URL
+retains its ordinary defaults. If no saved ROI exists, the parameters do not
+create a box or claim that filtering is active. Stop the server after checking.
+The application has no fixture fallback or automatic sample seeding.
 
 The generated box uses the actual finite object's XY 2nd–98th percentile bounds
 and the selected full Z extent plus 5% on each end. `created_by` is explicitly

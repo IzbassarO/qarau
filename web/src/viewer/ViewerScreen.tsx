@@ -82,12 +82,16 @@ export function ViewerScreen({
   embedded = false,
   initialPoint = null,
   invalidPoint = false,
+  initialView,
+  initialHideOutside = false,
   siteId,
 }: {
   bundle: Bundle;
   embedded?: boolean;
   initialPoint?: number | null;
   invalidPoint?: boolean;
+  initialView?: 'top';
+  initialHideOutside?: boolean;
   siteId?: string;
 }) {
   const { t } = useI18n();
@@ -101,7 +105,7 @@ export function ViewerScreen({
   const [alignMode, setAlignMode] = useState(false);
   const [pointInfoMode, setPointInfoMode] = useState(initialPoint !== null);
   const userId = useSyncExternalStore(subscribeToAuth, sessionUserId, () => null);
-  const roi = useRoi(bundle, siteId, userId, engineRef);
+  const roi = useRoi(bundle, siteId, userId, engineRef, initialHideOutside);
   const [sensitivitySetting, setSensitivitySetting] = useState(() => ({
     userId,
     value: loadSensitivity(userId),
@@ -202,6 +206,9 @@ export function ViewerScreen({
   useEffect(() => engineRef.current?.setPointInfoMode(pointInfoMode), [pointInfoMode, bundle]);
   useEffect(() => engineRef.current?.setSelectedFinding(sel ?? 0), [sel, bundle]);
   useEffect(() => engineRef.current?.setSensitivity(sensitivity), [sensitivity, bundle]);
+  useEffect(() => {
+    if (initialView === 'top') engineRef.current?.topView();
+  }, [initialView, bundle]);
 
   // finding markers are HTML on top of the canvas, re-placed after every render
   useEffect(() => {

@@ -56,6 +56,8 @@ export function ViewerPage() {
         bundle={bundle}
         initialPoint={valid ? point : null}
         invalidPoint={search.has('point') && !valid}
+        initialView={search.get('view') === 'top' ? 'top' : undefined}
+        initialHideOutside={search.get('hideOutside') === '1'}
       />
     );
   }

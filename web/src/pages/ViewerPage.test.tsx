@@ -1,6 +1,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { Box3Helper, PerspectiveCamera, Vector3 } from 'three';
+import {
+  Box3Helper,
+  PerspectiveCamera,
+  Vector3,
+  type BufferGeometry,
+  type Points,
+  type ShaderMaterial,
+} from 'three';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createDemo } from '../fixtures/demo';
 import { login, logout } from '../auth/auth';
@@ -660,7 +667,7 @@ it('allows colour changes when browser storage is unavailable', async () => {
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
-async function renderRoiViewer() {
+async function renderRoiViewer(query = '') {
   const bundle: bundleApi.Bundle = {
     ...createDemo('en').bundle,
     runId: 'notre-dame',
@@ -668,7 +675,7 @@ async function renderRoiViewer() {
   vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
   vi.spyOn(bundleApi, 'loadBundle').mockResolvedValue(bundle);
   const resize = vi.spyOn(ViewerEngine.prototype, 'resize');
-  const view = renderViewer(bundle.runId);
+  const view = renderViewer(bundle.runId, query);
   const locale = LANGS[document.documentElement.lang as Lang];
   const toolbar = await screen.findByRole('toolbar', { name: locale['toolbar.tools'] });
   const tool = within(toolbar).getByRole('button', { name: locale['roi.title'] });
@@ -730,6 +737,79 @@ function drawRoi(view: Awaited<ReturnType<typeof renderRoiViewer>>) {
   expect(view.engine.controls.enabled).toBe(true);
   expect(view.engine.scene.getObjectByName('roi-box')).toBeTruthy();
 }
+
+const savedRoi: Roi = {
+  version: 1,
+  site_id: 'notre-dame',
+  source_run: 'notre-dame',
+  frame: 'reconstruction',
+  up_axis: 'z',
+  min: [-1, -1, -1],
+  max: [1, 1, 1],
+  created_at: '2026-10-17T12:00:00Z',
+  created_by: 'roi-operator',
+};
+
+function roiCloud(engine: ViewerEngine) {
+  return engine.scene.children.find(
+    (object) =>
+      'geometry' in object && (object as Points<BufferGeometry>).geometry.hasAttribute('firstSeen'),
+  ) as Points<BufferGeometry, ShaderMaterial>;
+}
+
+it('opens a saved region permalink in top view with clipping enabled before interaction', async () => {
+  vi.mocked(roiApi.loadRoi).mockResolvedValue(savedRoi);
+  const topView = vi.spyOn(ViewerEngine.prototype, 'topView');
+  const view = await renderRoiViewer('?view=top&hideOutside=1');
+  expect(topView).toHaveBeenCalledTimes(1);
+  expect(topView.mock.contexts[0]).toBe(view.engine);
+  const helper = view.engine.scene.getObjectByName('roi-box') as Box3Helper;
+  expect(helper.box.min.toArray()).toEqual(savedRoi.min);
+  expect(helper.box.max.toArray()).toEqual(savedRoi.max);
+  expect(helper.visible).toBe(true);
+  const hide = within(view.panel).getByRole('button', { name: LANGS.en['roi.hideOutside'] });
+  expect(hide.getAttribute('aria-pressed')).toBe('true');
+  expect((hide as HTMLButtonElement).disabled).toBe(false);
+  expect(roiCloud(view.engine).material.uniforms.uHideOutside.value).toBe(1);
+  expect(within(view.panel).getByText(LANGS.en['roi.saved'])).toBeTruthy();
+  expect(view.engine.controls.enabled).toBe(true);
+  advanceFrames(180);
+  expect(
+    view.engine.camera.getWorldDirection(new Vector3()).distanceTo(new Vector3(0, 0, -1)),
+  ).toBeLessThan(0.001);
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it.each(['', '?view=side&hideOutside=true', '?view=TOP&hideOutside=-1'])(
+  'keeps normal view and clipping defaults for a saved region with query %s',
+  async (query) => {
+    vi.mocked(roiApi.loadRoi).mockResolvedValue(savedRoi);
+    const topView = vi.spyOn(ViewerEngine.prototype, 'topView');
+    const view = await renderRoiViewer(query);
+    expect(topView).not.toHaveBeenCalled();
+    expect(view.engine.scene.getObjectByName('roi-box')).toBeTruthy();
+    const hide = within(view.panel).getByRole('button', { name: LANGS.en['roi.hideOutside'] });
+    expect(hide.getAttribute('aria-pressed')).toBe('false');
+    expect((hide as HTMLButtonElement).disabled).toBe(false);
+    expect(roiCloud(view.engine).material.uniforms.uHideOutside.value).toBe(0);
+  },
+);
+
+it.each(['absent', 'failed'])(
+  'keeps requested clipping disabled when the saved region is %s',
+  async (result) => {
+    if (result === 'failed') vi.mocked(roiApi.loadRoi).mockRejectedValue(new Error('HTTP 503'));
+    const view = await renderRoiViewer('?view=top&hideOutside=1');
+    const hide = within(view.panel).getByRole('button', { name: LANGS.en['roi.hideOutside'] });
+    expect(hide.getAttribute('aria-pressed')).toBe('false');
+    expect((hide as HTMLButtonElement).disabled).toBe(true);
+    expect(view.engine.scene.getObjectByName('roi-box')).toBeUndefined();
+    expect(roiCloud(view.engine).material.uniforms.uHideOutside.value).toBe(0);
+    expect(screen.queryByRole('alert')?.textContent ?? null).toBe(
+      result === 'failed' ? LANGS.en['roi.loadError'] : null,
+    );
+  },
+);
 
 it.each<Lang>(['en', 'ru', 'kk'])(
   'shows a labelled ROI toolbar tool and open controls on a fresh Notre Dame route (%s)',

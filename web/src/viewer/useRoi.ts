@@ -12,6 +12,7 @@ export function useRoi(
   knownSiteId: string | undefined,
   userId: string | null,
   engine: RefObject<ViewerEngine | null>,
+  initialHideOutside = false,
 ) {
   const [box, setBox] = useState<RoiBox | null>(null);
   const [saved, setSaved] = useState<Roi | null>(null);
@@ -53,6 +54,7 @@ export function useRoi(
           setSiteId(site);
           setBox(roi);
           setSaved(roi);
+          setHidden(roi !== null && initialHideOutside);
           if (roi && roi.source_run !== bundle.runId) setOpen(true);
         } catch {
           if (abort.signal.aborted || current !== generation.current) return;
@@ -67,7 +69,7 @@ export function useRoi(
       abort.abort();
       generation.current = current + 1;
     };
-  }, [bundle, knownSiteId, userId, demo, revision]);
+  }, [bundle, knownSiteId, userId, demo, revision, initialHideOutside]);
 
   useEffect(() => engine.current?.setRoi(box), [box, bundle, engine]);
   useEffect(() => engine.current?.setHideOutsideRoi(hidden), [hidden, bundle, engine]);
