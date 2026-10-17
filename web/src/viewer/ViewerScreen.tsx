@@ -7,6 +7,7 @@ import { ViewerEngine, type ColorMode, type Options } from './engine';
 import { defaultViewState } from './defaults';
 import { AxisGizmo, type AxisGizmoHandle } from './AxisGizmo';
 import { H2, LangSwitch, Logo, Row, Toggle } from './ui';
+import { SessionImage } from '../auth/SessionImage';
 
 declare global {
   interface Window {
@@ -442,7 +443,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
               <span className={`${mono} text-xs text-ink-2`}>{tc(frame)}</span>
             </div>
             <div className="relative aspect-video overflow-hidden rounded-lg border border-line bg-[#0d1014]">
-              <img
+              <SessionImage
                 src={bundle.assetUrl?.(f.thumb) ?? runUrl(bundle.runId, f.thumb)}
                 alt={t('panel.frame')}
                 className="size-full object-contain"
