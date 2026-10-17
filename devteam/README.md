@@ -7,6 +7,8 @@ Plan and rules: `docs/notes/devteam-plan.md`, CLAUDE.md → "Delivery".
 packet is the description) and is merged automatically only when every gate is green:
 local checks, tester judge, GitHub CI, no benchmark regression, clean secret scan
 (gitleaks). Otherwise it goes back to the developer (max 3 times), then `blocked`.
+A red GitHub CI check sends back the last 150 lines of `gh run view <id> --log-failed`
+(in the packet and in the developer's feedback), not just a link.
 `dev` → `main` is a weekly release PR, merged only if CI and the full benchmark are green.
 
 ```bash
