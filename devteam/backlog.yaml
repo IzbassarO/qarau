@@ -460,9 +460,14 @@ tasks:
     for the panel data; tester screenshots of /viewer/notre-dame.
 
     '
-  status: todo
+  status: done
   depends_on:
   - A6
+  owner: dev_app
+  run: cont-20261017-123453-dev_app-3
+  branch: devteam/A6b
+  pr: https://github.com/IzbassarO/qarau/pull/34
+  done_at: '2026-10-17'
 - id: A7
   area: app
   title: Region of interest
