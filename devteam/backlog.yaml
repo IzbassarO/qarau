@@ -130,13 +130,11 @@ tasks:
     texture.
 
     '
-  status: blocked
+  status: todo
   owner: dev_pipeline
   run: run-20261016-215415
   branch: devteam/P2b
-  blocked_reason: 'GitHub CI failed:
-
-    web: FAILURE https://github.com/IzbassarO/qarau/actions/runs/39008036568/job/117324416132'
+  blocked_reason: CI web failure fixed in dev; re-run gates on the existing branch
 - id: P3c
   area: core
   title: Re-gate mykolaiv
