@@ -24,7 +24,8 @@ Existing CSS already defines `--color-notseen: #6b727d`.
 ## Verification
 
 - `cd web && pnpm lint && pnpm typecheck` — passed.
-- `cd web && pnpm test && pnpm build` — passed: 20 files, 327 tests. Vite reports
+- `cd web && pnpm test && pnpm build` — passed again after tester feedback: 20 files,
+  328 tests. Vite reports
   the existing large-chunk advisory; the build succeeds.
 - An additional scratch-only Vitest check loaded the actual P3b quick-benchmark bundle
   at `.state/bench-dev/P3b/notre-dame`: 36,450 object points and 6,921 far points. It
@@ -36,6 +37,43 @@ Existing CSS already defines `--color-notseen: #6b727d`.
   macOS Mach-port permission denial. Browser/page checks must run in the tester's
   environment; no browser success or visual verification is claimed here.
 - Added Playwright coverage for demo/Notre-Dame far visibility and malformed-array
-  recovery. Removed screenshot capture from the existing viewer test per the task's
-  instruction; performance artifacts now follow Playwright's configured output directory.
+  recovery. The unrelated changes to `e2e/viewer.spec.ts` were reverted after tester
+  feedback; it is byte-for-byte identical to the version before A5.
 - No server was left running. No pipeline or data files were changed.
+
+## Tester follow-up: which Notre-Dame is served
+
+The dev_app screenshot command in `devteam/config.yaml` sets
+`QARAU_RUNS_DIR={data}/runs`. Its `notre-dame/web/manifest.json` contains **15,239 object
+points and no `far` key**. Hiding the far toggle for that legacy run is expected. The
+toggle's screenshot criterion applies to `/viewer/demo`, which includes synthetic far
+arrays and starts unchecked; the old Notre-Dame must still open without an error banner.
+
+The real P3b run is a different directory:
+`/Users/izbassar/Documents/Startup/qarau/devteam/.state/bench-dev/P3b/notre-dame`.
+Its manifest has **36,450 object points and 6,921 far points**, with exactly the key and
+paths written by `export.py`: `far.position = "web/far.position.f32"` (83,052 bytes,
+6,921 × 12) and `far.color = "web/far.color.u8"` (20,763 bytes, 6,921 × 3).
+
+Two scratch-only integration tests now exercise the actual dev-runs middleware, real
+`loadManifest`/`loadBundle`, `ViewerPage` and engine for both directories. Both passed:
+the legacy run has no toggle; P3b renders 6,921 gray far points separately and shows an
+unchecked **«Дальние точки»** toggle that turns the layer on. Only WebGL is mocked;
+these are not browser or screenshot results. A permanent regression test also covers
+the complete served-manifest → raw arrays → Russian toggle path with a synthetic P3b
+contract, without mocking the loader. The Playwright test now inspects the manifest
+response received by the page and attaches its URL, point count and far declaration.
+
+Playwright was retried on P3b with the far-layer, navigation, login and control-center
+specs (no screenshots), using `--reporter=line,json`. The JSON report is at
+`/Users/izbassar/Documents/Startup/qarau/devteam/.state/scratch/A5/playwright-results.json`.
+It records a Vite bootstrap failure (`listen EPERM ::1:5195`), **zero executed tests**.
+Browser acceptance remains unverified in this sandbox. To run just the feature check
+where local listeners and Chromium are allowed:
+
+```sh
+cd web
+QARAU_RUNS_DIR=/Users/izbassar/Documents/Startup/qarau/devteam/.state/bench-dev/P3b \
+  pnpm e2e e2e/far-layer.spec.ts \
+  --output=/Users/izbassar/Documents/Startup/qarau/devteam/.state/scratch/A5/playwright
+```

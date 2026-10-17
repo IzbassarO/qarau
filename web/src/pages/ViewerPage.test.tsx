@@ -148,6 +148,59 @@ it.each<Lang>(['en', 'ru', 'kk'])(
   },
 );
 
+it('loads the served P3b manifest and arrays through to the Russian far-points toggle', async () => {
+  setLang('ru');
+  const demo = createDemo('ru').bundle;
+  const runId = 'p3b-contract';
+  const manifest: bundleApi.Manifest = {
+    ...demo.manifest,
+    points: {
+      ...demo.manifest.points,
+      position: 'web/points.position.f32',
+      first_seen: 'web/points.first_seen.u16',
+    },
+    tracks: {
+      frame_offsets: 'web/tracks.frame_offsets.u32',
+      frame_points: 'web/tracks.frame_points.u32',
+      point_offsets: 'web/tracks.point_offsets.u32',
+      point_frames: 'web/tracks.point_frames.u16',
+    },
+  };
+  const arrays = new Map<string, ArrayBuffer>([
+    [manifest.points.position, demo.position.slice().buffer],
+    [manifest.points.first_seen, demo.firstSeen.slice().buffer],
+    [manifest.tracks.frame_offsets, demo.frameOffsets.slice().buffer],
+    [manifest.tracks.frame_points, demo.frameInPoints.slice().buffer],
+    [manifest.tracks.point_offsets, demo.pointOffsets.slice().buffer],
+    [manifest.tracks.point_frames, demo.pointFrames.slice().buffer],
+    [manifest.far!.position, demo.far!.position.slice().buffer],
+    [manifest.far!.color, demo.far!.color.slice().buffer],
+  ]);
+  const fetch = vi.fn(async (url: string) => {
+    if (url === `/api/runs/${runId}/manifest.json`) return Response.json(manifest);
+    const prefix = bundleApi.runUrl(runId, '');
+    const array = arrays.get(url.slice(prefix.length));
+    return array ? new Response(array) : new Response(null, { status: 404 });
+  });
+  vi.stubGlobal('fetch', fetch);
+  const setFarVisible = vi.spyOn(ViewerEngine.prototype, 'setFarVisible');
+  renderViewer(runId);
+  const toggle = await screen.findByRole('button', { name: LANGS.ru['viewer.show.farPoints'] });
+  await waitFor(() => expect(setFarVisible).toHaveBeenLastCalledWith(false));
+  const engine = setFarVisible.mock.contexts.at(-1) as ViewerEngine;
+  expect(engine.hasFarLayer()).toBe(true);
+  expect(engine.scene.getObjectByName('far')!.visible).toBe(false);
+  expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(fetch).toHaveBeenCalledWith(bundleApi.runUrl(runId, 'web/far.position.f32'), {
+    headers: {},
+  });
+  expect(fetch).toHaveBeenCalledWith(bundleApi.runUrl(runId, 'web/far.color.u8'), { headers: {} });
+  fireEvent.click(toggle);
+  expect(setFarVisible).toHaveBeenLastCalledWith(true);
+  expect(engine.scene.getObjectByName('far')!.visible).toBe(true);
+});
+
 it.each([undefined, { position: new Float32Array(), color: new Uint8Array() }])(
   'hides the far toggle without usable far points (%s)',
   async (far) => {
