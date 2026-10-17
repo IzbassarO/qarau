@@ -482,7 +482,16 @@ tasks:
     screenshots of /viewer/notre-dame with a box drawn.
 
     '
-  status: todo
+  status: blocked
+  owner: dev_app
+  run: cont-20261017-123453-dev_app-4
+  branch: devteam/A7
+  blocked_reason: 'tester: The backend half of A7 is not delivered. The ROI router and its tests exist
+    only as docs/patches/a7-backend-roi.patch, so the real backend has no ROI routes, no persistence and
+    no pytest coverage. Server-side storage and the backend tests are explicit acceptance criteria. Run
+    the backend work under an owner allowed to write backend/ (for example, ask the orchestrator to grant
+    backend/ for this task, or file a companion task for dev_pipeline). Shipping a patch file does not
+    satisfy these '
 - id: A9
   area: app
   title: Observer mode
