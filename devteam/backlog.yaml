@@ -200,7 +200,12 @@ tasks:
     panel can show source frames for any point.
 
     '
-  status: todo
+  status: done
+  owner: dev_pipeline
+  run: cont-20261017-123453-dev_pipeline-3
+  branch: devteam/P4b
+  pr: https://github.com/IzbassarO/qarau/pull/36
+  done_at: '2026-10-17'
 - id: P4c
   area: core
   title: Dense only inside the region of interest
