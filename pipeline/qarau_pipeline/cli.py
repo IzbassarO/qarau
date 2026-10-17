@@ -1,4 +1,4 @@
-"""CLI: python -m qarau_pipeline {run,export,segment,project,benchmark} ..."""
+"""CLI: python -m qarau_pipeline {run,quality,export,segment,project,benchmark} ..."""
 
 from __future__ import annotations
 
@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from . import frames as frames_stage
+from . import quality
 from .interfaces import StageError, run_stage
+from .keyframes import MODES, KeyframeParams, subsample
 from .segmentation import GroundedSam2, ManualMasks, SamApiSegmenter, parse_prompt, segment_stage
 
 
@@ -63,6 +65,25 @@ def cmd_export(a: argparse.Namespace) -> None:
     _export(out, Path(a.sparse), frames, source)
 
 
+def _frames(a: argparse.Namespace, out: Path) -> dict[str, Any]:
+    video = Path(a.video).resolve()
+    keys = KeyframeParams(mode=a.keyframes)
+    params = {"video": video.name, "max_frames": a.max_frames, "keyframes": keys.label()}
+    res = run_stage(
+        out, "frames", f"ffmpeg {_ffmpeg_version()}", params,
+        lambda: frames_stage.run(video, out, a.max_frames, keys),
+    )  # fmt: skip
+    print(quality.text(json.loads((out / "quality_report.json").read_text())))
+    print(f"report: {out / 'quality_report.json'}")
+    return res.metrics
+
+
+def cmd_quality(a: argparse.Namespace) -> None:
+    out = Path(a.out).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    _frames(a, out)
+
+
 def cmd_run(a: argparse.Namespace) -> None:
     import pycolmap
 
@@ -72,12 +93,7 @@ def cmd_run(a: argparse.Namespace) -> None:
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     if a.video:
-        video = Path(a.video).resolve()
-        params = {"video": video.name, "max_frames": a.max_frames}
-        run_stage(
-            out, "frames", f"ffmpeg {_ffmpeg_version()}", params,
-            lambda: frames_stage.run(video, out, a.max_frames),
-        )  # fmt: skip
+        _frames(a, out)
     else:
         run_stage(
             out, "frames", "link", {"images": str(a.images)},
@@ -85,7 +101,13 @@ def cmd_run(a: argparse.Namespace) -> None:
         )  # fmt: skip
     fj = json.loads((out / "frames.json").read_text())
     names = [Path(f["file"]).name for f in fj["frames"] if f["kept"]]
-    dropped = [Path(f["file"]).name for f in fj["frames"] if not f["kept"]]
+    # bridges = quality drops only. The denser parallax candidates must not add merge
+    # matching time: there at most MAX_DROP of the keyframes. The fixed grid stays as it was
+    # (decide_drops already keeps drops <= MAX_DROP of all frames).
+    dropped = [Path(f["file"]).name for f in fj["frames"]
+               if not f["kept"] and f["drop_reason"] != "not_keyframe"]  # fmt: skip
+    if any(f["drop_reason"] == "not_keyframe" for f in fj["frames"]):
+        dropped = subsample(dropped, max(1, round(frames_stage.MAX_DROP * len(names))))
     rc = ColmapReconstructor(
         mode="video" if a.video else "images",
         max_image_size=a.max_image_size,
@@ -138,6 +160,8 @@ def main(argv: list[str] | None = None) -> None:
     g.add_argument("--images")
     r.add_argument("--out", required=True)
     r.add_argument("--max-frames", type=int, help="upper cap on extracted frames (default 300)")
+    r.add_argument("--keyframes", choices=MODES, default="parallax",
+                   help="parallax: skip frames with no camera motion; fixed: all")  # fmt: skip
     r.add_argument("--max-image-size", type=int, default=1600)
     r.add_argument("--max-features", type=int, help="SIFT features per image (default 8192)")
     r.add_argument("--peak-threshold", type=float, help="SIFT peak threshold (default 0.00667)")
@@ -152,6 +176,12 @@ def main(argv: list[str] | None = None) -> None:
     e.add_argument("--images", help="image dir (image-set input); omit to use <out>/frames.json")
     e.add_argument("--out", required=True)
     e.set_defaults(fn=cmd_export)
+    q = sub.add_parser("quality", help="video -> frames + <out>/quality_report.json only")
+    q.add_argument("--video", required=True)
+    q.add_argument("--out", required=True)
+    q.add_argument("--max-frames", type=int, help="upper cap on extracted frames (default 300)")
+    q.add_argument("--keyframes", choices=MODES, default="parallax")
+    q.set_defaults(fn=cmd_quality)
     sg = sub.add_parser("segment", help="masks for the bundle's frames -> <run>/segmentation/")
     sg.add_argument("--run", required=True)
     sg.add_argument("--segmenter", choices=["manual", "grounded-sam2", "sam-api"], required=True)
