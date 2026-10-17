@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { PerspectiveCamera, Vector3 } from 'three';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -86,10 +86,15 @@ function colourBundle(color?: Uint8Array): bundleApi.Bundle {
 async function renderColourBundle(bundle: bundleApi.Bundle) {
   vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
   vi.spyOn(bundleApi, 'loadBundle').mockResolvedValue(bundle);
+  const resize = vi.spyOn(ViewerEngine.prototype, 'resize');
+  const mounted = resize.mock.calls.length;
   const view = renderViewer(bundle.runId);
   const toggle = (await screen.findByRole('button', {
     name: LANGS[document.documentElement.lang as Lang]['show.colorMode'],
   })) as HTMLButtonElement;
+  // React commits the DOM first and runs the engine effect in a later task; wait for it,
+  // or the test races the effect (slow CI: it ran after the globals were unstubbed).
+  await waitFor(() => expect(resize.mock.calls.length).toBeGreaterThan(mounted));
   return { ...view, toggle };
 }
 
