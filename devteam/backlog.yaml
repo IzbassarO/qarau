@@ -117,12 +117,11 @@ tasks:
     License (non-commercial): forbidden. Unclear -> ask the owner.
 
     '
-  status: blocked
+  status: todo
   depends_on:
   - A4b
   run: run-20261016-115433
   branch: devteam/P3b
-  blocked_reason: Pipeline work done on devteam/P3b; re-test after A4b viewer fix
 - id: P2b
   area: core
   title: Parallax keyframes and a footage quality report
