@@ -380,10 +380,9 @@ tasks:
 
     '
   owner: dev_app
-  status: blocked
+  status: todo
   depends_on:
   - P3b
-  blocked_reason: 'Waits for P3b: the pipeline must first export the `far` layer.'
 - id: A1b
   area: app
   title: Simple local login
