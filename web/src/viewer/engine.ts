@@ -1,5 +1,6 @@
 import {
   Box3,
+  Box3Helper,
   BufferAttribute,
   BufferGeometry,
   Line,
@@ -26,6 +27,7 @@ import {
   type Axis,
 } from './gizmo';
 import { defaultViewState, initialFraming } from './defaults';
+import { boxFromPointsInRect, screenRectToBox, type RoiBox } from './roi';
 import { clampCamera, clampPosition, estimateGround, estimateSurfaceNormal } from './constraints';
 import { hasRgb, type Bundle } from '../lib/bundle';
 import {
@@ -51,6 +53,9 @@ export interface Options {
 export type ColorMode = 'height' | 'rgb';
 
 const VERT = /* glsl */ `
+uniform float uHideOutside;
+uniform vec3 uRoiMin, uRoiMax;
+varying float vRoiVisible;
 uniform float uFindings, uSelected;
 uniform float uCurrentFrame, uBuildUp, uShowCurrent, uPointSize, uPixelRatio, uRefDist;
 attribute float firstSeen;
@@ -59,6 +64,7 @@ attribute vec3 findingColor; // black = no finding; independent of the base colo
 attribute float fid;  // finding id, 0 none
 varying vec3 vColor;
 void main() {
+  vRoiVisible = float(all(greaterThanEqual(position, uRoiMin)) && all(lessThanEqual(position, uRoiMax)));
   vec3 c = color;
   float k = 1.0;
   if (firstSeen > 65534.5) c = vec3(0.4196, 0.4471, 0.4902);            // #6B727D never observed
@@ -76,8 +82,11 @@ void main() {
 }`;
 
 const FRAG = /* glsl */ `
+uniform float uHideOutside;
+varying float vRoiVisible;
 varying vec3 vColor;
 void main() {
+  if (uHideOutside > 0.5 && vRoiVisible < 0.5) discard;
   if (length(gl_PointCoord - 0.5) > 0.5) discard;
   gl_FragColor = vec4(vColor, 1.0);
 }`;
@@ -87,6 +96,10 @@ export interface Callbacks {
   onFlyModeChange?: (active: boolean) => void;
   onAlignModeChange?: (active: boolean) => void;
   onPointInfoModeChange?: (active: boolean) => void;
+  onRoiDrawingChange?: (active: boolean) => void;
+  onRoiRectChange?: (rect: { x: number; y: number; width: number; height: number } | null) => void;
+  onRoiBoxChange?: (box: RoiBox) => void;
+  onRoiDrawError?: () => void;
 }
 
 export class ViewerEngine {
@@ -121,6 +134,16 @@ export class ViewerEngine {
   private ground;
   private aligning = false;
   private pointInfoActive = false;
+  private roiDrawing = false;
+  private roiDrag: { id: number; x: number; y: number } | null = null;
+  private roiHelper?: Box3Helper;
+  private roiBox: RoiBox | null = null;
+  private hideOutsideRoi = false;
+  private roiUniforms = {
+    uHideOutside: { value: 0 },
+    uRoiMin: { value: new Vector3() },
+    uRoiMax: { value: new Vector3() },
+  };
   private flyState: FlyState | null = null;
   private flyLookActive = false;
   private flyDistance = 1;
@@ -224,6 +247,7 @@ export class ViewerEngine {
       fragmentShader: FRAG,
       vertexColors: true,
       uniforms: {
+        ...this.roiUniforms,
         uCurrentFrame: { value: 0 },
         uBuildUp: { value: defaults.buildUp ? 1 : 0 },
         uShowCurrent: { value: 1 },
@@ -248,6 +272,23 @@ export class ViewerEngine {
         new PointsMaterial({ color: color || '#6B727D', size: 2.5, sizeAttenuation: false }),
       );
       this.farPoints.name = 'far';
+      // Share the same world-space clipping uniforms without changing either source buffer.
+      this.farPoints.material.onBeforeCompile = (shader) => {
+        Object.assign(shader.uniforms, this.roiUniforms);
+        shader.vertexShader =
+          'uniform vec3 uRoiMin, uRoiMax; varying float vRoiVisible;\n' +
+          shader.vertexShader.replace(
+            '#include <begin_vertex>',
+            '#include <begin_vertex>\nvRoiVisible = float(all(greaterThanEqual(position, uRoiMin)) && all(lessThanEqual(position, uRoiMax)));',
+          );
+        shader.fragmentShader =
+          'uniform float uHideOutside; varying float vRoiVisible;\n' +
+          shader.fragmentShader.replace(
+            'void main() {',
+            'void main() {\nif (uHideOutside > 0.5 && vRoiVisible < 0.5) discard;',
+          );
+      };
+      this.farPoints.material.customProgramCacheKey = () => 'qarau-roi-v1';
       this.farPoints.visible = defaults.showFarLayer;
       this.scene.add(this.farPoints);
     }
@@ -315,7 +356,7 @@ export class ViewerEngine {
       boundsMargin: this.navigationMargin,
       onChange: () => (this.dirty = true),
       onStart: () => {
-        if (this.flyMode || this.aligning) return;
+        if (this.flyMode || this.aligning || this.roiDrawing) return;
         this.tween = null;
         this.axisAnimation = null;
         this.exitSourcePose();
@@ -324,11 +365,11 @@ export class ViewerEngine {
     this.resetView(false);
 
     canvas.tabIndex = 0;
-    canvas.addEventListener('pointerdown', this.onDown);
-    canvas.addEventListener('pointerup', this.onUp);
-    canvas.addEventListener('pointermove', this.onLookDrag);
-    canvas.addEventListener('pointercancel', this.onLookEnd);
-    canvas.addEventListener('lostpointercapture', this.onLookEnd);
+    canvas.addEventListener('pointerdown', this.onDown, true);
+    canvas.addEventListener('pointerup', this.onUp, true);
+    canvas.addEventListener('pointermove', this.onLookDrag, true);
+    canvas.addEventListener('pointercancel', this.onLookEnd, true);
+    canvas.addEventListener('lostpointercapture', this.onLookEnd, true);
     document.addEventListener('keydown', this.onKey);
     document.addEventListener('keyup', this.onKeyUp);
     document.addEventListener('mousemove', this.onMouseLook);
@@ -443,6 +484,66 @@ export class ViewerEngine {
     this.dirty = true;
   }
 
+  setRoi(box: RoiBox | null) {
+    this.roiBox = box;
+    if (this.roiHelper) {
+      this.roiHelper.removeFromParent();
+      this.roiHelper.dispose();
+      this.roiHelper = undefined;
+    }
+    if (box) {
+      this.roiUniforms.uRoiMin.value.fromArray(box.min);
+      this.roiUniforms.uRoiMax.value.fromArray(box.max);
+      this.roiHelper = new Box3Helper(
+        new Box3(new Vector3(...box.min), new Vector3(...box.max)),
+        0xddd6bf,
+      );
+      this.roiHelper.name = 'roi-box';
+      const materials = Array.isArray(this.roiHelper.material)
+        ? this.roiHelper.material
+        : [this.roiHelper.material];
+      for (const material of materials) material.depthTest = false;
+      this.roiHelper.renderOrder = 2;
+      this.scene.add(this.roiHelper);
+    }
+    this.setHideOutsideRoi(this.hideOutsideRoi);
+  }
+
+  setHideOutsideRoi(hidden: boolean) {
+    this.hideOutsideRoi = hidden;
+    this.roiUniforms.uHideOutside.value = hidden && this.roiBox ? 1 : 0;
+    this.dirty = true;
+  }
+
+  /** Use the gizmo's exact pole orientation before accepting any drag input. */
+  beginRoiDrawing() {
+    this.setOrbitMode();
+    this.resetView(false);
+    const target = viewDirectionFor('z', this.camera.up);
+    const distance = this.camera.position.distanceTo(this.controls.target);
+    this.camera.position.copy(this.controls.target).addScaledVector(target.direction, distance);
+    this.camera.quaternion.copy(orientationFor(target.direction, target.up));
+    this.camera.updateMatrixWorld();
+    this.controls.stop();
+    this.controls.enabled = false;
+    this.roiDrawing = true;
+    this.cb.onRoiDrawingChange?.(true);
+    this.canvas.focus({ preventScroll: true });
+    this.dirty = true;
+  }
+
+  cancelRoiDrawing() {
+    if (!this.roiDrawing) return;
+    const drag = this.roiDrag;
+    this.roiDrag = null;
+    this.roiDrawing = false;
+    if (drag && this.canvas.hasPointerCapture?.(drag.id))
+      this.canvas.releasePointerCapture(drag.id);
+    this.controls.enabled = true;
+    this.cb.onRoiRectChange?.(null);
+    this.cb.onRoiDrawingChange?.(false);
+  }
+
   /** Project a world point to canvas pixels (after the last render). */
   project(p: number[]) {
     const v = new Vector3(p[0], p[1], p[2]).project(this.camera);
@@ -477,6 +578,7 @@ export class ViewerEngine {
 
   /** Source-camera views retain the viewing direction; orbit always levels the horizon. */
   private fly(p1: Vector3, g1: Vector3, fov: number, animate = true, q1?: Quaternion) {
+    this.cancelRoiDrawing();
     this.cancelSurfaceAlignment();
     this.exitFlyMode();
     this.axisAnimation = null;
@@ -542,6 +644,7 @@ export class ViewerEngine {
   }
 
   setOrbitMode() {
+    this.cancelRoiDrawing();
     this.setPointInfoMode(false);
     this.cancelSurfaceAlignment();
     this.exitFlyMode();
@@ -567,6 +670,7 @@ export class ViewerEngine {
   /** Point inspection shares orbit navigation; only an unmodified click selects. */
   setPointInfoMode(active: boolean) {
     if (active) {
+      this.cancelRoiDrawing();
       this.cancelSurfaceAlignment();
       this.exitFlyMode();
     }
@@ -599,6 +703,7 @@ export class ViewerEngine {
   }
 
   private startAxisView(target: ReturnType<typeof viewDirectionFor>) {
+    this.cancelRoiDrawing();
     this.cancelSurfaceAlignment();
     this.exitFlyMode();
     this.tween = null;
@@ -620,6 +725,7 @@ export class ViewerEngine {
     this.fly(c.clone().addScaledVector(dir.normalize(), dist), c, 50);
   }
   zoom(factor: number, precision = false) {
+    this.cancelRoiDrawing();
     this.cancelSurfaceAlignment();
     this.exitFlyMode();
     this.axisAnimation = null;
@@ -663,6 +769,7 @@ export class ViewerEngine {
 
   private enterFlyMode() {
     if (this.flyMode || this.disposed) return;
+    this.cancelRoiDrawing();
     this.setPointInfoMode(false);
     this.cancelSurfaceAlignment();
     this.tween = null;
@@ -740,6 +847,23 @@ export class ViewerEngine {
   };
 
   private onLookDrag = (e: PointerEvent) => {
+    if (this.roiDrawing) {
+      const drag = this.roiDrag;
+      if (drag?.id === e.pointerId) {
+        const rc = this.canvas.getBoundingClientRect();
+        const x = Math.max(0, Math.min(rc.width, e.clientX - rc.left));
+        const y = Math.max(0, Math.min(rc.height, e.clientY - rc.top));
+        this.cb.onRoiRectChange?.({
+          x: Math.min(drag.x, x),
+          y: Math.min(drag.y, y),
+          width: Math.abs(x - drag.x),
+          height: Math.abs(y - drag.y),
+        });
+      }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     if (
       this.down?.id === e.pointerId &&
       Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 4
@@ -760,6 +884,10 @@ export class ViewerEngine {
       this.canvas.releasePointerCapture(drag.id);
   }
   private onLookEnd = (e: PointerEvent) => {
+    if (this.roiDrag?.id === e.pointerId) {
+      this.cancelRoiDrawing();
+      return;
+    }
     // Navigation releases capture on pointerup before our bubble listener runs.
     // A release with no held buttons must not erase that pending click.
     if (e.pointerId === this.down?.id && (e.type === 'pointercancel' || e.buttons !== 0))
@@ -770,6 +898,17 @@ export class ViewerEngine {
   private down: { id: number; x: number; y: number; moved: boolean; modified: boolean } | null =
     null;
   private onDown = (e: PointerEvent) => {
+    if (this.roiDrawing) {
+      if (e.button === 0 && !this.roiDrag) {
+        const rc = this.canvas.getBoundingClientRect();
+        this.roiDrag = { id: e.pointerId, x: e.clientX - rc.left, y: e.clientY - rc.top };
+        this.canvas.focus({ preventScroll: true });
+        this.canvas.setPointerCapture?.(e.pointerId);
+      }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     this.down =
       e.button === 0
         ? {
@@ -788,6 +927,28 @@ export class ViewerEngine {
     }
   };
   private onUp = (e: PointerEvent) => {
+    if (this.roiDrawing) {
+      const drag = this.roiDrag;
+      if (drag?.id === e.pointerId && e.button === 0) {
+        const rc = this.canvas.getBoundingClientRect();
+        const end = {
+          x: Math.max(0, Math.min(rc.width, e.clientX - rc.left)),
+          y: Math.max(0, Math.min(rc.height, e.clientY - rc.top)),
+        };
+        // A horizontal drawing plane at the estimated terrain's Z intercept.
+        const groundZ = -this.ground.constant / this.ground.normal.z;
+        const rect = screenRectToBox(this.camera, rc, drag, end, 'z', groundZ);
+        const box = rect && boxFromPointsInRect(this.b.position, rect, 'z');
+        this.cancelRoiDrawing();
+        if (box) {
+          this.setRoi(box);
+          this.cb.onRoiBoxChange?.(box);
+        } else this.cb.onRoiDrawError?.();
+      }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     const down = this.down;
     this.down = null;
     if (e.pointerId === this.lookDrag?.id) this.endLookDrag();
@@ -828,6 +989,13 @@ export class ViewerEngine {
   }
   private onKey = (e: KeyboardEvent) => {
     const key = this.keyName(e);
+    if (this.roiDrawing) {
+      if (key === 'escape') {
+        this.cancelRoiDrawing();
+        e.preventDefault();
+      }
+      return;
+    }
     const flyExit = this.flyMode && (key === 'f' || e.code === 'KeyF' || key === 'escape');
     const alignExit = this.aligning && key === 'escape';
     if (
@@ -869,9 +1037,15 @@ export class ViewerEngine {
     if (this.isEditing(e.target)) this.exitFlyMode();
     else if (e.target !== this.canvas) this.heldKeys.clear();
   };
-  private onBlur = () => this.exitFlyMode();
+  private onBlur = () => {
+    this.exitFlyMode();
+    this.cancelRoiDrawing();
+  };
   private onVisibility = () => {
-    if (document.hidden) this.exitFlyMode();
+    if (document.hidden) {
+      this.exitFlyMode();
+      this.cancelRoiDrawing();
+    }
   };
 
   private updateFly(dt: number) {
@@ -1046,7 +1220,7 @@ export class ViewerEngine {
     }
     this.updateFly(dt);
     this.updateAxisView(dt);
-    if (this.bench && !this.flyMode && !this.axisAnimation) {
+    if (this.bench && !this.flyMode && !this.axisAnimation && !this.roiDrawing) {
       // steady-state measurement: slowly orbit so every frame is a real redraw
       const t = this.controls.target,
         p = this.camera.position;
@@ -1096,14 +1270,17 @@ export class ViewerEngine {
   dispose() {
     this.disposed = true;
     this.exitFlyMode();
+    this.cancelRoiDrawing();
+    this.roiHelper?.removeFromParent();
+    this.roiHelper?.dispose();
     this.axisAnimation = null;
     cancelAnimationFrame(this.raf);
     const c = this.canvas;
-    c.removeEventListener('pointerdown', this.onDown);
-    c.removeEventListener('pointerup', this.onUp);
-    c.removeEventListener('pointermove', this.onLookDrag);
-    c.removeEventListener('pointercancel', this.onLookEnd);
-    c.removeEventListener('lostpointercapture', this.onLookEnd);
+    c.removeEventListener('pointerdown', this.onDown, true);
+    c.removeEventListener('pointerup', this.onUp, true);
+    c.removeEventListener('pointermove', this.onLookDrag, true);
+    c.removeEventListener('pointercancel', this.onLookEnd, true);
+    c.removeEventListener('lostpointercapture', this.onLookEnd, true);
     document.removeEventListener('keydown', this.onKey);
     document.removeEventListener('keyup', this.onKeyUp);
     document.removeEventListener('mousemove', this.onMouseLook);

@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Box3, Line, LineSegments, Points, PointsMaterial, ShaderMaterial, Vector3 } from 'three';
+import {
+  Box3,
+  Box3Helper,
+  Line,
+  LineSegments,
+  Points,
+  PointsMaterial,
+  ShaderMaterial,
+  Vector3,
+} from 'three';
 import { createDemo } from '../fixtures/demo';
 import type { Bundle } from '../lib/bundle';
 import { heightRamp, robustBounds } from '../lib/geometry';
@@ -107,10 +116,32 @@ function setup(bundle = createDemo('en').bundle) {
   const onFlyModeChange = vi.fn();
   const onAlignModeChange = vi.fn();
   const onPick = vi.fn();
-  const engine = new ViewerEngine(canvas, bundle, { onFlyModeChange, onPick, onAlignModeChange });
+  const onRoiDrawingChange = vi.fn();
+  const onRoiRectChange = vi.fn();
+  const onRoiBoxChange = vi.fn();
+  const onRoiDrawError = vi.fn();
+  const engine = new ViewerEngine(canvas, bundle, {
+    onFlyModeChange,
+    onPick,
+    onAlignModeChange,
+    onRoiDrawingChange,
+    onRoiRectChange,
+    onRoiBoxChange,
+    onRoiDrawError,
+  });
   engines.add(engine);
   canvas.focus();
-  return { canvas, engine, onFlyModeChange, onPick, onAlignModeChange };
+  return {
+    canvas,
+    engine,
+    onFlyModeChange,
+    onPick,
+    onAlignModeChange,
+    onRoiDrawingChange,
+    onRoiRectChange,
+    onRoiBoxChange,
+    onRoiDrawError,
+  };
 }
 
 function key(
@@ -155,6 +186,189 @@ function mouseLook(dx: number, dy: number) {
   });
   document.dispatchEvent(event);
 }
+
+describe('ViewerEngine region of interest', () => {
+  const cloud = (engine: ViewerEngine, bundle: Bundle) =>
+    engine.scene.children.find(
+      (child) =>
+        child instanceof Points &&
+        child.geometry.getAttribute('position').array === bundle.position,
+    ) as Points<import('three').BufferGeometry, ShaderMaterial>;
+
+  it('enters an exact top view and disables camera input until Escape', () => {
+    const { canvas, engine, onRoiDrawingChange, onRoiRectChange, onRoiBoxChange } =
+      setup(navigationBundle());
+    engine.beginSurfaceAlignment();
+    engine.beginRoiDrawing();
+    const target = viewDirectionFor('z', new Vector3(0, 0, 1));
+    const orientation = orientationFor(target.direction, target.up);
+    expect(engine.camera.quaternion.angleTo(orientation)).toBeLessThan(1e-7);
+    expect(engine.controls.enabled).toBe(false);
+    const position = engine.camera.position.clone();
+    pointer(canvas, 'pointerdown', 300, 200);
+    pointer(canvas, 'pointermove', 350, 250);
+    canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 300, ctrlKey: true }));
+    key(canvas, 'f');
+    frame(20);
+    expect(engine.camera.position.distanceTo(position)).toBeLessThan(1e-10);
+    expect(engine.camera.quaternion.angleTo(orientation)).toBeLessThan(1e-7);
+    expect(engine.flyMode).toBe(false);
+    key(canvas, 'Escape');
+    expect(engine.controls.enabled).toBe(true);
+    expect(onRoiDrawingChange.mock.calls).toEqual([[true], [false]]);
+    expect(onRoiRectChange.mock.calls.at(-1)).toEqual([null]);
+    pointer(canvas, 'pointerup', 350, 250);
+    expect(onRoiBoxChange).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    'draws a normalised box with the full selected height (reversed=%s)',
+    (reversed) => {
+      const bundle = navigationBundle();
+      const { canvas, engine, onRoiBoxChange, onRoiRectChange, onRoiDrawError, onPick } =
+        setup(bundle);
+      const original = bundle.position.slice();
+      engine.beginRoiDrawing();
+      const a = engine.project([-1.25, -1.25, -1]);
+      const b = engine.project([1.25, 1.25, -1]);
+      const [start, end] = reversed ? [b, a] : [a, b];
+      pointer(canvas, 'pointerdown', start.x, start.y);
+      pointer(canvas, 'pointermove', end.x, end.y);
+      const overlay = onRoiRectChange.mock.calls.at(-1)![0];
+      expect(overlay.x).toBeCloseTo(Math.min(a.x, b.x), 8);
+      expect(overlay.y).toBeCloseTo(Math.min(a.y, b.y), 8);
+      expect(overlay.width).toBeCloseTo(Math.abs(a.x - b.x), 8);
+      expect(overlay.height).toBeCloseTo(Math.abs(a.y - b.y), 8);
+      pointer(canvas, 'pointerup', end.x, end.y);
+      expect(onRoiBoxChange).toHaveBeenCalledOnce();
+      const box = onRoiBoxChange.mock.calls[0][0];
+      expect(box.min[0]).toBeCloseTo(-1.25, 8);
+      expect(box.min[1]).toBeCloseTo(-1.25, 8);
+      expect(box.min[2]).toBeCloseTo(-1.1, 8);
+      expect(box.max[0]).toBeCloseTo(1.25, 8);
+      expect(box.max[1]).toBeCloseTo(1.25, 8);
+      expect(box.max[2]).toBeCloseTo(1.1, 8);
+      const helper = engine.scene.getObjectByName('roi-box') as Box3Helper;
+      expect(helper).toBeInstanceOf(Box3Helper);
+      expect(helper.box.min.toArray()).toEqual(box.min);
+      expect(helper.box.max.toArray()).toEqual(box.max);
+      expect(engine.controls.enabled).toBe(true);
+      expect(onRoiDrawError).not.toHaveBeenCalled();
+      expect(onPick).not.toHaveBeenCalled();
+      expect(bundle.position).toEqual(original);
+    },
+  );
+
+  it('reports zero-area and empty selections without replacing an existing box', () => {
+    const { canvas, engine, onRoiBoxChange, onRoiDrawError } = setup(navigationBundle());
+    engine.setRoi({ min: [-1, -1, -1], max: [1, 1, 1] });
+    const saved = engine.scene.getObjectByName('roi-box');
+    engine.beginRoiDrawing();
+    pointer(canvas, 'pointerdown', 200, 200);
+    pointer(canvas, 'pointerup', 200, 300);
+    engine.beginRoiDrawing();
+    pointer(canvas, 'pointerdown', 1, 1);
+    pointer(canvas, 'pointermove', 2, 2);
+    pointer(canvas, 'pointerup', 2, 2);
+    expect(onRoiDrawError).toHaveBeenCalledTimes(2);
+    expect(onRoiBoxChange).not.toHaveBeenCalled();
+    expect(engine.scene.getObjectByName('roi-box')).toBe(saved);
+    expect(engine.controls.enabled).toBe(true);
+  });
+
+  it('cancels incomplete pointer gestures and releases capture on Escape', () => {
+    const { canvas, engine, onRoiBoxChange, onRoiDrawingChange } = setup(navigationBundle());
+    const capture = vi.fn();
+    const release = vi.fn();
+    Object.defineProperties(canvas, {
+      setPointerCapture: { value: capture },
+      hasPointerCapture: { value: () => true },
+      releasePointerCapture: { value: release },
+    });
+    engine.beginRoiDrawing();
+    pointer(canvas, 'pointerdown', 200, 200);
+    pointer(canvas, 'pointermove', 600, 400);
+    key(canvas, 'Escape');
+    expect(capture).toHaveBeenCalledWith(1);
+    expect(release).toHaveBeenCalledWith(1);
+    pointer(canvas, 'pointerup', 600, 400);
+    engine.beginRoiDrawing();
+    pointer(canvas, 'pointerdown', 200, 200);
+    pointer(canvas, 'pointercancel', 600, 400);
+    pointer(canvas, 'pointerup', 600, 400);
+    expect(onRoiBoxChange).not.toHaveBeenCalled();
+    expect(engine.controls.enabled).toBe(true);
+    expect(onRoiDrawingChange.mock.calls).toEqual([[true], [false], [true], [false]]);
+  });
+
+  it('clips the main and far layers using shared uniforms and leaves source buffers intact', () => {
+    const bundle = navigationBundle();
+    const positions = bundle.position.slice();
+    const farPositions = bundle.far!.position.slice();
+    const { engine } = setup(bundle);
+    const points = cloud(engine, bundle);
+    const far = engine.scene.getObjectByName('far') as Points<
+      import('three').BufferGeometry,
+      PointsMaterial
+    >;
+    const shader = {
+      uniforms: {},
+      vertexShader: '#include <begin_vertex>',
+      fragmentShader: 'void main() { gl_FragColor = vec4(1.0); }',
+    } as Parameters<PointsMaterial['onBeforeCompile']>[0];
+    far.material.onBeforeCompile(shader, engine.renderer);
+    engine.setHideOutsideRoi(true);
+    expect(points.material.uniforms.uHideOutside.value).toBe(0);
+    engine.setRoi({ min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] });
+    expect(points.material.uniforms.uHideOutside.value).toBe(1);
+    expect(points.material.uniforms.uRoiMin.value.toArray()).toEqual([-0.5, -0.5, -0.5]);
+    expect(points.material.uniforms.uRoiMax.value.toArray()).toEqual([0.5, 0.5, 0.5]);
+    expect(shader.uniforms.uHideOutside).toBe(points.material.uniforms.uHideOutside);
+    expect(shader.uniforms.uRoiMin).toBe(points.material.uniforms.uRoiMin);
+    expect(shader.uniforms.uRoiMax).toBe(points.material.uniforms.uRoiMax);
+    expect(points.material.fragmentShader).toContain('vRoiVisible < 0.5) discard;');
+    expect(shader.fragmentShader).toContain('vRoiVisible < 0.5) discard;');
+    expect(shader.vertexShader).toContain('greaterThanEqual(position, uRoiMin)');
+    expect(points.geometry.getAttribute('position').array).toBe(bundle.position);
+    expect(far.geometry.getAttribute('position').array).toBe(bundle.far!.position);
+    expect(bundle.position).toEqual(positions);
+    expect(bundle.far!.position).toEqual(farPositions);
+    engine.setHideOutsideRoi(false);
+    expect(shader.uniforms.uHideOutside.value).toBe(0);
+    engine.setHideOutsideRoi(true);
+    engine.setRoi(null);
+    expect(shader.uniforms.uHideOutside.value).toBe(0);
+    expect(engine.scene.getObjectByName('roi-box')).toBeUndefined();
+  });
+
+  it('disposes outlines when replacing, clearing or unloading and removes draw listeners', () => {
+    const { engine, canvas, onRoiBoxChange } = setup(navigationBundle());
+    const box = { min: [-1, -1, -1], max: [1, 1, 1] } as const;
+    engine.setRoi({ min: [...box.min], max: [...box.max] });
+    const first = engine.scene.getObjectByName('roi-box') as Box3Helper;
+    const firstDispose = vi.spyOn(first, 'dispose');
+    engine.setRoi({ min: [-2, -2, -2], max: [2, 2, 2] });
+    expect(firstDispose).toHaveBeenCalledOnce();
+    expect(first.parent).toBeNull();
+    const second = engine.scene.getObjectByName('roi-box') as Box3Helper;
+    const secondDispose = vi.spyOn(second, 'dispose');
+    engine.setRoi(null);
+    expect(secondDispose).toHaveBeenCalledOnce();
+    expect(second.parent).toBeNull();
+    engine.setRoi({ min: [...box.min], max: [...box.max] });
+    const final = engine.scene.getObjectByName('roi-box') as Box3Helper;
+    const finalDispose = vi.spyOn(final, 'dispose');
+    engine.beginRoiDrawing();
+    engine.dispose();
+    engines.delete(engine);
+    expect(finalDispose).toHaveBeenCalledOnce();
+    expect(final.parent).toBeNull();
+    pointer(canvas, 'pointerdown', 200, 200);
+    pointer(canvas, 'pointermove', 600, 400);
+    pointer(canvas, 'pointerup', 600, 400);
+    expect(onRoiBoxChange).not.toHaveBeenCalled();
+  });
+});
 
 describe('ViewerEngine point info tool', () => {
   it('selects through the existing picker only when active and preserves orbit during drags', () => {

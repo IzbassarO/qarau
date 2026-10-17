@@ -1,0 +1,119 @@
+# Region of interest — version 1
+
+One optional region of interest (ROI) belongs to a site. It is a world-coordinate,
+axis-aligned box, independent of the browser, camera orientation, point ordering,
+and whether clipping is enabled. P4c can read this document directly from the run
+catalog without opening the viewer.
+
+```json
+{
+  "version": 1,
+  "site_id": "notre-dame",
+  "source_run": "notre-dame",
+  "frame": "reconstruction",
+  "up_axis": "z",
+  "min": [-15.25, -22.0, -3.5],
+  "max": [17.75, 19.5, 28.5],
+  "created_at": "2026-10-17T12:00:00.000Z",
+  "created_by": "engineer"
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `version` | Required integer `1`; readers reject unsupported versions. |
+| `site_id` | Required site identifier; the document's id must match the URL/path. |
+| `source_run` | Required run or video id on which the box was drawn. |
+| `frame` | Required coordinate-frame name. The viewer currently writes `reconstruction`, meaning the exported bundle's world coordinates. |
+| `up_axis` | Required `x`, `y`, or `z`; the viewer's exported world is currently Z-up. |
+| `min`, `max` | Required XYZ triples of finite JSON numbers, in model units. Every `min[i] <= max[i]`; boundaries are inclusive. |
+| `created_at` | Required ISO 8601 timestamp with time and timezone, written when saving. |
+| `created_by` | Required user identifier. M1 uses the signed-in UI identity because the shared-token API has no individual account identities yet; this field is not a verified audit identity. Direct development viewer routes without a UI session write `development`; production requires the signed-in identity. |
+
+No scale or geographic coordinates are implied. A pipeline consumer must use the
+named frame and explicit bundle calibration before reporting metres or areas.
+The validator rejects malformed JSON, missing fields, empty metadata, unsupported
+versions, invalid timestamps, non-finite coordinates, and reversed box bounds.
+Additional JSON fields are ignored and omitted when rewriting version 1.
+
+## Drawing and vertical extent
+
+Drawing first switches the existing view gizmo to top view. The rectangle's four
+screen corners are unprojected onto a horizontal plane at the estimated terrain's
+Z intercept (the pure helper accepts an explicit plane coordinate, defaulting to zero);
+reversed drags produce the same normalized ground rectangle. Zero-width and
+zero-height drags are rejected. The other two axes retain the drawn bounds.
+
+Among finite object-cloud points inside that inclusive ground rectangle, let the
+smallest and largest up coordinates be `low` and `high`. The saved up-axis bounds
+are `low - 0.05 * (high - low)` and `high + 0.05 * (high - low)`: a 5% margin at
+each end. A flat selection has zero up-axis thickness. A rectangle containing no
+object points is rejected. The optional far layer does not inflate this extent;
+once enabled, clipping applies the same box to both object and far points without
+changing either source buffer.
+
+## Site resolution and coordinate-frame caveat
+
+The viewer resolves the current run against the inspection catalog. It uses the
+run's `site.id`, then `site_id`, when supplied. If neither association exists, the
+run id itself is the site id: `/viewer/notre-dame` saves under site `notre-dame`.
+Unassigned runs do not share the inspection-list display group
+`qarau:unassigned` as a storage id. Later inspections with the same actual site
+association load the same saved document.
+
+**Until P5 (gravity and scale) and M4 (registration), each run has its own
+reconstruction frame. A box reused on a different run is therefore only
+approximate.** The viewer displays a translated warning when `source_run` differs
+from the current run. It does not silently transform, register, or rescale the
+box. A pipeline consuming a different run must treat this mismatch explicitly
+rather than assuming alignment.
+
+## Catalog storage and API contract
+
+The catalog is file based, as in `backend/app/runs.py`. The ROI path is:
+
+```text
+<QARAU_RUNS_DIR>/sites/<site_id>/roi.json
+```
+
+The writer validates before creating directories, writes a uniquely named temp
+file in the site's directory, then atomically renames it to `roi.json`. Readers
+see either complete previous or complete new JSON. Site ids must match
+`[A-Za-z0-9][A-Za-z0-9._:-]*` and cannot contain `..`; encoded separators,
+traversal, and symlinked site/file paths are rejected. The root catalog directory
+is trusted configuration. Saves replace a site's current ROI; this is editable
+site configuration, not an append-only finding decision log.
+
+| Request | Declared role | Result |
+| --- | --- | --- |
+| `GET /api/sites/{site_id}/roi` | `viewer` | `200` with the JSON, `404` if none is saved. |
+| `PUT /api/sites/{site_id}/roi` | `editor` | Validate all fields and matching `site_id`, save atomically, return `200` with the JSON. Invalid body: `422`. |
+| `DELETE /api/sites/{site_id}/roi` | `editor` | Remove the file; `204`, including when already absent. |
+
+Every route declares its role. Authentication follows M1's existing shared-token
+policy in `backend/app/auth.py`: with `QARAU_API_TOKEN` configured, missing or
+incorrect Bearer credentials return `401`; without one, the explicitly existing
+development mode permits requests. Individual editor/viewer enforcement awaits
+the real identity/role provider. Invalid site paths return `400`; the body limit
+is 64 KiB (`413` beyond it), unsupported methods return `405`, and storage failures
+return `500`. Responses are uncached. Corrupt persisted JSON produces an error,
+never an apparently absent region. The client sends the existing session Bearer
+header and surfaces failures in translated viewer messages.
+
+### Current implementation boundary
+
+`web/vite-dev-roi.ts`, mounted by the existing Vite catalog adapter, implements
+this API and disk persistence for local development. It is disabled when
+`QARAU_API_PROXY` forwards `/api` to FastAPI. It is not included in the static web
+build and is not a production server.
+
+The task's explicit edit boundary permits only `web/` and `docs/`. The production
+`backend/app/roi.py` router, registration in `main.py`, Pydantic v2 model, and
+`backend/tests/test_roi.py` therefore remain required backend work under an
+expanded scope. They should implement the same JSON/path/API contract through
+the existing `require_role` dependency. No database migration is needed for this
+file-based catalog. Do not claim production API support until that router exists.
+
+No dependencies or models were added. This adapter uses Node built-ins and the
+installed Vite stack. Vite's local `LICENSE.md` is MIT (its bundled permissive
+MIT/BSD/ISC/Apache-2.0/CC0 components also permit commercial use).

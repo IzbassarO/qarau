@@ -30,6 +30,9 @@ import { PointInfoPanel } from './PointInfoPanel';
 import { SessionImage } from '../auth/SessionImage';
 import { sessionUserId, subscribeToAuth } from '../auth/auth';
 import { loadSensitivity, saveSensitivity } from './settings';
+import { useRoi } from './useRoi';
+import { RoiControls } from './RoiControls';
+import { containsPoint } from './roi';
 
 declare global {
   interface Window {
@@ -79,11 +82,13 @@ export function ViewerScreen({
   embedded = false,
   initialPoint = null,
   invalidPoint = false,
+  siteId,
 }: {
   bundle: Bundle;
   embedded?: boolean;
   initialPoint?: number | null;
   invalidPoint?: boolean;
+  siteId?: string;
 }) {
   const { t } = useI18n();
   const m = bundle.manifest;
@@ -96,6 +101,7 @@ export function ViewerScreen({
   const [alignMode, setAlignMode] = useState(false);
   const [pointInfoMode, setPointInfoMode] = useState(initialPoint !== null);
   const userId = useSyncExternalStore(subscribeToAuth, sessionUserId, () => null);
+  const roi = useRoi(bundle, siteId, userId, engineRef);
   const [sensitivitySetting, setSensitivitySetting] = useState(() => ({
     userId,
     value: loadSensitivity(userId),
@@ -146,6 +152,10 @@ export function ViewerScreen({
         onFlyModeChange: setFlyMode,
         onAlignModeChange: setAlignMode,
         onPointInfoModeChange: setPointInfoMode,
+        onRoiDrawingChange: roi.setDrawing,
+        onRoiRectChange: roi.setRect,
+        onRoiBoxChange: roi.drawn,
+        onRoiDrawError: roi.drawError,
       });
     } catch {
       setGlError(true);
@@ -177,6 +187,8 @@ export function ViewerScreen({
       ro.disconnect();
       eng.dispose();
     };
+    // The ROI callbacks write state and do not capture the current box or site.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bundle]);
 
   useEffect(() => engineRef.current?.setFrame(frame), [frame, bundle]);
@@ -202,7 +214,8 @@ export function ViewerScreen({
         if (!el) continue;
         const p = e.project(x.centroid);
         el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)`;
-        el.style.visibility = p.visible ? 'visible' : 'hidden';
+        const inRegion = !roi.hidden || !roi.box || containsPoint(roi.box, x.centroid);
+        el.style.visibility = p.visible && inRegion && !roi.drawing ? 'visible' : 'hidden';
       }
     };
     e.onRender = place;
@@ -210,7 +223,7 @@ export function ViewerScreen({
     return () => {
       e.onRender = undefined;
     };
-  }, [bundle, findings, frame, opts.buildUp, opts.findings]);
+  }, [bundle, findings, frame, opts.buildUp, opts.findings, roi.hidden, roi.box, roi.drawing]);
 
   // play: step in real time by frames[i].t (photo sets: 4 frames per second)
   useEffect(() => {
@@ -370,6 +383,21 @@ export function ViewerScreen({
               else setPointInfoMode(true);
             }}
           />
+          <ToolButton
+            label={t('roi.title')}
+            pressed={roi.open}
+            onClick={() => {
+              if (roi.open) eng()?.cancelRoiDrawing();
+              roi.setOpen(!roi.open);
+            }}
+          >
+            {icon(
+              <>
+                <path d="M2 6V2h4M12 2h4v4M16 12v4h-4M6 16H2v-4" />
+                <rect x="5" y="5" width="8" height="8" strokeDasharray="2 2" />
+              </>,
+            )}
+          </ToolButton>
           <span className="my-1 h-px w-6 bg-line" />
           <ToolButton
             label={t('toolbar.zoomIn')}
@@ -400,8 +428,31 @@ export function ViewerScreen({
             <canvas
               ref={canvasRef}
               aria-label={t('canvas.label')}
-              className="absolute inset-0 size-full outline-none"
+              className={`absolute inset-0 size-full outline-none ${roi.drawing ? 'cursor-crosshair' : ''}`}
             />
+            {roi.rect && (
+              <div
+                data-testid="roi-drag-rectangle"
+                className="pointer-events-none absolute border border-[#ddd6bf] bg-[#ddd6bf]/10"
+                style={{
+                  left: roi.rect.x,
+                  top: roi.rect.y,
+                  width: roi.rect.width,
+                  height: roi.rect.height,
+                }}
+              />
+            )}
+            {roi.open && (
+              <RoiControls
+                roi={roi}
+                runId={bundle.runId}
+                onDraw={() => {
+                  setPlaying(false);
+                  eng()?.beginRoiDrawing();
+                }}
+                onCancel={() => eng()?.cancelRoiDrawing()}
+              />
+            )}
             {glError && (
               <p className="absolute inset-0 grid place-items-center text-watch">
                 {t('error.webgl')}
@@ -452,13 +503,15 @@ export function ViewerScreen({
               role="status"
               className="pointer-events-none absolute bottom-3 left-1/2 w-max max-w-[calc(100%-15rem)] -translate-x-1/2 rounded-md bg-bg/80 px-2.5 py-1.5 text-center text-xs leading-5 text-ink-2"
             >
-              {alignMode
-                ? t('canvas.alignHint')
-                : flyMode
-                  ? t('canvas.flyHint')
-                  : pointInfoMode
-                    ? t('pointInfo.hint')
-                    : t('canvas.hint')}
+              {roi.drawing
+                ? t('roi.drawHint')
+                : alignMode
+                  ? t('canvas.alignHint')
+                  : flyMode
+                    ? t('canvas.flyHint')
+                    : pointInfoMode
+                      ? t('pointInfo.hint')
+                      : t('canvas.hint')}
             </div>
           </div>
 

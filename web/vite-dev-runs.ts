@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
+import { createRoiMiddleware } from './vite-dev-roi.ts';
 
 const TYPES: Record<string, string> = {
   '.json': 'application/json',
@@ -16,6 +17,7 @@ export function devRuns(): Plugin {
     apply: 'serve',
     configureServer(server) {
       const root = path.resolve(process.env.QARAU_RUNS_DIR ?? '../data/runs');
+      server.middlewares.use('/api/sites', createRoiMiddleware(root, process.env.QARAU_API_TOKEN));
       const send = (
         res: ServerResponse,
         code: number,
@@ -47,7 +49,18 @@ export function devRuns(): Plugin {
               const created_at =
                 m.created_at ??
                 fs.statSync(path.join(root, id, 'web/manifest.json')).mtime.toISOString();
-              out.push({ run_id: id, source: m.source, stats: m.stats, created_at });
+              out.push({
+                run_id: id,
+                source: m.source,
+                stats: m.stats,
+                created_at,
+                site: m.site,
+                site_id: m.site_id,
+                site_name: m.site_name,
+                title: m.title,
+                status: m.status,
+                stages: m.stages,
+              });
             } catch {
               /* not a run */
             }

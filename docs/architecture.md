@@ -26,6 +26,11 @@ API (FastAPI) ──► Web viewer / Desktop app / PDF & XLSX
 The viewer only reads finished artifacts (Potree octree, findings JSON), so the map opens
 instantly; it never waits on processing.
 
+Site configuration also stores an optional world-coordinate region of interest in
+the run catalog. Its versioned JSON, coordinate-frame caveat, site resolution,
+file layout, API contract, and current development-server boundary are documented
+in [Region of interest — version 1](notes/roi-format.md).
+
 ## Stage contracts
 
 Each stage reads inputs from storage by key and writes outputs under

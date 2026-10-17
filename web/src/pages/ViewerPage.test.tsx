@@ -1,14 +1,16 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { PerspectiveCamera, Vector3 } from 'three';
+import { Box3Helper, PerspectiveCamera, Vector3 } from 'three';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createDemo } from '../fixtures/demo';
 import { login, logout } from '../auth/auth';
 import { LANGS, setLang, type Lang } from '../i18n';
 import * as bundleApi from '../lib/bundle';
+import * as roiApi from '../lib/roi';
 import { ViewerEngine } from '../viewer/engine';
 import type { Axis } from '../viewer/gizmo';
 import { saveSensitivity } from '../viewer/settings';
+import type { Roi } from '../viewer/roi';
 import { ViewerPage } from './ViewerPage';
 
 const { renderScene } = vi.hoisted(() => ({ renderScene: vi.fn() }));
@@ -45,6 +47,8 @@ beforeEach(() => {
   sessionStorage.clear();
   setLang('en');
   vi.clearAllMocks();
+  vi.spyOn(roiApi, 'resolveRoiSiteId').mockImplementation(async (runId) => runId);
+  vi.spyOn(roiApi, 'loadRoi').mockResolvedValue(null);
   now = 0;
   nextFrame = 0;
   pendingFrames.clear();
@@ -655,3 +659,211 @@ it('allows colour changes when browser storage is unavailable', async () => {
   expect(setColorMode).toHaveBeenLastCalledWith('height');
   expect(screen.queryByRole('alert')).toBeNull();
 });
+
+async function renderRoiViewer() {
+  const bundle: bundleApi.Bundle = {
+    ...createDemo('en').bundle,
+    runId: 'notre-dame',
+  };
+  vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+  vi.spyOn(bundleApi, 'loadBundle').mockResolvedValue(bundle);
+  const resize = vi.spyOn(ViewerEngine.prototype, 'resize');
+  const view = renderViewer(bundle.runId);
+  const locale = LANGS[document.documentElement.lang as Lang];
+  const tool = await screen.findByRole('button', { name: locale['roi.title'] });
+  await waitFor(() => expect(roiApi.loadRoi).toHaveBeenCalled());
+  if (!screen.queryByRole('region', { name: locale['roi.title'] })) fireEvent.click(tool);
+  const panel = screen.getByRole('region', { name: locale['roi.title'] });
+  await waitFor(() =>
+    expect(
+      (within(panel).getByRole('button', { name: locale['roi.draw'] }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  );
+  const canvas = screen.getByLabelText(locale['canvas.label']) as HTMLCanvasElement;
+  Object.defineProperties(canvas, {
+    clientWidth: { configurable: true, value: 800 },
+    clientHeight: { configurable: true, value: 600 },
+  });
+  vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+    left: 0,
+    top: 0,
+    right: 800,
+    bottom: 600,
+    width: 800,
+    height: 600,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+  const engine = resize.mock.contexts.at(-1) as ViewerEngine;
+  engine.resize();
+  return { ...view, bundle, canvas, engine, panel, tool, locale };
+}
+
+function roiPointer(canvas: HTMLCanvasElement, type: string, x: number, y: number) {
+  const event = new MouseEvent(type, {
+    button: 0,
+    clientX: x,
+    clientY: y,
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperty(event, 'pointerId', { value: 7 });
+  act(() => canvas.dispatchEvent(event));
+}
+
+function drawRoi(view: Awaited<ReturnType<typeof renderRoiViewer>>) {
+  fireEvent.click(within(view.panel).getByRole('button', { name: view.locale['roi.draw'] }));
+  expect(view.engine.controls.enabled).toBe(false);
+  expect(
+    view.engine.camera.getWorldDirection(new Vector3()).distanceTo(new Vector3(0, 0, -1)),
+  ).toBeLessThan(0.001);
+  // Draw in reverse to exercise the actual top-view pointer path and box normalization.
+  roiPointer(view.canvas, 'pointerdown', 760, 560);
+  roiPointer(view.canvas, 'pointermove', 40, 40);
+  roiPointer(view.canvas, 'pointerup', 40, 40);
+  expect(view.engine.controls.enabled).toBe(true);
+  expect(view.engine.scene.getObjectByName('roi-box')).toBeTruthy();
+}
+
+it('draws a region on /viewer/notre-dame, saves it, restores it on reload and clears it on the server', async () => {
+  sessionStorage.setItem('qarau.auth.session', 'Bearer test-roi-credential');
+  sessionStorage.setItem('qarau.auth.userId', 'roi-operator');
+  let saved: Roi | null = null;
+  vi.mocked(roiApi.loadRoi).mockImplementation(async () => saved);
+  const save = vi.spyOn(roiApi, 'saveRoi').mockImplementation(async (_siteId, value) => {
+    saved = structuredClone(value);
+    return value;
+  });
+  const remove = vi.spyOn(roiApi, 'deleteRoi').mockImplementation(async () => {
+    saved = null;
+  });
+  const setHidden = vi.spyOn(ViewerEngine.prototype, 'setHideOutsideRoi');
+  const view = await renderRoiViewer();
+  const originalPoints = view.bundle.position.slice();
+  drawRoi(view);
+  const helper = view.engine.scene.getObjectByName('roi-box') as Box3Helper;
+  expect(helper.box.min.x).toBeLessThan(helper.box.max.x);
+  expect(helper.box.min.y).toBeLessThan(helper.box.max.y);
+  expect(helper.box.min.z).toBeLessThan(helper.box.max.z);
+  fireEvent.click(within(view.panel).getByRole('button', { name: LANGS.en['roi.hideOutside'] }));
+  expect(setHidden).toHaveBeenLastCalledWith(true);
+  expect(view.bundle.position).toEqual(originalPoints);
+
+  fireEvent.click(within(view.panel).getByRole('button', { name: LANGS.en['roi.save'] }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  expect(save).toHaveBeenCalledWith(
+    'notre-dame',
+    expect.objectContaining({
+      version: 1,
+      site_id: 'notre-dame',
+      source_run: 'notre-dame',
+      frame: 'reconstruction',
+      up_axis: 'z',
+      created_by: 'roi-operator',
+    }),
+  );
+  await within(view.panel).findByText(LANGS.en['roi.saved']);
+  const savedBounds = { min: helper.box.min.toArray(), max: helper.box.max.toArray() };
+  view.unmount();
+
+  const reloaded = await renderRoiViewer();
+  const restored = reloaded.engine.scene.getObjectByName('roi-box') as Box3Helper;
+  expect(restored.box.min.toArray()).toEqual(savedBounds.min);
+  expect(restored.box.max.toArray()).toEqual(savedBounds.max);
+  expect(screen.queryByRole('alert')).toBeNull();
+  fireEvent.click(within(reloaded.panel).getByRole('button', { name: LANGS.en['roi.clear'] }));
+  await waitFor(() => expect(remove).toHaveBeenCalledWith('notre-dame'));
+  await waitFor(() => expect(reloaded.engine.scene.getObjectByName('roi-box')).toBeUndefined());
+  expect(setHidden).toHaveBeenLastCalledWith(false);
+});
+
+it('cancels region drawing with Escape and restores orbit without saving a box', async () => {
+  const save = vi.spyOn(roiApi, 'saveRoi');
+  const view = await renderRoiViewer();
+  fireEvent.click(within(view.panel).getByRole('button', { name: LANGS.en['roi.draw'] }));
+  expect(view.engine.controls.enabled).toBe(false);
+  roiPointer(view.canvas, 'pointerdown', 100, 100);
+  roiPointer(view.canvas, 'pointermove', 400, 300);
+  fireEvent.keyDown(view.canvas, { key: 'Escape', code: 'Escape' });
+  expect(view.engine.controls.enabled).toBe(true);
+  expect(within(view.panel).queryByRole('button', { name: LANGS.en['roi.cancel'] })).toBeNull();
+  roiPointer(view.canvas, 'pointerup', 400, 300);
+  expect(view.engine.scene.getObjectByName('roi-box')).toBeUndefined();
+  expect(save).not.toHaveBeenCalled();
+});
+
+it('saves a direct development viewer region with an explicit development author', async () => {
+  expect(sessionStorage.getItem('qarau.auth.session')).toBeNull();
+  const save = vi.spyOn(roiApi, 'saveRoi').mockImplementation(async (_siteId, value) => value);
+  const view = await renderRoiViewer();
+  drawRoi(view);
+  const button = within(view.panel).getByRole('button', {
+    name: LANGS.en['roi.save'],
+  }) as HTMLButtonElement;
+  expect(button.disabled).toBe(false);
+  fireEvent.click(button);
+  await waitFor(() =>
+    expect(save).toHaveBeenCalledWith(
+      'notre-dame',
+      expect.objectContaining({ created_by: 'development', source_run: 'notre-dame' }),
+    ),
+  );
+  await within(view.panel).findByText(LANGS.en['roi.saved']);
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('shows load, save and clear failures in plain words and preserves the unsaved box', async () => {
+  sessionStorage.setItem('qarau.auth.session', 'Bearer test-roi-credential');
+  sessionStorage.setItem('qarau.auth.userId', 'roi-operator');
+  vi.mocked(roiApi.loadRoi).mockRejectedValueOnce(new Error('HTTP 503'));
+  vi.spyOn(roiApi, 'saveRoi').mockRejectedValue(new Error('HTTP 503'));
+  vi.spyOn(roiApi, 'deleteRoi').mockRejectedValue(new Error('HTTP 503'));
+  const view = await renderRoiViewer();
+  expect((await screen.findByRole('alert')).textContent).toBe(LANGS.en['roi.loadError']);
+  fireEvent.click(within(view.panel).getByRole('button', { name: LANGS.en['roi.retry'] }));
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  await waitFor(() =>
+    expect(
+      (within(view.panel).getByRole('button', { name: LANGS.en['roi.draw'] }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  );
+  drawRoi(view);
+  fireEvent.click(within(view.panel).getByRole('button', { name: LANGS.en['roi.save'] }));
+  expect((await screen.findByRole('alert')).textContent).toBe(LANGS.en['roi.saveError']);
+  expect(view.engine.scene.getObjectByName('roi-box')).toBeTruthy();
+  fireEvent.click(within(view.panel).getByRole('button', { name: LANGS.en['roi.clear'] }));
+  expect((await screen.findByRole('alert')).textContent).toBe(LANGS.en['roi.clearError']);
+  expect(view.engine.scene.getObjectByName('roi-box')).toBeTruthy();
+});
+
+it.each<Lang>(['en', 'ru', 'kk'])(
+  'localizes region controls and warns when a saved region comes from another run (%s)',
+  async (lang) => {
+    setLang(lang);
+    vi.mocked(roiApi.resolveRoiSiteId).mockResolvedValue('north-site');
+    vi.mocked(roiApi.loadRoi).mockResolvedValue({
+      version: 1,
+      site_id: 'north-site',
+      source_run: 'earlier-survey',
+      frame: 'reconstruction',
+      up_axis: 'z',
+      min: [-1, -1, -1],
+      max: [1, 1, 1],
+      created_at: '2026-10-17T12:00:00Z',
+      created_by: 'roi-operator',
+    });
+    const view = await renderRoiViewer();
+    expect(roiApi.loadRoi).toHaveBeenCalledWith('north-site', expect.any(AbortSignal));
+    for (const key of ['roi.draw', 'roi.save', 'roi.clear', 'roi.hideOutside'] as const)
+      expect(within(view.panel).getByRole('button', { name: LANGS[lang][key] })).toBeTruthy();
+    expect(within(view.panel).getByRole('note').textContent).toContain(
+      LANGS[lang]['roi.approximate'],
+    );
+    expect(within(view.panel).getByRole('note').textContent).toContain('earlier-survey');
+    expect(view.engine.scene.getObjectByName('roi-box')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  },
+);

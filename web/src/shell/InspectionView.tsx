@@ -73,7 +73,7 @@ export function InspectionView({
         </div>
         {bundle ? (
           <div className="inspection-viewer">
-            <ViewerScreen bundle={bundle} embedded />
+            <ViewerScreen key={inspection.id} bundle={bundle} siteId={inspection.siteId} embedded />
           </div>
         ) : query.isError ? (
           <div className="map-message" role="alert">
