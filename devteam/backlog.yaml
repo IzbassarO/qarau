@@ -117,11 +117,13 @@ tasks:
     License (non-commercial): forbidden. Unclear -> ask the owner.
 
     '
-  status: todo
+  status: done
   depends_on:
   - A4b
-  run: run-20261016-115433
+  run: run-20261017-085251
   branch: devteam/P3b
+  pr: https://github.com/IzbassarO/qarau/pull/28
+  done_at: '2026-10-17'
 - id: P2b
   area: core
   title: Parallax keyframes and a footage quality report
