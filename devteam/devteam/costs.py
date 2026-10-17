@@ -7,15 +7,68 @@ network error with unknown billing) keeps counting at its worst case.
 Subscription runs (Claude Code, Codex) are logged with billed=0, for information only.
 """
 
+import datetime as dt
+import re
 import sqlite3
 import time
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from rich.table import Table
 
 
 class BudgetExceeded(RuntimeError):
     pass
+
+
+class SubscriptionLimit(RuntimeError):
+    """A Claude Code / Codex plan limit. reset_at: epoch seconds, None if the tool didn't say."""
+
+    def __init__(self, message: str, reset_at: float | None):
+        super().__init__(message)
+        self.reset_at = reset_at
+
+
+LIMIT_HIT = re.compile(
+    r"usage limit|limit reached|hit your (?:usage )?limit|rate.?limit|quota exceeded", re.I
+)
+
+
+def limit_reset(text: str, now: float | None = None) -> tuple[bool, float | None]:
+    """(is a plan limit, reset epoch or None) from what claude / codex print. Seen forms:
+    "Claude AI usage limit reached|1760000000", "5-hour limit reached ∙ resets 3pm",
+    "You've hit your limit · resets 3:30pm (America/New_York)",
+    "try again in 2 hours 5 minutes", "try again at 3:05 PM"."""
+    if not LIMIT_HIT.search(text):
+        return False, None
+    now = time.time() if now is None else now
+    if m := re.search(r"\|(\d{10})\b", text):
+        return True, float(m.group(1))
+    if m := re.search(r"try again in\s+(?:(\d+)\s*h\w*)?\s*(?:(\d+)\s*m\w*)?", text, re.I):
+        if m.group(1) or m.group(2):
+            return True, now + int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60
+    m = re.search(
+        r"(?:resets?|try again)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?"
+        r"(?:\s*\(([\w/+-]+)\))?",
+        text,
+        re.I,
+    )
+    if not m:
+        return True, None
+    hour, minute = int(m.group(1)), int(m.group(2) or 0)
+    if m.group(3):
+        hour = hour % 12 + (12 if m.group(3).lower().startswith("p") else 0)
+    if hour > 23 or minute > 59:
+        return True, None
+    try:
+        tz = ZoneInfo(m.group(4)) if m.group(4) else None
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = None
+    t0 = dt.datetime.fromtimestamp(now, tz)
+    reset = t0.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if reset <= t0:
+        reset += dt.timedelta(days=1)
+    return True, reset.timestamp()
 
 
 def _db(home: Path) -> sqlite3.Connection:
@@ -29,6 +82,8 @@ def _db(home: Path) -> sqlite3.Connection:
         db.execute("alter table usage add column state text default 'settled'")
     if "secs" not in cols:  # v1 db
         db.execute("alter table usage add column secs real default 0")
+    db.execute("""create table if not exists limits (
+        day text, ts text, agent text, task text, reset_at real, waited_s real, message text)""")
     return db
 
 
@@ -155,6 +210,60 @@ def subscription_rows(home: Path, day: str) -> list[tuple]:
             sum(usd) from usage where day = ? and not billed
             group by task, agent, model order by sum(secs) desc""",
             (day,),
+        ).fetchall()
+    finally:
+        db.close()
+
+
+def record_limit(
+    home: Path, agent: str, task: str, reset_at: float | None, waited_s: float, message: str
+):
+    """A subscription-limit event (shown in the dashboard and the report)."""
+    with _db(home) as db:
+        db.execute(
+            "insert into limits values (?,?,?,?,?,?,?)",
+            (
+                _today(),
+                time.strftime("%Y-%m-%dT%H:%M:%S"),
+                agent,
+                task,
+                reset_at,
+                waited_s,
+                message[:300],
+            ),
+        )
+
+
+def limit_rows(home: Path, since_day: str) -> list[tuple]:
+    """(ts, agent, task, reset_at, waited_s, message), newest first."""
+    db = _db(home)
+    try:
+        return db.execute(
+            "select ts, agent, task, reset_at, waited_s, message from limits where day >= ? "
+            "order by ts desc",
+            (since_day,),
+        ).fetchall()
+    finally:
+        db.close()
+
+
+def last_row(home: Path) -> int:
+    """Marks the start of a run: spend_since(home, mark) is what the run used."""
+    db = _db(home)
+    try:
+        return db.execute("select coalesce(max(rowid), 0) from usage").fetchone()[0]
+    finally:
+        db.close()
+
+
+def spend_since(home: Path, rowid: int) -> list[tuple]:
+    """(task, agent, billed, calls, usd, tokens_in, tokens_out) of rows after the mark."""
+    db = _db(home)
+    try:
+        return db.execute(
+            """select task, agent, billed, count(*), sum(usd), sum(tokens_in), sum(tokens_out)
+            from usage where rowid > ? group by task, agent, billed order by task, agent""",
+            (rowid,),
         ).fetchall()
     finally:
         db.close()
