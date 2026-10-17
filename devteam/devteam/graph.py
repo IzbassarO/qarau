@@ -77,6 +77,22 @@ def is_protected(path: str) -> bool:
 VISUAL = re.compile(r"\b(viewer|screenshots?)\b", re.I)  # criteria the tester must see
 
 
+def where(paths) -> str:
+    """'3 file(s) in scratch/, web/': a log line, not a list of every path."""
+    tops = sorted({p.split("/", 1)[0] + ("/" if "/" in p else "") for p in paths})
+    return f"{len(paths)} file(s) in {', '.join(tops)}"
+
+
+def resume_note(task: dict) -> str:
+    """Said in the plan of a task whose branch already holds earlier work."""
+    if not task.get("previous_work"):
+        return ""
+    return (
+        f"Previous work is already on this task's branch: {task['previous_work']}. "
+        "You continue on that branch (dev merged in): build on it, do not start over.\n\n"
+    )
+
+
 def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
     """The whole plan is valid or nothing happens. Returns assignments."""
     by_id = {t["id"]: t for t in todo}
@@ -110,7 +126,7 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
         {
             "task": by_id[p["task_id"]],
             "assignee": p["assignee"],
-            "plan": p["plan"],
+            "plan": resume_note(by_id[p["task_id"]]) + p["plan"],
             "criteria": list(p["criteria"]),
             "routes": list(p.get("routes") or []),
         }
@@ -242,7 +258,11 @@ class Team:
             data = yaml.safe_load(self.backlog_path.read_text())
             for t in data["tasks"]:
                 if t["id"] == task_id:
-                    t.update(fields)
+                    for k, v in fields.items():  # None removes the field
+                        if v is None:
+                            t.pop(k, None)
+                        else:
+                            t[k] = v
             self.backlog_path.write_text(
                 yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100)
             )
@@ -341,8 +361,8 @@ class Team:
         specs = [f"+refs/heads/{b}:refs/remotes/{self.remote_name}/{b}" for b in branches]
         self.git("fetch", "-q", self.remote_url, *specs)
 
-    def merged_tasks(self) -> set[str]:
-        """Task ids whose devteam/<id> branch on the remote is already merged into dev."""
+    def fetch_tasks(self):
+        """dev and every devteam/<id> branch on the remote."""
         rn, base, pre = self.remote_name, self.cfg["base_branch"], self.branch_prefix
         self.git(
             "fetch",
@@ -351,8 +371,43 @@ class Team:
             f"+refs/heads/{base}:refs/remotes/{rn}/{base}",
             f"+refs/heads/{pre}/*:refs/remotes/{rn}/{pre}/*",
         )
+
+    def merged_tasks(self) -> set[str]:
+        """Task ids whose devteam/<id> branch on the remote is already merged into dev."""
+        rn, base, pre = self.remote_name, self.cfg["base_branch"], self.branch_prefix
+        self.fetch_tasks()
         out = self.git("branch", "-r", "--merged", f"{rn}/{base}", "--list", f"{rn}/{pre}/*")
         return {line.strip().rsplit("/", 1)[1] for line in out.splitlines() if line.strip()}
+
+    def prior_work(self, task_id: str) -> str:
+        """Commits on devteam/<id> (local first, then the remote's) that dev does not have.
+        Call after fetch_tasks()."""
+        b, base = self.branch_for(task_id), f"{self.remote_name}/{self.cfg['base_branch']}"
+        for ref in self.git(
+            "for-each-ref",
+            "--format=%(refname:short)",
+            f"refs/heads/{b}",
+            f"refs/remotes/{self.remote_name}/{b}",
+        ).split():
+            log = self.git("log", "--oneline", "--no-merges", f"{base}..{ref}").splitlines()
+            if log:
+                return f"{len(log)} commit(s) on {b} not in dev yet, latest: {log[0]}"
+        return ""
+
+    def unblock_ready(self) -> list[str]:
+        """Blocked tasks whose depends_on are all done go back to todo, pushed to dev."""
+        tasks = self.load_backlog()
+        done = {t["id"] for t in tasks if t["status"] == "done"}
+        ready = [
+            t["id"]
+            for t in tasks
+            if t["status"] == "blocked" and t.get("depends_on") and set(t["depends_on"]) <= done
+        ]
+        for tid in ready:
+            self.update_task(tid, status="todo", blocked_reason=None)
+            self.push_status(tid, f"backlog: {tid} todo (dependencies done)")
+            self.emit("brain", "dependencies done, back to todo", task=tid)
+        return ready
 
     def push_status(self, task_id: str, message: str) -> str | None:
         """Commits this task's status fields onto origin/dev and pushes them straight to dev:
@@ -641,14 +696,24 @@ def build_graph(team: Team, checkpointer):
     def worktree(s: TaskState):
         tid = s["task"]["id"]
         branch, path = team.branch_for(tid), team.home / "worktrees" / tid
-        if not path.exists():
-            team.fetch(base)
+        base_ref, theirs = f"{team.remote_name}/{base}", f"{team.remote_name}/{branch}"
+        team.fetch_tasks()
+        if not path.exists():  # an existing branch (local, else the remote's) is continued
             if team.git("branch", "--list", branch).strip():
                 team.git("worktree", "add", str(path), branch)
+            elif team.git("branch", "-r", "--list", theirs).strip():
+                team.git("worktree", "add", "-b", branch, str(path), theirs)
             else:
-                team.git("worktree", "add", "-b", branch, str(path), f"{team.remote_name}/{base}")
+                team.git("worktree", "add", "-b", branch, str(path), base_ref)
         out = {"worktree": str(path), "branch": branch, "rounds": 0, "fixes": 0}
         team.verify_worktree({**s, **out})
+        # earlier work starts from today's dev: a merge, never a rebase (no-op on a new branch)
+        r = subprocess.run(
+            ["git", "merge", "--no-edit", base_ref], cwd=path, capture_output=True, text=True
+        )
+        if r.returncode:
+            subprocess.run(["git", "merge", "--abort"], cwd=path, capture_output=True)
+            team.emit("brain", f"could not merge {base} into {branch}; the gates will", task=tid)
         out["head"] = out["start"] = team.git("rev-parse", "HEAD", cwd=path).strip()
         out["snap"] = team.snapshot(str(path))
         team.emit(
@@ -663,6 +728,7 @@ def build_graph(team: Team, checkpointer):
         dev, tid, wt = s["assignee"], s["task"]["id"], s["worktree"]
         team.verify_worktree(s)
         what = "fixing: " + s["feedback"][:200] if s.get("feedback") else "building the plan"
+        (team.home / "scratch" / tid).mkdir(parents=True, exist_ok=True)  # see the brief
         team.emit(dev, what, task=tid, status="working")
         if not team.fake:  # e.g. pnpm install: the Codex sandbox has no network
             for cmd in team.cfg["developers"][dev].get("setup", []):
@@ -673,11 +739,14 @@ def build_graph(team: Team, checkpointer):
         res = team.commit_round(s, s["head"], s["snap"])
         summary = out["summary"]
         if res["refused"]:
+            shown = res["refused"][:20]
+            more = len(res["refused"]) - len(shown)
             summary += (
                 "\n\nThe orchestrator reverted your changes to files you may not touch "
-                f"(outside your folders, or protected): {', '.join(res['refused'])}"
+                f"(outside your folders, or protected): {', '.join(shown)}"
+                + (f" and {more} more" if more else "")
             )
-            team.emit(dev, f"touched forbidden files, reverted: {res['refused']}", task=tid)
+            team.emit(dev, f"touched forbidden files, reverted: {where(res['refused'])}", task=tid)
         if res["secrets"]:
             summary += (
                 "\n\nThe secret scan found credentials in these files; they were NOT "
@@ -701,16 +770,19 @@ def build_graph(team: Team, checkpointer):
         for c in checks:
             team.emit("tester", f"{'ok  ' if c['ok'] else 'FAIL'} {c['cmd']}", task=tid)
         shots, problems = [], []
+        dev_shots: list[str] = []
         if not team.fake:
             shots, problems = G.screenshots(team, s, s.get("routes") or [])
+            dev_shots, dev_problems = G.dev_screenshots(team, s, s.get("routes") or [])
+            problems += dev_problems
             if shots or problems:
                 team.emit(
                     "tester", f"screenshots: {len(shots)} ok, {len(problems)} failed", task=tid
                 )
         verdict = team.agents.judge(
-            team, {**s, "screenshots": shots, "screenshot_problems": problems}, checks
+            team, {**s, "screenshots": shots + dev_shots, "screenshot_problems": problems}, checks
         )
-        verdict["screenshots"], verdict["screenshot_problems"] = shots, problems
+        verdict["screenshots"], verdict["screenshot_problems"] = shots + dev_shots, problems
         failed = [c for c in checks if not c["ok"]]
         verdict["judge_passed"] = verdict["passed"]
         # a visual criterion passes only on the tester's own screenshots, one per route
@@ -887,13 +959,15 @@ def build_graph(team: Team, checkpointer):
         packet = team.write_packet(s, "Merged into dev" if merged else "Blocked")
         fields: dict = {"status": status, "branch": s["branch"]}
         if merged:
-            fields.update(pr=g["pr"], done_at=time.strftime("%Y-%m-%d"))
+            fields.update(pr=g["pr"], done_at=time.strftime("%Y-%m-%d"), blocked_reason=None)
         else:
             fields["blocked_reason"] = (g.get("reason") or "unknown")[:500]
             if g.get("number"):
                 team.gh.open_pr(s["branch"], base, f"{tid}: {s['task']['title']}", packet)
         team.update_task(tid, **fields)
         team.push_status(tid, f"backlog: {tid} {status}" + (f" (#{g['number']})" if merged else ""))
+        if merged:
+            team.unblock_ready()  # e.g. A4 done -> P3b back to todo
         if merged:  # finished: the worktree is no longer needed (branch and packet stay)
             try:
                 team.git("worktree", "remove", "--force", s["worktree"])
@@ -953,6 +1027,13 @@ def build_graph(team: Team, checkpointer):
         if again := sorted(t["id"] for t in todo if t["id"] in team.merged_tasks()):
             team.emit("brain", f"skipping tasks already merged into dev, mark them done: {again}")
             todo = [t for t in todo if t["id"] not in again]
+        done = {t["id"] for t in team.load_backlog() if t["status"] == "done"}
+        if waiting := sorted(t["id"] for t in todo if not set(t.get("depends_on") or []) <= done):
+            team.emit("brain", f"skipping tasks whose depends_on are not all done: {waiting}")
+            todo = [t for t in todo if t["id"] not in waiting]
+        for t in todo:  # merged_tasks() fetched the task branches
+            if work := team.prior_work(t["id"]):
+                t["previous_work"] = work
         if team.only:  # `devteam run --only P1`
             todo = [t for t in todo if t["id"] in team.only]
         areas = {a for d in cfg["developers"].values() for a in d["areas"]}

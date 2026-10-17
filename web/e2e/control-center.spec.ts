@@ -1,22 +1,28 @@
-import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import en from '../src/i18n/en.json';
-import ru from '../src/i18n/ru.json';
+import en from '../src/i18n/en.json' with { type: 'json' };
+import ru from '../src/i18n/ru.json' with { type: 'json' };
+import kk from '../src/i18n/kk.json' with { type: 'json' };
 
-const screenshotDir = process.env.QARAU_SCREENSHOT_DIR ?? 'test-results/a1a-control-center';
-
-for (const [lang, t] of Object.entries({ en, ru })) {
-  test(`control center and demo screenshots: ${lang}`, async ({ page }) => {
+for (const [lang, t] of Object.entries({ en, ru, kk })) {
+  test(`control center default processing demo: ${lang}`, async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.addInitScript((locale) => localStorage.setItem('qarau.lang', locale), lang);
     await page.route('**/api/runs', (route) => route.fulfill({ status: 503, body: '' }));
     await page.goto('/');
-    await expect(page.getByRole('alert')).toContainText(t['shell.connectionError']);
-    await expect(page.getByRole('heading', { name: t['shell.emptyTitle'] })).toBeVisible();
-    await expect(page.getByText(t['demo.inspectionTitle'])).toHaveCount(0);
-    await page.evaluate(() => document.fonts.ready);
-    await page.screenshot({ path: path.join(screenshotDir, `home-${lang}.png`), fullPage: true });
+    await expect(page.getByRole('heading', { name: t['demo.inspectionTitle'] })).toBeVisible();
+    await expect(
+      page.getByText(t['processing.error.tooFewRegisteredFrames.whatToDo']),
+    ).toBeVisible();
+    const steps = page.getByRole('list', { name: t['inspection.processing'] });
+    for (const [index, state] of ['done', 'done', 'failed', 'skipped'].entries())
+      await expect(steps.locator('li').nth(index)).toHaveAttribute('data-state', state);
+    await expect(steps.getByText(t['processing.status.skipped'])).toBeVisible();
+    await expect(
+      page
+        .getByRole('navigation')
+        .getByRole('link', { name: new RegExp(t['demo.inspectionTitle']) }),
+    ).toHaveAttribute('aria-current', 'page');
 
     await page.getByRole('navigation').getByRole('button', { name: t['inspection.new'] }).click();
     const dialog = page.getByRole('dialog');
@@ -42,7 +48,6 @@ for (const [lang, t] of Object.entries({ en, ru })) {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
         ),
     );
-    await page.screenshot({ path: path.join(screenshotDir, `demo-${lang}.png`), fullPage: true });
     expect(errors).toEqual([]);
   });
 }

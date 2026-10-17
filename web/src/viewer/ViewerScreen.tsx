@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useI18n } from '../i18n';
-import { runUrl, type Bundle, type Finding } from '../lib/bundle';
+import { hasRgb, runUrl, type Bundle, type Finding } from '../lib/bundle';
 import { csrSlice, heightRamp, RAMP } from '../lib/geometry';
-import { ViewerEngine, type Options } from './engine';
+import { ViewerEngine, type ColorMode, type Options } from './engine';
+import { defaultViewState } from './defaults';
 import { AxisGizmo, type AxisGizmoHandle } from './AxisGizmo';
 import { H2, LangSwitch, Logo, Row, Toggle } from './ui';
 
@@ -19,6 +20,16 @@ declare global {
 }
 
 const mono = 'font-mono';
+const colorModeStorageKey = 'qarau.viewer.colorMode.v2';
+function savedColorMode(): ColorMode | undefined {
+  try {
+    const saved = localStorage.getItem(colorModeStorageKey);
+    return saved === 'rgb' || saved === 'height' ? saved : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const fmtTime = (s: number) => {
   const m = Math.floor(s / 60);
   return `${String(m).padStart(2, '0')}:${(s - m * 60).toFixed(1).padStart(4, '0')}`;
@@ -75,11 +86,15 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
   const [playing, setPlaying] = useState(false);
   const [picked, setPicked] = useState<number | null>(null);
   const [fps, setFps] = useState(0);
+  const [colorMode, setColorMode] = useState(savedColorMode);
+  const defaults = defaultViewState(bundle, colorMode);
+  const rgbAvailable = hasRgb(bundle);
+  const activeColorMode = defaults.colorMode;
+  const colorModeHintId = useId();
   const [opts, setOpts] = useState<Options>({
-    buildUp: true,
+    buildUp: defaults.buildUp,
     showCurrent: true,
-    frustums: true,
-    rgb: false,
+    frustums: defaults.frustums,
     findings: true,
     pointSize: 2.5,
   });
@@ -138,6 +153,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
 
   useEffect(() => engineRef.current?.setFrame(frame), [frame, bundle]);
   useEffect(() => engineRef.current?.setOptions(opts), [opts, bundle]);
+  useEffect(() => engineRef.current?.setColorMode(activeColorMode), [activeColorMode, bundle]);
   useEffect(() => engineRef.current?.setPicked(picked), [picked, bundle]);
   useEffect(() => engineRef.current?.setSelectedFinding(sel ?? 0), [sel, bundle]);
 
@@ -203,6 +219,14 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
   );
 
   const eng = () => engineRef.current;
+  const changeColorMode = (mode: ColorMode) => {
+    setColorMode(mode);
+    try {
+      localStorage.setItem(colorModeStorageKey, mode);
+    } catch {
+      // The current view still works when browser storage is unavailable.
+    }
+  };
   const tickFindings = !opts.findings ? [] : selected ? [selected] : findings;
   const ticks = frames.filter((x) => !x.registered || !x.kept);
   const stats = m.stats;
@@ -543,9 +567,28 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                 {t('show.findings')}
               </Toggle>
             )}
-            <Toggle on={opts.rgb} onChange={(v) => setOpts({ ...opts, rgb: v })}>
-              {t('show.rgb')}
-            </Toggle>
+            <div title={!rgbAvailable ? t('show.rgbUnavailable') : undefined}>
+              <Toggle
+                on={activeColorMode === 'rgb'}
+                onChange={(on) => changeColorMode(on ? 'rgb' : 'height')}
+                disabled={!rgbAvailable}
+                label={t('show.colorMode')}
+                title={!rgbAvailable ? t('show.rgbUnavailable') : undefined}
+                describedBy={!rgbAvailable ? colorModeHintId : undefined}
+              >
+                <span className="flex flex-col gap-0.5">
+                  <span>{t('show.colorMode')}</span>
+                  <span className="text-xs text-ink-2">
+                    {t(activeColorMode === 'rgb' ? 'show.rgb' : 'show.heightBlue')}
+                  </span>
+                </span>
+              </Toggle>
+              {!rgbAvailable && (
+                <span id={colorModeHintId} role="tooltip" className="sr-only">
+                  {t('show.rgbUnavailable')}
+                </span>
+              )}
+            </div>
             <label className="flex items-center gap-3 px-2.5 text-[13px]">
               <span className="shrink-0">{t('show.pointSize')}</span>
               <input

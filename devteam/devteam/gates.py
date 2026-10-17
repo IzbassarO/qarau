@@ -22,6 +22,7 @@ from pathlib import Path
 FORBIDDEN_GH_FLAGS = {"--admin", "--delete-branch", "-d"}
 FORBIDDEN_GH_COMMANDS = {"api", "ruleset", "secret", "variable", "repo", "workflow", "release"}
 CI_OK = {"SUCCESS", "SKIPPED", "NEUTRAL"}
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 # --- secret scan -----------------------------------------------------------------------------
@@ -158,10 +159,12 @@ def bench_table(res: dict) -> str:
 
 
 # --- screenshots (web and pipeline tasks) ---------------------------------------------------
-def screenshots(team, s, routes: list[str]) -> tuple[list[str], list[str]]:
+def screenshots(
+    team, s, routes: list[str], runs: Path | None = None, prefix: str = ""
+) -> tuple[list[str], list[str]]:
     """One PNG per route of the dev server in the task's worktree, for the tester (it sees
     them) and the packet. Returns (paths, problems); a route that fails is a problem, never
-    silently dropped."""
+    silently dropped. `runs`: serve these runs instead of the developer's quick benchmark."""
     sc = team.cfg["developers"][s["assignee"]].get("screenshots")
     if not sc or not routes:
         return [], []
@@ -170,7 +173,7 @@ def screenshots(team, s, routes: list[str]) -> tuple[list[str], list[str]]:
     srv = subprocess.Popen(  # {data}: the main checkout's data/ (runs to show, read-only)
         sc["serve"].format(  # {runs}: the developer's quick benchmark output (pipeline tasks)
             data=shlex.quote(str(team.root / "data")),
-            runs=shlex.quote(str(team.home / "bench-dev" / s["task"]["id"])),
+            runs=shlex.quote(str(runs or team.home / "bench-dev" / s["task"]["id"])),
         ),
         shell=True,
         cwd=s["worktree"],
@@ -191,7 +194,7 @@ def screenshots(team, s, routes: list[str]) -> tuple[list[str], list[str]]:
         else:
             return [], [f"dev server did not start: {sc['serve']}"]
         for route in routes:
-            name = re.sub(r"[^A-Za-z0-9]+", "-", route).strip("-") or "root"
+            name = prefix + (re.sub(r"[^A-Za-z0-9]+", "-", route).strip("-") or "root")
             png = out / f"{name}.png"
             r = team.run_proc(
                 sc["shoot"].format(url=shlex.quote(sc["url"] + route), png=shlex.quote(str(png))),
@@ -214,6 +217,19 @@ def screenshots(team, s, routes: list[str]) -> tuple[list[str], list[str]]:
         with team._lock:
             team._procs.discard(srv)
     return paths, problems
+
+
+def dev_screenshots(team, s, routes: list[str]) -> tuple[list[str], list[str]]:
+    """Pipeline tasks: the same routes on dev's cached gate benchmark, same viewer code, so the
+    tester compares dev and the branch. Never runs the benchmark (~70 min) for this."""
+    sc = team.cfg["developers"][s["assignee"]].get("screenshots") or {}
+    if "{runs}" not in sc.get("serve", "") or not routes:
+        return [], []
+    dev = f"{team.remote_name}/{team.cfg['base_branch']}"
+    runs = team.home / "bench" / bench_key(team, dev)
+    if not (runs / "results.json").exists():
+        return [], [f"no cached benchmark of {dev} to compare with: dev screenshots skipped"]
+    return screenshots(team, s, routes, runs=runs, prefix="dev-")
 
 
 # --- GitHub ----------------------------------------------------------------------------------
@@ -287,9 +303,23 @@ class GitHub:
                     for c in checks
                     if (c.get("conclusion") or c.get("state")) not in CI_OK
                 ]
-                return (not bad, "\n".join(bad) or "all checks green")
+                return (not bad, "\n".join(bad + self.failed_logs(bad)) or "all checks green")
             time.sleep(30)
         return False, f"CI did not finish in {timeout_s // 60} min"
+
+    def failed_logs(self, bad: list[str], lines: int = 150) -> list[str]:
+        """The developer sees the error itself, not only a link (P2b sent back blind)."""
+        out = []
+        for run in dict.fromkeys(re.findall(r"/actions/runs/(\d+)", "\n".join(bad))):
+            try:
+                log = self.gh("run", "view", run, "--log-failed")
+            except RuntimeError as e:
+                log = f"(log unavailable: {e})"
+            tail = "\n".join(ANSI.sub("", log).splitlines()[-lines:]).replace("```", "'''")
+            out.append(
+                f"\nLast {lines} lines of `gh run view {run} --log-failed`:\n```\n{tail}\n```"
+            )
+        return out
 
     def merge(self, number: int, sha: str):
         # Merge commit, exactly the tested commit; no --admin (branch protection applies).

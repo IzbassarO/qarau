@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import type { Manifest, Source, Stats } from './bundle';
+import type { Source, Stats } from './bundle';
+import type { ProcessingStagePayload } from './processing';
 
 export type InspectionStatus = 'queued' | 'running' | 'completed' | 'failed' | 'unknown';
 
@@ -28,7 +29,7 @@ export interface RunSummary {
   title?: string | null;
   created_at?: string | null;
   status?: string | null;
-  stages?: { name: string; status: string }[];
+  stages?: readonly ProcessingStagePayload[] | null;
 }
 
 export const UNASSIGNED_SITE_ID = 'qarau:unassigned';
@@ -93,14 +94,4 @@ export function useRuns(enabled = true) {
     enabled,
     retry: false,
   });
-}
-
-export function processingSteps(run?: RunSummary, manifest?: Manifest) {
-  const timings = run?.stats?.processing_s ?? manifest?.stats.processing_s ?? {};
-  const steps = new Map(
-    Object.keys(timings).map((name) => [name, { name, status: 'unknown' as InspectionStatus }]),
-  );
-  for (const stage of run?.stages ?? [])
-    steps.set(stage.name, { name: stage.name, status: inspectionStatus(stage.status) });
-  return Array.from(steps.values()).map((step) => ({ ...step, seconds: timings[step.name] }));
 }

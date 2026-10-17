@@ -1,11 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import {
-  fetchRuns,
-  groupRunsIntoSites,
-  processingSteps,
-  UNASSIGNED_SITE_ID,
-  type RunSummary,
-} from './inspections';
+import { fetchRuns, groupRunsIntoSites, UNASSIGNED_SITE_ID, type RunSummary } from './inspections';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -68,19 +62,6 @@ describe('groupRunsIntoSites', () => {
     expect(sites[2].inspections[0].createdAt).toBeNull();
     expect(runs).toEqual(before);
   });
-});
-
-it('keeps reported failures and does not infer success from elapsed time', () => {
-  expect(
-    processingSteps({
-      run_id: 'run',
-      stats: { processing_s: { frames: 1, reconstruction: 5 } },
-      stages: [{ name: 'reconstruction', status: 'failed' }],
-    }),
-  ).toEqual([
-    { name: 'frames', status: 'unknown', seconds: 1 },
-    { name: 'reconstruction', status: 'failed', seconds: 5 },
-  ]);
 });
 
 it('rejects failed HTTP requests and malformed run lists without a fixture fallback', async () => {

@@ -85,12 +85,21 @@ tasks:
     (dev_app); until then the viewer does not load it.
 
 
+    Re-test (owner 2026-10-16): the pipeline work is done on branch devteam/P3b (sky mask, triangulation-angle
+    / reprojection filter, far layer, counters, ADR 0013). Continue on that branch with dev merged in
+    (A4/A4b viewer fix; devteam merges, never rebases), rerun the checks and the quick benchmark. No new
+    pipeline changes unless the tester finds a real pipeline defect.
+
+
     Acceptance:
 
-    - The tester MUST take its own screenshots of the viewer on the benchmark videos with sky, notre-dame
-    and aegviidu (water towers): routes /viewer/notre-dame and /viewer/aegviidu, and judge that no sky
-    wall occludes the structure in the default view. A pass on the criteria without those screenshots
-    is a fail.
+
+    - The tester MUST take its own screenshots of /viewer/notre-dame and /viewer/aegviidu; a pass without
+    them is a fail. In the default view (after A4b), compared with dev from the same camera: no wall or
+    band of points in the sky; far points appear only in the separate far layer. (The orchestrator adds
+    dev-*.png screenshots of the same routes on dev''s gate benchmark.) Sparse clouds are never expected
+    to look like the object: do not judge recognisability before dense reconstruction (P4).
+
 
     - Registered-frames ratio is not below dev on any gated video.
 
@@ -109,6 +118,23 @@ tasks:
 
     '
   status: todo
+  depends_on:
+  - A4b
+  run: run-20261016-115433
+  branch: devteam/P3b
+- id: P2b
+  area: core
+  title: Parallax keyframes and a footage quality report
+  goal: 'Keyframes are chosen by parallax (enough camera motion), not a fixed rate. A quality report lists
+    problems with plain re-shoot advice: blur, moving too fast, pure rotation (turning on the spot), low
+    texture.
+
+    '
+  status: todo
+  owner: dev_pipeline
+  run: run-20261016-215415
+  branch: devteam/P2b
+  blocked_reason: CI web failure fixed in dev; re-run gates on the existing branch
 - id: P3c
   area: core
   title: Re-gate mykolaiv
@@ -120,16 +146,11 @@ tasks:
 
     '
   owner: dev_pipeline
-  status: todo
-- id: P2b
-  area: core
-  title: Parallax keyframes and a footage quality report
-  goal: 'Keyframes are chosen by parallax (enough camera motion), not a fixed rate. A quality report lists
-    problems with plain re-shoot advice: blur, moving too fast, pure rotation (turning on the spot), low
-    texture.
-
-    '
-  status: todo
+  status: done
+  run: run-20261016-165310
+  branch: devteam/P3c
+  pr: https://github.com/IzbassarO/qarau/pull/23
+  done_at: '2026-10-16'
 - id: P4a
   area: core
   title: Dense reconstruction stage (commercial licence)
@@ -139,11 +160,12 @@ tasks:
     id, with a test. Exported to the viewer bundle.
 
     '
-  status: todo
   licence: 'Depth Anything V2 Small code and weights: Apache-2.0 (owner confirmed 2026-10-15). Base/Large:
     CC-BY-NC-4.0, forbidden.
 
     '
+  status: blocked
+  blocked_reason: Waits for a GPU machine (owner 2026-10-16); set to todo when one is available.
 - id: P4b
   area: core
   title: Frame-to-point links for dense points
@@ -181,7 +203,7 @@ tasks:
 
     '
   status: blocked
-  blocked_by:
+  depends_on:
   - P4a
   blocked_reason: 'Waits for P4a (dense stage): the queue runs the full pipeline, including the dense
     stage.'
@@ -291,14 +313,61 @@ tasks:
     went wrong, what to do).
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261016-115433
+  branch: devteam/A3
+  pr: https://github.com/IzbassarO/qarau/pull/20
+  done_at: '2026-10-16'
 - id: A4
   area: app
   title: Colour toggle and object framing
   goal: 'Real colours <-> height-blue toggle; the initial view frames the object, not the whole scene.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261016-165310
+  branch: devteam/A4
+  pr: https://github.com/IzbassarO/qarau/pull/22
+  done_at: '2026-10-16'
+- id: A4b
+  area: app
+  title: 'Readable default view: real RGB by default, frustums hidden by default'
+  goal: 'Follow-up to A4 (#22, built to the old criteria), owner 2026-10-16. A4 delivered robust 2-98
+    % framing (+Z up, no roll), frustum size scaled to the scene and an RGB / height-blue toggle, but
+    the default view is unchanged: the colour mode defaults to height-blue, the build-up ("first seen
+    / not yet seen") colouring is on by default and draws not-yet-seen points dark (#2A3240), and camera
+    frustums are shown by default (web/src/viewer/ViewerScreen.tsx: buildUp: true, frustums: true, savedColorMode()
+    -> ''height''). No change to the pipeline output format (viewer bundle, ADR 0003).
+
+
+    Acceptance:
+
+    - The default point colour is the real RGB from the bundle when it has RGB (height-blue only as the
+    fallback without RGB, or by the user''s choice). The "first seen / not yet seen" timeline colouring
+    is an opt-in mode, off by default.
+
+    - Camera frustums are hidden by default, with the existing toggle to show them (text via i18n RU/KK/EN).
+    When shown, frustum size still scales to the scene extent.
+
+    - Unit tests for the defaults: RGB colour mode when the bundle has RGB, timeline colouring off, frustums
+    hidden. The A4 framing-bound tests keep passing.
+
+    - The tester takes its own screenshots of /viewer/notre-dame, /viewer/aegviidu and /viewer/room (the
+    room run) in the default view: the structure is clearly visible, no frustums, no dark "not yet seen"
+    points, no error banner. Sparse clouds are not expected to look like the object: judge readability,
+    not recognisability.
+
+    - No change to the pipeline output format; only web/ (and docs/) change.
+
+    '
+  owner: dev_app
+  status: done
+  run: run-20261016-215415
+  branch: devteam/A4b
+  pr: https://github.com/IzbassarO/qarau/pull/24
+  done_at: '2026-10-16'
 - id: A5
   area: app
   title: Far-point layer in the viewer
@@ -310,7 +379,7 @@ tasks:
     '
   owner: dev_app
   status: blocked
-  blocked_by:
+  depends_on:
   - P3b
   blocked_reason: 'Waits for P3b: the pipeline must first export the `far` layer.'
 - id: A1b

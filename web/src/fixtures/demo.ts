@@ -68,7 +68,7 @@ function createBundle(): Bundle {
         z_range: [0, 6],
         focus: { center: [0, 0, 2], radius: 16 },
       },
-      points: { count, position: '', color: '', first_seen: '', num_obs: '' },
+      points: { count, position: '', first_seen: '', num_obs: '' },
       tracks: { frame_offsets: '', frame_points: '', point_offsets: '', point_frames: '' },
       frames,
       stats: {
@@ -80,7 +80,6 @@ function createBundle(): Bundle {
       },
     },
     position,
-    color: new Uint8Array(count * 3).fill(180),
     firstSeen: new Uint16Array(count),
     frameOffsets: offsets,
     frameInPoints: framePoints,
@@ -100,12 +99,32 @@ export function createDemo(lang: Lang) {
     site: { id: 'demo-site', name: t('demo.siteName') },
     title: t('demo.inspectionTitle'),
     created_at: '2026-10-14T10:30:00+05:00',
-    status: 'completed',
-    stats: bundle.manifest.stats,
+    status: 'failed',
+    stats: {
+      ...bundle.manifest.stats,
+      processing_s: { ingest: 1.2, frames: 4.2, reconstruction: 38.6 },
+    },
     stages: [
-      { name: 'frames', status: 'completed' },
-      { name: 'reconstruction', status: 'completed' },
-      { name: 'export', status: 'completed' },
+      {
+        name: 'ingest',
+        status: 'ok',
+        started_at: '2026-10-14T05:30:00.000Z',
+        finished_at: '2026-10-14T05:30:01.200Z',
+      },
+      {
+        name: 'frames',
+        status: 'ok',
+        started_at: '2026-10-14T05:30:01.200Z',
+        finished_at: '2026-10-14T05:30:05.400Z',
+      },
+      {
+        name: 'reconstruction',
+        status: 'failed',
+        started_at: '2026-10-14T05:30:05.400Z',
+        finished_at: '2026-10-14T05:30:44.000Z',
+        error_code: 'too_few_registered_frames',
+      },
+      { name: 'export', status: 'skipped' },
     ],
   };
   const sites = groupRunsIntoSites([run]);

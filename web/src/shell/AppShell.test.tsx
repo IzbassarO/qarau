@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { setLang } from '../i18n';
@@ -43,7 +43,7 @@ it('shows a server error and retries without substituting demo inspections', asy
     .mockRejectedValueOnce(new TypeError('Failed to fetch'))
     .mockResolvedValueOnce(Response.json([]));
   vi.stubGlobal('fetch', fetch);
-  renderRoute();
+  renderRoute('/inspections/not-a-run');
   expect((await screen.findByRole('alert')).textContent).toContain('Could not load inspections');
   expect(screen.queryByText('Tank farm survey')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
@@ -63,16 +63,35 @@ it('shows the labelled demo with its viewer and stages without requesting the ba
   expect(fetch).not.toHaveBeenCalled();
 });
 
-it('keeps demo data out of the empty home and real inspection routes', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockImplementation(async () => Response.json([])),
+it('selects the labelled failed demo on home without interaction or backend requests', () => {
+  const fetch = vi.fn();
+  vi.stubGlobal('fetch', fetch);
+  renderRoute();
+  expect(screen.getByRole('heading', { name: 'Tank farm survey' })).toBeTruthy();
+  expect(screen.getByText('Not enough overlapping views')).toBeTruthy();
+  expect(screen.getByText('What to do')).toBeTruthy();
+  expect(screen.getByText('Not run')).toBeTruthy();
+  const processing = screen.getByRole('list', { name: 'Processing steps' });
+  expect(
+    within(processing)
+      .getAllByRole('listitem')
+      .map((row) => row.getAttribute('data-state')),
+  ).toEqual(['done', 'done', 'failed', 'skipped']);
+  expect(within(processing).getByText('Video import')).toBeTruthy();
+  expect(within(processing).getByText('Frame extraction & quality')).toBeTruthy();
+  expect(
+    screen.getByText(
+      'Film the asset again from several angles. Move slowly and keep the same surfaces visible between adjacent views.',
+    ),
+  ).toBeTruthy();
+  expect(screen.getByRole('link', { name: /Tank farm survey/ }).getAttribute('aria-current')).toBe(
+    'page',
   );
-  const home = renderRoute();
-  await screen.findByText('Your sites and inspections will appear here.');
-  expect(screen.queryByText('Tank farm survey')).toBeNull();
-  expect(screen.queryByTestId('embedded-viewer')).toBeNull();
-  home.unmount();
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it('keeps demo data out of real inspection routes', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([])));
   renderRoute('/inspections/not-a-run');
   expect(await screen.findByRole('heading', { name: 'Inspection not found' })).toBeTruthy();
   expect(screen.queryByText('Tank farm survey')).toBeNull();
@@ -80,7 +99,7 @@ it('keeps demo data out of the empty home and real inspection routes', async () 
 
 it('reports authentication errors without a local login flow', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })));
-  renderRoute();
+  renderRoute('/inspections/not-a-run');
   expect((await screen.findByRole('alert')).textContent).toContain(
     'Access requires authentication',
   );

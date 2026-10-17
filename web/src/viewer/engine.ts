@@ -2,7 +2,6 @@ import {
   Box3,
   BufferAttribute,
   BufferGeometry,
-  Color,
   Line,
   LineBasicMaterial,
   LineDashedMaterial,
@@ -14,22 +13,22 @@ import {
   Scene,
   ShaderMaterial,
   Uint8BufferAttribute,
-  Vector2,
   Vector3,
   WebGLRenderer,
 } from 'three';
 import { damp, NavigationControls } from './navigation';
 import { applyMouseLook, createFlyState, flyOrientation, step, type FlyState } from './fly';
 import { orientationFor, stepAxisView, viewDirectionFor, type Axis } from './gizmo';
-import type { Bundle } from '../lib/bundle';
+import { defaultViewState } from './defaults';
+import { hasRgb, type Bundle } from '../lib/bundle';
 import {
   colmapPoseToThree,
-  computeFocus,
   csrSlice,
+  frameBounds,
+  heightRamp,
   median,
   pickNearest,
   quatToMat3,
-  RAMP,
   type Focus,
   robustBounds,
   verticalFovDeg,
@@ -39,35 +38,28 @@ export interface Options {
   buildUp: boolean;
   showCurrent: boolean;
   frustums: boolean;
-  rgb: boolean;
   findings: boolean;
   pointSize: number;
 }
 
+export type ColorMode = 'height' | 'rgb';
+
 const VERT = /* glsl */ `
 uniform float uFindings, uSelected;
-uniform float uCurrentFrame, uBuildUp, uShowCurrent, uPointSize, uPixelRatio, uRefDist, uColorMode;
-uniform vec2 uZRange;
-uniform vec3 uRamp0, uRamp1, uRamp2, uRamp3;
+uniform float uCurrentFrame, uBuildUp, uShowCurrent, uPointSize, uPixelRatio, uRefDist;
 attribute float firstSeen;
 attribute float visibleNow;
-attribute float fsev; // 0 none, 1 watch, 2 critical
+attribute vec3 findingColor; // black = no finding; independent of the base colour mode
 attribute float fid;  // finding id, 0 none
 varying vec3 vColor;
-vec3 ramp(float t) {
-  float s = clamp(t, 0.0, 1.0) * 3.0;
-  if (s < 1.0) return mix(uRamp0, uRamp1, s);
-  if (s < 2.0) return mix(uRamp1, uRamp2, s - 1.0);
-  return mix(uRamp2, uRamp3, s - 2.0);
-}
 void main() {
-  vec3 c = uColorMode > 0.5 ? color : ramp((position.z - uZRange.x) / (uZRange.y - uZRange.x));
+  vec3 c = color;
   float k = 1.0;
   if (firstSeen > 65534.5) c = vec3(0.4196, 0.4471, 0.4902);            // #6B727D never observed
   else if (uBuildUp > 0.5 && firstSeen > uCurrentFrame) c = vec3(0.1647, 0.1961, 0.2510); // #2A3240
   else if (uShowCurrent > 0.5 && visibleNow > 0.5) { c = min(c * 1.25 + 0.12, vec3(1.0)); k = 1.25; }
-  if (uFindings > 0.5 && fsev > 0.5 && firstSeen < 65534.5 && !(uBuildUp > 0.5 && firstSeen > uCurrentFrame)) {
-    c = fsev > 1.5 ? vec3(0.9412, 0.3373, 0.3608) : vec3(0.9490, 0.6392, 0.2275); // #F0565C critical, #F2A33A watch
+  if (uFindings > 0.5 && findingColor.r > 0.0 && firstSeen < 65534.5 && !(uBuildUp > 0.5 && firstSeen > uCurrentFrame)) {
+    c = findingColor; // #F0565C critical, #F2A33A watch, in both colour modes
     k = fid == uSelected ? 1.9 : 1.35;
     if (uSelected > 0.5 && fid != uSelected) c *= 0.65;
   }
@@ -83,11 +75,6 @@ void main() {
   if (length(gl_PointCoord - 0.5) > 0.5) discard;
   gl_FragColor = vec4(vColor, 1.0);
 }`;
-
-const raw = (h: string) => {
-  const c = new Color(h);
-  return new Vector3(c.r, c.g, c.b);
-};
 
 export interface Callbacks {
   onPick: (point: number | null) => void;
@@ -105,6 +92,10 @@ export class ViewerEngine {
   onRender?: () => void;
   private rolled = false;
   private mat: ShaderMaterial;
+  private pointGeometry: BufferGeometry;
+  private heightColors: BufferAttribute;
+  private rgbColors?: BufferAttribute;
+  private currentColorMode: ColorMode;
   private visibleNow: Uint8Array;
   private visAttr: BufferAttribute;
   private prevFrame = -1;
@@ -113,9 +104,11 @@ export class ViewerEngine {
   private pathDash: Line;
   private frustumAll: LineSegments;
   private frustumNow: LineSegments;
+  private frustumsVisible: boolean;
   private dot: Points;
   private pickMark: Points;
   private navigationBounds: Box3;
+  private navigationMargin: number;
   private flyState: FlyState | null = null;
   private flyLookActive = false;
   private flyDistance = 1;
@@ -152,51 +145,59 @@ export class ViewerEngine {
     private cb: Callbacks,
   ) {
     const m = b.manifest;
+    const defaults = defaultViewState(b);
+    this.currentColorMode = defaults.colorMode;
+    this.frustumsVisible = defaults.frustums;
     this.renderer = new WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x000000);
     this.renderer.autoClear = false;
 
     const centers = m.frames.filter((f) => f.registered && f.center).map((f) => f.center!);
-    this.bounds = robustBounds(b.position, centers);
+    this.bounds = robustBounds(b.position);
     const r = this.bounds.radius;
-    this.navigationBounds = new Box3(
-      new Vector3(...this.bounds.min),
-      new Vector3(...this.bounds.max),
+    // Navigation includes every point and recorded camera; trimming is only for framing.
+    this.navigationBounds = new Box3().setFromArray(b.position);
+    for (const center of centers) this.navigationBounds.expandByPoint(new Vector3(...center));
+    if (this.navigationBounds.isEmpty()) this.navigationBounds.set(new Vector3(), new Vector3());
+    this.navigationMargin = Math.max(
+      1e-6,
+      this.navigationBounds.getSize(new Vector3()).length() / 2,
     );
     this.regIdx = m.frames.filter((f) => f.registered && f.pose).map((f) => f.i);
-    const wf = m.world.focus;
-    this.focus = wf
-      ? { center: wf.center, radius: wf.radius, method: 'manifest' }
-      : computeFocus(
-          b.position,
-          this.regIdx.map((fi) => ({
-            center: m.frames[fi].center!,
-            forward: colmapPoseToThree(
-              m.frames[fi].pose!.qvec,
-              m.frames[fi].pose!.tvec,
-            ).forward.toArray(),
-          })),
-          this.bounds,
-          b.pointOffsets,
-        );
+    this.focus = { center: this.bounds.center, radius: r, method: 'bounds' };
 
     // ---- points
     const g = new BufferGeometry();
+    this.pointGeometry = g;
     g.setAttribute('position', new BufferAttribute(b.position, 3));
-    g.setAttribute('color', new Uint8BufferAttribute(b.color, 3, true));
+    const heightColors = new Uint8Array(b.position.length);
+    const [low, high] = m.world.z_range;
+    for (let p = 0; p < m.points.count; p++)
+      heightColors.set(heightRamp((b.position[p * 3 + 2] - low) / (high - low || 1)), p * 3);
+    this.heightColors = new Uint8BufferAttribute(heightColors, 3, true);
+    if (hasRgb(b)) this.rgbColors = new Uint8BufferAttribute(b.color!, 3, true);
+    g.setAttribute('color', this.rgbColors ?? this.heightColors);
     g.setAttribute('firstSeen', new BufferAttribute(b.firstSeen, 1));
     this.visibleNow = new Uint8Array(m.points.count);
     this.visAttr = new BufferAttribute(this.visibleNow, 1);
     this.visAttr.setUsage(35048); // DynamicDrawUsage
     g.setAttribute('visibleNow', this.visAttr);
     // findings (v2): per-point severity + id, uploaded once; toggling is a uniform
-    const fsev = new Uint8Array(m.points.count);
+    const findingColors = new Uint8Array(m.points.count * 3);
     if (b.pointFinding && b.findings) {
-      const sev = new Map(b.findings.map((x) => [x.id, x.severity === 'critical' ? 2 : 1]));
-      for (let p = 0; p < fsev.length; p++) fsev[p] = sev.get(b.pointFinding[p]) ?? 0;
+      const palette = new Map(
+        b.findings.map((x) => [
+          x.id,
+          x.severity === 'critical' ? [0xf0, 0x56, 0x5c] : [0xf2, 0xa3, 0x3a],
+        ]),
+      );
+      for (let p = 0; p < m.points.count; p++) {
+        const color = palette.get(b.pointFinding[p]);
+        if (color) findingColors.set(color, p * 3);
+      }
     }
-    g.setAttribute('fsev', new BufferAttribute(fsev, 1));
+    g.setAttribute('findingColor', new Uint8BufferAttribute(findingColors, 3, true));
     g.setAttribute(
       'fid',
       new BufferAttribute(b.pointFinding ?? new Uint16Array(m.points.count), 1),
@@ -211,22 +212,15 @@ export class ViewerEngine {
       vertexColors: true,
       uniforms: {
         uCurrentFrame: { value: 0 },
-        uBuildUp: { value: 1 },
+        uBuildUp: { value: defaults.buildUp ? 1 : 0 },
         uShowCurrent: { value: 1 },
         uPointSize: { value: 2.5 },
         uPixelRatio: { value: this.renderer.getPixelRatio() },
         uRefDist: { value: r * 2 },
-        uColorMode: { value: 0 },
         uFindings: { value: 1 },
         uSelected: { value: 0 },
-        uZRange: { value: [m.world.z_range[0], m.world.z_range[1]] },
-        uRamp0: { value: raw(RAMP[0]) },
-        uRamp1: { value: raw(RAMP[1]) },
-        uRamp2: { value: raw(RAMP[2]) },
-        uRamp3: { value: raw(RAMP[3]) },
       },
     });
-    this.mat.uniforms.uZRange.value = new Vector2(m.world.z_range[0], m.world.z_range[1]);
     const pts = new Points(g, this.mat);
     pts.frustumCulled = false;
     this.scene.add(pts);
@@ -279,14 +273,15 @@ export class ViewerEngine {
 
     // ---- camera + controls (Blender-like)
     this.camera.up.set(0, 0, 1);
+    this.camera.aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight) || 1;
     this.camera.near = r * 0.0005;
-    this.camera.far = r * 60;
+    this.camera.far = this.navigationMargin * 60;
     this.controls = new NavigationControls(this.camera, canvas, {
       points: b.position,
       bounds: this.navigationBounds,
       minDistance: r * 0.002,
       collisionRadius: r * 0.003,
-      boundsMargin: r,
+      boundsMargin: this.navigationMargin,
       onChange: () => (this.dirty = true),
       onStart: () => {
         if (this.flyMode) return;
@@ -364,19 +359,38 @@ export class ViewerEngine {
       a.needsUpdate = true;
       (this.dot.geometry.getAttribute('position') as BufferAttribute).set(f.center!);
       (this.dot.geometry.getAttribute('position') as BufferAttribute).needsUpdate = true;
-      this.frustumNow.visible = this.dot.visible = true;
-    } else this.frustumNow.visible = this.dot.visible = false;
+    }
+    this.updateFrustumVisibility();
     this.dirty = true;
+  }
+
+  private updateFrustumVisibility() {
+    const frame = this.b.manifest.frames[this.prevFrame];
+    this.frustumAll.visible = this.frustumsVisible;
+    this.frustumNow.visible = this.dot.visible =
+      this.frustumsVisible && !!frame?.registered && !!frame.pose;
   }
 
   setOptions(o: Options) {
     const u = this.mat.uniforms;
     u.uBuildUp.value = o.buildUp ? 1 : 0;
     u.uShowCurrent.value = o.showCurrent ? 1 : 0;
-    u.uColorMode.value = o.rgb ? 1 : 0;
     u.uFindings.value = o.findings ? 1 : 0;
     u.uPointSize.value = o.pointSize;
-    this.frustumAll.visible = o.frustums;
+    this.frustumsVisible = o.frustums;
+    this.updateFrustumVisibility();
+    this.dirty = true;
+  }
+
+  get colorMode(): ColorMode {
+    return this.currentColorMode;
+  }
+
+  /** Swap precomputed attributes; positions, tracks and finding colours stay on the GPU. */
+  setColorMode(mode: ColorMode) {
+    if (mode === 'rgb' && !this.rgbColors) return;
+    this.currentColorMode = mode;
+    this.pointGeometry.setAttribute('color', mode === 'rgb' ? this.rgbColors! : this.heightColors);
     this.dirty = true;
   }
 
@@ -452,10 +466,13 @@ export class ViewerEngine {
     };
   }
 
-  private view(dir: Vector3, animate = true) {
-    const c = new Vector3(...this.focus.center);
-    const expanded = this.navigationBounds.clone().expandByScalar(this.bounds.radius);
-    const framingDistance = this.focus.radius * 2.4;
+  resetView(animate = true) {
+    const fovY = 50;
+    const framed = frameBounds(this.bounds, fovY, this.camera.aspect);
+    const c = new Vector3(...framed.target);
+    const offset = new Vector3(...framed.position).sub(c);
+    const expanded = this.navigationBounds.clone().expandByScalar(this.navigationMargin);
+    const framingDistance = offset.length();
     let distance = framingDistance;
     // A wide/flat cloud's framing radius can exceed its vertical navigation room.
     // Reset within a sphere that fits all six axis views at the same distance.
@@ -467,14 +484,25 @@ export class ViewerEngine {
           expanded.max.getComponent(axis) - c.getComponent(axis),
         );
     distance = Math.max(this.bounds.radius * 0.002, distance * 0.999);
-    const fov = Math.min(
-      120,
-      (Math.atan((framingDistance / distance) * Math.tan((25 * Math.PI) / 180)) * 360) / Math.PI,
-    );
-    this.fly(c.clone().addScaledVector(dir.normalize(), distance), c, fov, animate);
-  }
-  resetView(animate = true) {
-    this.view(new Vector3(1, -1.3, 0.8), animate);
+    const direction = offset.normalize();
+    const right = new Vector3().crossVectors(this.camera.up, direction).normalize();
+    const up = new Vector3().crossVectors(direction, right);
+    let tanHalfFov = Math.tan((fovY * Math.PI) / 360);
+    // Shortening the distance changes near-corner perspective more than centre-plane scale.
+    // Fit those corners again at the constrained distance, preserving the framing margin.
+    for (const x of [this.bounds.min[0], this.bounds.max[0]])
+      for (const y of [this.bounds.min[1], this.bounds.max[1]])
+        for (const z of [this.bounds.min[2], this.bounds.max[2]]) {
+          const corner = new Vector3(x, y, z).sub(c);
+          const depth = Math.max(1e-12, distance - corner.dot(direction));
+          tanHalfFov = Math.max(
+            tanHalfFov,
+            (1.1 * Math.abs(corner.dot(up))) / depth,
+            (1.1 * Math.abs(corner.dot(right))) / (depth * this.camera.aspect),
+          );
+        }
+    const fov = (Math.atan(tanHalfFov) * 360) / Math.PI;
+    this.fly(c.clone().addScaledVector(direction, distance), c, fov, animate);
   }
   topView() {
     this.axisView('z');
@@ -739,7 +767,7 @@ export class ViewerEngine {
         boostMultiplier: 4,
         damping: 10,
         bounds: this.navigationBounds,
-        boundsMargin: this.bounds.radius,
+        boundsMargin: this.navigationMargin,
       },
     );
     const safe = this.controls.constrainMove(previousPosition, this.flyState.position);

@@ -48,7 +48,7 @@ export interface Manifest {
   points: {
     count: number;
     position: string;
-    color: string;
+    color?: string;
     first_seen: string;
     num_obs: string;
     source?: string;
@@ -94,7 +94,8 @@ export interface Bundle {
   assetUrl?: (rel: string) => string;
   manifest: Manifest;
   position: Float32Array;
-  color: Uint8Array;
+  /** Real per-point RGB, when the bundle includes a complete colour buffer. */
+  color?: Uint8Array;
   firstSeen: Uint16Array;
   frameOffsets: Uint32Array;
   frameInPoints: Uint32Array;
@@ -120,6 +121,15 @@ export class BundleError extends Error {
 
 export const runUrl = (runId: string, rel: string) =>
   `/api/runs/${encodeURIComponent(runId)}/files/${rel}`;
+
+/** Real colours are available only when every point has an RGB triplet. */
+export function hasRgb(bundle: Bundle): boolean {
+  return (
+    bundle.color instanceof Uint8Array &&
+    bundle.color.length > 0 &&
+    bundle.color.length === bundle.manifest.points.count * 3
+  );
+}
 
 export async function loadManifest(runId: string): Promise<Manifest> {
   const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/manifest.json`);
@@ -202,7 +212,8 @@ export async function loadBundle(
   const { points: p, tracks: k } = manifest;
   const [pos, col, fs, fo, fp, po, pf] = await Promise.all([
     get(p.position),
-    get(p.color),
+    // Colour is optional: missing or invalid RGB must not hide usable geometry.
+    p.color?.trim() ? get(p.color).catch(() => undefined) : undefined,
     get(p.first_seen),
     get(k.frame_offsets),
     get(k.frame_points),
@@ -216,7 +227,8 @@ export async function loadBundle(
     runId,
     manifest,
     position: new Float32Array(pos),
-    color: new Uint8Array(col),
+    color:
+      col && col.byteLength > 0 && col.byteLength === p.count * 3 ? new Uint8Array(col) : undefined,
     firstSeen,
     frameOffsets: new Uint32Array(fo),
     frameInPoints: new Uint32Array(fp),

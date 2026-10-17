@@ -13,8 +13,9 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
   const { t, lang } = useI18n();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const runs = useRuns(!demo);
-  const demoData = useMemo(() => (demo ? createDemo(lang) : null), [demo, lang]);
+  const showDemo = demo || !id;
+  const runs = useRuns(!showDemo);
+  const demoData = useMemo(() => (showDemo ? createDemo(lang) : null), [showDemo, lang]);
   const sites = useMemo(
     () => demoData?.sites ?? groupRunsIntoSites(runs.data ?? []),
     [demoData, runs.data],
@@ -47,8 +48,8 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
       <div className="sidebar-container" id="inspection-sidebar">
         <Sidebar
           sites={sites}
-          demo={demo}
-          loading={!demo && runs.isPending}
+          demo={showDemo}
+          loading={!showDemo && runs.isPending}
           onNavigate={closeNavigation}
           onNewInspection={() => {
             closeNavigation();
@@ -93,10 +94,10 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
               </>
             )}
           </div>
-          {demo && <span className="demo-badge">{t('shell.demo')}</span>}
+          {showDemo && <span className="demo-badge">{t('shell.demo')}</span>}
         </header>
         <main id="inspection-main" tabIndex={-1} className="shell-main">
-          {!demo && runs.isError && (
+          {!showDemo && runs.isError && (
             <div className="api-error" role="alert">
               <div>
                 <strong>{t('shell.connectionError')}</strong>
