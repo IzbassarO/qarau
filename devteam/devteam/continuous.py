@@ -11,6 +11,7 @@ owns it; checked at start).
 """
 
 import json
+import os
 import queue
 import threading
 import time
@@ -48,6 +49,7 @@ class Continuous:
         self.run_id = time.strftime("cont-%Y%m%d-%H%M%S")
         self.t0 = clock()
         self.mark = costs.last_row(team.home)
+        self.resume = self.pending()  # rounds the last run left unfinished
 
     # --- pending rounds (survive a crash or a stop) ----------------------------------------
     def pending(self) -> dict[str, str]:
@@ -63,7 +65,9 @@ class Continuous:
                 p[dev] = thread
             else:
                 p.pop(dev, None)
-            self.state_file.write_text(json.dumps(p))
+            tmp = self.state_file.with_suffix(".tmp")  # readers never see a half-written file
+            tmp.write_text(json.dumps(p))
+            os.replace(tmp, self.state_file)
 
     def ignored_drift(self) -> set[str]:
         """Task ids claimed by pending rounds: their in_progress is expected, not drift."""
@@ -134,7 +138,7 @@ class Continuous:
         return not self.team.stopping.wait(wait)  # Ctrl+C ends the wait
 
     def dev_loop(self, dev: str):
-        thread, n = self.pending().get(dev), 0
+        thread, n = self.resume.get(dev), 0
         while True:
             with self.cond:
                 if self.team.stopping.is_set():

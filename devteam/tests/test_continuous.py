@@ -139,7 +139,11 @@ def test_ctrl_c_finishes_the_step_and_the_next_run_resumes(repo):
     team.stopping.clear()
     cont2 = StopDuringDevelop.cont = C.Continuous(team, graph)
     s2 = cont2.run()
-    assert statuses(team) == {"T-001": "done", "T-002": "done", "T-003": "done"}
+    assert statuses(team) == {"T-001": "done", "T-002": "done", "T-003": "done"}, (
+        s,
+        pending,
+        s2,
+    )
     assert s2["stop_reason"] == "no plannable task left for any developer"
     # the interrupted task was not started over: 2 developer rounds each (fails, then passes)
     assert StopDuringDevelop.calls.count(first) == 2

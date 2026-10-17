@@ -273,9 +273,10 @@ class Team:
                             t.pop(k, None)
                         else:
                             t[k] = v
-            self.backlog_path.write_text(
-                yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100)
-            )
+            # readers don't take the lock: replace the file whole, never truncate it in place
+            tmp = self.home / "backlog.yaml.tmp"  # same filesystem: os.replace is atomic
+            tmp.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100))
+            os.replace(tmp, self.backlog_path)
 
     # --- processes (all killable by `devteam stop`) --------------------------------------
     def run_proc(
