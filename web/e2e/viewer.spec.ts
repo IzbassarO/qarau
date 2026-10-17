@@ -130,8 +130,9 @@ test('missing run says so plainly', async ({ page }) => {
   await expect(page.getByRole('alert')).toBeVisible();
 });
 
-test('runs list links to viewer', async ({ page }) => {
+test('signed-out home asks for login', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('link').nth(0)).toBeVisible();
-  await page.screenshot({ path: `${OUT}/runs.png` });
+  await expect(page.locator('input[name="username"]')).toBeVisible();
+  await expect(page.locator('input[type="password"]')).toBeVisible();
+  await expect(page.getByRole('navigation')).toHaveCount(0);
 });

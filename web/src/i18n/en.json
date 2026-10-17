@@ -189,5 +189,18 @@
   "processing.error.timeout.whatToDo": "Retry the stage. If it times out again, use a shorter video or ask your administrator to check worker capacity.",
   "processing.error.unknown.title": "Processing stopped",
   "processing.error.unknown.whatWentWrong": "The pipeline reported a problem that this version cannot explain yet.",
-  "processing.error.unknown.whatToDo": "Check the pipeline details below. Retry the failed stage; if it fails again, share the inspection ID and error details with your administrator."
+  "processing.error.unknown.whatToDo": "Check the pipeline details below. Retry the failed stage; if it fails again, share the inspection ID and error details with your administrator.",
+  "auth.documentTitle": "Qarau Vision — Sign in",
+  "auth.title": "Sign in to the control center",
+  "auth.description": "Enter your username and password to open your sites and inspections.",
+  "auth.username": "Username",
+  "auth.password": "Password",
+  "auth.signIn": "Sign in",
+  "auth.signingIn": "Signing in…",
+  "auth.signOut": "Sign out",
+  "auth.required": "Enter your username and password.",
+  "auth.invalidCredentials": "Sign-in details were not accepted. Check your password or contact your administrator.",
+  "auth.connection": "Could not connect to the server. Try again in a moment.",
+  "auth.storage": "Your browser could not save this session. Enable session storage and try again.",
+  "auth.frameError": "Could not load this video frame. Check your access and connection."
 }

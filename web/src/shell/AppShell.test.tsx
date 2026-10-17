@@ -6,6 +6,9 @@ import { setLang } from '../i18n';
 import { createDemo } from '../fixtures/demo';
 import * as bundleApi from '../lib/bundle';
 import { AppShell } from './AppShell';
+import { AuthProvider } from '../auth/AuthProvider';
+import { RequireAuth } from '../auth/RequireAuth';
+import { authHeader } from '../auth/auth';
 
 vi.mock('../viewer/ViewerScreen', () => ({
   ViewerScreen: ({ bundle, embedded }: { bundle: bundleApi.Bundle; embedded: boolean }) => (
@@ -14,24 +17,33 @@ vi.mock('../viewer/ViewerScreen', () => ({
 }));
 
 const clients: QueryClient[] = [];
-function renderRoute(route = '/') {
+function renderRoute(route = '/', signedIn = true) {
+  if (signedIn) sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   clients.push(client);
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[route]}>
-        <Routes>
-          <Route path="/" element={<AppShell />} />
-          <Route path="/inspections/demo" element={<AppShell demo />} />
-          <Route path="/inspections/:id" element={<AppShell />} />
-        </Routes>
-      </MemoryRouter>
+      <AuthProvider>
+        <MemoryRouter initialEntries={[route]}>
+          <Routes>
+            <Route element={<RequireAuth />}>
+              <Route path="/" element={<AppShell />} />
+              <Route path="/inspections/demo" element={<AppShell demo />} />
+              <Route path="/inspections/:id" element={<AppShell />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>
     </QueryClientProvider>,
   );
 }
 
-beforeEach(() => setLang('en'));
+beforeEach(() => {
+  sessionStorage.clear();
+  setLang('en');
+});
 afterEach(() => {
+  sessionStorage.clear();
   clients.splice(0).forEach((client) => client.clear());
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -97,12 +109,72 @@ it('keeps demo data out of real inspection routes', async () => {
   expect(screen.queryByText('Tank farm survey')).toBeNull();
 });
 
-it('reports authentication errors without a local login flow', async () => {
+it('reports a backend authentication failure for a previously stored session', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })));
   renderRoute('/inspections/not-a-run');
   expect((await screen.findByRole('alert')).textContent).toContain(
     'Access requires authentication',
   );
+});
+
+it.each(['/', '/inspections/demo', '/inspections/private-run'])(
+  'shows only the login form when signed out at %s, without fetching protected data',
+  (route) => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    renderRoute(route, false);
+    expect(screen.getByRole('form', { name: 'Sign in to the control center' })).toBeTruthy();
+    expect(screen.getByLabelText('Username')).toBeTruthy();
+    expect(screen.getByLabelText('Password')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
+    expect(screen.queryByRole('navigation')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByTestId('embedded-viewer')).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);
+
+it('restores the signed-in sidebar from sessionStorage after remounting', () => {
+  const first = renderRoute();
+  expect(screen.getByRole('navigation', { name: 'Sites & inspections' })).toBeTruthy();
+  first.unmount();
+  renderRoute('/', false);
+  expect(screen.getByRole('navigation', { name: 'Sites & inspections' })).toBeTruthy();
+  expect(screen.queryByLabelText('Password')).toBeNull();
+});
+
+it('opens the requested inspection after login and returns to the form on sign-out', async () => {
+  const fetch = vi.fn().mockResolvedValue(Response.json([]));
+  vi.stubGlobal('fetch', fetch);
+  renderRoute('/inspections/private-run', false);
+  fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'test-operator' } });
+  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'test-api-value' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  expect(await screen.findByRole('navigation', { name: 'Sites & inspections' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: 'Inspection not found' })).toBeTruthy();
+  expect(fetch).toHaveBeenLastCalledWith('/api/runs', {
+    signal: expect.any(AbortSignal),
+    headers: { Authorization: 'Bearer test-api-value' },
+  });
+  expect(clients.at(-1)!.getQueryData(['runs'])).toEqual([]);
+  fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+  expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
+  expect(screen.queryByRole('navigation')).toBeNull();
+  expect(authHeader()).toEqual({});
+  expect(clients.at(-1)!.getQueryCache().getAll()).toHaveLength(0);
+});
+
+it('keeps the shell hidden after rejected credentials', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
+  renderRoute('/', false);
+  fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'test-operator' } });
+  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'rejected-test-value' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    'Sign-in details were not accepted',
+  );
+  expect(screen.queryByRole('navigation')).toBeNull();
+  expect(authHeader()).toEqual({});
 });
 
 it('loads a selected backend run into the existing embedded viewer with truthful metadata', async () => {

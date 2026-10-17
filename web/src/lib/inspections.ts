@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Source, Stats } from './bundle';
 import type { ProcessingStagePayload } from './processing';
+import { authHeader } from '../auth/auth';
 
 export type InspectionStatus = 'queued' | 'running' | 'completed' | 'failed' | 'unknown';
 
@@ -76,7 +77,7 @@ export function groupRunsIntoSites(runs: readonly RunSummary[]): Site[] {
 }
 
 export async function fetchRuns(signal?: AbortSignal): Promise<RunSummary[]> {
-  const response = await fetch('/api/runs', { signal });
+  const response = await fetch('/api/runs', { signal, headers: authHeader() });
   if (!response.ok) throw new Error(String(response.status));
   const runs: unknown = await response.json();
   if (
