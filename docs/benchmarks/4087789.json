@@ -1,0 +1,40 @@
+{
+  "commit": "4087789",
+  "dirty": true,
+  "pipeline_version": "0.1.0",
+  "started_at": "2026-10-16T16:01:38+00:00",
+  "videos": {
+    "aegviidu": {
+      "registered_pct": 100.0,
+      "models": 1,
+      "reproj_px": 0.661,
+      "points": 77545,
+      "points_total": 84915,
+      "points_dropped_low_parallax": 905,
+      "points_dropped_reproj": 6465,
+      "scale_err_cm": null,
+      "time_s": 1526.5,
+      "frames_used": 150,
+      "registered": 150,
+      "max_frames": 150,
+      "dropped_points": 0
+    },
+    "notre-dame": {
+      "registered_pct": 100.0,
+      "models": 1,
+      "reproj_px": 0.395,
+      "points": 43298,
+      "points_total": 43298,
+      "points_dropped_low_parallax": 0,
+      "points_dropped_reproj": 0,
+      "scale_err_cm": null,
+      "time_s": 141.3,
+      "frames_used": 109,
+      "registered": 109,
+      "max_frames": null,
+      "dropped_points": 0
+    }
+  },
+  "errors": {},
+  "skipped": []
+}

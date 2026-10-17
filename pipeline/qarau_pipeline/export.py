@@ -18,6 +18,7 @@ from .interfaces import stage_seconds
 
 NEVER = 65535
 THUMB_W = 960
+FAR_K = 2.5  # far layer: nearest-camera distance > FAR_K x median (ADR 0013)
 
 
 # ---------------------------------------------------------------- geometry
@@ -157,6 +158,20 @@ def sanitize_points(xyz: np.ndarray) -> tuple[np.ndarray, dict[str, int]]:
     return keep, report
 
 
+def far_mask(xyz: np.ndarray, centers: np.ndarray) -> np.ndarray:
+    """Points farther from every registered camera than FAR_K x the median such distance:
+    horizon, distant hills, sky remnants. Nearest camera, not the trajectory centroid, so a
+    long walk along a pipeline keeps its ends."""
+    # ponytail: dense N x C distance matrix in chunks; a KD-tree if C grows to thousands
+    d = np.concatenate(
+        [
+            np.sqrt(((xyz[i : i + 8192, None] - centers[None]) ** 2).sum(-1).min(1))
+            for i in range(0, len(xyz), 8192)
+        ]
+    )
+    return np.asarray(d > FAR_K * np.median(d))
+
+
 def las_offset_scale(xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Offset = middle of the extent, scale >= 1 mm and coarse enough that every quantized
     coordinate (x - offset) / scale fits in int32 (10% margin for rounding)."""
@@ -193,15 +208,21 @@ def export_bundle(
     dropped = {"non_finite": report["non_finite"], "far_outliers": report["far_outliers"]}
     if report["kept"] < N:
         print(f"export: dropped {N - report['kept']} of {N} points {dropped}", flush=True)
-    pids, xyz = pids[keep], xyz[keep]  # every per-point array below derives from pids
-    N = len(pids)
-    rgb = np.array([rec.points3D[int(p)].color for p in pids], dtype=np.uint8)
+    pids, xyz = pids[keep], xyz[keep]
 
     # poses (COLMAP world)
     R = {iid: np.asarray(rec.images[iid].cam_from_world().rotation.matrix()) for iid in reg}
     t = {iid: np.asarray(rec.images[iid].cam_from_world().translation) for iid in reg}
     Rs = np.stack(list(R.values()))
     centers = np.stack([-R[i].T @ t[i] for i in reg])
+
+    # far layer (ADR 0013): own arrays, never in the object cloud
+    far = far_mask(xyz, centers)
+    far_xyz = xyz[far]
+    far_rgb = np.array([rec.points3D[int(p)].color for p in pids[far]], np.uint8).reshape(-1, 3)
+    pids, xyz = pids[~far], xyz[~far]  # every per-point array below derives from pids
+    N = len(pids)
+    rgb = np.array([rec.points3D[int(p)].color for p in pids], dtype=np.uint8)
 
     # alignment: up -> +Z, point centroid -> origin, no scale
     A = rotation_between(estimate_up(Rs, centers), np.array([0.0, 0, 1]))
@@ -293,6 +314,12 @@ def export_bundle(
             "first_seen": w("points.first_seen.u16", first_seen, "<u2"),
             "num_obs": w("points.num_obs.u8", num_obs, "u1"),
         },
+        "far": {
+            "count": len(far_xyz),
+            "position": w("far.position.f32", far_xyz @ A.T - c, "<f4"),
+            "color": w("far.color.u8", far_rgb, "u1"),
+            "rule": f"nearest camera distance > {FAR_K:g} x median",
+        },
         "tracks": {
             "frame_offsets": w("tracks.frame_offsets.u32", frame_offsets, "<u4"),
             "frame_points": w("tracks.frame_points.u32", frame_points, "<u4"),
@@ -305,6 +332,7 @@ def export_bundle(
             "frames_dropped": sum(1 for f in frames if not f["kept"]),
             "frames_registered": len(reg),
             "points": N,
+            "far_points": len(far_xyz),
             "dropped_points": dropped,
             "mean_track_length": round(mean_track, 3),
             "mean_reproj_error_px": round(mean_err, 3),

@@ -22,8 +22,13 @@ class FakeRec:
     def reg_image_ids(self) -> list[int]:
         return [i for i, n in enumerate(self.names) if n]
 
+    points3D: dict[int, Any] = {}  # noqa: RUF012 - the point filter sees an empty model
+
+    def update_point_3d_errors(self) -> None:
+        pass
+
     def image(self, i: int) -> SimpleNamespace:
-        return SimpleNamespace(name=self.names[i], frame_id=i)
+        return SimpleNamespace(name=self.names[i], frame_id=i, projection_center=list)
 
     def deregister_frame(self, frame_id: int) -> None:
         self.names[frame_id] = ""  # ids stay stable while iterating
@@ -109,7 +114,11 @@ def stub_pycolmap(result: dict[int, FakeRec]) -> tuple[Any, dict[str, Any]]:
             ),
         ),
         incremental_mapping=incremental_mapping,
-        bundle_adjustment=lambda rec: calls.setdefault("ba", rec),
+        bundle_adjustment=lambda rec, opts: calls.setdefault("ba", (rec, opts)),
+        BundleAdjustmentOptions=lambda: SimpleNamespace(
+            print_summary=True, ceres=SimpleNamespace(loss_function_type="TRIVIAL")
+        ),
+        LossFunctionType=SimpleNamespace(HUBER="HUBER"),
     )
     return pc, calls
 
@@ -137,7 +146,14 @@ def test_drop_bridges_then_global_ba() -> None:
     rec = FakeRec(imgs(0, 98) | {"b1.jpg", "b2.jpg"})  # two bridge frames got registered
     pc, calls = stub_pycolmap({})
     assert rc.drop_bridges(pc, rec, {"b1.jpg", "b2.jpg", "b3.jpg"}) == 2
-    assert rec.reg_names() == imgs(0, 98) and calls["ba"] is rec
+    assert rec.reg_names() == imgs(0, 98) and calls["ba"][0] is rec
+    assert calls["ba"][1].ceres.loss_function_type == "HUBER"  # robust, like GLOMAP's own BA
+
+
+def test_no_bridge_in_model_no_second_ba() -> None:
+    rec = FakeRec(imgs(0, 98))
+    pc, calls = stub_pycolmap({})
+    assert rc.drop_bridges(pc, rec, {"b1.jpg"}) == 0 and "ba" not in calls
 
 
 def patch_colmap(
@@ -218,3 +234,32 @@ def test_reconstruct_merge_off_is_old_behaviour(
     m = rc.ColmapReconstructor(merge=False).reconstruct(tmp_path, NAMES, tmp_path / "c", ["b"])
     assert (n["incremental"], n["global"], n["extract"], n["match"]) == (1, 0, 1, 1)
     assert m["merge"]["attempted"] is False and (m["models"], m["registered_images"]) == (2, 70)
+
+
+@pytest.mark.parametrize("sky", [True, False])
+def test_sky_masks_reach_feature_extraction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sky: bool
+) -> None:
+    import cv2
+    import numpy as np
+
+    frames = tmp_path / "frames"
+    frames.mkdir()
+    img = np.random.default_rng(0).integers(0, 255, (60, 80, 3)).astype(np.uint8)
+    img[:20] = (230, 180, 120)  # flat blue band at the top
+    for n in NAMES:
+        cv2.imwrite(str(frames / n), img)
+    patch_colmap(monkeypatch, {0: FakeRec(imgs(0, 100))}, {}, {})
+    seen: list[str] = []
+    monkeypatch.setattr(
+        rc.pycolmap, "extract_features", lambda *a, **k: seen.append(k["reader_options"].mask_path)
+    )
+    m = rc.ColmapReconstructor(sky_mask=sky).reconstruct(frames, NAMES, tmp_path / "colmap")
+    masks = tmp_path / "colmap/masks"
+    assert seen == [masks if sky else Path("")]  # pycolmap's default: no mask
+    if sky:
+        assert (masks / "000000.jpg.png").is_file() and m["sky_mask"]["sky"] == 100
+    else:
+        assert not masks.exists() and m["sky_mask"] is None
+    with pytest.raises(SystemExit):  # the switch exists on the CLI
+        main(["run", "--no-sky-mask", "--out", "o"])
