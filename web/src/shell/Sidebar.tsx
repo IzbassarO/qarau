@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, NavLink, useLocation } from 'react-router';
+import { Link, NavLink } from 'react-router';
 import { useI18n } from '../i18n';
 import { UNASSIGNED_SITE_ID, type Site } from '../lib/inspections';
 import { LangSwitch, Logo } from '../viewer/ui';
@@ -16,7 +16,6 @@ interface SidebarProps {
 export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: SidebarProps) {
   const { t } = useI18n();
   const { signOut } = useAuth();
-  const { pathname } = useLocation();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (id: string) => {
     setCollapsed((previous) => {
@@ -75,11 +74,7 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
               {site.inspections.map((inspection) => (
                 <li key={inspection.id}>
                   <NavLink
-                    to={
-                      pathname === '/' && demo && inspection.id === 'demo'
-                        ? '/'
-                        : `/inspections/${encodeURIComponent(inspection.id)}`
-                    }
+                    to={`/inspections/${encodeURIComponent(inspection.id)}`}
                     className={({ isActive }) => `inspection-link${isActive ? ' active' : ''}`}
                     onClick={onNavigate}
                     title={inspection.title}

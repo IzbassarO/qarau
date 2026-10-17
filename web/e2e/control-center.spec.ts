@@ -12,7 +12,7 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
       sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
     }, lang);
     await page.route('**/api/runs', (route) => route.fulfill({ status: 503, body: '' }));
-    await page.goto('/');
+    await page.goto('/inspections/demo');
     await expect(page.getByRole('heading', { name: t['demo.inspectionTitle'] })).toBeVisible();
     await expect(
       page.getByText(t['processing.error.tooFewRegisteredFrames.whatToDo']),
@@ -54,6 +54,20 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
     expect(errors).toEqual([]);
   });
 }
+
+test('home lists the real runs, not the demo', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('qarau.lang', 'en');
+    sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
+  });
+  await page.route('**/api/runs', (route) =>
+    route.fulfill({ json: [{ run_id: 'notre-dame', source: { name: 'notre-dame.mp4' } }] }),
+  );
+  await page.goto('/');
+  const navigation = page.getByRole('navigation');
+  await expect(navigation.getByRole('link', { name: /notre-dame\.mp4/ })).toBeVisible();
+  await expect(navigation.getByRole('link', { name: /Tank farm survey/ })).toHaveCount(0);
+});
 
 test('mobile sidebar collapses, opens and closes with navigation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });

@@ -75,11 +75,10 @@ it('shows the labelled demo with its viewer and stages without requesting the ba
   expect(fetch).not.toHaveBeenCalled();
 });
 
-it('selects the labelled failed demo on home without interaction or backend requests', () => {
+it('shows the failed demo stages at /inspections/demo without backend requests', () => {
   const fetch = vi.fn();
   vi.stubGlobal('fetch', fetch);
-  renderRoute();
-  expect(screen.getByRole('heading', { name: 'Tank farm survey' })).toBeTruthy();
+  renderRoute('/inspections/demo');
   expect(screen.getByText('Not enough overlapping views')).toBeTruthy();
   expect(screen.getByText('What to do')).toBeTruthy();
   expect(screen.getByText('Not run')).toBeTruthy();
@@ -96,10 +95,28 @@ it('selects the labelled failed demo on home without interaction or backend requ
       'Film the asset again from several angles. Move slowly and keep the same surfaces visible between adjacent views.',
     ),
   ).toBeTruthy();
-  expect(screen.getByRole('link', { name: /Tank farm survey/ }).getAttribute('aria-current')).toBe(
-    'page',
-  );
   expect(fetch).not.toHaveBeenCalled();
+});
+
+// Regression (A3 -> 2026-10-17): home showed only the demo site and never asked for real runs.
+it('lists the real runs on home, not the demo', async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValue(
+      Response.json([
+        { run_id: 'notre-dame', source: { name: 'notre-dame.mp4' } },
+        { run_id: 'room', source: { name: 'room.mov' } },
+      ]),
+    );
+  vi.stubGlobal('fetch', fetch);
+  renderRoute('/');
+  expect(await screen.findByRole('link', { name: /notre-dame\.mp4/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /room\.mov/ }).getAttribute('href')).toBe(
+    '/inspections/room',
+  );
+  expect(screen.queryByText('Tank farm survey')).toBeNull();
+  expect(screen.queryByTestId('embedded-viewer')).toBeNull();
+  expect(fetch).toHaveBeenCalledWith('/api/runs', expect.anything());
 });
 
 it('keeps demo data out of real inspection routes', async () => {
