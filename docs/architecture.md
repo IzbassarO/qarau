@@ -28,7 +28,7 @@ instantly; it never waits on processing.
 
 Site configuration also stores an optional world-coordinate region of interest in
 the run catalog. Its versioned JSON, coordinate-frame caveat, site resolution,
-file layout, production FastAPI routes and development adapter are documented
+file layout, development API and retained FastAPI installation patch are documented
 in [Region of interest — version 1](notes/roi-format.md).
 
 ## Stage contracts

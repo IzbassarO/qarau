@@ -100,19 +100,44 @@ return `500`. Responses are uncached. Corrupt persisted JSON produces an error,
 never an apparently absent region. The client sends the existing session Bearer
 header and surfaces failures in translated viewer messages.
 
-### Production and development
+### Delivered implementation and activation
 
-`backend/app/roi.py`, registered in `backend/app/main.py`, provides the production
-FastAPI routes. A Pydantic v2 model validates the versioned document; each route
-uses the existing `require_role` dependency. The API's CORS policy permits
-authenticated JSON PUT and DELETE as well as GET from configured web origins.
-The run catalog preserves optional site associations so inspections of the same
-site resolve the same ROI. No database migration is needed for this file catalog.
+The currently retained `backend/app/main.py` baseline has **no ROI routes**.
+The orchestrator removed the earlier backend edits because
+`developers.dev_app.owns` in `devteam/config.yaml` contains only `web/` (shared
+`docs/` is also retained). Authorization in the conversation does not change
+that configured ownership check. The default production API must not be described
+as supporting ROI until the backend files are retained or the patch below is
+applied by the backend owner.
+
+The complete, reviewable production implementation is preserved in
+[`../patches/a7-backend-roi.patch`](../patches/a7-backend-roi.patch), inside the
+allowed documentation tree. It contains `backend/app/roi.py`, registration and
+CORS in `backend/app/main.py`, site metadata in `backend/app/runs.py`,
+`backend/tests/test_roi.py`, and catalog regression coverage. The router uses
+the existing `require_role` dependency on all three methods, validates with
+Pydantic v2, and atomically writes the file path documented above. No database
+migration or new dependency is needed.
+
+The orchestrator must retain `backend/` for A7, or `dev_pipeline` (the configured
+owner of `backend/`) must apply this patch from the repository root:
+
+```sh
+git apply --check docs/patches/a7-backend-roi.patch
+git apply docs/patches/a7-backend-roi.patch
+```
+
+The patch is not installed implicitly by web builds, tests, or Vite startup.
+Local restoration and passing tests do not prove that the orchestrator will
+retain those backend paths; the patch exists so another rollback cannot discard
+the implementation and its tests again.
 
 `web/vite-dev-roi.ts`, mounted by the existing Vite catalog adapter, provides the
-same file format for local development. When `QARAU_API_PROXY` forwards `/api` to
-FastAPI, the development adapter is disabled and requests reach the production
-router. The static web build always uses the same `/api/sites/.../roi` client.
+same file format and working disk persistence for local development today. When
+`QARAU_API_PROXY` forwards `/api` to FastAPI, the development adapter is disabled:
+ROI requests then require the backend patch to have been applied. The static web
+build uses the same `/api/sites/.../roi` client and cannot supply missing API
+routes itself.
 
 ### Finding and checking the tool
 
@@ -133,6 +158,41 @@ reads the current source entry (`/src/main.tsx`), rather than `web/dist`. Its
 plain URL capture shows the initial controls; a drawn-box capture additionally
 requires the interaction above or an existing saved site ROI. The ROI Playwright
 regression performs the interactions without taking screenshots.
+
+### Saved Notre-Dame fixture for the tester
+
+Prepare an isolated catalog explicitly; this command reads the sample catalog
+and copies its viewer bundle without editing the source or writing under `data/`:
+
+```sh
+cd web
+pnpm roi:prepare --source /path/to/read-only/runs --out /path/to/A7-scratch/notre-dame-roi-review
+QARAU_RUNS_DIR=/path/to/A7-scratch/notre-dame-roi-review pnpm exec vite --port 5198 --strictPort
+```
+
+Open `http://localhost:5198/viewer/notre-dame`. The ordinary site-ROI GET reads
+`sites/notre-dame/roi.json` from this catalog, so the saved wireframe is present
+before drawing. Enable **Hide points outside region** for the filtered view,
+then stop the server after checking. The application has no fixture fallback or
+automatic sample seeding.
+
+The generated box uses the actual finite object's XY 2nd–98th percentile bounds
+and the selected full Z extent plus 5% on each end. `created_by` is explicitly
+`a7-visual-test-fixture`; `roi-test-fixture.json` records its purpose and point
+counts. It is a visual-test artifact, not an engineer-approved selection.
+The preparation script refuses existing destinations, overlapping source/output
+catalogs, paths under `data/`, escaping asset paths and malformed geometry.
+
+For this A7 worktree, the prepared catalog is
+`/Users/izbassar/Documents/Startup/qarau/devteam/.state/scratch/A7/notre-dame-roi-review`.
+It contains 15,239 real sample points: 14,134 inside the ROI and 1,105 outside.
+The locally restored FastAPI serves its saved ROI, manifest and position buffer
+with `200` responses. This API check uses TestClient and takes no screenshot.
+
+**The existing screenshot command still hardcodes `QARAU_RUNS_DIR={data}/runs`.**
+The orchestrator/tester must explicitly select the prepared catalog for a
+saved-box capture; preparing it under scratch does not change the fixed gate's
+input. This developer does not modify ownership or screenshot gate controls.
 
 No dependencies or models were added. FastAPI and Pydantic are MIT; Python and
 Node standard libraries and the installed Vite stack permit commercial use.

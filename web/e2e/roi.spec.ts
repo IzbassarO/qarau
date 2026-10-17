@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import type { Box3Helper, BufferGeometry, Points, ShaderMaterial } from 'three';
 import en from '../src/i18n/en.json' with { type: 'json' };
-import type { Roi } from '../src/viewer/roi';
+import type { Manifest } from '../src/lib/bundle';
+import { boxFromPointsInRect, type Roi } from '../src/viewer/roi';
 
 // No screenshots or catalog writes: the tester owns images and backend tests
 // exercise atomic persistence. Keep only ROI API state in memory while the real
@@ -164,4 +165,78 @@ test('Notre Dame exposes ROI, draws in top view, hides outside points and restor
   expect(saved).toBeNull();
   await expect(page.getByRole('alert')).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+
+test('a fresh Notre Dame route displays a previously saved fixture outline without drawing first', async ({
+  page,
+}) => {
+  // Derive a fixture from the actual object buffer. This is an explicit mocked
+  // saved document, never an automatic default in product code or a real write.
+  const manifestResponse = await page.request.get('/api/runs/notre-dame/manifest.json');
+  expect(manifestResponse.ok()).toBe(true);
+  const manifest = (await manifestResponse.json()) as Manifest;
+  const positionResponse = await page.request.get(
+    `/api/runs/notre-dame/files/${manifest.points.position}`,
+  );
+  expect(positionResponse.ok()).toBe(true);
+  const bytes = await positionResponse.body();
+  expect(bytes.length).toBe(manifest.points.count * 12);
+  const positions = new Float32Array(bytes.length / 4);
+  for (let i = 0; i < positions.length; i++) positions[i] = bytes.readFloatLE(i * 4);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i < positions.length; i += 3)
+    if ([positions[i], positions[i + 1], positions[i + 2]].every(Number.isFinite)) {
+      xs.push(positions[i]);
+      ys.push(positions[i + 1]);
+    }
+  xs.sort((a, b) => a - b);
+  ys.sort((a, b) => a - b);
+  const lo = Math.floor((xs.length - 1) * 0.02);
+  const hi = Math.floor((xs.length - 1) * 0.98);
+  const box = boxFromPointsInRect(
+    positions,
+    { min: [xs[lo], ys[lo], 0], max: [xs[hi], ys[hi], 0] },
+    'z',
+  );
+  expect(box).not.toBeNull();
+  const roi: Roi = {
+    version: 1,
+    site_id: 'notre-dame',
+    source_run: 'notre-dame',
+    frame: 'reconstruction',
+    up_axis: 'z',
+    min: box!.min,
+    max: box!.max,
+    created_at: '2026-10-17T12:00:00Z',
+    created_by: 'a7-visual-test-fixture',
+  };
+  await page.route('**/api/sites/*/roi', async (route) => {
+    expect(route.request().method()).toBe('GET');
+    const site = decodeURIComponent(new URL(route.request().url()).pathname.split('/')[3]);
+    await route.fulfill({ status: 200, json: { ...roi, site_id: site } });
+  });
+  await page.addInitScript(() => localStorage.setItem('qarau.lang', 'en'));
+  await page.goto('/viewer/notre-dame');
+  await page.waitForFunction(() => window.__qarau?.engine?.scene.getObjectByName('roi-box'), null, {
+    timeout: 120_000,
+  });
+  const panel = page.getByRole('region', { name: en['roi.title'] });
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText(en['roi.saved'], { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: en['roi.save'], exact: true })).toBeDisabled();
+  const outline = await page.evaluate(() => {
+    const helper = window.__qarau!.engine!.scene.getObjectByName('roi-box') as Box3Helper;
+    return {
+      min: helper.box.min.toArray(),
+      max: helper.box.max.toArray(),
+      visible: helper.visible,
+    };
+  });
+  expect(outline).toEqual({ ...box, visible: true });
+  const hide = panel.getByRole('button', { name: en['roi.hideOutside'], exact: true });
+  await expect(hide).toBeEnabled();
+  await hide.click();
+  await expect(hide).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });
