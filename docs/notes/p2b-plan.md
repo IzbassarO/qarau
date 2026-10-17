@@ -116,6 +116,29 @@ Round 3 quick benchmark (`4d121b5+dirty`):
 | room (dev) | 269 | 100.0 | 1 | 27349 | 0.94 | 442.9 |
 | room (P2b) | 282 | 100.0 | 1 | 26397 (−3.5 %) | 0.982 | 357.1 |
 
+### Round 4: report format, max time gap, tests in test_frames.py
+
+- `quality_report.json` version 2: `summary` {`frames_total`, `keyframes`, `issues_count`,
+  `verdict`}; issues `kind` (was `code`), `severity` `info`/`warn` (was `minor`/`major`),
+  `advice` + `advice_key` (was `advice_en`), `frames` = every flagged frame index.
+  `run` and `quality` print `quality.text(report)`.
+- Keyframes: `max_gap_s` 2 s adds a keyframe after a long gap if the image moved ≥ 1 % of
+  the diagonal (a still camera still gives first + last only). ADR 0015.
+- Synthetic keyframe/quality tests moved into `tests/test_frames.py`.
+
+Quick benchmark, before (round-3 code, `d02a466`) → after (round 4, `d02a466+dirty`):
+
+| Video | Frames used | Registered % | Models | Points | Reproj. px | Time s |
+| --- | --- | --- | --- | --- | --- | --- |
+| notre-dame (before) | 121 | 100.0 | 1 | 49876 | 0.394 | 146.9 |
+| notre-dame (after) | 121 | 100.0 | 1 | 49927 | 0.395 | 149.1 |
+| room (before) | 282 | 100.0 | 1 | 25278 | 0.99 | 349.7 |
+| room (after) | 282 | 100.0 | 1 | 26706 | 0.979 | 308.9 |
+
+Same fitted θ (0.0012 / 0.00081) and identical keyframe sets before and after (the gap rule
+did not fire on either video), so the point difference on room is COLMAP run-to-run spread. Reports unchanged in content: notre-dame `ok`, 1
+`info` blur (17.5–19.7 s); room `ok`, 9 `info` issues, blur only 5.0–5.5 and 31.2–32.0 s.
+
 Round 1 quick benchmark (`23cf1a2+dirty`, fixed θ 0.0003, old grid) vs dev baseline:
 
 | Video | Frames used | Registered % | Models | Points | Reproj. px | Time s |

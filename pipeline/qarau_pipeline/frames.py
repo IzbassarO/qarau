@@ -221,7 +221,8 @@ def run(
         "frames_extracted": len(files), "frames_dropped": dropped, "keyframes": len(chosen),
         "keyframe_mode": f"{asked}; used {theta:.2g}" if theta else asked,
         "keyframe_selection": selection,
-        "quality_verdict": rep["verdict"], "quality_issues": [i["code"] for i in rep["issues"]],
+        "quality_verdict": rep["summary"]["verdict"],
+        "quality_issues": [i["kind"] for i in rep["issues"]],
         "rate_fps": round(rate, 4), "median_blur": round(float(np.median(blur)), 2),
         "conversions": conv, "warnings": warn,
     }  # fmt: skip

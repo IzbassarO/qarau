@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from . import frames as frames_stage
+from . import quality
 from .interfaces import StageError, run_stage
 from .keyframes import MODES, KeyframeParams, subsample
 from .segmentation import GroundedSam2, ManualMasks, SamApiSegmenter, parse_prompt, segment_stage
@@ -72,6 +73,8 @@ def _frames(a: argparse.Namespace, out: Path) -> dict[str, Any]:
         out, "frames", f"ffmpeg {_ffmpeg_version()}", params,
         lambda: frames_stage.run(video, out, a.max_frames, keys),
     )  # fmt: skip
+    print(quality.text(json.loads((out / "quality_report.json").read_text())))
+    print(f"report: {out / 'quality_report.json'}")
     return res.metrics
 
 
@@ -79,11 +82,6 @@ def cmd_quality(a: argparse.Namespace) -> None:
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     _frames(a, out)
-    rep = json.loads((out / "quality_report.json").read_text())
-    print(f"quality: {rep['verdict']}, {rep['keyframes']}/{rep['candidate_frames']} keyframes")
-    for i in rep["issues"]:
-        print(f"  [{i['severity']}] {i['code']}: {i['advice_en']}")
-    print(f"report: {out / 'quality_report.json'}")
 
 
 def cmd_run(a: argparse.Namespace) -> None:
@@ -170,17 +168,17 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--no-merge", dest="merge", action="store_false",
                    help="largest model only, no leftover registration (pre-P3)")  # fmt: skip
     r.set_defaults(fn=cmd_run)
+    e = sub.add_parser("export", help="COLMAP model -> LAZ/PLY + viewer bundle")
+    e.add_argument("--sparse", required=True)
+    e.add_argument("--images", help="image dir (image-set input); omit to use <out>/frames.json")
+    e.add_argument("--out", required=True)
+    e.set_defaults(fn=cmd_export)
     q = sub.add_parser("quality", help="video -> frames + <out>/quality_report.json only")
     q.add_argument("--video", required=True)
     q.add_argument("--out", required=True)
     q.add_argument("--max-frames", type=int, help="upper cap on extracted frames (default 300)")
     q.add_argument("--keyframes", choices=MODES, default="parallax")
     q.set_defaults(fn=cmd_quality)
-    e = sub.add_parser("export", help="COLMAP model -> LAZ/PLY + viewer bundle")
-    e.add_argument("--sparse", required=True)
-    e.add_argument("--images", help="image dir (image-set input); omit to use <out>/frames.json")
-    e.add_argument("--out", required=True)
-    e.set_defaults(fn=cmd_export)
     sg = sub.add_parser("segment", help="masks for the bundle's frames -> <run>/segmentation/")
     sg.add_argument("--run", required=True)
     sg.add_argument("--segmenter", choices=["manual", "grounded-sam2", "sam-api"], required=True)

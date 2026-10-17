@@ -1,6 +1,6 @@
 """Footage quality: per candidate frame checks -> time ranges with plain re-shoot advice ->
-quality_report.json (format: docs/notes/quality-report.md). Codes are stable: the web app
-translates them."""
+quality_report.json (format: docs/notes/quality-report.md). Kinds and advice keys are
+stable: the web app translates them."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ import numpy as np
 
 from . import keyframes as kf
 
-SCHEMA_VERSION = 1
-CODES = ("blur", "too_fast", "pure_rotation", "low_texture")
+VERSION = 2
+KINDS = ("blur", "too_fast", "pure_rotation", "low_texture")
 BELOW = {"laplacian_var", "parallax_frac"}  # metrics where a lower value is worse
 
 ADVICE = {
@@ -66,7 +66,7 @@ def frame_flags(
 ) -> dict[str, list[Flag | None]]:
     n = len(times)
     diag = kf.diagonal(greys[0])
-    flags: dict[str, list[Flag | None]] = {c: [None] * n for c in CODES}
+    flags: dict[str, list[Flag | None]] = {c: [None] * n for c in KINDS}
     rel = prm.blur_rel * float(np.median(blur))
     thr = max(prm.blur_min, rel)
     for i in range(n):
@@ -122,8 +122,8 @@ def issues(
 ) -> list[dict[str, Any]]:
     dt = float(np.median(np.diff(times))) if len(times) > 1 else 0.0
     out = []
-    for code in CODES:
-        fl = flags[code]
+    for kind in KINDS:
+        fl = flags[kind]
         for i0, i1 in ranges([f is not None for f in fl]):
             span = times[i1] - times[i0] + dt
             if span < prm.min_issue_s:
@@ -133,17 +133,18 @@ def issues(
             vals = [f[1] for f in got if f[0] == metric]
             worst = min(vals) if metric in BELOW else max(vals)
             out.append({
-                "code": code,
+                "kind": kind,
                 "start_s": round(times[i0], 2),
                 "end_s": round(times[i1], 2),
-                "frames": [i0, i1],
-                "severity": "major" if span >= prm.major_frac * duration else "minor",
+                "frames": [i for i in range(i0, i1 + 1) if fl[i] is not None],
+                "severity": "warn" if span >= prm.major_frac * duration else "info",
                 "metric": metric,
                 "value": round(worst, 5),
                 "threshold": round(next(f[2] for f in got if f[0] == metric), 5),
-                "advice_en": ADVICE[code].format(when=_when(times[i0], times[i1])),
+                "advice": ADVICE[kind].format(when=_when(times[i0], times[i1])),
+                "advice_key": f"quality.advice.{kind}",
             })  # fmt: skip
-    return sorted(out, key=lambda x: (x["start_s"], CODES.index(x["code"])))
+    return sorted(out, key=lambda x: (x["start_s"], KINDS.index(x["kind"])))
 
 
 def report(
@@ -159,15 +160,27 @@ def report(
 ) -> dict[str, Any]:
     prm = prm or QualityParams()
     found = issues(frame_flags(times, blur, greys, tracks, prm), times, duration, prm)
-    major = any(x["severity"] == "major" for x in found)
+    warn = any(x["severity"] == "warn" for x in found)
     return {
-        "schema_version": SCHEMA_VERSION,
+        "version": VERSION,
         "video": video,
         "duration_s": round(duration, 3),
-        "candidate_frames": len(times),
-        "keyframes": keyframes,
+        "summary": {
+            "frames_total": len(times),
+            "keyframes": keyframes,
+            "issues_count": len(found),
+            "verdict": "reshoot_recommended" if warn else "ok",
+        },
         "keyframe_selection": selection,
         "thresholds": asdict(prm),
-        "verdict": "reshoot_recommended" if major else "ok",
         "issues": found,
     }
+
+
+def text(rep: dict[str, Any]) -> str:
+    """Short human-readable summary for the CLI."""
+    s = rep["summary"]
+    lines = [f"quality: {s['verdict']}, {s['keyframes']} keyframes of {s['frames_total']} "
+             f"frames, {s['issues_count']} issue(s)"]  # fmt: skip
+    lines += [f"  [{i['severity']}] {i['kind']}: {i['advice']}" for i in rep["issues"]]
+    return "\n".join(lines)

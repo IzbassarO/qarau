@@ -37,10 +37,12 @@ class KeyframeParams:
     # points fall 11 % (1.5: -2.6 %, within run-to-run spread; docs/notes/p2b-plan.md)
     oversample: float = 1.5
     min_track_frac: float = 0.6  # fewer of the keyframe's tracks left -> new keyframe
+    max_gap_s: float = 2.0  # this long since the last keyframe and the image moved -> new one
     rotation_min_gap_s: float = 0.3  # pure rotation: track-loss keyframes at most this often
     rotation_inliers: float = 0.9  # homography inlier ratio: "the homography explains it"
     rotation_max_parallax_frac: float = 0.002  # ... and no parallax left
-    min_motion_frac: float = 0.01  # ... while the image did move
+    # ... while the image did move; also the max-gap rule's bar: still frames are duplicates
+    min_motion_frac: float = 0.01
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
@@ -50,7 +52,7 @@ class KeyframeParams:
         if self.mode == "fixed":
             return "fixed"
         return (f"parallax >= {self.parallax_frac:g} fit to budget, {self.oversample:g}x "
-                f"candidates, tracks {self.min_track_frac:g}, "
+                f"candidates, tracks {self.min_track_frac:g}, max gap {self.max_gap_s:g} s, "
                 f"rotation gap {self.rotation_min_gap_s:g} s")  # fmt: skip
 
 
@@ -195,6 +197,8 @@ def fit(
                                   prm.min_motion_frac)  # fmt: skip
                 if not rot or times[i] - times[k] >= prm.rotation_min_gap_s:
                     keys.append(i)
+            elif times[i] - times[k] >= prm.max_gap_s and p.flow >= prm.min_motion_frac * diag:
+                keys.append(i)
         return [*keys, idx[-1]]
 
     lo, keys = prm.parallax_frac, walk(prm.parallax_frac)
