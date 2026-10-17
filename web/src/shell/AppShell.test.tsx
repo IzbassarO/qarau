@@ -100,14 +100,12 @@ it('shows the failed demo stages at /inspections/demo without backend requests',
 
 // Regression (A3 -> 2026-10-17): home showed only the demo site and never asked for real runs.
 it('lists the real runs on home, not the demo', async () => {
-  const fetch = vi
-    .fn()
-    .mockResolvedValue(
-      Response.json([
-        { run_id: 'notre-dame', source: { name: 'notre-dame.mp4' } },
-        { run_id: 'room', source: { name: 'room.mov' } },
-      ]),
-    );
+  const fetch = vi.fn().mockResolvedValue(
+    Response.json([
+      { run_id: 'notre-dame', source: { name: 'notre-dame.mp4' } },
+      { run_id: 'room', source: { name: 'room.mov' } },
+    ]),
+  );
   vi.stubGlobal('fetch', fetch);
   renderRoute('/');
   expect(await screen.findByRole('link', { name: /notre-dame\.mp4/ })).toBeTruthy();
