@@ -87,7 +87,7 @@ tasks:
 
     Re-test (owner 2026-10-16): the pipeline work is done on branch devteam/P3b (sky mask, triangulation-angle
     / reprojection filter, far layer, counters, ADR 0013). Continue on that branch with dev merged in
-    (A4''s viewer fix; devteam merges, never rebases), rerun the checks and the quick benchmark. No new
+    (A4/A4b viewer fix; devteam merges, never rebases), rerun the checks and the quick benchmark. No new
     pipeline changes unless the tester finds a real pipeline defect.
 
 
@@ -95,7 +95,7 @@ tasks:
 
 
     - The tester MUST take its own screenshots of /viewer/notre-dame and /viewer/aegviidu; a pass without
-    them is a fail. In the default view (after A4), compared with dev from the same camera: no wall or
+    them is a fail. In the default view (after A4b), compared with dev from the same camera: no wall or
     band of points in the sky; far points appear only in the separate far layer. (The orchestrator adds
     dev-*.png screenshots of the same routes on dev''s gate benchmark.) Sparse clouds are never expected
     to look like the object: do not judge recognisability before dense reconstruction (P4).
@@ -119,10 +119,10 @@ tasks:
     '
   status: blocked
   depends_on:
-  - A4
+  - A4b
   run: run-20261016-115433
   branch: devteam/P3b
-  blocked_reason: Pipeline work done on devteam/P3b; re-test after A4 viewer fix
+  blocked_reason: Pipeline work done on devteam/P3b; re-test after A4b viewer fix
 - id: P2b
   area: core
   title: Parallax keyframes and a footage quality report
@@ -143,7 +143,11 @@ tasks:
 
     '
   owner: dev_pipeline
-  status: todo
+  status: done
+  run: run-20261016-165310
+  branch: devteam/P3c
+  pr: https://github.com/IzbassarO/qarau/pull/23
+  done_at: '2026-10-16'
 - id: P4a
   area: core
   title: Dense reconstruction stage (commercial licence)
@@ -315,29 +319,42 @@ tasks:
 - id: A4
   area: app
   title: Colour toggle and object framing
-  goal: 'Owner 2026-10-16: P3b''s pipeline work is done but its tester failed the default view: ~93-95
-    % of points are drawn in the dark "not yet seen" timeline colour and large camera frustums cross the
-    scene. Make the default viewer view honest and readable. No change to the pipeline output format (viewer
-    bundle, ADR 0003).
+  goal: 'Real colours <-> height-blue toggle; the initial view frames the object, not the whole scene.
+
+    '
+  status: done
+  owner: dev_app
+  run: run-20261016-165310
+  branch: devteam/A4
+  pr: https://github.com/IzbassarO/qarau/pull/22
+  done_at: '2026-10-16'
+- id: A4b
+  area: app
+  title: 'Readable default view: real RGB by default, frustums hidden by default'
+  goal: 'Follow-up to A4 (#22, built to the old criteria), owner 2026-10-16. A4 delivered robust 2-98
+    % framing (+Z up, no roll), frustum size scaled to the scene and an RGB / height-blue toggle, but
+    the default view is unchanged: the colour mode defaults to height-blue, the build-up ("first seen
+    / not yet seen") colouring is on by default and draws not-yet-seen points dark (#2A3240), and camera
+    frustums are shown by default (web/src/viewer/ViewerScreen.tsx: buildUp: true, frustums: true, savedColorMode()
+    -> ''height''). No change to the pipeline output format (viewer bundle, ADR 0003).
 
 
     Acceptance:
 
-    - The default point colour is the real RGB from the bundle. The "first seen / not yet seen" timeline
-    colouring is an opt-in mode, never the default.
+    - The default point colour is the real RGB from the bundle when it has RGB (height-blue only as the
+    fallback without RGB, or by the user''s choice). The "first seen / not yet seen" timeline colouring
+    is an opt-in mode, off by default.
 
-    - Camera frustums are hidden by default, with a toggle to show them (text via i18n RU/KK/EN). When
-    shown, frustum size scales to the scene extent.
+    - Camera frustums are hidden by default, with the existing toggle to show them (text via i18n RU/KK/EN).
+    When shown, frustum size still scales to the scene extent.
 
-    - The initial camera frames the main point layer using robust bounds (2-98 % percentiles per axis,
-    the far layer excluded), +Z up, no roll.
-
-    - Unit tests for the framing bounds (outliers and far points do not move the framed box; +Z up, no
-    roll) and for the defaults (RGB colour, frustums hidden).
+    - Unit tests for the defaults: RGB colour mode when the bundle has RGB, timeline colouring off, frustums
+    hidden. The A4 framing-bound tests keep passing.
 
     - The tester takes its own screenshots of /viewer/notre-dame, /viewer/aegviidu and /viewer/room (the
-    room run) in the default view: the structure is clearly visible, no frustums, no error banner. Sparse
-    clouds are not expected to look like the object: judge readability, not recognisability.
+    room run) in the default view: the structure is clearly visible, no frustums, no dark "not yet seen"
+    points, no error banner. Sparse clouds are not expected to look like the object: judge readability,
+    not recognisability.
 
     - No change to the pipeline output format; only web/ (and docs/) change.
 

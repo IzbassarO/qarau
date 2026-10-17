@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Box3, Vector3 } from 'three';
+import { Box3, Points, ShaderMaterial, Vector3 } from 'three';
 import { createDemo } from '../fixtures/demo';
 import type { Bundle } from '../lib/bundle';
-import { robustBounds } from '../lib/geometry';
+import { heightRamp, robustBounds } from '../lib/geometry';
 import { ViewerEngine } from './engine';
 import { orientationFor, viewDirectionFor } from './gizmo';
 
@@ -448,15 +448,12 @@ function navigationBundle(extra: number[][] = []): Bundle {
 }
 
 function navigationEnvelope(bundle: Bundle) {
-  const bounds = robustBounds(
-    bundle.position,
-    bundle.manifest.frames.filter((f) => f.registered && f.center).map((f) => f.center!),
-  );
+  const bounds = new Box3().setFromArray(bundle.position);
+  for (const frame of bundle.manifest.frames)
+    if (frame.registered && frame.center) bounds.expandByPoint(new Vector3(...frame.center));
   return {
-    expanded: new Box3(new Vector3(...bounds.min), new Vector3(...bounds.max)).expandByScalar(
-      bounds.radius,
-    ),
-    collisionRadius: bounds.radius * 0.003,
+    expanded: bounds.clone().expandByScalar(bounds.getSize(new Vector3()).length() / 2),
+    collisionRadius: robustBounds(bundle.position).radius * 0.003,
   };
 }
 
@@ -590,14 +587,186 @@ describe('ViewerEngine axis flights', () => {
     const { engine } = setup(bundle);
     const pivot = engine.controls.target.clone();
     const radius = engine.camera.position.distanceTo(pivot);
-    expect(Math.tan((engine.camera.fov * Math.PI) / 360) * radius).toBeCloseTo(
-      Math.tan((25 * Math.PI) / 180) * engine.focus.radius * 2.4,
-      8,
-    );
+    const bounds = robustBounds(bundle.position);
+    expect(pivot.toArray()).toEqual(bounds.center);
     for (const direction of [new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 1)])
       for (const sign of [-1, 1])
         expect(
           expanded.containsPoint(pivot.clone().addScaledVector(direction, radius * sign)),
         ).toBe(true);
+  });
+});
+
+describe('ViewerEngine colour modes', () => {
+  function cloud(engine: ViewerEngine, bundle: Bundle) {
+    return engine.scene.children.find(
+      (child) =>
+        child instanceof Points &&
+        child.geometry.getAttribute('position').array === bundle.position,
+    ) as Points;
+  }
+
+  it('setColorMode swaps height and RGB buffers without rebuilding geometry or point positions', () => {
+    const bundle = navigationBundle();
+    bundle.color = Uint8Array.from({ length: bundle.position.length }, (_, i) => (i * 23) % 256);
+    const { engine } = setup(bundle);
+    const points = cloud(engine, bundle);
+    const geometry = points.geometry;
+    const positions = geometry.getAttribute('position');
+    const height = geometry.getAttribute('color');
+    expect(engine.colorMode).toBe('height');
+    const z = bundle.position[2];
+    const [low, high] = bundle.manifest.world.z_range;
+    expect(Array.from(height.array.slice(0, 3))).toEqual(heightRamp((z - low) / (high - low)));
+
+    engine.setColorMode('rgb');
+    const rgb = geometry.getAttribute('color');
+    expect(engine.colorMode).toBe('rgb');
+    expect(rgb).not.toBe(height);
+    expect(Array.from(rgb.array)).toEqual(Array.from(bundle.color));
+    expect(rgb.normalized).toBe(true);
+    engine.setColorMode('height');
+    expect(engine.colorMode).toBe('height');
+    expect(geometry.getAttribute('color')).toBe(height);
+    engine.setColorMode('rgb');
+    expect(geometry.getAttribute('color')).toBe(rgb);
+    expect(points.geometry).toBe(geometry);
+    expect(geometry.getAttribute('position')).toBe(positions);
+    expect(positions.array).toBe(bundle.position);
+  });
+
+  it('keeps critical finding points red and watch points orange in RGB mode', () => {
+    const bundle = navigationBundle();
+    bundle.findings = [
+      {
+        id: 1,
+        class: 'corrosion',
+        severity: 'critical',
+        status: 'confirmed',
+        n_points: 1,
+        centroid: [-1, -1, -1],
+        bbox: { min: [-1, -1, -1], max: [-1, -1, -1] },
+        frames: [0],
+      },
+      {
+        id: 2,
+        class: 'corrosion',
+        severity: 'watch',
+        status: 'confirmed',
+        n_points: 1,
+        centroid: [-1, -1, 1],
+        bbox: { min: [-1, -1, 1], max: [-1, -1, 1] },
+        frames: [0],
+      },
+    ];
+    bundle.pointFinding = new Uint16Array(bundle.manifest.points.count);
+    bundle.pointFinding.set([1, 2]);
+    bundle.firstSeen[2] = 65535;
+    const { engine } = setup(bundle);
+    const points = cloud(engine, bundle);
+    const overlay = points.geometry.getAttribute('findingColor');
+    const material = points.material as ShaderMaterial;
+    engine.setColorMode('rgb');
+    expect(engine.colorMode).toBe('rgb');
+    expect(Array.from(overlay.array.slice(0, 6))).toEqual([0xf0, 0x56, 0x5c, 0xf2, 0xa3, 0x3a]);
+    expect(overlay.normalized).toBe(true);
+    expect(points.geometry.getAttribute('findingColor')).toBe(overlay);
+    expect(material.uniforms.uFindings.value).toBe(1);
+    // Coverage and finding attributes are separate from the swapped base RGB buffer.
+    expect(points.geometry.getAttribute('firstSeen').getX(2)).toBe(65535);
+    expect(Array.from(points.geometry.getAttribute('fid').array.slice(0, 3))).toEqual([1, 2, 0]);
+    engine.setColorMode('height');
+    expect(points.geometry.getAttribute('findingColor')).toBe(overlay);
+  });
+
+  it.each([undefined, new Uint8Array(1)])(
+    'stays in height mode when RGB is unavailable (%s)',
+    (color) => {
+      const bundle = { ...navigationBundle(), color };
+      const { engine } = setup(bundle);
+      const points = cloud(engine, bundle);
+      const height = points.geometry.getAttribute('color');
+      engine.setColorMode('rgb');
+      expect(engine.colorMode).toBe('height');
+      expect(points.geometry.getAttribute('color')).toBe(height);
+    },
+  );
+});
+
+describe('ViewerEngine object framing', () => {
+  it.each([
+    { min: [-1, -1, -1], max: [1, 1, 1], aspect: 1.6 },
+    { min: [-50, -50, 0], max: [50, 50, 0], aspect: 1.6 },
+    { min: [-1, -1, 0], max: [1, 1, 20], aspect: 0.45 },
+    { min: [-40, -3, -2], max: [40, 3, 2], aspect: 3.2 },
+  ])(
+    'fits all object corners after constraining reset distance ($aspect)',
+    ({ min, max, aspect }) => {
+      const points = [];
+      for (const x of [min[0], max[0]])
+        for (const y of [min[1], max[1]]) for (const z of [min[2], max[2]]) points.push([x, y, z]);
+      const bundle = navigationBundle();
+      // Each face occurs four times, so percentile bounds coincide with the box faces.
+      bundle.position = Float32Array.from(points.flat());
+      bundle.manifest.points.count = points.length;
+      const { engine } = setup(bundle);
+      engine.camera.aspect = aspect;
+      engine.resetView(false);
+      engine.camera.updateMatrixWorld();
+      const { expanded } = navigationEnvelope(bundle);
+      const centre = new Vector3(...min.map((value, axis) => (value + max[axis]) / 2));
+      expect(engine.controls.target.toArray()).toEqual(centre.toArray());
+      for (const point of points) {
+        const ndc = new Vector3(...point).project(engine.camera);
+        expect(Math.abs(ndc.x)).toBeLessThanOrEqual(1 / 1.1 + 1e-6);
+        expect(Math.abs(ndc.y)).toBeLessThanOrEqual(1 / 1.1 + 1e-6);
+        expect(Math.abs(ndc.z)).toBeLessThan(1);
+      }
+      const distance = engine.camera.position.distanceTo(centre);
+      for (const axis of [new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 1)])
+        for (const sign of [-1, 1])
+          expect(
+            expanded.containsPoint(centre.clone().addScaledVector(axis, distance * sign)),
+          ).toBe(true);
+    },
+  );
+
+  it('uses object bounds for initial/reset framing and keeps outliers and cameras in navigation limits', () => {
+    const extra = Array.from({ length: 300 }, (_, i) => [
+      i % 2 ? -1 : 1,
+      i % 3 ? -1 : 1,
+      i % 5 ? -1 : 1,
+    ]);
+    const bundle = navigationBundle([...extra, [1000, 1000, 1000]]);
+    bundle.manifest.frames[0] = {
+      ...bundle.manifest.frames[0],
+      registered: true,
+      center: [-500, 0, 0],
+    };
+    const { engine } = setup(bundle);
+    const bounds = robustBounds(bundle.position);
+    expect(bounds.max).toEqual([1, 1, 1]);
+    expect(engine.controls.target.toArray()).toEqual([0, 0, 0]);
+    const initial = engine.camera.position.clone();
+    expect(initial.length()).toBeLessThan(10);
+    engine.camera.updateMatrixWorld();
+    for (const x of [-1, 1])
+      for (const y of [-1, 1])
+        for (const z of [-1, 1]) {
+          const ndc = new Vector3(x, y, z).project(engine.camera);
+          expect(Math.abs(ndc.x)).toBeLessThan(1);
+          expect(Math.abs(ndc.y)).toBeLessThan(1);
+        }
+
+    // Neither the discarded outlier nor the recorded camera is cut out of the navigation box.
+    engine.camera.position.set(900, 900, 900);
+    engine.controls.sync();
+    expect(engine.camera.position.toArray()).toEqual([900, 900, 900]);
+    engine.camera.position.set(-500, 0, 0);
+    engine.controls.sync();
+    expect(engine.camera.position.toArray()).toEqual([-500, 0, 0]);
+    engine.resetView(false);
+    expect(engine.camera.position.distanceTo(initial)).toBeLessThan(1e-9);
+    expect(engine.controls.target.toArray()).toEqual(bounds.center);
   });
 });

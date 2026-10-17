@@ -5,12 +5,14 @@ Newest first. Keep it short.
 ## 2026-10-16 — P3b waits for the viewer fix (A4); task dependencies in devteam
 
 - P3b's pipeline work is done on `devteam/P3b`; it failed only the default view (dark
-  "not yet seen" colouring, big camera frustums): a viewer problem. **A4** now asks for real
-  RGB by default, frustums hidden, robust framing; P3b is blocked on it and is re-tested
-  after A4 against new criteria (no band of points in the sky, compared with dev).
+  "not yet seen" colouring, big camera frustums): a viewer problem. A4 (#22) was built to its
+  old criteria: robust framing and a colour toggle, but the default is still height-blue with
+  the dark build-up colouring and frustums shown. New **A4b**: real RGB and frustums hidden by
+  default. P3b is blocked on A4b and is re-tested after it against new criteria (no band of
+  points in the sky, compared with dev).
 - devteam: `depends_on` (auto back to `todo` when done), resume on an existing task branch,
   `dev-*.png` comparison screenshots for pipeline tasks, scratch dir outside the worktree.
-- Queue: dev_app A4; dev_pipeline P2b, then P3c. P4a waits for a GPU (blocked).
+- Queue: dev_app A4b; dev_pipeline P2b. P3c is done (#23). P4a waits for a GPU (blocked).
 
 ## 2026-10-16 — Dev team re-planned P0 and A2a (incident)
 

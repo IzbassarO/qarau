@@ -19,7 +19,9 @@ notes = "drone orbit around a water tower, 1920x1080, 71 s"
 name = "mykolaiv"
 file = "mykolaiv_oil_tanks.webm"
 required = true
-notes = "drone over oil tanks (first market asset type)"
+# Not a survey: an edited night news clip (~18 shots, title cards, burned-in logo), so it
+# cannot give one honest model; not gated (docs/notes/benchmark-method.md, "Mykolaiv (P3c)").
+notes = "edited news clip of an oil depot fire at night; multi-shot, not gated"
 
 [[video]]
 name = "notre-dame"

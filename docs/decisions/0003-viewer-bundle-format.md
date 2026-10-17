@@ -20,6 +20,11 @@ after a rigid alignment that makes +Z up; the applied transform is stored in the
 Frame indices refer to the time-ordered `frames` array, never to COLMAP image ids.
 Full field list: `docs/notes/m1-plan.md` §3.
 
+`points.color` is optional for viewer consumers. When present it names an unsigned
+8-bit RGB buffer with exactly `3 * points.count` bytes. A missing, unreadable or malformed
+colour buffer disables real-colour display while preserving geometry and tracks. No RGB
+is inferred or fabricated. Existing v1/v2 bundles with complete RGB remain compatible.
+
 LAZ remains the exchange format for engineers and other tools; Potree octrees are added
 only when point counts require LOD (ADR 0005).
 
