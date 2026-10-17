@@ -138,6 +138,9 @@ take screenshots (Codex runs in a sandbox with no network and no browser): never
 developer to produce, attach or commit a screenshot. Write visual criteria as what the page
 must show ("/viewer/demo shows a black canvas with points and no error banner"); the tester
 judges them from its own screenshots of `routes`, and a missing screenshot fails the task.
+A task with `previous_work` already has commits on its devteam/<id> branch: the developer
+continues on that branch (dev merged in), so plan only what is still missing; say in the plan
+that the earlier work is there. Tasks whose `depends_on` are not all done never reach you.
 Never require edits to docs/notes/progress.md: developers may not touch it (parallel
 tasks would conflict there); the daily report covers progress.
 Pick at most one task per developer, in backlog order, only for the developers listed.
@@ -158,6 +161,11 @@ viewer (web or pipeline task) with no screenshot of yours (none attached, or lis
 <screenshots_failed>) is NOT met: never pass it from the code alone.
 Developers run only a quick benchmark subset; the full benchmark is a merge gate after you:
 never fail a criterion because the developer did not run the full set.
+Screenshots named `dev-*.png` show the same page on current `dev` (same viewer code, dev's
+benchmark output) for criteria that compare the branch with dev.
+Sparse point clouds never look like the object: do not judge whether a building or object is
+recognisable before dense reconstruction (task P4). Judge only what the criterion names (e.g. no
+wall or band of points in the sky, far points only in the far layer).
 The developer cannot commit (the orchestrator commits after each round), so results of the
 developer's own runs tagged "<hash>+dirty" or with an earlier commit hash are expected: never
 fail a criterion for that. Judge whether the mechanism records the commit correctly (code and
@@ -304,6 +312,9 @@ Rules:
 - Do not commit, push, merge or create branches; the orchestrator commits your changes.
 - Never write keys or tokens into files. Never write under data/. Sample videos (read-only):
   {team.root / "data" / "samples"}
+- Scratch output (experiments, temp scripts, logs, renders) goes ONLY to
+  {team.home / "scratch" / t["id"]}, never inside this worktree (no scratch/ or tmp files
+  here): files outside your folders are reverted, and they bloat the review.
 - Before using any model or library, check its licence allows commercial use; note it.
 - Your runs are on uncommitted code, so anything tagged with a commit hash shows "+dirty";
   that is expected. If a request needs a commit, say so instead of trying to commit.
@@ -337,6 +348,8 @@ Rules:
             ",".join(dev.get("disallowed_tools", [])),
             "--add-dir",
             str(team.root / "data" / "samples"),
+            "--add-dir",
+            str(team.home / "scratch" / s["task"]["id"]),
         ]
         if dev.get("model"):
             cmd += ["--model", dev["model"]]
@@ -381,6 +394,7 @@ Rules:
             if k not in ("OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL")
         }
         cmd = ["codex", "exec", "--json", "--sandbox", "workspace-write", "-C", s["worktree"]]
+        cmd += ["--add-dir", str(team.home / "scratch" / s["task"]["id"])]  # writable too
         if dev.get("model"):
             cmd += ["-m", dev["model"]]
         if s.get("session") and s.get("feedback"):

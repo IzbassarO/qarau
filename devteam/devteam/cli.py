@@ -180,6 +180,8 @@ def main():
             "backlog.yaml status fields differ from origin/dev; merge them into dev first:\n"
             + "\n".join(drift)
         )
+    if args.command == "run":  # dependencies finished outside a run (e.g. done by hand)
+        team.unblock_ready()
     if args.command in ("run", "resume"):
         run_graph(team, resume=args.command == "resume")
     elif args.command == "stop":

@@ -30,7 +30,17 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   gate and at release, cached per `pipeline/` tree; a task may set its own `quick_only`.
 - Screenshots: any task whose criteria mention the viewer lists `routes`; the tester
   screenshots them (pipeline tasks: the viewer on the quick benchmark output). A missing
-  screenshot fails the task even if the judge passed.
+  screenshot fails the task even if the judge passed. Pipeline tasks also get `dev-*.png`: the
+  same routes on dev's cached gate benchmark, so the tester can compare with dev.
+- Dependencies: a task may list `depends_on: [ids]`. The brain never plans it until all of
+  them are `done`; a `blocked` task whose dependencies are all done goes back to `todo` (pushed
+  to `dev` like any status) when the last one merges, or at the next `devteam run`.
+- Resume: a task whose `devteam/<id>` branch already exists (local or on the remote) and has
+  commits `dev` lacks continues on that branch, with `dev` merged in (never rebased); the plan
+  says so.
+- Scratch: each task gets `.state/scratch/<id>/` outside its worktree for experiments and temp
+  output; files a developer leaves outside its folders are reverted (the log shows only the
+  count and top-level folders).
 - Task status lives in `backlog.yaml` on `dev`, owned by devteam. When a task ends (PR merged
   → `done`, or `blocked`), the orchestrator commits its status fields (`status, owner, run,
   branch, pr, done_at`, `blocked_reason`) straight to `dev` as `backlog: P3 done (#18)`:
