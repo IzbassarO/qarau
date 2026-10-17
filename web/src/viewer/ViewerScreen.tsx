@@ -383,21 +383,6 @@ export function ViewerScreen({
               else setPointInfoMode(true);
             }}
           />
-          <ToolButton
-            label={t('roi.title')}
-            pressed={roi.open}
-            onClick={() => {
-              if (roi.open) eng()?.cancelRoiDrawing();
-              roi.setOpen(!roi.open);
-            }}
-          >
-            {icon(
-              <>
-                <path d="M2 6V2h4M12 2h4v4M16 12v4h-4M6 16H2v-4" />
-                <rect x="5" y="5" width="8" height="8" strokeDasharray="2 2" />
-              </>,
-            )}
-          </ToolButton>
           <span className="my-1 h-px w-6 bg-line" />
           <ToolButton
             label={t('toolbar.zoomIn')}
@@ -414,8 +399,30 @@ export function ViewerScreen({
         </div>
 
         <main className="flex min-w-0 flex-1 flex-col">
-          <div className="relative z-20 flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-3 py-2">
+          <div
+            role="toolbar"
+            aria-label={t('toolbar.tools')}
+            className="relative z-20 flex flex-wrap items-center gap-2 border-b border-line bg-surface px-3 py-2"
+          >
             <ModeSwitch orbitActive={!flyMode} onOrbit={() => eng()?.setOrbitMode()} />
+            <button
+              type="button"
+              aria-pressed={roi.open}
+              onClick={() => {
+                if (roi.open) eng()?.cancelRoiDrawing();
+                roi.setOpen(!roi.open);
+              }}
+              className={`flex min-h-9 cursor-pointer items-center gap-2 rounded-lg border border-line-strong px-3 text-xs text-ink hover:bg-raised ${roi.open ? 'bg-line' : 'bg-transparent'}`}
+            >
+              {icon(
+                <>
+                  <path d="M2 6V2h4M12 2h4v4M16 12v4h-4M6 16H2v-4" />
+                  <rect x="5" y="5" width="8" height="8" strokeDasharray="2 2" />
+                </>,
+              )}
+              {t('roi.title')}
+            </button>
+            <div className="grow" />
             <NavigationSettings
               sensitivity={sensitivity}
               onSensitivityChange={(value) => {

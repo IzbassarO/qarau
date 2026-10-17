@@ -24,13 +24,25 @@ export function RoiControls({
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 className="m-0 text-sm font-medium">{t('roi.title')}</h2>
         <button
-          className={`${button} pointer-events-auto`}
+          type="button"
+          aria-label={t('roi.close')}
+          title={t('roi.close')}
+          className="pointer-events-auto flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-2 hover:bg-raised"
           onClick={() => {
             onCancel();
             roi.setOpen(false);
           }}
         >
-          {t('roi.close')}
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path d="m4 4 8 8M12 4l-8 8" />
+          </svg>
         </button>
       </div>
       <div className="flex flex-wrap gap-2">

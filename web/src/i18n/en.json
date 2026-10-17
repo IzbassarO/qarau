@@ -259,5 +259,6 @@
   "roi.saveError": "Could not save the region. Your box is still here; try Save again.",
   "roi.clearError": "Could not clear the saved region. Try Clear again.",
   "roi.drawError": "No points inside this box. Draw a larger region with width and height.",
-  "roi.retry": "Retry loading"
+  "roi.retry": "Retry loading",
+  "toolbar.tools": "Viewer tools"
 }

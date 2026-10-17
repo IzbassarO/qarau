@@ -670,10 +670,14 @@ async function renderRoiViewer() {
   const resize = vi.spyOn(ViewerEngine.prototype, 'resize');
   const view = renderViewer(bundle.runId);
   const locale = LANGS[document.documentElement.lang as Lang];
-  const tool = await screen.findByRole('button', { name: locale['roi.title'] });
-  await waitFor(() => expect(roiApi.loadRoi).toHaveBeenCalled());
-  if (!screen.queryByRole('region', { name: locale['roi.title'] })) fireEvent.click(tool);
+  const toolbar = await screen.findByRole('toolbar', { name: locale['toolbar.tools'] });
+  const tool = within(toolbar).getByRole('button', { name: locale['roi.title'] });
+  // A fresh viewer must advertise the tool in text and show its controls without
+  // a test-only click. This is also the page the screenshot gate opens directly.
+  expect(tool.textContent).toContain(locale['roi.title']);
+  expect(tool.getAttribute('aria-pressed')).toBe('true');
   const panel = screen.getByRole('region', { name: locale['roi.title'] });
+  await waitFor(() => expect(roiApi.loadRoi).toHaveBeenCalled());
   await waitFor(() =>
     expect(
       (within(panel).getByRole('button', { name: locale['roi.draw'] }) as HTMLButtonElement)
@@ -726,6 +730,18 @@ function drawRoi(view: Awaited<ReturnType<typeof renderRoiViewer>>) {
   expect(view.engine.controls.enabled).toBe(true);
   expect(view.engine.scene.getObjectByName('roi-box')).toBeTruthy();
 }
+
+it.each<Lang>(['en', 'ru', 'kk'])(
+  'shows a labelled ROI toolbar tool and open controls on a fresh Notre Dame route (%s)',
+  async (lang) => {
+    setLang(lang);
+    const view = await renderRoiViewer();
+    expect(roiApi.loadRoi).toHaveBeenCalledWith('notre-dame', expect.any(AbortSignal));
+    expect(within(view.panel).getByRole('button', { name: LANGS[lang]['roi.draw'] })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(view.engine.scene.getObjectByName('roi-box')).toBeUndefined();
+  },
+);
 
 it('draws a region on /viewer/notre-dame, saves it, restores it on reload and clears it on the server', async () => {
   sessionStorage.setItem('qarau.auth.session', 'Bearer test-roi-credential');

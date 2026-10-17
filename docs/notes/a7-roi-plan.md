@@ -11,10 +11,11 @@ the viewer uses Z-up world coordinates and the gizmo defines stable pole views.
 2. Add pure, validated drag/box/point-mask/serialization helpers and unit tests.
 3. Add authenticated ROI fetch/save/delete clients and explicit errors; connect
    site resolution to the catalog instead of grouping all unassigned runs.
-4. Add server file persistence to the existing **development** catalog adapter,
-   with validation, safe ids/paths and atomic replacement. Tests use temporary
-   catalog directories outside the worktree. No files under `data/` are written
-   during verification.
+4. Add the production FastAPI ROI router with a Pydantic v2 document, explicit
+   viewer/editor dependencies, safe catalog paths and atomic file replacement.
+   Register it in the API and allow authenticated JSON PUT/DELETE through CORS.
+   Keep the development catalog adapter compatible. Tests use temporary catalog
+   directories outside the worktree; verification never writes under `data/`.
 5. Integrate a toolbar tool, exact gizmo top view, exclusive drag input, Escape,
    live rectangle, neutral wireframe, and non-destructive shader clipping of
    object and far points. Load saved site regions, save/clear explicitly, and
@@ -24,14 +25,16 @@ the viewer uses Z-up world coordinates and the gizmo defines stable pole views.
    every server immediately afterwards and place scratch output only in the
    designated A7 scratch directory.
 
-## Scope constraint
+## Returned-work fixes
 
-The task also requests `backend/app/roi.py`, registration in `main.py`, and
-`backend/tests/test_roi.py`, but the owner's final rules allow edits only to
-`web/` and `docs/` and state that other edits are reverted. Expansion to
-`backend/` has been requested. Until explicitly granted, do not edit it or claim
-the development adapter provides production FastAPI routes. Document the exact
-production API contract and remaining work. No pipeline changes.
+The tester identified missing production API routes and an undiscoverable ROI
+control. The owner's follow-up explicitly authorizes the required `backend/`
+implementation and tests. Add the FastAPI router and regression coverage; replace
+the icon-only ROI entry with a clearly labelled toolbar control and expose the
+ROI panel initially so the tool is visible on `/viewer/notre-dame`. Check that
+the route and generated application bundle include these controls. Add a browser
+regression for drawing, outline, clipping and save/reload against the actual API
+where the environment permits listening sockets. No pipeline changes.
 
 ## Licences
 
@@ -39,21 +42,30 @@ No dependencies or models added. Installed Three.js (`LICENSE`), React
 (`LICENSE`) and Vitest (`LICENSE.md`, core MIT with commercially usable bundled
 MIT/BSD/ISC components) were checked locally; commercial use is permitted.
 Use existing Node built-ins and Vite (MIT) for the development catalog adapter.
+The installed FastAPI 0.143.0 and Pydantic 2.14.1 package metadata both declare MIT;
+the production router adds no dependencies.
 
-## Verification and remaining boundary
+## Verification after returned-work fixes
 
-- `pnpm lint`, `pnpm typecheck`, `pnpm test` (540 tests across 29 files), and
+- `pnpm lint`, `pnpm typecheck`, `pnpm test` (543 tests across 29 files), and
   `pnpm build` pass. The build retains the existing large-chunk advisory.
-- Existing backend `ruff check`, strict `mypy app`, and `pytest` pass (10 tests).
-  These do not test production ROI routes: those routes and their Pydantic/pytest
-  coverage cannot be added within the authorized edit boundary.
+- Backend `ruff check`, strict `mypy app tests`, and `pytest` pass (73 tests,
+  including 62 production ROI cases). Coverage includes persisted round trips,
+  missing ROI, malformed input, authentication for all three methods, traversal,
+  symlinks, atomic replacement and failed writes, deletion, and edit CORS.
 - Viewer integration tests exercise `/viewer/notre-dame` with the real engine
   and mocked GPU/API: reversed top-view drag, save/reload, restored outline,
   source-buffer preservation, clipping, clear, Escape, visible errors/retry,
-  cross-run warning, and EN/RU/KK controls. Middleware tests exercise real files
-  across fresh handler instances, authentication, invalid bodies and traversal.
-- A real Notre-Dame browser check was prepared using a scratch-only catalog and
-  read-only sample-run symlink. Starting Vite on `127.0.0.1:5207` failed with
-  sandbox `EPERM` before listening, so real-browser rendering/save/reload remains
-  unverified here. No screenshots were attempted; they belong to the tester.
-  The child exited and a listening-port check confirmed no server on that port.
+  cross-run warning, and EN/RU/KK controls. Initial-visibility assertions require
+  the text-labelled toolbar button and open ROI panel without clicking to reveal
+  them. Development middleware tests also exercise actual catalog files.
+- The screenshot gate launches source Vite from the task worktree and rejects
+  occupied ports. The source entry routes to this `ViewerScreen`. A fresh
+  production build was inspected and contains the ROI toolbar label, draw label,
+  outline, and site API client. It is not an older viewer implementation.
+- `e2e/roi.spec.ts` adds a real-mouse/WebGL regression over the actual Notre-Dame
+  bundle, with ROI API responses kept in memory so it never edits sample data.
+  Its explicit run was blocked before testing: Vite could not listen on
+  `::1:5207` (`EPERM`); a separate bind check on `127.0.0.1` has the same sandbox
+  restriction. The browser scenario remains unverified in this environment.
+  No screenshots were attempted. No server remained listening after the check.

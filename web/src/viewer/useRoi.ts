@@ -21,7 +21,7 @@ export function useRoi(
     null,
   );
   const [hidden, setHidden] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(bundle.runId !== 'demo');
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<Key | null>(null);

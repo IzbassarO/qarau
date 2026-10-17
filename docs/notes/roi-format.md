@@ -100,20 +100,41 @@ return `500`. Responses are uncached. Corrupt persisted JSON produces an error,
 never an apparently absent region. The client sends the existing session Bearer
 header and surfaces failures in translated viewer messages.
 
-### Current implementation boundary
+### Production and development
 
-`web/vite-dev-roi.ts`, mounted by the existing Vite catalog adapter, implements
-this API and disk persistence for local development. It is disabled when
-`QARAU_API_PROXY` forwards `/api` to FastAPI. It is not included in the static web
-build and is not a production server.
+`backend/app/roi.py`, registered in `backend/app/main.py`, provides the production
+FastAPI routes. A Pydantic v2 model validates the versioned document; each route
+uses the existing `require_role` dependency. The API's CORS policy permits
+authenticated JSON PUT and DELETE as well as GET from configured web origins.
+The run catalog preserves optional site associations so inspections of the same
+site resolve the same ROI. No database migration is needed for this file catalog.
 
-The task's explicit edit boundary permits only `web/` and `docs/`. The production
-`backend/app/roi.py` router, registration in `main.py`, Pydantic v2 model, and
-`backend/tests/test_roi.py` therefore remain required backend work under an
-expanded scope. They should implement the same JSON/path/API contract through
-the existing `require_role` dependency. No database migration is needed for this
-file-based catalog. Do not claim production API support until that router exists.
+`web/vite-dev-roi.ts`, mounted by the existing Vite catalog adapter, provides the
+same file format for local development. When `QARAU_API_PROXY` forwards `/api` to
+FastAPI, the development adapter is disabled and requests reach the production
+router. The static web build always uses the same `/api/sites/.../roi` client.
 
-No dependencies or models were added. This adapter uses Node built-ins and the
-installed Vite stack. Vite's local `LICENSE.md` is MIT (its bundled permissive
+### Finding and checking the tool
+
+`/viewer/:runId` is routed by `web/src/main.tsx` to `ViewerPage`, which imports
+`ViewerScreen`. Its horizontal **Viewer tools** toolbar has a text-labelled
+**Region of interest** button. On real runs the ROI panel starts open, including
+on `/viewer/notre-dame`; the demo keeps it closed until selected. No region is
+invented when the site has none saved.
+
+Select **Draw region**, then drag on the map. The viewer changes to top view,
+shows a live drag rectangle, and displays the resulting neutral wireframe.
+Enable **Hide points outside region**, select **Save**, and reload to check the
+saved outline. **Clear** removes the site file. The ROI panel can be closed and
+reopened using the text button.
+
+The screenshot gate starts Vite from the task worktree with `--strictPort` and
+reads the current source entry (`/src/main.tsx`), rather than `web/dist`. Its
+plain URL capture shows the initial controls; a drawn-box capture additionally
+requires the interaction above or an existing saved site ROI. The ROI Playwright
+regression performs the interactions without taking screenshots.
+
+No dependencies or models were added. FastAPI and Pydantic are MIT; Python and
+Node standard libraries and the installed Vite stack permit commercial use.
+Vite's local `LICENSE.md` is MIT (its bundled permissive
 MIT/BSD/ISC/Apache-2.0/CC0 components also permit commercial use).
