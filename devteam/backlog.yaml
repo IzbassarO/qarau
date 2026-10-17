@@ -523,9 +523,14 @@ tasks:
     movement and controls; tester screenshots of /viewer/aegviidu in Observer mode.
 
     '
-  status: todo
+  status: done
   depends_on:
   - A6
+  owner: dev_app
+  run: cont-20261017-123453-dev_app-5
+  branch: devteam/A9
+  pr: https://github.com/IzbassarO/qarau/pull/37
+  done_at: '2026-10-17'
 - id: O1
   area: app
   title: Organization map
