@@ -152,7 +152,12 @@ tasks:
     worker that would exceed it. Tested with a fake provider only: no real GPU, no paid account.
 
     '
-  status: todo
+  status: done
+  owner: dev_pipeline
+  run: cont-20261017-123453-dev_pipeline-2
+  branch: devteam/P4a-1
+  pr: https://github.com/IzbassarO/qarau/pull/35
+  done_at: '2026-10-17'
 - id: P3c
   area: core
   title: Re-gate mykolaiv
