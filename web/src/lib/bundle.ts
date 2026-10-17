@@ -3,7 +3,7 @@ import { authHeader } from '../auth/auth';
 
 export interface FrameInfo {
   i: number;
-  t: number;
+  t?: number | null;
   image: string;
   thumb: string;
   kept: boolean;
@@ -45,6 +45,8 @@ export interface Manifest {
     bounds: { min: number[]; max: number[] };
     z_range: [number, number];
     focus?: { center: number[]; radius: number; method?: string };
+    /** Explicit metric calibration: metres per model unit. Absent in unscaled exports. */
+    scale_m_per_unit?: number;
   };
   points: {
     count: number;
@@ -53,12 +55,14 @@ export interface Manifest {
     first_seen: string;
     num_obs: string;
     source?: string;
+    /** Optional per-point float32 confidence in [0,1], supplied by the pipeline. */
+    confidence?: string;
   };
   /** ADR 0003 / P3b: separate XYZ float32 and RGB uint8 triplets, without tracks. */
   far?: { count: number; position: string; color: string; rule: string };
   dense?: { method: string; frames_used?: number; points?: number };
   findings?: string;
-  tracks: {
+  tracks?: {
     frame_offsets: string;
     frame_points: string;
     point_offsets: string;
@@ -107,6 +111,8 @@ export interface Bundle {
   frameInPoints: Uint32Array;
   pointOffsets: Uint32Array;
   pointFrames: Uint16Array;
+  /** Only populated from an explicitly supplied per-point confidence buffer. */
+  pointConfidence?: Float32Array;
   /** cumulative[i] = points with first_seen <= i */
   assembled: Uint32Array;
   /** v2, optional: findings and the per-point finding id (0 = none) */
@@ -236,10 +242,10 @@ export async function loadBundle(
     // Colour is optional: missing or invalid RGB must not hide usable geometry.
     p.color?.trim() ? get(p.color).catch(() => undefined) : undefined,
     get(p.first_seen),
-    get(k.frame_offsets),
-    get(k.frame_points),
-    get(k.point_offsets),
-    get(k.point_frames),
+    k ? get(k.frame_offsets) : new Uint32Array(manifest.frames.length + 1).buffer,
+    k ? get(k.frame_points) : new ArrayBuffer(0),
+    k ? get(k.point_offsets) : new ArrayBuffer(0),
+    k ? get(k.point_frames) : new ArrayBuffer(0),
   ]);
   const firstSeen = new Uint16Array(fs);
   const fnd = manifest.findings ? await loadFindings(manifest, get) : {};
@@ -257,6 +263,14 @@ export async function loadBundle(
     pointFrames: new Uint16Array(pf),
     assembled: cumulativeAssembled(firstSeen, manifest.frames.length),
   };
+  if (p.confidence) {
+    try {
+      const buffer = await get(p.confidence);
+      if (buffer.byteLength === p.count * 4) bundle.pointConfidence = new Float32Array(buffer);
+    } catch {
+      // Geometry remains usable; point info explicitly reports confidence as unavailable.
+    }
+  }
   if (manifest.far !== undefined) {
     try {
       const far = manifest.far;

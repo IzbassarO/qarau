@@ -183,6 +183,38 @@ it('sends the session header with the protected manifest and every bundle file',
     expect(options.headers).toEqual({ Authorization: 'Bearer test-api-value' });
 });
 
+it('loads bundles without track files so point info can estimate visibility', async () => {
+  const fetch = serveFiles();
+  const bundle = await loadBundle(routeId, { ...manifest(), tracks: undefined }, vi.fn());
+  expect(bundle.pointOffsets).toHaveLength(0);
+  expect(bundle.pointFrames).toHaveLength(0);
+  expect(bundle.frameOffsets).toEqual(new Uint32Array([0, 0]));
+  expect(bundle.frameInPoints).toHaveLength(0);
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+it('loads only explicitly declared per-point confidence and preserves metric calibration', async () => {
+  const m = manifest();
+  m.world.scale_m_per_unit = 0.5;
+  m.points.confidence = 'confidence.bin';
+  serveFiles({ ...files(), 'confidence.bin': new Float32Array([0.75, 0.5]).buffer });
+  const bundle = await loadBundle(routeId, m, vi.fn());
+  expect(bundle.pointConfidence).toEqual(new Float32Array([0.75, 0.5]));
+  expect(bundle.manifest.world.scale_m_per_unit).toBe(0.5);
+});
+
+it.each([undefined, new ArrayBuffer(3), new ArrayBuffer(4)])(
+  'leaves unreadable or incomplete point confidence unavailable (%s)',
+  async (confidence) => {
+    const m = manifest();
+    m.points.confidence = 'confidence.bin';
+    serveFiles({ ...files(), ...(confidence ? { 'confidence.bin': confidence } : {}) });
+    const bundle = await loadBundle(routeId, m, vi.fn());
+    expect(bundle.pointConfidence).toBeUndefined();
+    expect(bundle.position).toHaveLength(6);
+  },
+);
+
 describe('optional bundle RGB', () => {
   it('loads real RGB without changing point, track or assembly data', async () => {
     const fetch = serveFiles();

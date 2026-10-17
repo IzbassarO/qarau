@@ -5,17 +5,28 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type MouseEvent,
   type ReactNode,
 } from 'react';
 import { Link } from 'react-router';
 import { useI18n } from '../i18n';
 import { hasRgb, runUrl, type Bundle, type Finding } from '../lib/bundle';
-import { csrSlice, heightRamp, RAMP } from '../lib/geometry';
+import { heightRamp, RAMP } from '../lib/geometry';
 import { ViewerEngine, type ColorMode, type Options } from './engine';
 import { defaultViewState } from './defaults';
 import { AxisGizmo, type AxisGizmoHandle } from './AxisGizmo';
-import { H2, LangSwitch, Logo, ModeSwitch, NavigationSettings, Row, Toggle } from './ui';
+import {
+  H2,
+  LangSwitch,
+  Logo,
+  ModeSwitch,
+  NavigationSettings,
+  PointInfoTool,
+  Row,
+  Toggle,
+  ToolButton,
+} from './ui';
+import { buildPointInfo, frameTime } from './pointInfo';
+import { PointInfoPanel } from './PointInfoPanel';
 import { SessionImage } from '../auth/SessionImage';
 import { sessionUserId, subscribeToAuth } from '../auth/auth';
 import { loadSensitivity, saveSensitivity } from './settings';
@@ -47,31 +58,6 @@ const fmtTime = (s: number) => {
   return `${String(m).padStart(2, '0')}:${(s - m * 60).toFixed(1).padStart(4, '0')}`;
 };
 
-function ToolButton({
-  label,
-  onClick,
-  pressed,
-  children,
-}: {
-  label: string;
-  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
-  pressed?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      aria-pressed={pressed}
-      className={`flex size-9 cursor-pointer items-center justify-center rounded-lg border-0 text-xl text-[#c9ced6] hover:bg-raised ${pressed ? 'bg-line' : 'bg-transparent'}`}
-    >
-      {children}
-    </button>
-  );
-}
-
 const icon = (d: ReactNode) => (
   <svg
     width="18"
@@ -88,7 +74,17 @@ const icon = (d: ReactNode) => (
   </svg>
 );
 
-export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; embedded?: boolean }) {
+export function ViewerScreen({
+  bundle,
+  embedded = false,
+  initialPoint = null,
+  invalidPoint = false,
+}: {
+  bundle: Bundle;
+  embedded?: boolean;
+  initialPoint?: number | null;
+  invalidPoint?: boolean;
+}) {
   const { t } = useI18n();
   const m = bundle.manifest;
   const frames = m.frames;
@@ -98,6 +94,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
   const gizmoRef = useRef<AxisGizmoHandle>(null);
   const [flyMode, setFlyMode] = useState(false);
   const [alignMode, setAlignMode] = useState(false);
+  const [pointInfoMode, setPointInfoMode] = useState(initialPoint !== null);
   const userId = useSyncExternalStore(subscribeToAuth, sessionUserId, () => null);
   const [sensitivitySetting, setSensitivitySetting] = useState(() => ({
     userId,
@@ -107,7 +104,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
     sensitivitySetting.userId === userId ? sensitivitySetting.value : loadSensitivity(userId);
   const [frame, setFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [picked, setPicked] = useState<number | null>(null);
+  const [picked, setPicked] = useState<number | null>(initialPoint);
   const [fps, setFps] = useState(0);
   const [colorMode, setColorMode] = useState(savedColorMode);
   const defaults = defaultViewState(bundle, colorMode);
@@ -133,7 +130,11 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
   const sevColor = (x: Finding) => (x.severity === 'critical' ? '#F0565C' : '#F2A33A');
   // a finding exists on the map once its first frame has played (always, with build-up off)
   const seen = (x: Finding) => !opts.buildUp || !x.frames.length || x.frames[0] <= frame;
-  const tc = (i: number) => (isImages ? `#${i}` : fmtTime(frames[i].t));
+  const tc = (i: number) => {
+    const time = frameTime(frames[i]);
+    return isImages ? `#${i}` : time === null ? t('pointInfo.noTimestamp') : fmtTime(time);
+  };
+  const canPlay = isImages || frames.every((frame) => frameTime(frame) !== null);
 
   // engine lifecycle
   useEffect(() => {
@@ -144,6 +145,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
         onPick: (p) => setPicked(p),
         onFlyModeChange: setFlyMode,
         onAlignModeChange: setAlignMode,
+        onPointInfoModeChange: setPointInfoMode,
       });
     } catch {
       setGlError(true);
@@ -181,7 +183,11 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
   useEffect(() => engineRef.current?.setOptions(opts), [opts, bundle]);
   useEffect(() => engineRef.current?.setFarVisible(showFarLayer), [showFarLayer, bundle]);
   useEffect(() => engineRef.current?.setColorMode(activeColorMode), [activeColorMode, bundle]);
-  useEffect(() => engineRef.current?.setPicked(picked), [picked, bundle]);
+  useEffect(
+    () => engineRef.current?.setPicked(pointInfoMode ? picked : null),
+    [picked, pointInfoMode, bundle],
+  );
+  useEffect(() => engineRef.current?.setPointInfoMode(pointInfoMode), [pointInfoMode, bundle]);
   useEffect(() => engineRef.current?.setSelectedFinding(sel ?? 0), [sel, bundle]);
   useEffect(() => engineRef.current?.setSensitivity(sensitivity), [sensitivity, bundle]);
 
@@ -208,15 +214,15 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
 
   // play: step in real time by frames[i].t (photo sets: 4 frames per second)
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || !canPlay) return;
     const rate = isImages ? 4 : 1;
     const start = performance.now();
-    const t0 = isImages ? frame : frames[frame].t;
+    const t0 = isImages ? frame : frameTime(frames[frame])!;
     let raf = 0;
     const tick = () => {
       const el = ((performance.now() - start) / 1000) * rate + t0;
       let i = frame;
-      while (i + 1 < frames.length && (isImages ? i + 1 : frames[i + 1].t) <= el) i++;
+      while (i + 1 < frames.length && (isImages ? i + 1 : frameTime(frames[i + 1])!) <= el) i++;
       setFrame(i);
       if (i >= frames.length - 1) setPlaying(false);
       else raf = requestAnimationFrame(tick);
@@ -238,13 +244,20 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
     engineRef.current?.flyToFinding(x.centroid, Math.hypot(d[0], d[1], d[2]));
   };
 
-  const observed = useMemo(
-    () =>
-      picked === null
-        ? null
-        : Array.from(csrSlice(bundle.pointOffsets, bundle.pointFrames, picked)),
+  const pointInfo = useMemo(
+    () => (picked === null ? null : buildPointInfo(bundle, picked)),
     [picked, bundle],
   );
+  const closePointInfo = () => {
+    setPicked(null);
+    setPointInfoMode(false);
+  };
+  const seekPointFrame = (timeSec: number, frameId: number) => {
+    const index = frames.findIndex((frame) => frame.i === frameId && frameTime(frame) === timeSec);
+    if (index < 0) return;
+    setPlaying(false);
+    jump(index);
+  };
 
   const eng = () => engineRef.current;
   const changeColorMode = (mode: ColorMode) => {
@@ -302,6 +315,11 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
           {t(bundle.farError === 'missing' ? 'viewer.far.errorMissing' : 'viewer.far.errorBroken')}
         </p>
       )}
+      {invalidPoint && (
+        <p role="note" className="m-0 border-b border-line bg-surface px-4 py-2 text-xs text-ink-2">
+          {t('pointInfo.invalidPoint')}
+        </p>
+      )}
 
       <div className="flex min-h-0 grow">
         <div
@@ -345,6 +363,13 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
               </>,
             )}
           </ToolButton>
+          <PointInfoTool
+            active={pointInfoMode}
+            onClick={() => {
+              if (pointInfoMode) closePointInfo();
+              else setPointInfoMode(true);
+            }}
+          />
           <span className="my-1 h-px w-6 bg-line" />
           <ToolButton
             label={t('toolbar.zoomIn')}
@@ -427,7 +452,13 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
               role="status"
               className="pointer-events-none absolute bottom-3 left-1/2 w-max max-w-[calc(100%-15rem)] -translate-x-1/2 rounded-md bg-bg/80 px-2.5 py-1.5 text-center text-xs leading-5 text-ink-2"
             >
-              {alignMode ? t('canvas.alignHint') : flyMode ? t('canvas.flyHint') : t('canvas.hint')}
+              {alignMode
+                ? t('canvas.alignHint')
+                : flyMode
+                  ? t('canvas.flyHint')
+                  : pointInfoMode
+                    ? t('pointInfo.hint')
+                    : t('canvas.hint')}
             </div>
           </div>
 
@@ -435,6 +466,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
             <div className="flex items-center gap-3">
               <button
                 type="button"
+                disabled={!canPlay}
                 onClick={() =>
                   setPlaying((p) => (!p && frame >= frames.length - 1 ? (setFrame(0), true) : !p))
                 }
@@ -499,6 +531,12 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
         </main>
 
         <aside className="flex w-[340px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-line bg-surface p-4">
+          {pointInfoMode && pointInfo && (
+            <PointInfoPanel info={pointInfo} onSeek={seekPointFrame} onClose={closePointInfo} />
+          )}
+          {pointInfoMode && !pointInfo && (
+            <p className="m-0 text-[13px] text-ink-2">{t('pointInfo.hint')}</p>
+          )}
           <section className="flex flex-col gap-2">
             <div className="flex items-baseline justify-between">
               <h2 className="m-0 text-sm font-semibold">{t('panel.frame')}</h2>
@@ -669,38 +707,6 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                 className="w-full"
               />
             </label>
-          </section>
-
-          <section className="flex flex-col gap-2">
-            <H2>{t('point.title')}</H2>
-            {observed === null ? (
-              <p className="m-0 text-[13px] text-ink-2">{t('point.hint')}</p>
-            ) : (
-              <div className="flex flex-col gap-2 rounded-[10px] border border-line-strong p-3">
-                <span className="text-[13px]">
-                  {observed.length ? t('point.observed') : t('point.none')}
-                </span>
-                <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
-                  {observed.map((i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => jump(i)}
-                      className={`${mono} h-7 cursor-pointer rounded-md border border-line-strong bg-transparent px-2 text-xs text-ink ${i === frame ? 'bg-raised' : ''}`}
-                    >
-                      {tc(i)}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setPicked(null)}
-                  className="h-7 cursor-pointer self-start rounded-md border border-line-strong bg-transparent px-2 text-xs text-ink-2"
-                >
-                  {t('point.clear')}
-                </button>
-              </div>
-            )}
           </section>
 
           <section className="flex flex-col gap-1.5">
