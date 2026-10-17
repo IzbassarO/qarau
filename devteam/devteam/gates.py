@@ -22,6 +22,7 @@ from pathlib import Path
 FORBIDDEN_GH_FLAGS = {"--admin", "--delete-branch", "-d"}
 FORBIDDEN_GH_COMMANDS = {"api", "ruleset", "secret", "variable", "repo", "workflow", "release"}
 CI_OK = {"SUCCESS", "SKIPPED", "NEUTRAL"}
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 # --- secret scan -----------------------------------------------------------------------------
@@ -302,9 +303,23 @@ class GitHub:
                     for c in checks
                     if (c.get("conclusion") or c.get("state")) not in CI_OK
                 ]
-                return (not bad, "\n".join(bad) or "all checks green")
+                return (not bad, "\n".join(bad + self.failed_logs(bad)) or "all checks green")
             time.sleep(30)
         return False, f"CI did not finish in {timeout_s // 60} min"
+
+    def failed_logs(self, bad: list[str], lines: int = 150) -> list[str]:
+        """The developer sees the error itself, not only a link (P2b sent back blind)."""
+        out = []
+        for run in dict.fromkeys(re.findall(r"/actions/runs/(\d+)", "\n".join(bad))):
+            try:
+                log = self.gh("run", "view", run, "--log-failed")
+            except RuntimeError as e:
+                log = f"(log unavailable: {e})"
+            tail = "\n".join(ANSI.sub("", log).splitlines()[-lines:]).replace("```", "'''")
+            out.append(
+                f"\nLast {lines} lines of `gh run view {run} --log-failed`:\n```\n{tail}\n```"
+            )
+        return out
 
     def merge(self, number: int, sha: str):
         # Merge commit, exactly the tested commit; no --admin (branch protection applies).
