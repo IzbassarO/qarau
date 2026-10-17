@@ -360,7 +360,11 @@ tasks:
 
     '
   owner: dev_app
-  status: todo
+  status: done
+  run: run-20261016-215415
+  branch: devteam/A4b
+  pr: https://github.com/IzbassarO/qarau/pull/24
+  done_at: '2026-10-16'
 - id: A5
   area: app
   title: Far-point layer in the viewer
