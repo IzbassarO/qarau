@@ -11,6 +11,7 @@ import {
   orbit,
   pan,
   pickPivot,
+  speedScale,
   zoomToward,
   type NavigationState,
 } from './navigation';
@@ -252,11 +253,13 @@ describe('mapInput', () => {
     [{ type: 'pointerdown', button: 2 }, NavigationAction.None],
     [{ type: 'wheel', ctrlKey: true, deltaY: 1.2 }, NavigationAction.Zoom],
     [{ type: 'wheel', ctrlKey: true, shiftKey: true, deltaY: 1.2 }, NavigationAction.Zoom],
-    [{ type: 'wheel', shiftKey: true, deltaY: 100 }, NavigationAction.Pan],
+    [{ type: 'wheel', shiftKey: true, deltaY: 100 }, NavigationAction.Zoom],
+    [{ type: 'wheel', shiftKey: true, deltaY: 3.5 }, NavigationAction.Pan],
+    [{ type: 'wheel', shiftKey: true, deltaX: 120, deltaY: 0 }, NavigationAction.Zoom],
     [{ type: 'wheel', deltaMode: 1, deltaY: 3 }, NavigationAction.Zoom],
     [{ type: 'wheel', deltaMode: 2, deltaY: -1 }, NavigationAction.Zoom],
     [{ type: 'wheel', deltaMode: 0, deltaY: 120, deltaX: 0 }, NavigationAction.Zoom],
-    [{ type: 'wheel', deltaMode: 0, deltaY: -40, deltaX: 0 }, NavigationAction.Zoom],
+    [{ type: 'wheel', deltaMode: 0, deltaY: -40, deltaX: 0 }, NavigationAction.Orbit],
     [{ type: 'wheel', deltaMode: 0, deltaY: 12, deltaX: 0 }, NavigationAction.Orbit],
     [{ type: 'wheel', deltaMode: 0, deltaY: 120, deltaX: 2 }, NavigationAction.Orbit],
     [{ type: 'wheel', deltaMode: 0, deltaY: 80.5, deltaX: 0 }, NavigationAction.Orbit],
@@ -264,6 +267,29 @@ describe('mapInput', () => {
     [{ type: 'keydown' }, NavigationAction.None],
   ])('maps %j to %s', (input, expected) => {
     expect(mapInput(input)).toBe(expected);
+  });
+});
+
+describe('speedScale', () => {
+  it('slows navigation near its target relative to scene size', () => {
+    expect(speedScale(0.1, 10)).toBeLessThan(speedScale(2, 10));
+    expect(speedScale(2, 10)).toBeLessThan(speedScale(10, 10));
+    expect(speedScale(10, 10)).toBe(speedScale(100, 10));
+    expect(speedScale(0, 10)).toBeGreaterThan(0);
+  });
+
+  it('makes Alt/Option precision exactly four times slower', () => {
+    for (const distance of [0.1, 2, 10, 100]) {
+      expect(speedScale(distance, 10, { precision: true })).toBe(speedScale(distance, 10) * 0.25);
+    }
+  });
+
+  it('scales sensitivity within 0.25–4 and handles invalid values', () => {
+    expect(speedScale(2, 10, { sensitivity: 2 })).toBe(speedScale(2, 10) * 2);
+    expect(speedScale(2, 10, { sensitivity: 0 })).toBe(speedScale(2, 10) * 0.25);
+    expect(speedScale(2, 10, { sensitivity: 10 })).toBe(speedScale(2, 10) * 4);
+    expect(speedScale(2, 10, { sensitivity: NaN })).toBe(speedScale(2, 10));
+    expect(Number.isFinite(speedScale(0, 0))).toBe(true);
   });
 });
 
@@ -332,6 +358,8 @@ function controlsFixture(
     minDistance: 0.1,
     collisionRadius: 0.01,
     boundsMargin: 0,
+    // Keep the A2 geometric fixtures at full speed; distance scaling is tested separately.
+    sceneRadius: 0.01,
     onChange,
     onStart,
   });
@@ -358,7 +386,101 @@ function settle(controls: NavigationControls) {
   for (let i = 0; i < 180; i++) controls.update(1 / 60);
 }
 
+function wheelAt(canvas: HTMLCanvasElement, init: WheelEventInit, timeStamp: number) {
+  const event = new WheelEvent('wheel', { clientX: 400, clientY: 300, ...init });
+  Object.defineProperty(event, 'timeStamp', { value: timeStamp });
+  canvas.dispatchEvent(event);
+}
+
 describe('NavigationControls DOM lifecycle', () => {
+  it.each([false, true])(
+    'never turns repeated small integer trackpad scrolling into zoom (Shift: %s)',
+    (shiftKey) => {
+      const { canvas, camera, controls } = controlsFixture(new Float32Array());
+      for (let i = 0; i < 20; i++) {
+        wheelAt(canvas, { deltaY: 12, shiftKey }, i * 16);
+        controls.update(1);
+        expect(camera.position.distanceTo(controls.target)).toBeCloseTo(10, 8);
+      }
+    },
+  );
+
+  it('learns smaller pixel notches only from confirmed mouse events and expires their history', () => {
+    const { canvas, camera, controls } = controlsFixture(new Float32Array());
+    for (let i = 0; i < 3; i++) {
+      wheelAt(canvas, { deltaMode: 1, deltaY: 3 }, i * 20);
+      controls.update(1);
+    }
+    const afterMouse = camera.position.distanceTo(controls.target);
+    // Three line ticks establish 3 × 16 = 48 pixels as a known mouse step.
+    wheelAt(canvas, { deltaY: 48 }, 60);
+    settle(controls);
+    const afterPixelNotch = camera.position.distanceTo(controls.target);
+    expect(afterPixelNotch).toBeGreaterThan(afterMouse);
+    // The same ambiguous pixel event returns to orbit after a gesture gap.
+    wheelAt(canvas, { deltaY: 48 }, 400);
+    settle(controls);
+    expect(camera.position.distanceTo(controls.target)).toBeCloseTo(afterPixelNotch, 8);
+  });
+
+  it('keeps confirmed mouse history separate for every control instance', () => {
+    const first = controlsFixture(new Float32Array());
+    const second = controlsFixture(new Float32Array());
+    for (let i = 0; i < 3; i++) {
+      wheelAt(first.canvas, { deltaMode: 1, deltaY: 3 }, i * 20);
+      first.controls.update(1);
+    }
+    wheelAt(second.canvas, { deltaY: 48 }, 60);
+    settle(second.controls);
+    expect(second.camera.position.distanceTo(second.controls.target)).toBeCloseTo(10, 8);
+  });
+
+  it.each(['orbit', 'pan', 'zoom'] as const)(
+    'applies Alt precision and live sensitivity to trackpad %s',
+    (action) => {
+      const move = (altKey: boolean, sensitivity = 1) => {
+        const { canvas, camera, controls } = controlsFixture(new Float32Array());
+        controls.sensitivity = sensitivity;
+        const previous = camera.position.clone();
+        canvas.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaX: action === 'zoom' ? 0 : 8,
+            deltaY: action === 'zoom' ? -4 : 0,
+            shiftKey: action === 'pan',
+            ctrlKey: action === 'zoom',
+            altKey,
+            clientX: 400,
+            clientY: 300,
+          }),
+        );
+        settle(controls);
+        return action === 'orbit'
+          ? previous.angleTo(camera.position)
+          : camera.position.distanceTo(previous);
+      };
+      const normal = move(false);
+      expect(normal).toBeGreaterThan(0);
+      expect(move(true)).toBeCloseTo(normal * 0.25, 6);
+      expect(move(false, 2)).toBeCloseTo(normal * 2, 6);
+    },
+  );
+
+  it('keeps Shift mouse-wheel zoom working when the browser swaps its delta to X', () => {
+    const { canvas, camera, controls } = controlsFixture(new Float32Array());
+    canvas.dispatchEvent(
+      new WheelEvent('wheel', {
+        deltaX: 120,
+        shiftKey: true,
+        clientX: 400,
+        clientY: 300,
+      }),
+    );
+    settle(controls);
+    expect(camera.position.z).toBeGreaterThan(10);
+    expect(camera.position.x).toBeCloseTo(0, 8);
+    expectVector(controls.target, v());
+  });
+
   it('picks a point on pointerdown and keeps that pivot for the rest of the orbit drag', () => {
     const { canvas, camera, controls, onStart, onChange } = controlsFixture(
       new Float32Array([0, 0, 0]),
@@ -600,7 +722,13 @@ describe('NavigationControls DOM lifecycle', () => {
     controls.enabled = false;
     pointer(canvas, 'pointerdown');
     pointer(canvas, 'pointermove', { clientX: 550 });
-    canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -120 }));
+    const disabledPinch = new WheelEvent('wheel', {
+      deltaY: -12,
+      ctrlKey: true,
+      cancelable: true,
+    });
+    canvas.dispatchEvent(disabledPinch);
+    expect(disabledPinch.defaultPrevented).toBe(true);
     settle(controls);
     expectVector(camera.position, initialPosition);
     // The engine may use onStart to enable controls when leaving a video pose.

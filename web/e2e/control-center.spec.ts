@@ -7,9 +7,12 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
   test(`control center default processing demo: ${lang}`, async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
-    await page.addInitScript((locale) => localStorage.setItem('qarau.lang', locale), lang);
+    await page.addInitScript((locale) => {
+      localStorage.setItem('qarau.lang', locale);
+      sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
+    }, lang);
     await page.route('**/api/runs', (route) => route.fulfill({ status: 503, body: '' }));
-    await page.goto('/');
+    await page.goto('/inspections/demo');
     await expect(page.getByRole('heading', { name: t['demo.inspectionTitle'] })).toBeVisible();
     await expect(
       page.getByText(t['processing.error.tooFewRegisteredFrames.whatToDo']),
@@ -52,9 +55,36 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
   });
 }
 
+test('home lists the real runs, not the demo', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('qarau.lang', 'en');
+    sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
+  });
+  await page.route('**/api/runs', (route) =>
+    route.fulfill({
+      json: [
+        {
+          run_id: 'notre-dame',
+          source: { name: 'notre_dame.webm' },
+          created_at: '2026-10-16T15:00:00Z',
+        },
+      ],
+    }),
+  );
+  await page.goto('/');
+  const navigation = page.getByRole('navigation');
+  await expect(navigation.getByRole('link', { name: /^notre-dame/ })).toContainText(
+    'notre-dame · 16 Oct',
+  );
+  await expect(navigation.getByRole('link', { name: /Tank farm survey/ })).toHaveCount(0);
+});
+
 test('mobile sidebar collapses, opens and closes with navigation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.addInitScript(() => localStorage.setItem('qarau.lang', 'en'));
+  await page.addInitScript(() => {
+    localStorage.setItem('qarau.lang', 'en');
+    sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
+  });
   await page.route('**/api/runs', (route) => route.fulfill({ json: [] }));
   await page.goto('/inspections/demo');
   const navigation = page.getByRole('navigation');

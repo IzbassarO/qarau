@@ -251,9 +251,9 @@ def test_developer_commits_are_unwound_and_checked(repo):
 class CountingPlans(Quick):
     plans = 0
 
-    def plan(self, team, todo, feedback=None):
+    def plan(self, team, todo, feedback=None, devs=None):
         CountingPlans.plans += 1
-        return super().plan(team, todo, feedback)
+        return super().plan(team, todo, feedback, devs)
 
 
 def test_assignments_are_checkpointed_before_the_backlog_changes(repo, monkeypatch):
@@ -312,7 +312,7 @@ def test_valid_plan_passes():
 
 
 class BadPlanner(Quick):
-    def plan(self, team, todo, feedback=None):
+    def plan(self, team, todo, feedback=None, devs=None):
         return [p("T-002", "dev_pipeline")]
 
 
@@ -324,7 +324,7 @@ def test_bad_plan_twice_stops_without_touching_the_backlog(repo):
 
 
 # --- #7 checks gate --------------------------------------------------------------------------
-def only_core(team, todo, feedback=None):
+def only_core(team, todo, feedback=None, devs=None):
     return [p("T-001", "dev_pipeline")]
 
 
@@ -353,7 +353,7 @@ def test_visual_task_without_tester_screenshots_never_passes(repo):
         },
     )
     agents = Quick()
-    agents.plan = lambda team, todo, feedback=None: [
+    agents.plan = lambda team, todo, feedback=None, devs=None: [
         {
             **p("T-001", "dev_pipeline", ("/viewer/room shows no sky wall",)),
             "routes": ["/viewer/room"],
@@ -508,7 +508,9 @@ def test_brain_never_plans_done_or_already_merged_tasks(repo):
     team.update_task("T-001", status="todo")  # the status got lost, the branch is in dev
     seen = []
     agents = Quick()
-    agents.plan = lambda team, todo, feedback=None: seen.extend(t["id"] for t in todo) or []
+    agents.plan = lambda team, todo, feedback=None, devs=None: (
+        seen.extend(t["id"] for t in todo) or []
+    )
     team.agents = agents
     graph.invoke({}, {"configurable": {"thread_id": "r2"}})
     assert "T-001" not in seen and "T-002" not in seen and "T-003" in seen
@@ -621,7 +623,7 @@ def rerun_merged_task(repo, agents):
     first_pr = team.load_backlog()[0]["pr"]
     team.update_task("T-001", status="todo")
     team.agents, team.merged_tasks = agents, lambda: set()
-    agents.plan = lambda team, todo, feedback=None: [p("T-001", "dev_pipeline")]
+    agents.plan = lambda team, todo, feedback=None, devs=None: [p("T-001", "dev_pipeline")]
     graph.invoke({}, {"configurable": {"thread_id": "r2"}})
     return team, first_pr, next(t for t in team.load_backlog() if t["id"] == "T-001")
 

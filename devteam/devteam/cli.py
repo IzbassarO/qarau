@@ -1,7 +1,9 @@
-"""devteam run|resume|stop|status|costs|report|release|cleanup  (--fake: no cost, local remote)."""
+"""Kerege CLI: devteam run [--continuous]|resume|stop|status|costs|report|release|cleanup|dashboard
+(--fake: no cost, local remote)."""
 
 import argparse
 import os
+import queue
 import signal
 import sqlite3
 import sys
@@ -17,6 +19,7 @@ from rich.table import Table
 
 from devteam import costs
 from devteam.agents import FakeAgents
+from devteam.continuous import Continuous, summary_lines
 from devteam.gates import EMPTY_BENCH, release
 from devteam.graph import AGENTS, Team, build_graph
 from devteam.report import write_report
@@ -47,7 +50,7 @@ def make_team(fake: bool) -> Team:
 
 
 def status_table(team: Team, working: dict) -> Table:
-    t = Table(box=None, show_header=False, padding=(0, 2))
+    t = Table(box=None, show_header=False, padding=(0, 2), title="Kerege", title_justify="left")
     for a in AGENTS:
         tasks = working.get(a)
         state = f"[bold]working[/] on {', '.join(sorted(tasks))}" if tasks else "[dim]idle[/]"
@@ -57,24 +60,85 @@ def status_table(team: Team, working: dict) -> Table:
     return t
 
 
+def show_event(team: Team, live: Live, working: dict, e: dict):
+    a = e["agent"]
+    if e["status"] in ("working", "waiting"):
+        working.setdefault(a, set()).add(e["task"] or "backlog")
+    elif e["status"] == "idle":
+        working.get(a, set()).discard(e["task"] or "backlog")
+    arrow = f" → [{COLORS.get(e['to'], 'white')}]{e['to']}[/]" if e["to"] else ""
+    task = f"[dim]{e['task']}[/] " if e["task"] else ""
+    live.console.print(
+        f"[dim]{e['t']}[/] [{COLORS.get(a, 'white')}]{a}[/]{arrow} {task}{e['msg']}",
+        markup=True,
+        highlight=False,
+    )
+    live.update(status_table(team, working))
+
+
 def watch(team: Team, graph, inp, config):
     working: dict[str, set] = {}
     with Live(status_table(team, working), console=console, refresh_per_second=4) as live:
         for _ns, e in graph.stream(inp, config, stream_mode="custom", subgraphs=True):
-            a = e["agent"]
-            if e["status"] == "working":
-                working.setdefault(a, set()).add(e["task"] or "backlog")
-            elif e["status"] == "idle":
-                working.get(a, set()).discard(e["task"] or "backlog")
-            arrow = f" → [{COLORS.get(e['to'], 'white')}]{e['to']}[/]" if e["to"] else ""
-            task = f"[dim]{e['task']}[/] " if e["task"] else ""
-            live.console.print(
-                f"[dim]{e['t']}[/] [{COLORS[a]}]{a}[/]{arrow} {task}{e['msg']}",
-                markup=True,
-                highlight=False,
-            )
-            live.update(status_table(team, working))
+            show_event(team, live, working, e)
     console.print()
+
+
+def run_continuous(team: Team):
+    """Developers loop on their own; the first Ctrl+C finishes the current steps cleanly."""
+    db = sqlite3.connect(team.home / "checkpoints.sqlite", check_same_thread=False)
+    cont = Continuous(team, build_graph(team, SqliteSaver(db)))
+    if not team.fake and (drift := team.backlog_drift()):
+        mine = cont.ignored_drift()  # claims of rounds this run resumes
+        if drift := [d for d in drift if d.split(".", 1)[0] not in mine]:
+            sys.exit(
+                "backlog.yaml status fields differ from origin/dev; merge them into dev first:\n"
+                + "\n".join(drift)
+            )
+    team.unblock_ready()
+    pid_file = team.home / "run.pid"
+    pid_file.write_text(str(os.getpid()))
+    presses = []
+
+    def on_int(signum, frame):
+        presses.append(1)
+        if len(presses) == 1:
+            console.print(
+                "[yellow]Kerege: finishing the current steps, then stopping. "
+                "Ctrl+C again kills everything now.[/]"
+            )
+            cont.halt("Ctrl+C")
+            return
+        hard_stop("Ctrl+C twice")
+
+    def hard_stop(reason: str):
+        team.kill_all()
+        cont.stop_reason = cont.stop_reason or reason
+        finish(cont.finish())
+        pid_file.unlink(missing_ok=True)
+        sys.stdout.flush()
+        os._exit(130)  # every finished step is checkpointed; the next run resumes the rest
+
+    def finish(summary: dict):
+        console.print()
+        for line in summary_lines(summary):
+            console.print(line, markup=False, highlight=False)
+        console.print(f"report: {write_report(team)}")
+
+    signal.signal(signal.SIGINT, on_int)
+    signal.signal(signal.SIGTERM, lambda *_: hard_stop("devteam stop"))
+    working: dict[str, set] = {}
+    try:
+        threads = cont.start()
+        with Live(status_table(team, working), console=console, refresh_per_second=4) as live:
+            while any(t.is_alive() for t in threads) or not cont.events.empty():
+                try:
+                    show_event(team, live, working, cont.events.get(timeout=0.25))
+                except queue.Empty:
+                    pass
+        finish(cont.finish())
+    finally:
+        pid_file.unlink(missing_ok=True)
 
 
 def run_graph(team: Team, resume: bool):
@@ -168,13 +232,35 @@ def main():
     p = argparse.ArgumentParser(prog="devteam")
     p.add_argument(
         "command",
-        choices=["run", "resume", "stop", "status", "costs", "report", "release", "cleanup"],
+        choices=[
+            "run",
+            "resume",
+            "stop",
+            "status",
+            "costs",
+            "report",
+            "release",
+            "cleanup",
+            "dashboard",
+        ],
     )
+    p.add_argument(
+        "--continuous",
+        action="store_true",
+        help="run: keep planning per developer until a stop condition (config: continuous)",
+    )
+    p.add_argument("--port", type=int, default=8765, help="dashboard: local port")
     p.add_argument("--fake", action="store_true", help="fake agents, no cost, separate state")
     p.add_argument("--only", default="", help="run: only these task ids, e.g. --only P1,A1a")
     args = p.parse_args()
     team = make_team(args.fake)
     team.only = {t for t in args.only.split(",") if t}
+    if args.command == "run" and args.continuous:
+        return run_continuous(team)
+    if args.command == "dashboard":
+        from devteam.dashboard import serve
+
+        return serve(team, args.port)
     if args.command == "run" and not args.fake and (drift := team.backlog_drift()):
         sys.exit(  # statuses kept only in the working tree get lost: get them into dev first
             "backlog.yaml status fields differ from origin/dev; merge them into dev first:\n"

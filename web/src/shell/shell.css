@@ -1,3 +1,62 @@
+.login-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--color-bg);
+}
+.login-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 32px;
+  border-bottom: 1px solid var(--color-line);
+}
+.login-card {
+  width: min(420px, calc(100% - 32px));
+  margin: auto;
+  padding: 40px 0;
+}
+.login-card h1 {
+  margin-top: 10px;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+}
+.login-description {
+  margin: 12px 0 28px;
+  color: var(--color-ink-2);
+  line-height: 22px;
+}
+.login-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.login-card label {
+  font-size: 13px;
+  font-weight: 500;
+}
+.login-card input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font: inherit;
+}
+.login-card .shell-button {
+  min-height: 44px;
+  margin-top: 8px;
+}
+.login-error {
+  color: var(--color-watch);
+  font-size: 13px;
+  line-height: 20px;
+}
 .app-shell {
   display: flex;
   min-height: 100%;
@@ -140,6 +199,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.inspection-source {
+  font-family: var(--font-mono);
+}
+.inspection-link-date {
+  color: var(--color-ink-2);
 }
 .status-dot {
   display: inline-block;

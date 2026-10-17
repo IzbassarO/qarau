@@ -1,13 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Source, Stats } from './bundle';
 import type { ProcessingStagePayload } from './processing';
+import { authHeader } from '../auth/auth';
 
 export type InspectionStatus = 'queued' | 'running' | 'completed' | 'failed' | 'unknown';
 
 export interface InspectionSummary {
   id: string;
   siteId: string;
+  /** The run name (run id unless the API gives a title). */
   title: string;
+  /** The uploaded file the run was made from, if known. */
+  source: string | null;
   createdAt: string | null;
   status: InspectionStatus;
 }
@@ -62,7 +66,8 @@ export function groupRunsIntoSites(runs: readonly RunSummary[]): Site[] {
     site.inspections.push({
       id: run.run_id,
       siteId,
-      title: run.title || run.source?.name || run.run_id,
+      title: run.title || run.run_id,
+      source: run.source?.name || null,
       createdAt:
         run.created_at && Number.isFinite(Date.parse(run.created_at)) ? run.created_at : null,
       status: inspectionStatus(run.status),
@@ -76,7 +81,7 @@ export function groupRunsIntoSites(runs: readonly RunSummary[]): Site[] {
 }
 
 export async function fetchRuns(signal?: AbortSignal): Promise<RunSummary[]> {
-  const response = await fetch('/api/runs', { signal });
+  const response = await fetch('/api/runs', { signal, headers: authHeader() });
   if (!response.ok) throw new Error(String(response.status));
   const runs: unknown = await response.json();
   if (

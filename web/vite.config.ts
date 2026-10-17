@@ -16,5 +16,8 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     environment: 'jsdom',
     setupFiles: ['src/test/setup.ts'],
+    // afterEach in declaration order: setup.ts unmounts (cleanup) before a test file
+    // unstubs globals / restores mocks that the unmounting components still use.
+    sequence: { hooks: 'list' },
   },
 });

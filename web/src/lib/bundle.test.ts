@@ -1,7 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { hasRgb, loadBundle, runUrl, type Finding, type Manifest } from './bundle';
+import {
+  FarLayerError,
+  hasRgb,
+  loadBundle,
+  loadManifest,
+  runUrl,
+  type Finding,
+  type Manifest,
+} from './bundle';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  sessionStorage.clear();
+  vi.unstubAllGlobals();
+});
 
 const routeId = 'copied run';
 const rgb = new Uint8Array([12, 34, 56, 78, 90, 123]);
@@ -63,6 +74,115 @@ function serveFiles(assets = files()) {
   return fetch;
 }
 
+describe('optional far layer (ADR 0003)', () => {
+  const far: NonNullable<Manifest['far']> = {
+    count: 1,
+    position: 'web/far.position.f32',
+    color: 'web/far.color.u8',
+    rule: 'nearest camera distance > 2.5 x median',
+  };
+  const position = new Float32Array([100, 200, 300]);
+  const color = new Uint8Array([21, 43, 65]);
+  const farFiles = () => ({
+    ...files(),
+    [far.position]: position.buffer,
+    [far.color]: color.buffer,
+  });
+
+  it('loads far XYZ and RGB into separate typed arrays without changing object data', async () => {
+    serveFiles(farFiles());
+    const original = await loadBundle(routeId, manifest('color.bin'), vi.fn());
+    const progress = vi.fn();
+    const bundle = await loadBundle(routeId, { ...manifest('color.bin'), far }, progress);
+    expect(bundle.far?.position).toBeInstanceOf(Float32Array);
+    expect(bundle.far?.position).toEqual(position);
+    expect(bundle.far?.color).toBeInstanceOf(Uint8Array);
+    expect(bundle.far?.color).toEqual(color);
+    expect(bundle.farError).toBeUndefined();
+    expect(bundle.manifest.points.count).toBe(2);
+    expect(bundle.position).toHaveLength(6);
+    expect(bundle.far?.position.buffer).not.toBe(bundle.position.buffer);
+    for (const key of [
+      'position',
+      'color',
+      'firstSeen',
+      'frameOffsets',
+      'frameInPoints',
+      'pointOffsets',
+      'pointFrames',
+      'assembled',
+    ] as const)
+      expect(bundle[key]).toEqual(original[key]);
+    expect(progress).toHaveBeenLastCalledWith(1);
+  });
+
+  it('loads a legacy bundle unchanged without fetching far arrays', async () => {
+    const fetch = serveFiles();
+    const bundle = await loadBundle(routeId, manifest(), vi.fn());
+    expect(bundle.far).toBeUndefined();
+    expect(bundle.farError).toBeUndefined();
+    expect(bundle.position).toEqual(new Float32Array([0, 0, 0, 1, 2, 3]));
+    expect(bundle.firstSeen).toEqual(new Uint16Array([0, 65535]));
+    expect(fetch).toHaveBeenCalledTimes(6);
+  });
+
+  it('accepts an empty exported far layer', async () => {
+    serveFiles({ ...files(), [far.position]: new ArrayBuffer(0), [far.color]: new ArrayBuffer(0) });
+    const bundle = await loadBundle(routeId, { ...manifest(), far: { ...far, count: 0 } }, vi.fn());
+    expect(bundle.far).toEqual({ position: new Float32Array(), color: new Uint8Array() });
+  });
+
+  it.each([
+    ['position', undefined, 'missing'],
+    ['color', undefined, 'missing'],
+    ['position', new ArrayBuffer(8), 'broken'],
+    ['position', new ArrayBuffer(13), 'broken'],
+    ['position', new ArrayBuffer(24), 'broken'],
+    ['color', new ArrayBuffer(2), 'broken'],
+    ['color', new ArrayBuffer(4), 'broken'],
+  ] as const)('raises a recoverable typed error for %s (%s)', async (field, buffer, reason) => {
+    const assets: Record<string, ArrayBuffer | string> = farFiles();
+    if (buffer === undefined) delete assets[far[field]];
+    else assets[far[field]] = buffer;
+    serveFiles(assets);
+    const error = await loadBundle(routeId, { ...manifest(), far }, vi.fn()).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(FarLayerError);
+    const failure = error as FarLayerError;
+    expect(failure.message).toContain('far layer:');
+    expect(failure.reason).toBe(reason);
+    expect(failure.bundle.far).toBeUndefined();
+    expect(failure.bundle.farError).toBe(reason);
+    expect(failure.bundle.position).toEqual(new Float32Array([0, 0, 0, 1, 2, 3]));
+    expect(failure.bundle.assembled).toEqual(new Uint32Array([1]));
+  });
+
+  it.each([-1, 0.5, NaN])('rejects invalid far count %s as a typed error', async (count) => {
+    serveFiles(farFiles());
+    await expect(
+      loadBundle(routeId, { ...manifest(), far: { ...far, count } }, vi.fn()),
+    ).rejects.toBeInstanceOf(FarLayerError);
+  });
+});
+
+it('sends the session header with the protected manifest and every bundle file', async () => {
+  sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
+  const fetchManifest = vi.fn().mockResolvedValue(Response.json(manifest()));
+  vi.stubGlobal('fetch', fetchManifest);
+  await loadManifest(routeId);
+  expect(fetchManifest).toHaveBeenCalledWith(
+    `/api/runs/${encodeURIComponent(routeId)}/manifest.json`,
+    {
+      headers: { Authorization: 'Bearer test-api-value' },
+    },
+  );
+  const fetchFiles = serveFiles();
+  await loadBundle(routeId, manifest(), vi.fn());
+  for (const [, options] of fetchFiles.mock.calls as unknown as [string, RequestInit][])
+    expect(options.headers).toEqual({ Authorization: 'Bearer test-api-value' });
+});
+
 describe('optional bundle RGB', () => {
   it('loads real RGB without changing point, track or assembly data', async () => {
     const fetch = serveFiles();
@@ -78,7 +198,7 @@ describe('optional bundle RGB', () => {
     expect(bundle.pointOffsets).toEqual(new Uint32Array([0, 1, 1]));
     expect(bundle.pointFrames).toEqual(new Uint16Array([0]));
     expect(bundle.assembled).toEqual(new Uint32Array([1]));
-    expect(fetch).toHaveBeenCalledWith(runUrl(routeId, 'color.bin'));
+    expect(fetch).toHaveBeenCalledWith(runUrl(routeId, 'color.bin'), { headers: {} });
     expect(progress).toHaveBeenLastCalledWith(1);
   });
 

@@ -14,6 +14,7 @@ import re
 import shutil
 import signal
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -26,6 +27,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
 from devteam import gates as G
+from devteam import procs
+from devteam.costs import BudgetExceeded, SubscriptionLimit
 
 AGENTS = ["brain", "dev_pipeline", "dev_app", "tester"]
 SHARED_DIRS = ["docs/"]  # any developer may touch these besides its own folders
@@ -63,8 +66,22 @@ RELEASE_TAG = re.compile(r"refs/tags/release-\d{4}-\d{2}-\d{2}(\.\d+)?")  # push
 FORBIDDEN_BRANCH = {"-D", "-d", "--delete", "-M", "-m", "--move", "-f", "--force"}
 
 
+def _feed(pipe, text: str):
+    """stdin for a step, from a thread: a large brief must not block the wait."""
+    try:
+        pipe.write(text.encode("utf-8", "surrogateescape"))
+        pipe.close()
+    except (BrokenPipeError, OSError):
+        pass
+
+
 class Violation(RuntimeError):
     """The worktree or branch is not what the graph expects: stop, never commit."""
+
+
+class StopRun(Exception):
+    """A clean stop was asked (Ctrl+C in continuous mode, a run limit): raised at the start of
+    a node, so the steps before it stay checkpointed and nothing is half done."""
 
 
 def is_protected(path: str) -> bool:
@@ -156,6 +173,7 @@ class TaskState(TypedDict, total=False):
 
 
 class TeamState(TypedDict, total=False):
+    developers: list[str]  # plan only for these (continuous mode: the one that is free)
     assignments: list[dict]
     results: Annotated[list, operator.add]
 
@@ -188,6 +206,7 @@ class Team:
         self._procs: set[subprocess.Popen] = set()
         self._status_commit = None  # the only commit push_status may push straight to dev
         self.only: set[str] = set()
+        self.stopping = threading.Event()  # set: no node starts any more (clean stop)
         if remote is None and fake:
             remote = str(self.home / "remote.git")
             if not Path(remote).exists():
@@ -233,9 +252,10 @@ class Team:
                 text = text.replace(v, "***")
         return text
 
-    def emit(self, agent: str, msg: str, *, task: str = "", to: str = "", status: str = ""):
+    def emit(self, agent: str, msg: str, *, task: str = "", to: str = "", status: str = "") -> dict:
         event = {
             "t": time.strftime("%H:%M:%S"),
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),  # the dashboard needs the day too
             "agent": agent,
             "task": task,
             "to": to,
@@ -248,6 +268,7 @@ class Team:
             get_stream_writer()(event)
         except RuntimeError:  # called outside a graph run
             pass
+        return event
 
     # --- backlog -------------------------------------------------------------------------
     def load_backlog(self) -> list[dict]:
@@ -263,44 +284,69 @@ class Team:
                             t.pop(k, None)
                         else:
                             t[k] = v
-            self.backlog_path.write_text(
-                yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100)
-            )
+            # readers don't take the lock: replace the file whole, never truncate it in place
+            tmp = self.home / "backlog.yaml.tmp"  # same filesystem: os.replace is atomic
+            tmp.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100))
+            os.replace(tmp, self.backlog_path)
 
     # --- processes (all killable by `devteam stop`) --------------------------------------
     def run_proc(
-        self, cmd, cwd: str, timeout: int, input: str | None = None, env: dict | None = None
+        self,
+        cmd,
+        cwd: str,
+        timeout: int,
+        input: str | None = None,
+        env: dict | None = None,
+        agent: str = "tester",
     ) -> dict:
-        """Runs in its own process group, registered so stop() can kill the whole tree."""
-        p = subprocess.Popen(
-            cmd,
-            shell=isinstance(cmd, str),
-            cwd=cwd,
-            text=True,
-            stdin=subprocess.PIPE if input else subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
-            env=env,
-        )
-        with self._lock:
-            self._procs.add(p)
-        try:
-            out, err = p.communicate(input, timeout=timeout)
-            ok = p.returncode == 0
-        except subprocess.TimeoutExpired:
-            os.killpg(p.pid, signal.SIGKILL)
-            out, err = p.communicate()
-            ok, err = False, (err or "") + f"\ntimed out after {timeout // 60} min"
-        finally:
+        """Runs in its own process group, registered so stop() can kill the whole tree. When it
+        ends (any way), everything it started is killed; a port it left listening is a warning
+        (owner rule: no agent leaves a server running)."""
+        marker = procs.new_marker()
+        env = {**(os.environ if env is None else env), procs.MARKER: marker}
+        # Output goes to files, not pipes: a server the step leaves in the background keeps a
+        # pipe open, and reading it to EOF would wait for the timeout instead of the step.
+        with tempfile.TemporaryFile() as fo, tempfile.TemporaryFile() as fe:
+            p = subprocess.Popen(
+                cmd,
+                shell=isinstance(cmd, str),
+                cwd=cwd,
+                stdin=subprocess.PIPE if input else subprocess.DEVNULL,
+                stdout=fo,
+                stderr=fe,
+                start_new_session=True,
+                env=env,
+            )
             with self._lock:
-                self._procs.discard(p)
+                self._procs.add(p)
+            if input:
+                threading.Thread(target=_feed, args=(p.stdin, input), daemon=True).start()
+            note = ""
+            try:
+                p.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                note = f"\ntimed out after {timeout // 60} min"
+            finally:
+                with self._lock:
+                    self._procs.discard(p)
+                for port, pid in procs.reap(p.pid, marker):  # the whole step, any outcome
+                    label = cmd if isinstance(cmd, str) else " ".join(cmd[:3])
+                    self.emit(
+                        agent,
+                        f"WARNING: `{label[:80]}` left port {port} listening (pid {pid}); "
+                        "killed it",
+                    )
+                p.wait()
+            fo.seek(0)
+            fe.seek(0)
+            out = fo.read().decode("utf-8", "replace")
+            err = fe.read().decode("utf-8", "replace") + note
         return {
-            "ok": ok,
+            "ok": p.returncode == 0 and not note,
             "code": p.returncode,
-            "stdout": out or "",
-            "stderr": err or "",
-            "output": (out or "") + (err or ""),
+            "stdout": out,
+            "stderr": err,
+            "output": out + err,
         }
 
     def kill_all(self):
@@ -732,7 +778,7 @@ def build_graph(team: Team, checkpointer):
         team.emit(dev, what, task=tid, status="working")
         if not team.fake:  # e.g. pnpm install: the Codex sandbox has no network
             for cmd in team.cfg["developers"][dev].get("setup", []):
-                r = team.run_proc(cmd, cwd=wt, timeout=1800)
+                r = team.run_proc(cmd, cwd=wt, timeout=1800, agent=dev)
                 if not r["ok"]:
                     raise RuntimeError(f"setup `{cmd}` failed: {team.redact(r['output'][-800:])}")
         out = team.agents.develop(team, s)
@@ -983,8 +1029,12 @@ def build_graph(team: Team, checkpointer):
         now, so the owner can `devteam stop`, fix and `resume`."""
 
         def node(s: TaskState):
+            if team.stopping.is_set():
+                raise StopRun(f"stopped before {name}")
             try:
                 return fn(s)
+            except (SubscriptionLimit, BudgetExceeded):  # the caller waits or stops, no crash
+                raise
             except Exception as e:
                 team.emit(
                     s.get("assignee", "brain"),
@@ -1017,6 +1067,9 @@ def build_graph(team: Team, checkpointer):
     def brain(s: TeamState, config: RunnableConfig):
         """Plans only; writes nothing. Tasks this run already claimed count as open again."""
         run = config["configurable"]["thread_id"]
+        if team.stopping.is_set():
+            raise StopRun("stopped before planning")
+        devs = {d: cfg["developers"][d] for d in s.get("developers") or cfg["developers"]}
         team.emit("brain", "reading the backlog", status="working")
         todo = [
             t
@@ -1036,15 +1089,16 @@ def build_graph(team: Team, checkpointer):
                 t["previous_work"] = work
         if team.only:  # `devteam run --only P1`
             todo = [t for t in todo if t["id"] in team.only]
-        areas = {a for d in cfg["developers"].values() for a in d["areas"]}
-        if no_area := [t["id"] for t in todo if t.get("area") not in areas]:
-            team.emit("brain", f"skipping tasks without a known area {sorted(areas)}: {no_area}")
-            todo = [t for t in todo if t["id"] not in no_area]
+        known = {a for d in cfg["developers"].values() for a in d["areas"]}
+        if no_area := [t["id"] for t in todo if t.get("area") not in known]:
+            team.emit("brain", f"skipping tasks without a known area {sorted(known)}: {no_area}")
+        areas = {a for d in devs.values() for a in d["areas"]}  # other developers' tasks wait
+        todo = [t for t in todo if t.get("area") in areas]
         assignments, feedback = [], None
         for attempt in range(2):  # one retry with the validation errors
-            plans = team.agents.plan(team, todo, feedback=feedback) if todo else []
+            plans = team.agents.plan(team, todo, feedback=feedback, devs=list(devs)) if todo else []
             try:
-                assignments = validate_plan(plans, todo, cfg)
+                assignments = validate_plan(plans, todo, {**cfg, "developers": devs})
                 break
             except ValueError as e:
                 if attempt:

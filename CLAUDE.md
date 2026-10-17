@@ -209,6 +209,11 @@ modes; security-sensitive defaults. Everything else — decide, document, contin
 
 ## Working rules for agents
 
+- **Never leave a server running** (owner, 2026-10-17). Any dev server, preview, dashboard or
+  test server an agent starts is stopped as soon as its check is done; never leave a listening
+  port behind. If the owner wants a server, he starts it himself. Kerege kills everything a
+  developer or tester step started when the step ends and logs a warning for any port it had
+  to close; Playwright always starts its own fresh server (`reuseExistingServer: false`).
 - **Cost first.** Do not add paid services, cloud resources or API usage without the
   owner's explicit OK. Prefer local, open-source, free tiers.
 - **Small changes.** One feature or fix per branch/PR, with tests; the gates must be able

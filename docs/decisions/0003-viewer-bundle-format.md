@@ -36,3 +36,20 @@ only when point counts require LOD (ADR 0005).
   manifest key without changing existing ones; `version` is bumped on breaking changes.
 - The bundle is plain files, so it can live in a run directory, in object storage, or in a
   desktop app without conversion.
+
+## Addendum 2026-10-16 (P3b): `far` layer
+
+Manifest key `far = {count, position: "web/far.position.f32", color: "web/far.color.u8",
+rule}`: points farther from the nearest registered camera than 2.5 × the median such distance
+(ADR 0013). Same encoding and world frame as `points.position` / `points.color`; no tracks,
+no first-seen. These points are never in the `points` arrays, the tracks, `world.bounds` or
+`cloud.laz`. Additive key, so `version` is unchanged; viewers that do not know `far` ignore
+it (the current viewer does; A5 renders it).
+
+## Addendum 2026-10-17: `created_at`
+
+Manifest key `created_at`: ISO 8601 UTC time the export stage wrote the bundle (e.g.
+`"2026-10-16T09:30:00+00:00"`). `GET /api/runs` (and the Vite dev stand-in) returns it as the
+run date; for runs exported before this key existed it falls back to the manifest file's
+modification time. The control center shows runs as "run name · date". Additive key, `version`
+unchanged.

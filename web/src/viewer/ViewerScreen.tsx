@@ -1,4 +1,13 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type MouseEvent,
+  type ReactNode,
+} from 'react';
 import { Link } from 'react-router';
 import { useI18n } from '../i18n';
 import { hasRgb, runUrl, type Bundle, type Finding } from '../lib/bundle';
@@ -6,7 +15,10 @@ import { csrSlice, heightRamp, RAMP } from '../lib/geometry';
 import { ViewerEngine, type ColorMode, type Options } from './engine';
 import { defaultViewState } from './defaults';
 import { AxisGizmo, type AxisGizmoHandle } from './AxisGizmo';
-import { H2, LangSwitch, Logo, Row, Toggle } from './ui';
+import { H2, LangSwitch, Logo, ModeSwitch, NavigationSettings, Row, Toggle } from './ui';
+import { SessionImage } from '../auth/SessionImage';
+import { sessionUserId, subscribeToAuth } from '../auth/auth';
+import { loadSensitivity, saveSensitivity } from './settings';
 
 declare global {
   interface Window {
@@ -38,10 +50,12 @@ const fmtTime = (s: number) => {
 function ToolButton({
   label,
   onClick,
+  pressed,
   children,
 }: {
   label: string;
-  onClick: () => void;
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+  pressed?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -50,7 +64,8 @@ function ToolButton({
       onClick={onClick}
       aria-label={label}
       title={label}
-      className="flex size-9 cursor-pointer items-center justify-center rounded-lg border-0 bg-transparent text-xl text-[#c9ced6] hover:bg-raised"
+      aria-pressed={pressed}
+      className={`flex size-9 cursor-pointer items-center justify-center rounded-lg border-0 text-xl text-[#c9ced6] hover:bg-raised ${pressed ? 'bg-line' : 'bg-transparent'}`}
     >
       {children}
     </button>
@@ -82,6 +97,14 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
   const engineRef = useRef<ViewerEngine | null>(null);
   const gizmoRef = useRef<AxisGizmoHandle>(null);
   const [flyMode, setFlyMode] = useState(false);
+  const [alignMode, setAlignMode] = useState(false);
+  const userId = useSyncExternalStore(subscribeToAuth, sessionUserId, () => null);
+  const [sensitivitySetting, setSensitivitySetting] = useState(() => ({
+    userId,
+    value: loadSensitivity(userId),
+  }));
+  const sensitivity =
+    sensitivitySetting.userId === userId ? sensitivitySetting.value : loadSensitivity(userId);
   const [frame, setFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [picked, setPicked] = useState<number | null>(null);
@@ -91,6 +114,8 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
   const rgbAvailable = hasRgb(bundle);
   const activeColorMode = defaults.colorMode;
   const colorModeHintId = useId();
+  const [showFarLayer, setShowFarLayer] = useState(defaults.showFarLayer);
+  const farAvailable = !!bundle.far?.position.length;
   const [opts, setOpts] = useState<Options>({
     buildUp: defaults.buildUp,
     showCurrent: true,
@@ -118,6 +143,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
       eng = new ViewerEngine(canvas, bundle, {
         onPick: (p) => setPicked(p),
         onFlyModeChange: setFlyMode,
+        onAlignModeChange: setAlignMode,
       });
     } catch {
       setGlError(true);
@@ -153,9 +179,11 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
 
   useEffect(() => engineRef.current?.setFrame(frame), [frame, bundle]);
   useEffect(() => engineRef.current?.setOptions(opts), [opts, bundle]);
+  useEffect(() => engineRef.current?.setFarVisible(showFarLayer), [showFarLayer, bundle]);
   useEffect(() => engineRef.current?.setColorMode(activeColorMode), [activeColorMode, bundle]);
   useEffect(() => engineRef.current?.setPicked(picked), [picked, bundle]);
   useEffect(() => engineRef.current?.setSelectedFinding(sel ?? 0), [sel, bundle]);
+  useEffect(() => engineRef.current?.setSensitivity(sensitivity), [sensitivity, bundle]);
 
   // finding markers are HTML on top of the canvas, re-placed after every render
   useEffect(() => {
@@ -269,6 +297,12 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
         </header>
       )}
 
+      {bundle.farError && (
+        <p role="alert" className="m-0 border-b border-line bg-surface px-4 py-2 text-watch">
+          {t(bundle.farError === 'missing' ? 'viewer.far.errorMissing' : 'viewer.far.errorBroken')}
+        </p>
+      )}
+
       <div className="flex min-h-0 grow">
         <div
           role="toolbar"
@@ -290,6 +324,19 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
           <ToolButton label={t('toolbar.side')} onClick={() => eng()?.sideView()}>
             {icon(<path d="M2 14h14M5 14V7h8v7" />)}
           </ToolButton>
+          <ToolButton label={t('toolbar.front')} onClick={() => eng()?.frontView()}>
+            {icon(<path d="M3 14V4h12v10M6 14V9h6v5M2 14h14" />)}
+          </ToolButton>
+          <ToolButton label={t('toolbar.threeQuarter')} onClick={() => eng()?.threeQuarterView()}>
+            {icon(<path d="m9 2 6 3.5v7L9 16l-6-3.5v-7L9 2Zm0 7L3 5.5M9 9l6-3.5M9 9v7" />)}
+          </ToolButton>
+          <ToolButton
+            label={t('toolbar.alignSurface')}
+            pressed={alignMode}
+            onClick={() => eng()?.beginSurfaceAlignment()}
+          >
+            {icon(<path d="m2 12 7 4 7-4-7-4-7 4ZM9 10V2M6 5l3-3 3 3" />)}
+          </ToolButton>
           <ToolButton label={t('toolbar.camera')} onClick={() => eng()?.viewThroughFrame(frame)}>
             {icon(
               <>
@@ -299,15 +346,31 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
             )}
           </ToolButton>
           <span className="my-1 h-px w-6 bg-line" />
-          <ToolButton label={t('toolbar.zoomIn')} onClick={() => eng()?.zoom(0.8)}>
+          <ToolButton
+            label={t('toolbar.zoomIn')}
+            onClick={(event) => eng()?.zoom(0.8, event.altKey)}
+          >
             +
           </ToolButton>
-          <ToolButton label={t('toolbar.zoomOut')} onClick={() => eng()?.zoom(1.25)}>
+          <ToolButton
+            label={t('toolbar.zoomOut')}
+            onClick={(event) => eng()?.zoom(1.25, event.altKey)}
+          >
             −
           </ToolButton>
         </div>
 
         <main className="flex min-w-0 flex-1 flex-col">
+          <div className="relative z-20 flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-3 py-2">
+            <ModeSwitch orbitActive={!flyMode} onOrbit={() => eng()?.setOrbitMode()} />
+            <NavigationSettings
+              sensitivity={sensitivity}
+              onSensitivityChange={(value) => {
+                setSensitivitySetting({ userId, value });
+                saveSensitivity(userId, value);
+              }}
+            />
+          </div>
           <div className="relative min-h-0 grow bg-black">
             <canvas
               ref={canvasRef}
@@ -364,7 +427,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
               role="status"
               className="pointer-events-none absolute bottom-3 left-1/2 w-max max-w-[calc(100%-15rem)] -translate-x-1/2 rounded-md bg-bg/80 px-2.5 py-1.5 text-center text-xs leading-5 text-ink-2"
             >
-              {flyMode ? t('canvas.flyHint') : t('canvas.hint')}
+              {alignMode ? t('canvas.alignHint') : flyMode ? t('canvas.flyHint') : t('canvas.hint')}
             </div>
           </div>
 
@@ -442,7 +505,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
               <span className={`${mono} text-xs text-ink-2`}>{tc(frame)}</span>
             </div>
             <div className="relative aspect-video overflow-hidden rounded-lg border border-line bg-[#0d1014]">
-              <img
+              <SessionImage
                 src={bundle.assetUrl?.(f.thumb) ?? runUrl(bundle.runId, f.thumb)}
                 alt={t('panel.frame')}
                 className="size-full object-contain"
@@ -562,6 +625,11 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
             <Toggle on={opts.frustums} onChange={(v) => setOpts({ ...opts, frustums: v })}>
               {t('show.frustums')}
             </Toggle>
+            {farAvailable && (
+              <Toggle on={showFarLayer} onChange={setShowFarLayer}>
+                {t('viewer.show.farPoints')}
+              </Toggle>
+            )}
             {findings.length > 0 && (
               <Toggle on={opts.findings} onChange={(v) => setOpts({ ...opts, findings: v })}>
                 {t('show.findings')}

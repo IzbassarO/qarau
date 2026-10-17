@@ -49,3 +49,22 @@ global mapper (`pycolmap.global_mapping`). It has no binding for COLMAP's model 
   benchmark's 30 min per-video budget but to be watched in the full gate run.
 - If a later pycolmap exposes `MergeReconstructions`, merging models that share images can
   replace part of the join without a second mapping run.
+
+## Addendum 2026-10-16 (P3b): BA after the join only when bridges were removed
+
+The GLOMAP variance repeated on aegviidu (ADR 0013): of four runs on the same frames, one
+joined the 18 leftover frames with 1.0–1.5 px per image and 6 465 points over 4 px (mean
+0.661 px against 0.525–0.532 in the other three and on dev).
+
+- Changed: the global BA after the join runs only when bridge frames were actually
+  deregistered, and with the Huber loss GLOMAP's own BA uses. Before, it always ran with
+  the default trivial loss: with no bridge in the model it re-adjusted an already adjusted
+  GLOMAP model, letting points GLOMAP keeps (its filter allows ≈ 0.01 × focal ≈ 23 px) pull the
+  poses. Measured on aegviidu: merge step 612–754 s → 353 s, total 1 346 s, 0.525 px.
+- Tried and reverted: relaxed leftover registration into the mapper's own model **before**
+  GLOMAP. On aegviidu it reached 134 of 150 frames, so GLOMAP still ran, and the attempt
+  added ~140 s to a video already close to the 1 800 s per-video budget.
+- Not used: a fixed seed (GLOMAP is not deterministic with one, above; feature extraction
+  already differs by a few features per frame between identical runs). Best-of-two joins
+  would double the ~600 s join on a video near the budget. Next step if the gate trips on it:
+  shorten aegviidu matching (exhaustive 150 frames × 13 k features ≈ 510 s), then best-of-two.

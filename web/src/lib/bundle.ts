@@ -1,4 +1,5 @@
 import { cumulativeAssembled } from './geometry';
+import { authHeader } from '../auth/auth';
 
 export interface FrameInfo {
   i: number;
@@ -53,6 +54,8 @@ export interface Manifest {
     num_obs: string;
     source?: string;
   };
+  /** ADR 0003 / P3b: separate XYZ float32 and RGB uint8 triplets, without tracks. */
+  far?: { count: number; position: string; color: string; rule: string };
   dense?: { method: string; frames_used?: number; points?: number };
   findings?: string;
   tracks: {
@@ -96,6 +99,9 @@ export interface Bundle {
   position: Float32Array;
   /** Real per-point RGB, when the bundle includes a complete colour buffer. */
   color?: Uint8Array;
+  far?: { position: Float32Array; color: Uint8Array };
+  /** A declared far layer failed; the object cloud remains usable. */
+  farError?: 'missing' | 'broken';
   firstSeen: Uint16Array;
   frameOffsets: Uint32Array;
   frameInPoints: Uint32Array;
@@ -119,6 +125,19 @@ export class BundleError extends Error {
   }
 }
 
+/** Recoverable optional-layer failure: consumers render `bundle` with its warning. */
+export class FarLayerError extends Error {
+  readonly name = 'FarLayerError';
+
+  constructor(
+    public reason: 'missing' | 'broken',
+    message: string,
+    public bundle: Bundle,
+  ) {
+    super(`far layer: ${message}`);
+  }
+}
+
 export const runUrl = (runId: string, rel: string) =>
   `/api/runs/${encodeURIComponent(runId)}/files/${rel}`;
 
@@ -132,7 +151,9 @@ export function hasRgb(bundle: Bundle): boolean {
 }
 
 export async function loadManifest(runId: string): Promise<Manifest> {
-  const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/manifest.json`);
+  const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/manifest.json`, {
+    headers: authHeader(),
+  });
   if (res.status === 404) throw new BundleError('noManifest', 'manifest.json not found');
   if (!res.ok) throw new BundleError('generic', `manifest: HTTP ${res.status}`);
   const m = (await res.json()) as Manifest;
@@ -142,7 +163,7 @@ export async function loadManifest(runId: string): Promise<Manifest> {
 }
 
 async function fetchBuffer(url: string, onBytes: (loaded: number, total: number) => void) {
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: authHeader() });
   if (!res.ok || !res.body) throw new BundleError('generic', `${url}: HTTP ${res.status}`);
   const total = Number(res.headers.get('content-length') ?? 0);
   const chunks: Uint8Array[] = [];
@@ -222,7 +243,7 @@ export async function loadBundle(
   ]);
   const firstSeen = new Uint16Array(fs);
   const fnd = manifest.findings ? await loadFindings(manifest, get) : {};
-  return {
+  const bundle: Bundle = {
     ...fnd,
     runId,
     manifest,
@@ -236,4 +257,34 @@ export async function loadBundle(
     pointFrames: new Uint16Array(pf),
     assembled: cumulativeAssembled(firstSeen, manifest.frames.length),
   };
+  if (manifest.far !== undefined) {
+    try {
+      const far = manifest.far;
+      if (
+        !far ||
+        !Number.isSafeInteger(far.count) ||
+        far.count < 0 ||
+        typeof far.position !== 'string' ||
+        !far.position.trim() ||
+        typeof far.color !== 'string' ||
+        !far.color.trim()
+      )
+        throw new Error('invalid far manifest (count, position or color)');
+      const buffers = await Promise.allSettled([get(far.position), get(far.color)]);
+      const [position, color] = buffers.map((result) => {
+        if (result.status === 'rejected') throw result.reason;
+        return result.value;
+      });
+      if (position.byteLength !== far.count * 12 || color.byteLength !== far.count * 3)
+        throw new Error(
+          `expected ${far.count} XYZ/RGB triplets; got ${position.byteLength} position bytes and ${color.byteLength} color bytes`,
+        );
+      bundle.far = { position: new Float32Array(position), color: new Uint8Array(color) };
+    } catch (error) {
+      const reason = String(error).includes('HTTP 404') ? 'missing' : 'broken';
+      bundle.farError = reason;
+      throw new FarLayerError(reason, String(error), bundle);
+    }
+  }
+  return bundle;
 }

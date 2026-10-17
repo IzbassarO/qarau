@@ -6,6 +6,8 @@ import { setLang } from '../i18n';
 import { groupRunsIntoSites } from '../lib/inspections';
 import { Sidebar } from './Sidebar';
 import { NewInspectionDialog } from './NewInspectionDialog';
+import { AuthProvider } from '../auth/AuthProvider';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const sites = groupRunsIntoSites([
   { run_id: 'north-1', title: 'North survey', site: { id: 'north', name: 'North site' } },
@@ -16,10 +18,14 @@ const sites = groupRunsIntoSites([
 function Harness() {
   const [open, setOpen] = useState(false);
   return (
-    <MemoryRouter initialEntries={['/']}>
-      <Sidebar sites={sites} onNavigate={() => {}} onNewInspection={() => setOpen(true)} />
-      {open && <NewInspectionDialog onClose={() => setOpen(false)} />}
-    </MemoryRouter>
+    <QueryClientProvider client={new QueryClient()}>
+      <AuthProvider>
+        <MemoryRouter initialEntries={['/']}>
+          <Sidebar sites={sites} onNavigate={() => {}} onNewInspection={() => setOpen(true)} />
+          {open && <NewInspectionDialog onClose={() => setOpen(false)} />}
+        </MemoryRouter>
+      </AuthProvider>
+    </QueryClientProvider>
   );
 }
 

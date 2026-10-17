@@ -18,13 +18,19 @@ import {
 } from 'three';
 import { damp, NavigationControls } from './navigation';
 import { applyMouseLook, createFlyState, flyOrientation, step, type FlyState } from './fly';
-import { orientationFor, stepAxisView, viewDirectionFor, type Axis } from './gizmo';
-import { defaultViewState } from './defaults';
+import {
+  orientationFor,
+  stepAxisView,
+  threeQuarterDirection,
+  viewDirectionFor,
+  type Axis,
+} from './gizmo';
+import { defaultViewState, initialFraming } from './defaults';
+import { clampCamera, clampPosition, estimateGround, estimateSurfaceNormal } from './constraints';
 import { hasRgb, type Bundle } from '../lib/bundle';
 import {
   colmapPoseToThree,
   csrSlice,
-  frameBounds,
   heightRamp,
   median,
   pickNearest,
@@ -79,6 +85,7 @@ void main() {
 export interface Callbacks {
   onPick: (point: number | null) => void;
   onFlyModeChange?: (active: boolean) => void;
+  onAlignModeChange?: (active: boolean) => void;
 }
 
 export class ViewerEngine {
@@ -90,7 +97,7 @@ export class ViewerEngine {
   readonly focus: Focus;
   /** called after every render; the UI uses it to place finding markers */
   onRender?: () => void;
-  private rolled = false;
+  private sourcePose = false;
   private mat: ShaderMaterial;
   private pointGeometry: BufferGeometry;
   private heightColors: BufferAttribute;
@@ -102,13 +109,16 @@ export class ViewerEngine {
   private regIdx: number[]; // registered frame indices in time order
   private pathSolid: Line;
   private pathDash: Line;
-  private frustumAll: LineSegments;
+  private pathDots: Points<BufferGeometry, PointsMaterial>;
   private frustumNow: LineSegments;
   private frustumsVisible: boolean;
   private dot: Points;
   private pickMark: Points;
+  private farPoints?: Points<BufferGeometry, PointsMaterial>;
   private navigationBounds: Box3;
   private navigationMargin: number;
+  private ground;
+  private aligning = false;
   private flyState: FlyState | null = null;
   private flyLookActive = false;
   private flyDistance = 1;
@@ -164,6 +174,7 @@ export class ViewerEngine {
       1e-6,
       this.navigationBounds.getSize(new Vector3()).length() / 2,
     );
+    this.ground = estimateGround(b.position, new Vector3(0, 0, 1));
     this.regIdx = m.frames.filter((f) => f.registered && f.pose).map((f) => f.i);
     this.focus = { center: this.bounds.center, radius: r, method: 'bounds' };
 
@@ -225,6 +236,20 @@ export class ViewerEngine {
     pts.frustumCulled = false;
     this.scene.add(pts);
 
+    // ---- far layer: flat not-seen colour, independent of object colours and tracks
+    if (b.far && b.far.position.length > 0) {
+      const farGeometry = new BufferGeometry();
+      farGeometry.setAttribute('position', new BufferAttribute(b.far.position, 3));
+      const color = getComputedStyle(canvas).getPropertyValue('--color-notseen').trim();
+      this.farPoints = new Points(
+        farGeometry,
+        new PointsMaterial({ color: color || '#6B727D', size: 2.5, sizeAttenuation: false }),
+      );
+      this.farPoints.name = 'far';
+      this.farPoints.visible = defaults.showFarLayer;
+      this.scene.add(this.farPoints);
+    }
+
     // ---- camera path: solid up to the current frame, dashed for the rest
     const pathPts = new Float32Array(this.regIdx.length * 3);
     this.regIdx.forEach((fi, k) => pathPts.set(m.frames[fi].center!, k * 3));
@@ -238,27 +263,28 @@ export class ViewerEngine {
     );
     this.pathDash.computeLineDistances();
     this.pathSolid.frustumCulled = this.pathDash.frustumCulled = false;
-    this.scene.add(this.pathSolid, this.pathDash);
+    this.pathSolid.name = 'camera-path';
+    this.pathDots = new Points(
+      pg.clone(),
+      new PointsMaterial({ color: 0x9aa6b8, size: 3, sizeAttenuation: false }),
+    );
+    this.pathDots.name = 'camera-path-dots';
+    this.pathDots.frustumCulled = false;
+    this.scene.add(this.pathSolid, this.pathDash, this.pathDots);
 
-    // ---- frustums: every N-th registered frame (<= ~40), current one larger
-    const every = Math.max(1, Math.ceil(this.regIdx.length / 40));
-    const sel = this.regIdx.filter((_, k) => k % every === 0);
-    const fa = new Float32Array(sel.length * 16 * 3);
-    sel.forEach((fi, k) => this.writeFrustum(fa, k * 48, fi, r * 0.04));
-    const fg = new BufferGeometry();
-    fg.setAttribute('position', new BufferAttribute(fa, 3));
-    this.frustumAll = new LineSegments(fg, new LineBasicMaterial({ color: 0x7d8696 }));
+    // One frustum buffer, reused for the current frame. Never allocate per-frame pyramids.
     const ng = new BufferGeometry();
     ng.setAttribute('position', new BufferAttribute(new Float32Array(48), 3));
     this.frustumNow = new LineSegments(ng, new LineBasicMaterial({ color: 0x5b9bff }));
+    this.frustumNow.name = 'current-camera-frustum';
     const dg2 = new BufferGeometry();
     dg2.setAttribute('position', new BufferAttribute(new Float32Array(3), 3));
     this.dot = new Points(
       dg2,
       new PointsMaterial({ color: 0x5b9bff, size: 9, sizeAttenuation: false }),
     );
-    this.frustumAll.frustumCulled = this.frustumNow.frustumCulled = this.dot.frustumCulled = false;
-    this.scene.add(this.frustumAll, this.frustumNow, this.dot);
+    this.frustumNow.frustumCulled = this.dot.frustumCulled = false;
+    this.scene.add(this.frustumNow, this.dot);
 
     // ---- picked point marker
     const mg = new BufferGeometry();
@@ -280,14 +306,15 @@ export class ViewerEngine {
       points: b.position,
       bounds: this.navigationBounds,
       minDistance: r * 0.002,
+      sceneRadius: r,
       collisionRadius: r * 0.003,
       boundsMargin: this.navigationMargin,
       onChange: () => (this.dirty = true),
       onStart: () => {
-        if (this.flyMode) return;
+        if (this.flyMode || this.aligning) return;
         this.tween = null;
         this.axisAnimation = null;
-        this.exitRoll();
+        this.exitSourcePose();
       },
     });
     this.resetView(false);
@@ -353,7 +380,7 @@ export class ViewerEngine {
     while (n < this.regIdx.length && this.regIdx[n] <= i) n++;
     this.pathSolid.geometry.setDrawRange(0, n);
     this.pathDash.geometry.setDrawRange(Math.max(0, n - 1), this.regIdx.length);
-    if (f.registered && f.pose) {
+    if (f.registered && f.pose && f.camera && f.center) {
       const a = this.frustumNow.geometry.getAttribute('position') as BufferAttribute;
       this.writeFrustum(a.array as Float32Array, 0, i, this.bounds.radius * 0.12);
       a.needsUpdate = true;
@@ -366,9 +393,12 @@ export class ViewerEngine {
 
   private updateFrustumVisibility() {
     const frame = this.b.manifest.frames[this.prevFrame];
-    this.frustumAll.visible = this.frustumsVisible;
     this.frustumNow.visible = this.dot.visible =
-      this.frustumsVisible && !!frame?.registered && !!frame.pose;
+      this.frustumsVisible &&
+      !!frame?.registered &&
+      !!frame.pose &&
+      !!frame.camera &&
+      !!frame.center;
   }
 
   setOptions(o: Options) {
@@ -377,8 +407,18 @@ export class ViewerEngine {
     u.uShowCurrent.value = o.showCurrent ? 1 : 0;
     u.uFindings.value = o.findings ? 1 : 0;
     u.uPointSize.value = o.pointSize;
+    if (this.farPoints) this.farPoints.material.size = o.pointSize;
     this.frustumsVisible = o.frustums;
     this.updateFrustumVisibility();
+    this.dirty = true;
+  }
+
+  hasFarLayer(): boolean {
+    return !!this.farPoints;
+  }
+
+  setFarVisible(visible: boolean) {
+    if (this.farPoints) this.farPoints.visible = visible;
     this.dirty = true;
   }
 
@@ -421,26 +461,27 @@ export class ViewerEngine {
   }
 
   // ------------------------------------------------------------ views
-  /** Leave the through-camera view: back to the world-up orbit (drops the roll). */
-  private exitRoll = () => {
-    if (!this.rolled) return;
-    this.rolled = false;
+  /** Leave the locked source-camera view and resume world-up orbit. */
+  private exitSourcePose = () => {
+    if (!this.sourcePose) return;
+    this.sourcePose = false;
     this.tween = null;
     this.controls.enabled = true;
     this.controls.sync(); // re-aims at the target with camera.up = +Z
     this.dirty = true;
   };
 
-  /** q1 = exact camera rotation (through-camera view, roll included); else normal orbit view. */
+  /** Source-camera views retain the viewing direction; orbit always levels the horizon. */
   private fly(p1: Vector3, g1: Vector3, fov: number, animate = true, q1?: Quaternion) {
+    this.cancelSurfaceAlignment();
     this.exitFlyMode();
     this.axisAnimation = null;
     this.controls.stop();
-    this.exitRoll();
+    this.exitSourcePose();
     const p0 = this.camera.position.clone(),
       g0 = this.controls.target.clone();
     if (q1) {
-      this.rolled = true;
+      this.sourcePose = true;
       this.controls.enabled = false;
     } else this.controls.enabled = true;
     if (!animate) {
@@ -448,6 +489,7 @@ export class ViewerEngine {
       this.controls.target.copy(g1);
       this.controls.sync();
       if (q1) this.camera.quaternion.copy(q1);
+      this.enforceCamera();
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
       this.dirty = true;
@@ -467,43 +509,15 @@ export class ViewerEngine {
   }
 
   resetView(animate = true) {
-    const fovY = 50;
-    const framed = frameBounds(this.bounds, fovY, this.camera.aspect);
-    const c = new Vector3(...framed.target);
-    const offset = new Vector3(...framed.position).sub(c);
-    const expanded = this.navigationBounds.clone().expandByScalar(this.navigationMargin);
-    const framingDistance = offset.length();
-    let distance = framingDistance;
-    // A wide/flat cloud's framing radius can exceed its vertical navigation room.
-    // Reset within a sphere that fits all six axis views at the same distance.
-    if (expanded.containsPoint(c))
-      for (let axis = 0; axis < 3; axis++)
-        distance = Math.min(
-          distance,
-          c.getComponent(axis) - expanded.min.getComponent(axis),
-          expanded.max.getComponent(axis) - c.getComponent(axis),
-        );
-    distance = Math.max(this.bounds.radius * 0.002, distance * 0.999);
-    const direction = offset.normalize();
-    const right = new Vector3().crossVectors(this.camera.up, direction).normalize();
-    const up = new Vector3().crossVectors(direction, right);
-    let tanHalfFov = Math.tan((fovY * Math.PI) / 360);
-    // Shortening the distance changes near-corner perspective more than centre-plane scale.
-    // Fit those corners again at the constrained distance, preserving the framing margin.
-    for (const x of [this.bounds.min[0], this.bounds.max[0]])
-      for (const y of [this.bounds.min[1], this.bounds.max[1]])
-        for (const z of [this.bounds.min[2], this.bounds.max[2]]) {
-          const corner = new Vector3(x, y, z).sub(c);
-          const depth = Math.max(1e-12, distance - corner.dot(direction));
-          tanHalfFov = Math.max(
-            tanHalfFov,
-            (1.1 * Math.abs(corner.dot(up))) / depth,
-            (1.1 * Math.abs(corner.dot(right))) / (depth * this.camera.aspect),
-          );
-        }
-    const fov = (Math.atan(tanHalfFov) * 360) / Math.PI;
-    this.fly(c.clone().addScaledVector(direction, distance), c, fov, animate);
+    const framed = initialFraming(
+      this.bounds,
+      this.navigationBounds,
+      this.navigationMargin,
+      this.camera.aspect,
+    );
+    this.fly(framed.position, framed.target, framed.fov, animate);
   }
+
   topView() {
     this.axisView('z');
   }
@@ -511,16 +525,73 @@ export class ViewerEngine {
     this.axisView('x');
   }
 
+  frontView() {
+    this.axisView('-y');
+  }
+
+  threeQuarterView() {
+    this.startAxisView(threeQuarterDirection(this.camera.up));
+  }
+
+  setSensitivity(value: number) {
+    this.controls.sensitivity = value;
+  }
+
+  setOrbitMode() {
+    this.cancelSurfaceAlignment();
+    this.exitFlyMode();
+    this.exitSourcePose();
+    this.enforceCamera();
+  }
+
+  beginSurfaceAlignment() {
+    if (this.aligning) {
+      this.cancelSurfaceAlignment();
+      return;
+    }
+    this.setOrbitMode();
+    this.tween = null;
+    this.axisAnimation = null;
+    this.controls.stop();
+    this.controls.enabled = false;
+    this.aligning = true;
+    this.cb.onAlignModeChange?.(true);
+    this.canvas.focus({ preventScroll: true });
+  }
+
+  private cancelSurfaceAlignment() {
+    if (!this.aligning) return;
+    this.aligning = false;
+    this.controls.enabled = true;
+    this.cb.onAlignModeChange?.(false);
+  }
+
+  private alignToPoint(index: number) {
+    const point = new Vector3().fromArray(this.b.position, index * 3);
+    const normal = estimateSurfaceNormal(this.b.position, point, 30, this.camera.up);
+    if (Math.abs(normal.dot(this.camera.up)) >= Math.cos(Math.PI / 18)) normal.copy(this.camera.up);
+    else if (normal.dot(this.camera.position.clone().sub(point)) < 0) normal.negate();
+    const distance = this.camera.position.distanceTo(this.controls.target);
+    this.fly(point.clone().addScaledVector(normal, distance), point, this.camera.fov);
+  }
+
   /** Axis buttons orbit the current pivot at the current distance, with stable pole up. */
   axisView(axis: Axis) {
+    // An underside orbit would violate the terrain constraint.
+    if (axis === '-z') return;
+    this.startAxisView(viewDirectionFor(axis, this.camera.up));
+  }
+
+  private startAxisView(target: ReturnType<typeof viewDirectionFor>) {
+    this.cancelSurfaceAlignment();
     this.exitFlyMode();
     this.tween = null;
-    this.rolled = false;
+    this.sourcePose = false;
     this.controls.stop();
     this.controls.enabled = true;
     this.axisAnimation = {
       pivot: this.controls.target.clone(),
-      target: viewDirectionFor(axis, this.camera.up),
+      target,
     };
     this.dirty = true;
   }
@@ -532,12 +603,13 @@ export class ViewerEngine {
     const dist = Math.min(this.bounds.radius * 2, Math.max(diag * 3, this.bounds.radius * 0.1));
     this.fly(c.clone().addScaledVector(dir.normalize(), dist), c, 50);
   }
-  zoom(factor: number) {
+  zoom(factor: number, precision = false) {
+    this.cancelSurfaceAlignment();
     this.exitFlyMode();
     this.axisAnimation = null;
     this.tween = null;
-    this.exitRoll();
-    this.controls.zoom(factor);
+    this.exitSourcePose();
+    this.controls.zoom(factor, precision);
   }
 
   /** Fly into the pose of frame i (position = centre, FOV from fy, looking at median visible depth). */
@@ -575,9 +647,10 @@ export class ViewerEngine {
 
   private enterFlyMode() {
     if (this.flyMode || this.disposed) return;
+    this.cancelSurfaceAlignment();
     this.tween = null;
     this.axisAnimation = null;
-    this.rolled = false;
+    this.sourcePose = false;
     this.controls.stop();
     this.controls.enabled = false;
     this.flyDistance = Math.max(
@@ -687,6 +760,11 @@ export class ViewerEngine {
       Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 4
     )
       return;
+    if (this.aligning) {
+      const point = this.pickAt(e);
+      if (point !== undefined) this.alignToPoint(point);
+      return;
+    }
     this.cb.onPick(this.pickAt(e) ?? null);
   };
   private noCtx = (e: Event) => e.preventDefault();
@@ -706,6 +784,7 @@ export class ViewerEngine {
   private onKey = (e: KeyboardEvent) => {
     const key = this.keyName(e);
     const flyExit = this.flyMode && (key === 'f' || e.code === 'KeyF' || key === 'escape');
+    const alignExit = this.aligning && key === 'escape';
     if (
       this.isEditing(e.target) ||
       this.isEditing(document.activeElement) ||
@@ -715,10 +794,15 @@ export class ViewerEngine {
       (document.activeElement !== this.canvas &&
         e.target !== this.canvas &&
         document.pointerLockElement !== this.canvas &&
-        !flyExit)
+        !flyExit &&
+        !alignExit)
     )
       return;
-    if (key === 'f' || e.code === 'KeyF') {
+    if (alignExit) this.cancelSurfaceAlignment();
+    else if (key === '1') this.setOrbitMode();
+    else if (key === '2' || key === '3')
+      return; // Walk / Observer are not implemented yet.
+    else if (key === 'f' || e.code === 'KeyF') {
       if (!e.repeat) {
         if (this.flyMode) this.exitFlyMode();
         else this.enterFlyMode();
@@ -728,8 +812,6 @@ export class ViewerEngine {
       else if (['w', 'a', 's', 'd', 'shift'].includes(key)) this.heldKeys.add(key);
       else return;
     } else if (key === 'home') this.resetView();
-    else if (key === '1') this.axisView('-y');
-    else if (key === '3') this.sideView();
     else if (key === '7') this.topView();
     else return;
     if (this.flyMode && e.shiftKey) this.heldKeys.add('shift');
@@ -811,7 +893,12 @@ export class ViewerEngine {
         animation.target,
         dt / steps,
       );
-      const safe = this.controls.constrainMove(this.camera.position, next.position);
+      const safe = clampPosition(this.controls.constrainMove(this.camera.position, next.position), {
+        ground: this.ground,
+        box: this.navigationBounds,
+        margin: this.navigationMargin,
+        epsilon: this.bounds.radius * 0.0001,
+      });
       if (!safe.equals(next.position)) {
         this.axisAnimation = null;
         break;
@@ -845,6 +932,43 @@ export class ViewerEngine {
   }
 
   // ------------------------------------------------------------ loop
+  /** Final safety pass for every camera producer (input, presets, tween and benchmark). */
+  private enforceCamera() {
+    const options = {
+      ground: this.ground,
+      box: this.navigationBounds,
+      margin: this.navigationMargin,
+      epsilon: this.bounds.radius * 0.0001,
+    };
+    const before = this.camera.position.clone();
+    const rotation = this.camera.quaternion.clone();
+    if (this.flyState) {
+      const safe = clampPosition(this.camera.position, options);
+      if (!safe.equals(this.camera.position)) this.flyState.velocity.set(0, 0, 0);
+      this.camera.position.copy(safe);
+      this.flyState.position.copy(safe);
+    } else {
+      const state = clampCamera(
+        {
+          position: this.camera.position,
+          pivot: this.controls.target,
+          up: this.camera.up,
+          minDistance: this.bounds.radius * 0.002,
+          fov: this.camera.fov,
+          rotation: this.camera.quaternion,
+        },
+        { ...options, minDist: this.bounds.radius * 0.002, maxDist: this.bounds.radius * 20 },
+      );
+      this.camera.position.copy(state.position);
+      this.controls.target.copy(state.pivot);
+      this.camera.up.copy(state.up);
+      if (state.rotation) this.camera.quaternion.copy(state.rotation);
+    }
+    this.camera.updateMatrixWorld();
+    this.dirty ||=
+      !before.equals(this.camera.position) || rotation.angleTo(this.camera.quaternion) > 1e-7;
+  }
+
   resize() {
     const w = this.canvas.clientWidth,
       h = this.canvas.clientHeight;
@@ -867,7 +991,7 @@ export class ViewerEngine {
       const previousPosition = this.camera.position.clone();
       this.camera.position.lerpVectors(tw.p0, tw.p1, s);
       this.controls.target.lerpVectors(tw.g0, tw.g1, s);
-      // Source-camera views reproduce the recorded pose exactly, roll included.
+      // Follow the source-camera direction; the final constraint pass levels roll.
       this.controls.sync(tw.q1 ? undefined : previousPosition);
       if (tw.q0 && tw.q1) this.camera.quaternion.slerpQuaternions(tw.q0, tw.q1, s);
       this.camera.fov = tw.f0 + (tw.f1 - tw.f0) * s;
@@ -889,8 +1013,9 @@ export class ViewerEngine {
       this.controls.sync();
       this.dirty = true;
     }
-    if (!this.rolled && !this.flyMode && !this.axisAnimation && this.controls.update(dt))
+    if (!this.sourcePose && !this.flyMode && !this.axisAnimation && this.controls.update(dt))
       this.dirty = true;
+    this.enforceCamera();
     // fps = frames actually rendered per second; renders are on demand, so idle reads 0
     if (this.dirty) {
       this.dirty = false;
@@ -916,10 +1041,10 @@ export class ViewerEngine {
     const atCam =
       this.dot.visible &&
       this.camera.position.distanceTo(new Vector3(c[0], c[1], c[2])) < this.bounds.radius * 0.02;
-    const shown = [this.frustumAll.visible, this.frustumNow.visible, this.dot.visible];
-    if (atCam) this.frustumAll.visible = this.frustumNow.visible = this.dot.visible = false;
+    const shown = [this.frustumNow.visible, this.dot.visible];
+    if (atCam) this.frustumNow.visible = this.dot.visible = false;
     r.render(this.scene, this.camera);
-    [this.frustumAll.visible, this.frustumNow.visible, this.dot.visible] = shown;
+    [this.frustumNow.visible, this.dot.visible] = shown;
     this.onRender?.();
   }
 
@@ -943,6 +1068,21 @@ export class ViewerEngine {
     window.removeEventListener('blur', this.onBlur);
     c.removeEventListener('contextmenu', this.noCtx);
     this.controls.dispose();
+    for (const object of [
+      this.pathSolid,
+      this.pathDash,
+      this.pathDots,
+      this.frustumNow,
+      this.dot,
+      this.pickMark,
+    ]) {
+      object.geometry.dispose();
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) material.dispose();
+    }
+    this.farPoints?.geometry.dispose();
+    this.farPoints?.material.dispose();
+    this.farPoints?.removeFromParent();
     this.renderer.dispose();
   }
 }

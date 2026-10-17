@@ -28,7 +28,7 @@ v = {"registered_pct": pct, "models": 1, "reproj_px": 0.5, "points": 1000,
 """
 
 
-def only_core(team, todo, feedback=None):
+def only_core(team, todo, feedback=None, devs=None):
     return [{"task_id": "T-001", "assignee": "dev_pipeline", "plan": "p", "criteria": ["c"]}]
 
 
@@ -107,6 +107,62 @@ def test_red_ci_sends_back_then_blocks(repo):
     t = task(team)
     assert t["status"] == "blocked" and "GitHub CI failed" in t["blocked_reason"]
     assert team.gh.merged == [] and "pipeline/b.py" not in remote_files(repo)
+
+
+def test_ci_failure_log_reaches_the_packet_and_the_developer(repo, monkeypatch):
+    url = "https://github.com/o/r/actions/runs/39008036568/job/117324416132"
+    log = "".join(f"web\tstep\t\x1b[31mline {i}\x1b[39m\n" for i in range(200))
+    calls = []
+
+    def gh(self, *args):
+        calls.append(args)
+        if args[:2] == ("run", "view"):
+            return log
+        return json.dumps(
+            {
+                "headRefOid": self.sha,
+                "statusCheckRollup": [
+                    {
+                        "name": "web",
+                        "status": "COMPLETED",
+                        "conclusion": "FAILURE",
+                        "detailsUrl": url,
+                    },
+                    {
+                        "name": "web-e2e",
+                        "status": "COMPLETED",
+                        "conclusion": "FAILURE",
+                        "detailsUrl": url,
+                    },
+                    {"name": "backend", "status": "COMPLETED", "conclusion": "SUCCESS"},
+                ],
+            }
+        )
+
+    monkeypatch.setattr(GitHub, "gh", gh)
+    real = GitHub(None)
+    real.sha = "abc"
+    ok, why = real.wait_ci(25, "abc", 60)
+    assert not ok and why.startswith(f"web: FAILURE {url}")
+    assert [c for c in calls if c[0] == "run"] == [("run", "view", "39008036568", "--log-failed")]
+    assert "line 50\n" in why and "line 199" in why and "line 49\n" not in why
+    assert "\x1b" not in why
+
+    seen = []
+
+    class Red(FakeGitHub):
+        def wait_ci(self, number, sha, timeout_s):
+            return False, f"web: FAILURE {url}\n```\nReferenceError: ResizeObserver\n```"
+
+    team, graph = make(
+        repo,
+        Dev(lambda wt, s: seen.append(s.get("feedback", ""))),
+        gh=Red,
+        max_fix_loops=1,
+    )
+    run(graph)
+    assert "ResizeObserver" in seen[-1]  # round 2 is told the error, not only a link
+    assert "ResizeObserver" in (team.home / "packets" / "T-001.md").read_text()
 
 
 def test_secret_is_never_committed(repo):

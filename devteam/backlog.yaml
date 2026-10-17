@@ -117,17 +117,38 @@ tasks:
     License (non-commercial): forbidden. Unclear -> ask the owner.
 
     '
-  status: todo
+  status: done
   depends_on:
   - A4b
-  run: run-20261016-115433
+  run: run-20261017-085251
   branch: devteam/P3b
+  pr: https://github.com/IzbassarO/qarau/pull/28
+  done_at: '2026-10-17'
 - id: P2b
   area: core
   title: Parallax keyframes and a footage quality report
   goal: 'Keyframes are chosen by parallax (enough camera motion), not a fixed rate. A quality report lists
     problems with plain re-shoot advice: blur, moving too fast, pure rotation (turning on the spot), low
     texture.
+
+
+    Earlier work is on devteam/P2b (PR #25, open): re-run the gates on that branch; the CI web failure
+    that blocked it is fixed in dev.
+
+    '
+  status: todo
+  owner: dev_pipeline
+  run: run-20261016-215415
+  branch: devteam/P2b
+  blocked_reason: CI web failure fixed in dev; re-run gates on the existing branch
+- id: P4a-1
+  area: core
+  title: Dense stage executor without spending money
+  goal: 'A Docker image with COLMAP built for CUDA, and a provider-independent remote executor behind
+    an interface: start a GPU worker, upload the frames, run dense, download the results, and always shut
+    the worker down (finally / on error / on timeout, with a test for each). A timeout and a daily GPU
+    budget in config.yaml (the pipeline''s or infra/, never devteam/); the executor refuses to start a
+    worker that would exceed it. Tested with a fake provider only: no real GPU, no paid account.
 
     '
   status: todo
@@ -147,13 +168,17 @@ tasks:
   branch: devteam/P3c
   pr: https://github.com/IzbassarO/qarau/pull/23
   done_at: '2026-10-16'
-- id: P4a
+- id: P4a-2
   area: core
-  title: Dense reconstruction stage (commercial licence)
+  title: 'Dense reconstruction: first real GPU run (commercial licence)'
   goal: 'A dense stage behind the Densifier interface, starting from branch wip/dense-stage (ADR 0008).
     Model: Depth Anything V2 **Small only** (depth-anything/Depth-Anything-V2-Small-hf, Apache-2.0); Base
     and Large are CC-BY-NC (non-commercial) and must never be loaded: the code refuses any other model
     id, with a test. Exported to the viewer bundle.
+
+
+    Runs through the P4a-1 executor on a real GPU provider: the first paid run. No depends_on on purpose,
+    so finishing P4a-1 never moves it to todo: only the owner does, once a provider is funded.
 
     '
   licence: 'Depth Anything V2 Small code and weights: Apache-2.0 (owner confirmed 2026-10-15). Base/Large:
@@ -161,7 +186,7 @@ tasks:
 
     '
   status: blocked
-  blocked_reason: Waits for a GPU machine (owner 2026-10-16); set to todo when one is available.
+  blocked_reason: waits for owner to fund a GPU provider
 - id: P4b
   area: core
   title: Frame-to-point links for dense points
@@ -170,6 +195,22 @@ tasks:
 
     '
   status: todo
+- id: P4c
+  area: core
+  title: Dense only inside the region of interest
+  goal: 'When a site has a region of interest (A7), dense reconstruction and the later stages process
+
+    only the frames and points that see it; camera poses still use all frames. Without a region
+
+    the pipeline runs as before. Tests on a synthetic scene with a box; benchmark unchanged for
+
+    videos without a region.
+
+    '
+  status: todo
+  depends_on:
+  - P4a-2
+  - A7
 - id: S1
   area: core
   phase: server
@@ -200,8 +241,8 @@ tasks:
     '
   status: blocked
   depends_on:
-  - P4a
-  blocked_reason: 'Waits for P4a (dense stage): the queue runs the full pipeline, including the dense
+  - P4a-2
+  blocked_reason: 'Waits for P4a-2 (dense stage): the queue runs the full pipeline, including the dense
     stage.'
 - id: P5a
   area: core
@@ -374,10 +415,123 @@ tasks:
 
     '
   owner: dev_app
-  status: blocked
+  status: done
   depends_on:
   - P3b
-  blocked_reason: 'Waits for P3b: the pipeline must first export the `far` layer.'
+  run: cont-20261017-123453-dev_app-1
+  branch: devteam/A5
+  pr: https://github.com/IzbassarO/qarau/pull/32
+  done_at: '2026-10-17'
+- id: A6
+  area: app
+  title: Viewer navigation that feels natural
+  goal: "The owner works on a MacBook trackpad (no mouse): the trackpad is a first-class input. Mouse\n\
+    controls stay as they are.\n- Trackpad: two-finger drag = orbit, pinch = zoom, Shift + two-finger\
+    \ drag = pan. Tell pinch\n  (wheel events with ctrlKey) apart from two-finger scrolling; never zoom\
+    \ on plain two-finger\n  scrolling.\n- Speed adapts to distance: orbit, pan and zoom slow down near\
+    \ the target point. Hold\n  Option/Alt for precision (4x slower). A sensitivity slider in settings,\
+    \ saved per user.\n- The horizon stays level (no roll). \"Align to surface\": click it, then a point;\
+    \ the camera\n  turns to face that surface head-on. Preset views (top, front, side, 3/4) and \"reset\
+    \ view\".\n- Orbit mode is the default. The ground is the outer terrain (not building floors), estimated\n\
+    \  as the dominant lowest plane until P5a gives gravity; the camera never goes below it and\n  cannot\
+    \ look up from under it; it stays inside the scene box plus a margin; zoom has a min and\n  max distance.\n\
+    - The camera path is a thin line with dots; a frustum only for the current or selected frame,\n  never\
+    \ for all frames.\n- A mode switch with three modes (keys 1/2/3): Orbit, Walk (A8, shown disabled\
+    \ until it\n  exists), Observer (A9).\n- All text via i18n (RU/KK/EN).\n- Unit tests for the event\
+    \ handling (pinch vs scroll, Shift pan, Alt precision) and for the\n  constraints (ground, bounds,\
+    \ zoom limits, no roll). Tester screenshots of /viewer/notre-dame, /viewer/aegviidu and /viewer/room.\n"
+  status: done
+  owner: dev_app
+  run: cont-20261017-123453-dev_app-2
+  branch: devteam/A6
+  pr: https://github.com/IzbassarO/qarau/pull/33
+  done_at: '2026-10-17'
+- id: A6b
+  area: app
+  title: Point info
+  goal: 'An "i" tool. Clicking a point opens a panel with its coordinates, the video frames that see it
+
+    (thumbnails; a click jumps to that moment of the video) and the number of views. Height and
+
+    distances in metres only once P5a provides scale, confidence only once P6 provides it; until
+
+    then the panel says they are not available (never a made-up number). i18n RU/KK/EN; unit tests
+
+    for the panel data; tester screenshots of /viewer/notre-dame.
+
+    '
+  status: todo
+  depends_on:
+  - A6
+- id: A7
+  area: app
+  title: Region of interest
+  goal: 'In top view the user draws a box around the object. It is saved per site and reused for later
+
+    inspections of that site; the viewer can hide points outside it (toggle). Store it with the
+
+    run catalog / site data (a documented JSON shape the pipeline can read later, for P4c), not
+
+    only in browser storage. i18n RU/KK/EN; unit tests for the box math and save/load; tester
+
+    screenshots of /viewer/notre-dame with a box drawn.
+
+    '
+  status: todo
+- id: A9
+  area: app
+  title: Observer mode
+  goal: 'Upgrade the existing fly mode (F) into a free spectator camera: no gravity, passes through
+
+    everything, speed adapts to distance. Game-style controls: WASD/arrows to move, Space/Shift
+
+    up/down, mouse look with pointer lock (Esc to exit); on a trackpad, two-finger drag to look
+
+    while the keyboard moves. A minimap in the corner (top view) shows the user as a circle with a
+
+    view cone. Optional third-person view with the circle visible. Once P5a gives metric scale, an
+
+    optional 1.75 m human figure for scale (hidden until then). Plain, engineering-like visual
+
+    style; Orbit stays the default mode. Multi-user shared viewing is out of scope. Unit tests for
+
+    movement and controls; tester screenshots of /viewer/aegviidu in Observer mode.
+
+    '
+  status: todo
+  depends_on:
+  - A6
+- id: O1
+  area: app
+  title: Organization map
+  goal: 'An organization page with a MapLibre map of the organization''s sites as markers; clicking a
+
+    site opens its inspections. Only real sites, no invented demo sites: a site without
+
+    coordinates is listed beside the map, not placed. Seed the organization "Syracuse University"
+
+    with no sites (the page then says there are no sites yet). i18n RU/KK/EN; unit tests; tester
+
+    screenshot of the organization page.
+
+    '
+  status: todo
+- id: A8
+  area: app
+  title: Walk mode
+  goal: 'First-person view to go inside buildings: the floor is the surface directly under the camera
+
+    (raycast down), eye height 1.6 m (needs metric scale from P5a), walls can be passed through;
+
+    arrows/WASD and two-finger trackpad movement. Enables the Walk entry of the A6 mode switch.
+
+    Unit tests for floor following; tester screenshots of /viewer/room in Walk mode.
+
+    '
+  status: todo
+  depends_on:
+  - A6
+  - P5a
 - id: A1b
   area: app
   title: Simple local login
@@ -385,4 +539,9 @@ tasks:
     credentials never hard-coded.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261017-085251
+  branch: devteam/A1b
+  pr: https://github.com/IzbassarO/qarau/pull/27
+  done_at: '2026-10-17'

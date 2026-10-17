@@ -43,7 +43,11 @@ export function devRuns(): Plugin {
               const m = JSON.parse(
                 fs.readFileSync(path.join(root, id, 'web/manifest.json'), 'utf8'),
               );
-              out.push({ run_id: id, source: m.source, stats: m.stats });
+              // same as the API: the manifest's created_at; mtime only for old runs
+              const created_at =
+                m.created_at ??
+                fs.statSync(path.join(root, id, 'web/manifest.json')).mtime.toISOString();
+              out.push({ run_id: id, source: m.source, stats: m.stats, created_at });
             } catch {
               /* not a run */
             }

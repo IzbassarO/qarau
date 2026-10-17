@@ -9,15 +9,20 @@ class FakeAgents:
 
     delay = 1.0
 
-    def plan(self, team, todo: list[dict], feedback=None) -> list[dict]:
+    def plan(self, team, todo: list[dict], feedback=None, devs=None) -> list[dict]:
         """First open task per developer, matched by area."""
         time.sleep(self.delay)
         out, busy = [], set()
+        allowed = team.cfg["developers"] if devs is None else devs
         for t in todo:
-            devs = [d for d, c in team.cfg["developers"].items() if t.get("area") in c["areas"]]
-            if not devs or devs[0] in busy:
+            devs_ = [
+                d
+                for d, c in team.cfg["developers"].items()
+                if t.get("area") in c["areas"] and d in allowed
+            ]
+            if not devs_ or devs_[0] in busy:
                 continue
-            dev = devs[0]
+            dev = devs_[0]
             busy.add(dev)
             out.append(
                 {

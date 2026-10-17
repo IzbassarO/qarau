@@ -24,9 +24,9 @@ def recording(agents):
     """Records what the brain was offered and the plan each developer got."""
     seen, plans, plan = [], {}, agents.plan
 
-    def record_plan(team, todo, feedback=None):
+    def record_plan(team, todo, feedback=None, devs=None):
         seen.append({t["id"]: t for t in todo})
-        return plan(team, todo, feedback)
+        return plan(team, todo, feedback, devs)
 
     develop = agents.develop
 

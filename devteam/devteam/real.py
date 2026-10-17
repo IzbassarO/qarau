@@ -143,6 +143,8 @@ continues on that branch (dev merged in), so plan only what is still missing; sa
 that the earlier work is there. Tasks whose `depends_on` are not all done never reach you.
 Never require edits to docs/notes/progress.md: developers may not touch it (parallel
 tasks would conflict there); the daily report covers progress.
+Never plan a step that spends money: no paid external services (RunPod, cloud GPUs, paid APIs);
+a task that needs one is the owner's call, so leave it out.
 Pick at most one task per developer, in backlog order, only for the developers listed.
 Respect the repository rules (CLAUDE.md). Keep each task small enough for one PR."""
 
@@ -181,8 +183,12 @@ class RealAgents:
     TOOLS = {"claude", "codex"}  # developer tools implemented
 
     # --- brain ---------------------------------------------------------------------------
-    def plan(self, team, todo, feedback=None):
-        devs = {n: d for n, d in team.cfg["developers"].items() if d["tool"] in self.TOOLS}
+    def plan(self, team, todo, feedback=None, devs=None):
+        devs = {
+            n: d
+            for n, d in team.cfg["developers"].items()
+            if d["tool"] in self.TOOLS and (devs is None or n in devs)
+        }
         root = team.root
         read = lambda p: (root / p).read_text() if (root / p).exists() else "(missing)"  # noqa: E731
         files = team.git("ls-files", "pipeline", "backend", "infra", "web/src").split("\n")
@@ -285,7 +291,11 @@ class RealAgents:
             secs=time.monotonic() - t0,
         )
         if out.pop("error", None):  # usage limit, auth, crash: stop; `devteam resume` retries
-            raise RuntimeError(f"{dev['tool']} failed: {team.redact(out['summary'][:800])}")
+            msg = f"{dev['tool']} failed: {team.redact(out['summary'][:800])}"
+            hit, reset_at = costs.limit_reset(out["summary"])
+            if hit:  # continuous mode waits for the reset, a single run stops
+                raise costs.SubscriptionLimit(msg, reset_at)
+            raise RuntimeError(msg)
         return out
 
     def _brief(self, team, s, dev) -> str:
@@ -320,6 +330,9 @@ Rules:
   that is expected. If a request needs a commit, say so instead of trying to commit.
 - Do not try to take screenshots: the tester screenshots the app pages itself and judges
   visual criteria from them.
+- Stop every server you start (dev server, preview, test server) as soon as its check is
+  done; never leave a listening port. When your run ends, the orchestrator kills anything
+  you left and reports each port it had to close.
 {quick_benchmark(team, s, dev)}- Run these checks and make them pass before you finish:
 {checks}
 - Finish with a short summary: what you changed, how you verified it, what is left."""
@@ -331,6 +344,7 @@ Rules:
             if k
             not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDECODE")
             and not k.startswith("CLAUDE_CODE_")
+            and not paid_service_key(k)
         }
         if not team.secrets.get("CLAUDE_CODE_OAUTH_TOKEN"):
             raise RuntimeError("CLAUDE_CODE_OAUTH_TOKEN is missing in devteam/.env")
@@ -362,11 +376,21 @@ Rules:
         else:
             prompt = self._brief(team, s, dev)
         r = team.run_proc(
-            cmd, cwd=s["worktree"], timeout=dev["timeout_min"] * 60, input=prompt, env=env
+            cmd,
+            cwd=s["worktree"],
+            timeout=dev["timeout_min"] * 60,
+            input=prompt,
+            env=env,
+            agent=s["assignee"],
         )
         try:
             out = json.loads(r["stdout"])
         except json.JSONDecodeError:
+            if costs.limit_reset(r["stderr"] + r["stdout"])[0]:
+                raise costs.SubscriptionLimit(
+                    f"claude: {team.redact((r['stderr'] or r['stdout'])[-800:])}",
+                    costs.limit_reset(r["stderr"] + r["stdout"])[1],
+                ) from None
             raise RuntimeError(
                 f"claude gave no JSON (exit {r['code']}): "
                 f"{team.redact(r['stderr'][-800:] or r['stdout'][-800:])}"
@@ -392,6 +416,7 @@ Rules:
             k: v
             for k, v in os.environ.items()
             if k not in ("OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL")
+            and not paid_service_key(k)
         }
         cmd = ["codex", "exec", "--json", "--sandbox", "workspace-write", "-C", s["worktree"]]
         cmd += ["--add-dir", str(team.home / "scratch" / s["task"]["id"])]  # writable too
@@ -407,7 +432,12 @@ Rules:
             cmd += ["-"]
             prompt = self._brief(team, s, dev)
         r = team.run_proc(
-            cmd, cwd=s["worktree"], timeout=dev["timeout_min"] * 60, input=prompt, env=env
+            cmd,
+            cwd=s["worktree"],
+            timeout=dev["timeout_min"] * 60,
+            input=prompt,
+            env=env,
+            agent=s["assignee"],
         )
         return parse_codex(r["stdout"], r["ok"], r["stderr"], s.get("session", ""))
 
@@ -488,6 +518,11 @@ Rules:
         )
         v["passed"] = v["passed"] and all(c["met"] for c in v["criteria"])
         return v
+
+
+def paid_service_key(name: str) -> bool:
+    """Credentials for services that bill per use never reach a developer agent."""
+    return any(p in name.upper() for p in ("RUNPOD", "AWS_", "GOOGLE_APPLICATION", "VAST_"))
 
 
 def parse_codex(stdout: str, ok: bool, stderr: str, session: str) -> dict:
