@@ -151,3 +151,7 @@ That copy passes ruff lint/format, strict mypy and all 73 pytest cases. The actu
 delivered backend remains unmodified and still has no ROI router. No server was
 started in this round; actual browser/screenshot confirmation remains pending
 external backend delivery and the tester's prepared-catalog selection.
+
+**Update 2026-10-17 (owner):** A7 is split. The backend patch file was removed;
+the backend routes and their tests are task A7a (`dev_pipeline`, `backend/`). A7 is the web
+part only and resumes on this branch once A7a is merged.

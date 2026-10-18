@@ -102,42 +102,17 @@ header and surfaces failures in translated viewer messages.
 
 ### Delivered implementation and activation
 
-The currently retained `backend/app/main.py` baseline has **no ROI routes**.
-The orchestrator removed the earlier backend edits because
-`developers.dev_app.owns` in `devteam/config.yaml` contains only `web/` (shared
-`docs/` is also retained). Authorization in the conversation does not change
-that configured ownership check. The default production API must not be described
-as supporting ROI until the backend files are retained or the patch below is
-applied by the backend owner.
-
-The complete, reviewable production implementation is preserved in
-[`../patches/a7-backend-roi.patch`](../patches/a7-backend-roi.patch), inside the
-allowed documentation tree. It contains `backend/app/roi.py`, registration and
-CORS in `backend/app/main.py`, site metadata in `backend/app/runs.py`,
-`backend/tests/test_roi.py`, and catalog regression coverage. The router uses
-the existing `require_role` dependency on all three methods, validates with
-Pydantic v2, and atomically writes the file path documented above. No database
-migration or new dependency is needed.
-
-The orchestrator must retain `backend/` for A7, or `dev_pipeline` (the configured
-owner of `backend/`) must apply this patch from the repository root:
-
-```sh
-git apply --check docs/patches/a7-backend-roi.patch
-git apply docs/patches/a7-backend-roi.patch
-```
-
-The patch is not installed implicitly by web builds, tests, or Vite startup.
-Local restoration and passing tests do not prove that the orchestrator will
-retain those backend paths; the patch exists so another rollback cannot discard
-the implementation and its tests again.
+The backend half is task **A7a** (owner `dev_pipeline`, `backend/` only): the three
+routes above with the existing `require_role` dependency, a Pydantic v2 model, the
+atomic write and the path checks, with backend tests. Until A7a is merged the
+production API has no ROI routes, and the viewer shows its translated load error
+instead of an empty region.
 
 `web/vite-dev-roi.ts`, mounted by the existing Vite catalog adapter, provides the
-same file format and working disk persistence for local development today. When
-`QARAU_API_PROXY` forwards `/api` to FastAPI, the development adapter is disabled:
-ROI requests then require the backend patch to have been applied. The static web
-build uses the same `/api/sites/.../roi` client and cannot supply missing API
-routes itself.
+same file format and working disk persistence for local development. When
+`QARAU_API_PROXY` forwards `/api` to FastAPI, the development adapter is disabled
+and ROI requests go to the A7a routes. The static web build uses the same
+`/api/sites/.../roi` client and cannot supply missing API routes itself.
 
 ### Finding and checking the tool
 
