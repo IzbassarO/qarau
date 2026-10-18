@@ -5,6 +5,7 @@ and CI. Every byte of the page goes through Team.redact; nothing from .env is sh
 import html
 import json
 import os
+import re
 import subprocess
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -121,6 +122,14 @@ ROLE = {
     "tester": "checks, judge, gates",
 }
 STATES = ("working", "waiting", "blocked", "idle")
+OWNER_WAIT = re.compile(
+    r"\bwaits? for (the |your )?owner|\bowner'?s (call|decision|approval)", re.I
+)
+VIOLATION_DO = {
+    "out_of_scope": "Split the task in devteam/backlog.yaml: one task per developer.",
+    "protected": "Check the branch: no agent may change these files. Resume only after fixing it.",
+    "bypass": "Nothing yet: it went back to the developer. A second time blocks it.",
+}
 
 
 def blocked_action(t: dict, by_id: dict) -> str | None:
@@ -137,7 +146,7 @@ def blocked_action(t: dict, by_id: dict) -> str | None:
         return f"You stopped it. Run `devteam resume {tid}` when it should go on."
     if reason.startswith("needs a split"):
         return "Split it in devteam/backlog.yaml: one task per developer, with depends_on."
-    if "owner" in reason.lower():
+    if OWNER_WAIT.search(reason):
         return f"It waits for your decision. Once made, run `devteam resume {tid}`."
     return (
         f"Read devteam/.state/packets/{tid}.md, fix the cause (task text, dev, limits), then "
@@ -226,9 +235,12 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
                     "Review it, then merge or close it.",
                     p["url"],
                 )
-    for v in team.violations(day):  # the scope gate refused something today
-        attention.append(
-            ("violation", f"{v['task']} {v['agent']} {v['kind']}: {v['detail'][:300]}", "")
+    violations = team.violations(day)
+    for v in violations:  # the scope gate refused something today
+        need(
+            v["kind"].replace("_", " "),
+            f"{v['task']} ({v['agent']}): {v['detail'][:300]}",
+            VIOLATION_DO.get(v["kind"], "Look at the task's diff."),
         )
     if cap and spent > 0.8 * cap:
         need(
@@ -319,6 +331,7 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
         "ci": latest_ci if isinstance(ci, list) else ci,
         "log": log,
         "attention": attention,
+        "violations": violations,
         "last_run": last_run,
     }
 
@@ -384,7 +397,8 @@ border-radius:8px;padding:10px 12px;min-width:0}
 min-width:0}
 .col h3{font-size:13px;font-weight:600;margin:2px 0 8px;color:var(--ink2)}
 .task{border-top:1px solid var(--line);padding:6px 0;font-size:13px}
-.task b{font-weight:600}.task .why{color:var(--ink2);font-size:12px;overflow-wrap:anywhere}
+.task b{font-weight:600}.task .why{color:var(--ink2);font-size:12px;overflow-wrap:anywhere;
+display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .lanes{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
 .lane{display:grid;grid-template-columns:110px 1fr;align-items:center;height:30px}
 .track{position:relative;height:16px;background:#111b28;border-radius:3px}
@@ -405,7 +419,7 @@ border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--ink2);font
 .box{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;
 overflow-x:auto}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.nowrap{white-space:nowrap}.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
 /* Office: a kerege (yurt lattice) wall behind each room */
 .rooms{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .room{all:unset;cursor:pointer;display:block;border:1px solid var(--line);border-radius:10px;
@@ -413,6 +427,7 @@ overflow:hidden;background:var(--panel)}
 .room:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .room[aria-pressed=true]{border-color:#5d7ea8}
 .wall{height:150px;background-color:#16263a;background-image:
+linear-gradient(to top,#132030 0 22px,transparent 22px),
 repeating-linear-gradient(45deg,transparent 0 17px,#1f3350 17px 19px),
 repeating-linear-gradient(-45deg,transparent 0 17px,#1f3350 17px 19px)}
 .wall svg{display:block;width:100%;height:150px}
@@ -492,6 +507,11 @@ def _hm(epoch) -> str:
     return time.strftime("%H:%M", time.localtime(epoch)) if epoch else "unknown"
 
 
+def _when(ts: str, now: str) -> str:
+    """'14:37' today, '10-16 14:37' on another day."""
+    return ts[11:16] if ts[:10] == now[:10] else f"{ts[5:10]} {ts[11:16]}"
+
+
 def _code(text: str) -> str:
     """`backticks` in owner instructions become <code>."""
     parts = _e(text).split("`")
@@ -516,7 +536,6 @@ def figure(a: dict) -> str:
         body, head = "#6f8096", "#9eadc0"
     p = [
         "<svg viewBox='0 0 200 150' role='img' aria-hidden='true'>",
-        "<rect x='0' y='128' width='200' height='22' fill='#132030'/>",
         # desk + monitor + keyboard
         "<rect x='92' y='88' width='96' height='7' rx='2' fill='#5a4636'/>",
         "<rect x='98' y='95' width='5' height='33' fill='#46372b'/>",
@@ -755,7 +774,7 @@ def _limits(d: dict) -> str:
     if not rows:
         return "<p class='calm'>No subscription limit was hit in the last 7 days.</p>"
     body = "".join(
-        f"<tr><td>{_e(ts.replace('T', ' ')[5:16])}</td><td>{_e(a)}</td><td>{_e(t)}</td><td>"
+        f"<tr><td class='nowrap'>{_e(_when(ts, d['now']))}</td><td>{_e(a)}</td><td>{_e(t)}</td><td>"
         + (
             f"{_e(_hm(r))} · <span data-reset='{r:.0f}'></span>"
             if r and r > d["epoch"]
@@ -767,6 +786,22 @@ def _limits(d: dict) -> str:
     return (
         "<div class='box'><table><tr><th>When</th><th>Developer</th><th>Task</th><th>Resets</th>"
         f"<th>Waited</th><th>Message</th></tr>{body}</table></div>"
+    )
+
+
+def _violations(d: dict) -> str:
+    rows = d["violations"]
+    if not rows:
+        return "<p class='calm'>No scope or bypass violation today.</p>"
+    body = "".join(
+        f"<tr><td>{_e(v['ts'][11:16])}</td><td>{_e(v['task'])}</td><td>{_e(v['agent'])}</td>"
+        f"<td><span class='dot blocked'></span>{_e(v['kind'].replace('_', ' '))}</td>"
+        f"<td class='muted'>{_e(v['detail'][:400])}</td></tr>"
+        for v in rows
+    )
+    return (
+        "<div class='box'><table><tr><th>When</th><th>Task</th><th>Developer</th><th>Kind</th>"
+        f"<th>What</th></tr>{body}</table></div>"
     )
 
 
@@ -907,7 +942,9 @@ def render(d: dict) -> str:
             _bars(d),
             "</div><div><h2>Subscription limits, last 7 days</h2>",
             _limits(d),
-            "</div></div><h2>API spend today</h2>",
+            "</div></div><h2>Scope and bypass violations today</h2>",
+            _violations(d),
+            "<h2>API spend today</h2>",
             _costs(d),
             _github(d),
             "</div><div data-tab='office' hidden>",

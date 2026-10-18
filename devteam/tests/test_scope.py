@@ -281,7 +281,9 @@ def test_violations_reach_the_dashboard_and_the_report(repo):
     team, graph = make(repo, A7Replay("backend"))
     run(graph)
     d = D.collect(team, None)
-    assert any(k == "violation" and "out_of_scope" in t for k, t, _u in d["attention"])
+    (a,) = [a for a in d["attention"] if a["kind"] == "out of scope"]
+    assert "T-002 (dev_app)" in a["text"] and a["do"].startswith("Split the task")
+    assert "Scope and bypass violations today" in D.render(d)
     report = write_report(team).read_text()
     assert "## Scope and bypass violations" in report
     assert "T-002 (dev_app) **out_of_scope**" in report
