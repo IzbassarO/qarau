@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Box3, Vector3 } from 'three';
 import { createDemo } from '../fixtures/demo';
 import { nearestPointDistance } from './constraints';
+import { observerMovement } from './input';
 import { PointCloudIndex } from './navigation';
 import {
   canShowHumanFigure,
@@ -129,12 +130,18 @@ describe('Observer distance-adaptive speed', () => {
   };
 
   it('grows with exact nearest-point distance and respects scene-derived clamps', () => {
+    // Retain the original floor expectation via an override; test defaults separately.
+    const ctx = { ...options, minSpeed: 0.05 };
     const speedAt = (position: Vector3) =>
-      step(initial(position), { forward: true }, 0.01, options).velocity.length();
-    expect(speedAt(v())).toBeCloseTo(0.6, 12);
+      step(initial(position), { forward: true }, 0.01, ctx).velocity.length();
+    expect(speedAt(v())).toBeCloseTo(0.05, 12);
     expect(speedAt(v(1, 0, 0))).toBeCloseTo(0.8, 12);
     expect(speedAt(v(2, 0, 0))).toBeCloseTo(1.6, 12);
     expect(speedAt(v(100, 0, 0))).toBeCloseTo(5, 12);
+  });
+
+  it('defaults to a visible scene-relative floor when no override is given', () => {
+    expect(step(initial(), { forward: true }, 1, options).velocity.length()).toBeCloseTo(0.6, 12);
   });
 
   it.each([0.1, 1, 10])(
@@ -186,6 +193,28 @@ describe('Observer distance-adaptive speed', () => {
       12,
     );
   });
+
+  it.each(['control', 'alt'] as const)(
+    'applies the fourfold multiplier through %s input while Shift still descends',
+    (boostKey) => {
+      // A9 uses Shift for descent; the configured Ctrl/Alt key supplies the boost flag.
+      for (const distance of [0, 2, 100]) {
+        const start = initial(v(distance, 0, 0));
+        const move = (keys: string[]) =>
+          step(start, observerMovement(new Set(keys), boostKey), 1, options);
+        const normal = move(['w']);
+        const boosted = move(['w', boostKey]);
+        const shifted = move(['w', 'shift']);
+        expect(boosted.velocity.length()).toBeCloseTo(normal.velocity.length() * 4, 12);
+        expect(boosted.position.distanceTo(start.position)).toBeCloseTo(
+          normal.position.distanceTo(start.position) * 4,
+          12,
+        );
+        expect(shifted.velocity.length()).toBeCloseTo(normal.velocity.length(), 12);
+        expect(shifted.velocity.z).toBeLessThan(0);
+      }
+    },
+  );
 
   it('uses the nearest of all points and respects explicit speed clamps', () => {
     const ctx = { ...options, points: [v(0, -100, 0), v(0, -2, 0)], minSpeed: 2, maxSpeed: 3 };

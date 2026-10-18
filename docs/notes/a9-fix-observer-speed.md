@@ -23,15 +23,20 @@ Velocity damping, Orbit navigation and input mappings are unchanged. In current
 Observer controls Ctrl/Alt boosts and Shift descends; the legacy fly integrator's
 Shift boost is also unchanged. Tests cover scene-relative travel with damping,
 distance adaptation, both speed limits in large scenes and exact boost ratios.
-The existing exact floor expectation increases from 0.05 to 0.6 at the same
-precision; no existing assertion is weakened or removed.
+The original exact floor assertion remains 0.05 at its original precision, with
+an explicit `minSpeed: 0.05` override in that test. A separate test checks the new
+default of 0.6 for a diagonal of 10. Input-to-movement tests verify that each
+configured Ctrl/Alt boost multiplies speed and travel by exactly four near,
+between and at the speed bounds, while Shift descends without boosting. The
+plan's Shift-boost wording predates A9's Observer mapping; testing the configured
+modifier preserves that mapping. No existing assertion is weakened or removed.
 
 No dependencies or models were added. Installed package metadata confirms
 Three.js, React, Vitest, ESLint and Vite use MIT; TypeScript and Playwright use
 Apache-2.0. These licences permit commercial use.
 
 Verification: `pnpm lint && pnpm typecheck` and `pnpm test && pnpm build` pass in
-`web/` (495 tests across 28 files). The new near-geometry and large-scene tests
+`web/` (499 tests across 28 files). The new near-geometry and large-scene tests
 failed against the previous movement code and pass after the fix. Diff review
 confirms no existing assertions were loosened, removed, skipped or focused.
 
@@ -39,3 +44,12 @@ A browser check without screenshots was attempted for
 `/viewer/aegviidu?mode=observer`, but this sandbox rejects listening sockets with
 `listen EPERM`. The Vite instance was closed immediately and port 5209 has no
 listener. Visual acceptance remains for the tester's screenshot run.
+
+For the tester's Observer screenshot, open `/viewer/aegviidu?mode=observer` and
+wait for the point cloud to load. Before capturing, confirm that the Observer
+button is pressed, the minimap and Observer controls hint are visible, and no
+error banner appears. Keep the page in the foreground: the existing blur handler
+exits Observer. The bare `/viewer/aegviidu` URL opens Orbit by design; from there,
+click the Observer mode button, or focus the point-cloud canvas and press F, then
+capture the resulting Observer view. Page tests cover both the direct link and
+the mode-button path. Screenshots remain the tester's responsibility.
