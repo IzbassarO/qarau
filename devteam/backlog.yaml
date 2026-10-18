@@ -672,7 +672,12 @@ tasks:
     screenshot of the organization page.
 
     '
-  status: todo
+  status: blocked
+  blocked_reason: 'needs a split before it can be planned: the work spans folders of more than one developer
+    (The goal needs a real organization and its sites from the backend. The current backend (backend/app:
+    auth, health, runs, settings) has no Organization or Site model and no API for them. Seeding "Syracuse
+    University" means a database change: an Alembic migration plus seed data. Serving it needs authenticated
+    API routes that declare a role (CLAUDE.md). All of that lives in backend/, which is outside dev_app'''
 - id: U2
   area: app
   title: Upload a video in the web app
