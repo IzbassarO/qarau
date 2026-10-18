@@ -523,7 +523,7 @@ describe('ViewerEngine observer input', () => {
     key(canvas, 'ц', { code: 'KeyW' });
     frame(20);
     const traveled = engine.camera.position.clone().sub(start);
-    expect(traveled.length()).toBeGreaterThan(0);
+    expect(traveled.length()).toBeGreaterThan(0.5);
     expect(traveled.normalize().dot(forward)).toBeCloseTo(1, 8);
     const beforeRelease = engine.camera.position.clone();
     key(canvas, 'ц', { code: 'KeyW', type: 'keyup' });

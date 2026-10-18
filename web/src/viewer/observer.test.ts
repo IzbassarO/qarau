@@ -122,7 +122,7 @@ describe('Observer movement', () => {
 
 describe('Observer distance-adaptive speed', () => {
   const options = {
-    bounds: new Box3(v(), v(6, 8, 0)), // Diagonal = 10; default clamps are .05 and 5.
+    bounds: new Box3(v(), v(6, 8, 0)), // Diagonal = 10; default clamps are .6 and 5.
     points: [v()],
     damping: 0,
     distanceFactor: 0.8,
@@ -131,10 +131,60 @@ describe('Observer distance-adaptive speed', () => {
   it('grows with exact nearest-point distance and respects scene-derived clamps', () => {
     const speedAt = (position: Vector3) =>
       step(initial(position), { forward: true }, 0.01, options).velocity.length();
-    expect(speedAt(v())).toBeCloseTo(0.05, 12);
+    expect(speedAt(v())).toBeCloseTo(0.6, 12);
     expect(speedAt(v(1, 0, 0))).toBeCloseTo(0.8, 12);
     expect(speedAt(v(2, 0, 0))).toBeCloseTo(1.6, 12);
     expect(speedAt(v(100, 0, 0))).toBeCloseTo(5, 12);
+  });
+
+  it.each([0.1, 1, 10])(
+    'travels at least 5% of the scene diagonal in one second near geometry (scale %s)',
+    (scale) => {
+      const bounds = new Box3(v(), v(6 * scale, 8 * scale, 0));
+      const start = initial(v(0.001 * scale, 0, 0));
+      let current = start;
+      for (let frame = 0; frame < 60; frame++)
+        current = step(current, { forward: true }, 1 / 60, { ...options, bounds, damping: 10 });
+      expect(current.position.distanceTo(start.position)).toBeGreaterThanOrEqual(
+        bounds.getSize(v()).length() * 0.05,
+      );
+    },
+  );
+
+  it('moves faster away from geometry but stops increasing at the scene-relative maximum', () => {
+    const near = step(initial(), { forward: true }, 1, options);
+    const farStart = initial(v(100, 0, 0));
+    const far = step(farStart, { forward: true }, 1, options);
+    expect(far.velocity.length()).toBeGreaterThan(near.velocity.length());
+    expect(far.velocity.length()).toBe(5);
+    expect(far.position.distanceTo(farStart.position)).toBe(5);
+  });
+
+  it.each([100, 1e6])(
+    'caps both default speed bounds in a very large scene (scale %s)',
+    (scale) => {
+      const bounds = new Box3(v(), v(6 * scale, 8 * scale, 0));
+      const ctx = { ...options, bounds };
+      for (const position of [v(), v(100 * scale, 0, 0)]) {
+        const moved = step(initial(position), { forward: true }, 1, ctx);
+        expect(moved.velocity.length()).toBeLessThanOrEqual(100);
+        expect(moved.position.distanceTo(position)).toBeLessThanOrEqual(100);
+      }
+      expect(step(initial(v(100 * scale, 0, 0)), { forward: true }, 1, ctx).velocity.length()).toBe(
+        100,
+      );
+    },
+  );
+
+  it.each([0, 2, 100])('retains the boost multiplier at nearest-point distance %s', (distance) => {
+    const start = initial(v(distance, 0, 0));
+    const normal = step(start, { forward: true }, 1, options);
+    const boosted = step(start, { forward: true, boost: true }, 1, options);
+    expect(boosted.velocity.length()).toBeCloseTo(normal.velocity.length() * 4, 12);
+    expect(boosted.position.distanceTo(start.position)).toBeCloseTo(
+      normal.position.distanceTo(start.position) * 4,
+      12,
+    );
   });
 
   it('uses the nearest of all points and respects explicit speed clamps', () => {
