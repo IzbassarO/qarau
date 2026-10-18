@@ -509,11 +509,10 @@ def test_real_backlog_split_a7_p3e_and_order():
     core_todo = [
         t["id"] for t in tasks if t["area"] == "core" and t["status"] in ("todo", "blocked")
     ]
-    assert core_todo[:5] == ["P3e", "P5a", "D1", "S1", "A7a"]
+    assert core_todo[:6] == ["P3e", "P5a", "P4a-1b", "D1", "S1", "A7a"]
     app_todo = [t["id"] for t in tasks if t["area"] == "app" and t["status"] == "todo"]
     assert app_todo[:4] == ["A9-fix", "A5-fix", "O1", "U2"]  # the historic violations first
     assert by["P4a-1b"]["area"] == "core" and "MODAL_TOKEN_ID" in by["P4a-1b"]["goal"]
-    assert core_todo.index("P4a-1b") == core_todo.index("A7a") + 1
     assert by["P4a-2"]["status"] == "blocked"  # until the owner says the Modal account is ready
     # A7a's own criteria-shaped goal stays inside dev_pipeline's folders
     assert outside_paths([by["A7a"]["goal"]], "dev_pipeline", CFG, by["A7a"]) == []

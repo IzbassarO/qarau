@@ -211,6 +211,25 @@ tasks:
 
     '
   status: todo
+- id: P4a-1b
+  area: core
+  title: Modal GPU provider for the dense executor
+  goal: 'A Modal provider for the P4a-1 executor behind the existing GpuProvider interface (pipeline/qarau_pipeline/dense_remote.py,
+    ADR 0016): start a GPU worker, upload frames, run COLMAP dense, download the results, always stop
+    (finally / error / timeout). The image is built by Modal from infra/colmap-cuda (Modal image build);
+    it is never pushed to a public registry. The token is read from devteam/.env as MODAL_TOKEN_ID / MODAL_TOKEN_SECRET
+    at run time and is never printed, logged or written to a file (a test checks a fake token never appears
+    in logs or errors). Config in pipeline/config.yaml: daily_gpu_hours_budget 1.0, est_hours_per_job
+    0.5 (timeout_s within the estimate, as the loader requires); dense_remote.enabled stays false. Tests
+    use a mocked Modal client only: no real Modal call, no account, no spending (developers have no Modal
+    token). Record the Modal client licence (Apache-2.0) and the decision in an ADR. P4a-2 stays blocked
+    until the owner says the Modal account is ready.
+
+    '
+  licence: 'modal Python client: Apache-2.0. Modal itself is a paid service: no real call in this task.
+
+    '
+  status: todo
 - id: D1
   area: core
   title: Data foundation - storage layout and run catalog
@@ -280,25 +299,6 @@ tasks:
 
     '
   licence: 'FastAPI (MIT) and Pydantic (MIT), already backend dependencies; no new library.
-
-    '
-  status: todo
-- id: P4a-1b
-  area: core
-  title: Modal GPU provider for the dense executor
-  goal: 'A Modal provider for the P4a-1 executor behind the existing GpuProvider interface (pipeline/qarau_pipeline/dense_remote.py,
-    ADR 0016): start a GPU worker, upload frames, run COLMAP dense, download the results, always stop
-    (finally / error / timeout). The image is built by Modal from infra/colmap-cuda (Modal image build);
-    it is never pushed to a public registry. The token is read from devteam/.env as MODAL_TOKEN_ID / MODAL_TOKEN_SECRET
-    at run time and is never printed, logged or written to a file (a test checks a fake token never appears
-    in logs or errors). Config in pipeline/config.yaml: daily_gpu_hours_budget 1.0, est_hours_per_job
-    0.5 (timeout_s within the estimate, as the loader requires); dense_remote.enabled stays false. Tests
-    use a mocked Modal client only: no real Modal call, no account, no spending (developers have no Modal
-    token). Record the Modal client licence (Apache-2.0) and the decision in an ADR. P4a-2 stays blocked
-    until the owner says the Modal account is ready.
-
-    '
-  licence: 'modal Python client: Apache-2.0. Modal itself is a paid service: no real call in this task.
 
     '
   status: todo

@@ -11,9 +11,9 @@ Newest first. Keep it short.
     **A5-fix** makes that e2e run on a synthetic bundle.
   - P3c (#23) edited `pipeline/qarau_pipeline/benchmark_set.toml` (now a protected path):
     **approved exception** by the owner (2026-10-18); the change stays.
-- GPU: task P4a-1b adds a Modal provider (mocked in tests, token from devteam/.env, never
-  printed); budget 1.0 GPU h/day, 0.5 h per job. P4a-2 stays blocked until the owner says the
-  Modal account is ready.
+- GPU: task P4a-1b (queued right after P5a) adds a Modal provider (mocked in tests, token
+  from devteam/.env, never printed); budget 1.0 GPU h/day, 0.5 h per job. P4a-2 stays blocked
+  until the owner says the Modal account is ready.
 
 ## 2026-10-17 — Kerege supervisor (A7 used 42.6 M tokens while going nowhere)
 
