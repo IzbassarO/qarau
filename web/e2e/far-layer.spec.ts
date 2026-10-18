@@ -3,11 +3,29 @@ import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 import type { Manifest } from '../src/lib/bundle';
+import { makeFarBundle } from './fixtures/far-layer/makeFarBundle';
 
 const realManifestPath = path.resolve(
   process.env.QARAU_RUNS_DIR ?? '../data/runs',
   'notre-dame/web/manifest.json',
 );
+
+async function serveFarBundle(page: Page, { manifest, files }: ReturnType<typeof makeFarBundle>) {
+  await page.addInitScript(() => localStorage.setItem('qarau.lang', 'en'));
+  const prefix = `/api/runs/${manifest.run_id}/`;
+  await page.route(`**${prefix}**`, (route) => {
+    const relative = new URL(route.request().url()).pathname.slice(prefix.length);
+    if (relative === 'manifest.json') return route.fulfill({ json: manifest });
+    const body = relative.startsWith('files/')
+      ? files.get(relative.slice('files/'.length))
+      : undefined;
+    if (!body) throw new Error(`Unexpected synthetic bundle request: ${relative}`);
+    return route.fulfill({
+      body,
+      contentType: relative.endsWith('.svg') ? 'image/svg+xml' : 'application/octet-stream',
+    });
+  });
+}
 
 async function layerState(page: Page) {
   return page.evaluate(() => {
@@ -100,17 +118,14 @@ for (const run of ['demo', 'notre-dame']) {
 }
 
 test('malformed far arrays warn while the real object cloud still renders', async ({ page }) => {
-  test.skip(!fs.existsSync(realManifestPath), 'needs a far-layer Notre-Dame bundle');
-  const response = await page.request.get('/api/runs/notre-dame/manifest.json');
-  expect(response.ok()).toBe(true);
-  const manifest = (await response.json()) as Manifest;
-  test.skip(!manifest.far, 'needs a far-layer Notre-Dame bundle');
-  await page.addInitScript(() => localStorage.setItem('qarau.lang', 'en'));
-  await page.route('**/files/' + manifest.far!.position, (route) =>
-    route.fulfill({ body: Buffer.alloc(4), contentType: 'application/octet-stream' }),
-  );
-  await page.goto('/viewer/notre-dame');
+  const bundle = makeFarBundle();
+  const { manifest } = bundle;
+  // A single float cannot hold the 200 XYZ triplets declared by the manifest.
+  bundle.files.set(manifest.far.position, Buffer.alloc(4));
+  await serveFarBundle(page, bundle);
+  await page.goto(`/viewer/${manifest.run_id}`);
   await page.waitForFunction(() => window.__qarau?.pointsLoaded);
+  await expect(page.getByRole('alert')).toBeVisible();
   await expect(page.getByRole('alert')).toHaveText(en['viewer.far.errorBroken']);
   await expect(page.getByText(en['error.webgl'])).toHaveCount(0);
   expect(await layerState(page)).toMatchObject({
@@ -118,4 +133,26 @@ test('malformed far arrays warn while the real object cloud still renders', asyn
     objectCount: manifest.points.count,
   });
   await expect(page.getByRole('button', { name: en['viewer.show.farPoints'] })).toHaveCount(0);
+});
+
+test('valid synthetic far arrays show the opt-in toggle without a warning', async ({ page }) => {
+  const bundle = makeFarBundle();
+  const { manifest } = bundle;
+  await serveFarBundle(page, bundle);
+  await page.goto(`/viewer/${manifest.run_id}`);
+  await page.waitForFunction(() => window.__qarau?.pointsLoaded);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByText(en['error.webgl'])).toHaveCount(0);
+  const before = await layerState(page);
+  expect(before).toMatchObject({
+    available: true,
+    visible: false,
+    objectCount: manifest.points.count,
+    farCount: manifest.far.count,
+  });
+  const toggle = page.getByRole('button', { name: en['viewer.show.farPoints'] });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => layerState(page)).toEqual({ ...before, visible: true });
 });
