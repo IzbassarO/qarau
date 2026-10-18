@@ -630,7 +630,12 @@ tasks:
     Observer mode.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: cont-20261018-153430-dev_app-1
+  branch: devteam/A9-fix
+  pr: https://github.com/IzbassarO/qarau/pull/41
+  done_at: '2026-10-18'
 - id: A5-fix
   area: app
   title: Far-layer e2e test runs without local data
