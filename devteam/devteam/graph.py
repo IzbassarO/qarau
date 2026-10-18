@@ -135,13 +135,18 @@ class PlanError(ValueError):
 def outside_paths(criteria: list, dev: str, cfg: dict, task: dict) -> list[str]:
     """Developer folders (any developer's `owns`, or devteam/) named in the criteria that `dev`
     may not edit: such a task must be split first (A7 needed backend/ from dev_app)."""
-    known = {d for c in cfg["developers"].values() for d in c["owns"]} | {"devteam/"}
-    mine = tuple(cfg["developers"][dev]["owns"] + list(task.get("writable") or []))
+    known = {SC.folder(d) for c in cfg["developers"].values() for d in c["owns"]} | {"devteam/"}
+    mine = cfg["developers"][dev]["owns"] + list(task.get("writable") or [])
+    near = tuple(SC.folder(d) for d in mine)  # "docs/notes/" names a folder dev_app may write
     alt = "|".join(map(re.escape, sorted(known)))
     pat = rf"(?<![\w./-])((?:{alt})[\w./-]*)"
     found = re.findall(pat, " ".join(map(str, criteria)))
     branch = re.compile(r"devteam/[A-Z][\w.-]*")  # a task branch like devteam/A7, not a folder
-    return sorted({p for p in found if not p.startswith(mine) and not branch.fullmatch(p)})
+    return sorted(
+        p
+        for p in set(found)
+        if not SC.owned(p, mine) and not p.startswith(near) and not branch.fullmatch(p)
+    )
 
 
 def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
@@ -803,7 +808,7 @@ class Team:
             if "R" in code or "C" in code:  # rename/copy: next entry is the source path
                 paths.append(entries[i])
                 i += 1
-            ok = all(any(p.startswith(d) for d in owns) and not is_protected(p) for p in paths)
+            ok = all(SC.owned(p, owns) and not is_protected(p) for p in paths)
             if ok:
                 allowed.extend(paths)
             else:

@@ -283,6 +283,25 @@ tasks:
 
     '
   status: todo
+- id: P4a-1b
+  area: core
+  title: Modal GPU provider for the dense executor
+  goal: 'A Modal provider for the P4a-1 executor behind the existing GpuProvider interface (pipeline/qarau_pipeline/dense_remote.py,
+    ADR 0016): start a GPU worker, upload frames, run COLMAP dense, download the results, always stop
+    (finally / error / timeout). The image is built by Modal from infra/colmap-cuda (Modal image build);
+    it is never pushed to a public registry. The token is read from devteam/.env as MODAL_TOKEN_ID / MODAL_TOKEN_SECRET
+    at run time and is never printed, logged or written to a file (a test checks a fake token never appears
+    in logs or errors). Config in pipeline/config.yaml: daily_gpu_hours_budget 1.0, est_hours_per_job
+    0.5 (timeout_s within the estimate, as the loader requires); dense_remote.enabled stays false. Tests
+    use a mocked Modal client only: no real Modal call, no account, no spending (developers have no Modal
+    token). Record the Modal client licence (Apache-2.0) and the decision in an ADR. P4a-2 stays blocked
+    until the owner says the Modal account is ready.
+
+    '
+  licence: 'modal Python client: Apache-2.0. Modal itself is a paid service: no real call in this task.
+
+    '
+  status: todo
 - id: P5b
   area: core
   title: Drone telemetry reader (GPS, DJI SRT)
@@ -336,7 +355,7 @@ tasks:
 
     '
   status: blocked
-  blocked_reason: waits for owner to fund a GPU provider
+  blocked_reason: 'waits for the owner: Modal account not ready yet (P4a-1b adds the provider)'
 - id: P4c
   area: core
   title: Dense only inside the region of interest
@@ -599,6 +618,32 @@ tasks:
   blocked_reason: waits for A7a (Region of interest API); back to todo when it merges, resumes on devteam/A7
   depends_on:
   - A7a
+- id: A9-fix
+  area: app
+  title: 'Observer mode: restore the WASD travel threshold'
+  goal: 'A9 (#37) lowered a test threshold instead of fixing the code: in web/src/viewer/engine.test.ts,
+    ''moves with physical WASD across keyboard layouts and damps after release'' now expects traveled.length()
+    toBeGreaterThan(0); before A9 (A2b) it was 0.5. Restore toBeGreaterThan(0.5) and change the observer
+    movement code so the camera really travels more than 0.5 scene units in that test (speed adapts to
+    distance; the test''s scene must still move a visible amount). No other test may be loosened; Observer
+    and Orbit behaviour otherwise unchanged. Unit tests pass; tester screenshot of /viewer/aegviidu in
+    Observer mode.
+
+    '
+  status: todo
+- id: A5-fix
+  area: app
+  title: Far-layer e2e test runs without local data
+  goal: 'The A5 e2e test ''malformed far arrays warn while the real object cloud still renders'' (web/e2e/far-layer.spec.ts)
+    skips itself with test.skip(!manifest.far): the local notre-dame run has no far layer and CI has no
+    data, so it never runs anywhere. Make it independent of local data: serve a small synthetic viewer
+    bundle with a far layer through page.route (fixture under web/e2e/, a few hundred points, written
+    by the test or a tiny generator script), then break the far arrays and assert the warning, the object
+    count and the missing toggle as today. Remove that test.skip; keep the existsSync-based skips of the
+    other real-data tests. The e2e runs in CI.
+
+    '
+  status: todo
 - id: O1
   area: app
   title: Organization map

@@ -616,10 +616,16 @@ def _json(line: str) -> dict:
 
 
 def docs_rule(dev: dict) -> str:
+    progress = (
+        "Do not edit docs/notes/progress.md: parallel tasks would conflict there (the daily "
+        "report covers progress)."
+    )
     if "docs/" in dev["owns"]:
+        return progress
+    if docs := [o for o in dev["owns"] if o.startswith("docs/")]:
         return (
-            "Do not edit docs/notes/progress.md: parallel tasks would conflict there (the "
-            "daily report covers progress)."
+            f"In docs/ you may write only {', '.join(docs)}: plans and ADRs as markdown, never "
+            f"code (a long code block is refused). {progress}"
         )
     return "You may not write docs/: put your plan and notes in the final summary."
 
@@ -636,7 +642,8 @@ def writable_rule(team, task: dict) -> str:
 
 def paid_service_key(name: str) -> bool:
     """Credentials for services that bill per use never reach a developer agent."""
-    return any(p in name.upper() for p in ("RUNPOD", "AWS_", "GOOGLE_APPLICATION", "VAST_"))
+    paid = ("RUNPOD", "MODAL_", "AWS_", "GOOGLE_APPLICATION", "VAST_")
+    return any(p in name.upper() for p in paid)
 
 
 def parse_codex(stdout: str, ok: bool, stderr: str, session: str) -> dict:

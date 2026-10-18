@@ -50,15 +50,26 @@ def is_protected(path: str, cfg: dict) -> bool:
     return any(fnmatch.fnmatch(path, p) for p in pats)
 
 
+def owned(path: str, owns) -> bool:
+    """`owns` entries are folders ("web/") or patterns ("docs/notes/*.md": markdown only)."""
+    return any(fnmatch.fnmatch(path, o) if "*" in o else path.startswith(o) for o in owns)
+
+
+def folder(entry: str) -> str:
+    """The folder an `owns` entry lives in: "docs/notes/*.md" -> "docs/notes/"."""
+    return entry if "*" not in entry else entry.split("*", 1)[0].rsplit("/", 1)[0] + "/"
+
+
 def allowed(cfg: dict, dev: str, task: dict) -> tuple[str, ...]:
     return tuple(cfg["developers"][dev]["owns"]) + tuple(task.get("writable") or [])
 
 
 def foreign(path: str, cfg: dict, dev: str) -> bool:
     """In another developer's folders (the task needs that developer)."""
-    mine = tuple(cfg["developers"][dev]["owns"])
-    return not path.startswith(DOCS) and any(
-        path.startswith(d) and not path.startswith(mine)
+    if path.startswith(DOCS) or owned(path, cfg["developers"][dev]["owns"]):
+        return False
+    return any(
+        path.startswith(folder(d))
         for name, c in cfg["developers"].items()
         if name != dev
         for d in c["owns"]
@@ -69,7 +80,7 @@ def check_paths(paths: list[str], cfg: dict, dev: str, task: dict) -> dict[str, 
     """{"protected": [...], "out_of_scope": [...]} for the changed paths."""
     ok = allowed(cfg, dev, task)
     prot = sorted(p for p in paths if is_protected(p, cfg))
-    out = sorted(p for p in paths if p not in prot and not p.startswith(ok))
+    out = sorted(p for p in paths if p not in prot and not owned(p, ok))
     return {"protected": prot, "out_of_scope": out}
 
 
