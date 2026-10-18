@@ -226,6 +226,10 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
                     "Review it, then merge or close it.",
                     p["url"],
                 )
+    for v in team.violations(day):  # the scope gate refused something today
+        attention.append(
+            ("violation", f"{v['task']} {v['agent']} {v['kind']}: {v['detail'][:300]}", "")
+        )
     if cap and spent > 0.8 * cap:
         need(
             "spend",

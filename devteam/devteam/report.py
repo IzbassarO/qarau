@@ -24,6 +24,11 @@ def write_report(team, day: str | None = None) -> Path:
     ]
     lines += ["## Merged into dev", ""]
     lines += [f"- {t['id']} {t['title']} — {t.get('pr', '')}" for t in done] or ["- none"]
+    lines += ["", "## Scope and bypass violations", ""]
+    lines += [
+        f"- {v['ts'][11:16]} {v['task']} ({v['agent']}) **{v['kind']}**: {v['detail'][:300]}"
+        for v in team.violations(day)
+    ] or ["- none"]
     lines += ["", "## Blocked (need attention)", ""]
     lines += [
         f"- {t['id']} {t['title']}: {t.get('blocked_reason', '')[:300]}" for t in blocked

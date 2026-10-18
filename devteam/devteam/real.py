@@ -160,8 +160,9 @@ Never require edits to docs/notes/progress.md: developers may not touch it (para
 tasks would conflict there); the daily report covers progress.
 Never plan a step that spends money: no paid external services (RunPod, cloud GPUs, paid APIs);
 a task that needs one is the owner's call, so leave it out.
-A developer edits only its own folders (`owns` in <developers>) and docs/; anything else is
-reverted. Never plan a task whose acceptance needs files outside the assignee's folders (A7 asked
+A developer edits only its own folders (`owns` in <developers>); anything else is reverted,
+and the scope gate ends a task whose change leaves them.
+Never plan a task whose acceptance needs files outside the assignee's folders (A7 asked
 the web developer for backend/ routes and went round in circles). Do not plan such a task:
 list it in `needs_split` with the reason and the proposed parts, one per developer, and the
 owner splits it. Name a folder in a criterion only if the developer must change it there.
@@ -173,7 +174,9 @@ TESTER_SYSTEM = """You are the tester of Qarau's dev team. There is no human rev
 plus the automated checks decide whether this change merges into `dev`. Be strict and fair.
 Judge each acceptance criterion from the diff, the developer's summary and the check output.
 A criterion is met only if the diff shows it (code + tests), not just because the developer
-says so. Missing tests, placeholders, TODO stubs, silently skipped work, or edits unrelated to
+says so: the developer's summary is a claim, never evidence. The checks and screenshots were
+run by the orchestrator on a clean checkout of the committed code.
+Missing tests, placeholders, TODO stubs, silently skipped work, or edits unrelated to
 the task fail. Check results are given; failing checks are handled separately, but mention
 them in feedback if relevant. Screenshots of the app pages, when attached, are the real UI and
 were taken by the orchestrator for you: judge visible criteria (layout, text via i18n, errors
@@ -366,9 +369,12 @@ Acceptance criteria (all must be visibly met in your diff, with tests):
 {crit}
 
 Rules:
-- Edit only {", ".join(dev["owns"])} and docs/. Anything else is reverted automatically.
-  Do not edit docs/notes/progress.md: parallel tasks would conflict there (the daily
-  report covers progress).
+- Edit only {", ".join(dev["owns"])}. Anything else is reverted automatically, and changing
+  another developer's folders or a protected file (devteam/, .github/, backlog.yaml,
+  CLAUDE.md, AGENTS.md, the benchmark video set, lint and gate configs) ends the task at once:
+  if the task needs them, say so in your summary instead. {docs_rule(dev)}
+- Never skip, focus (.only) or weaken tests, assertions or thresholds, never ship work as a
+  .patch / .diff file or as code under docs/: the scope gate refuses the change.
 - Do not commit, push, merge or create branches; the orchestrator commits your changes.
 - Never write keys or tokens into files. Never write under data/{writable_rule(team, t)}. Sample
   videos (read-only): {team.root / "data" / "samples"}
@@ -607,6 +613,15 @@ def _json(line: str) -> dict:
     except ValueError:
         return {}
     return e if isinstance(e, dict) else {}
+
+
+def docs_rule(dev: dict) -> str:
+    if "docs/" in dev["owns"]:
+        return (
+            "Do not edit docs/notes/progress.md: parallel tasks would conflict there (the "
+            "daily report covers progress)."
+        )
+    return "You may not write docs/: put your plan and notes in the final summary."
 
 
 def writable_rule(team, task: dict) -> str:

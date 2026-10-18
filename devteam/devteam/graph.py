@@ -6,6 +6,7 @@ test or gates fail -> back to develop (max N fixes) -> then "blocked".
 gates = merge latest dev in, secret scan, benchmark, push, PR into dev, GitHub CI, auto-merge.
 """
 
+import contextlib
 import fnmatch
 import hashlib
 import json
@@ -29,12 +30,12 @@ from langgraph.types import Send
 
 from devteam import gates as G
 from devteam import procs
+from devteam import scope as SC
 from devteam import supervise as SV
 from devteam.costs import BudgetExceeded, SubscriptionLimit
 from devteam.supervise import TaskHalted
 
 AGENTS = ["brain", "dev_pipeline", "dev_app", "tester"]
-SHARED_DIRS = ["docs/"]  # any developer may touch these besides its own folders
 # Never touched by a developer, tracked or ignored. Checked by snapshot (git can't see ignored).
 PROTECTED = [".env", ".env.*", "*/.env", "*/.env.*", "data/*", "scratch/*", "*.sqlite"]
 PROTECTED_OK = [".env.example", "*/.env.example"]
@@ -135,7 +136,7 @@ def outside_paths(criteria: list, dev: str, cfg: dict, task: dict) -> list[str]:
     """Developer folders (any developer's `owns`, or devteam/) named in the criteria that `dev`
     may not edit: such a task must be split first (A7 needed backend/ from dev_app)."""
     known = {d for c in cfg["developers"].values() for d in c["owns"]} | {"devteam/"}
-    mine = tuple(cfg["developers"][dev]["owns"] + SHARED_DIRS + list(task.get("writable") or []))
+    mine = tuple(cfg["developers"][dev]["owns"] + list(task.get("writable") or []))
     alt = "|".join(map(re.escape, sorted(known)))
     pat = rf"(?<![\w./-])((?:{alt})[\w./-]*)"
     found = re.findall(pat, " ".join(map(str, criteria)))
@@ -168,7 +169,7 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
             outside[tid] = bad
             errors.append(
                 f"{tid}: the criteria need {bad}, which {dev} may not edit (it owns "
-                f"{devs[dev]['owns']} + docs/). If the task must change them, do not plan it: "
+                f"{devs[dev]['owns']}). If the task must change them, do not plan it: "
                 "list it in needs_split with the parts per developer. If they are only read, "
                 "do not name them in the criteria"
             )
@@ -471,6 +472,34 @@ class Team:
             self.emit("brain", line)
         return out
 
+    def violation(self, task_id: str, agent: str, kind: str, detail: str):
+        """Scope / protected / bypass violations: kept for the dashboard and the report."""
+        row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "task": task_id, "agent": agent}
+        row.update(kind=kind, detail=self.redact(detail)[:1000])
+        with self._lock, open(self.home / "violations.jsonl", "a") as f:
+            f.write(json.dumps(row) + "\n")
+        self.emit("tester", f"VIOLATION {kind}: {detail[:300]}", task=task_id)
+
+    def violations(self, day: str) -> list[dict]:
+        try:
+            lines = (self.home / "violations.jsonl").read_text().splitlines()
+        except FileNotFoundError:
+            return []
+        return [r for r in map(json.loads, lines) if r["ts"].startswith(day)]
+
+    @contextlib.contextmanager
+    def clean_checkout(self, s):
+        """A fresh detached checkout of the task's committed HEAD: the tester's checks never
+        see the developer's untracked or ignored leftovers."""
+        path = self.home / "check-wt" / s["task"]["id"]
+        if path.exists():
+            self.git("worktree", "remove", "--force", str(path))
+        self.git("worktree", "add", "--detach", str(path), s["head"])
+        try:
+            yield str(path)
+        finally:
+            self.git("worktree", "remove", "--force", str(path))
+
     # --- the task branch -----------------------------------------------------------------
     def merge_base(self, wt: str) -> list[str]:
         """Merges the latest dev into the task branch (a merge, never a rebase; the orchestrator
@@ -746,7 +775,7 @@ class Team:
         only if no secret is found. Returns {"refused": [...], "secrets": [...]}."""
         self.verify_worktree(s)
         wt = s["worktree"]
-        owns = self.cfg["developers"][s["assignee"]]["owns"] + SHARED_DIRS
+        owns = self.cfg["developers"][s["assignee"]]["owns"]
         if self.git("rev-parse", "HEAD", cwd=wt).strip() != head_before:
             self.git("reset", "-q", "--soft", head_before, cwd=wt)  # its commits get checked too
         self.git("reset", "-q", cwd=wt)  # unstage everything; we decide what goes in
@@ -1032,6 +1061,11 @@ def build_graph(team: Team, checkpointer):
             reason = str(e) + (limit_hint(tid) if str(e).startswith("supervisor") else "")
             return {**halt(s, reason), "head": team.git("rev-parse", "HEAD", cwd=wt).strip()}
         res = team.commit_round(s, s["head"], s["snap"])
+        head = team.git("rev-parse", "HEAD", cwd=wt).strip()
+        if tried := [p for p in res["refused"] if SC.is_protected(p, cfg)]:
+            return {**refuse(s, "protected", tried, "tried to change"), "head": head}
+        if tried := [p for p in res["refused"] if SC.foreign(p, cfg, dev)]:
+            return {**refuse(s, "out_of_scope", tried, "tried to change"), "head": head}
         data_after = team.data_snapshot(s["task"])
         if touched := sorted(p for p, v in data_before.items() if data_after.get(p) != v):
             return {
@@ -1076,25 +1110,67 @@ def build_graph(team: Team, checkpointer):
             return "finish"
         return s.get("after_dev") or "test"
 
+    def refuse(s: TaskState, kind: str, paths: list[str], verb: str = "changed") -> dict:
+        """A scope or protected-path violation: logged for the owner, the task ends, no retry."""
+        dev, tid = s["assignee"], s["task"]["id"]
+        team.violation(tid, dev, kind, f"{verb} {paths}")
+        if kind == "out_of_scope":
+            return halt(
+                s,
+                "needs a split before it can be planned: out_of_scope: "
+                f"{dev} may only change {list(SC.allowed(cfg, dev, s['task']))}, it {verb} "
+                f"{paths[:10]}",
+            )
+        return halt(s, f"protected: {dev} {verb} files no agent may change: {paths[:10]}")
+
     def test(s: TaskState):
-        tid = s["task"]["id"]
-        team.emit("tester", "running checks", task=tid, status="working")
-        checks = [] if team.fake else team.run_checks(s)
-        for c in checks:
-            team.emit("tester", f"{'ok  ' if c['ok'] else 'FAIL'} {c['cmd']}", task=tid)
-        shots, problems = [], []
-        dev_shots: list[str] = []
-        if not team.fake:
-            shots, problems = G.screenshots(team, s, s.get("routes") or [])
-            dev_shots, dev_problems = G.dev_screenshots(team, s, s.get("routes") or [])
-            problems += dev_problems
-            if shots or problems:
-                team.emit(
-                    "tester", f"screenshots: {len(shots)} ok, {len(problems)} failed", task=tid
-                )
-        verdict = team.agents.judge(
-            team, {**s, "screenshots": shots + dev_shots, "screenshot_problems": problems}, checks
+        tid, dev, wt = s["task"]["id"], s["assignee"], s["worktree"]
+        team.emit(
+            "tester", "scope gate, then checks on a clean checkout", task=tid, status="working"
         )
+        # 1. scope gate on what the branch really changes (never on what the developer says)
+        team.fetch(base)
+        span = f"{team.remote_name}/{base}...HEAD"
+        paths = [p for p in team.git("diff", "--name-only", "-z", span, cwd=wt).split("\0") if p]
+        bad = SC.check_paths(paths, cfg, dev, s["task"])
+        if bad["protected"]:
+            return refuse(s, "protected", bad["protected"])
+        if bad["out_of_scope"]:
+            return refuse(s, "out_of_scope", bad["out_of_scope"])
+        findings = SC.bypass(team.git("diff", "-U0", span, cwd=wt), paths)
+        checks, shots, problems, dev_shots = [], [], [], []
+        if findings:  # no checks or judge: the change itself is refused
+            team.violation(tid, dev, "bypass", "; ".join(findings))
+            verdict = {
+                "passed": False,
+                "criteria": [],
+                "summary": "",
+                "how_to_try": "",
+                "feedback": "The scope gate refused this change (anti-bypass checks):\n- "
+                + "\n- ".join(findings)
+                + "\nDo the work in the code itself; never skip, focus or weaken tests.",
+            }
+        else:
+            if not team.fake:  # every check again, from a clean checkout of the committed HEAD
+                with team.clean_checkout(s) as clean:
+                    cs = {**s, "worktree": clean}
+                    checks = team.run_checks(cs)
+                    for c in checks:
+                        team.emit("tester", f"{'ok  ' if c['ok'] else 'FAIL'} {c['cmd']}", task=tid)
+                    runs, problems = tester_benchmark(cs, clean)
+                    shots, more = G.screenshots(team, cs, s.get("routes") or [], runs=runs)
+                    dev_shots, dev_problems = G.dev_screenshots(team, cs, s.get("routes") or [])
+                    problems += more + dev_problems
+                if shots or problems:
+                    team.emit(
+                        "tester", f"screenshots: {len(shots)} ok, {len(problems)} failed", task=tid
+                    )
+            verdict = team.agents.judge(
+                team,
+                {**s, "screenshots": shots + dev_shots, "screenshot_problems": problems},
+                checks,
+            )
+        verdict["bypass"] = findings
         verdict["screenshots"], verdict["screenshot_problems"] = shots + dev_shots, problems
         failed = [c for c in checks if not c["ok"]]
         verdict["judge_passed"] = verdict["passed"]
@@ -1119,6 +1195,7 @@ def build_graph(team: Team, checkpointer):
             else "\n".join(
                 sorted(f"criterion: {c['criterion']}" for c in verdict["criteria"] if not c["met"])
                 + sorted(f"check: {c['cmd']}" for c in failed)
+                + sorted(f"bypass: {f}" for f in findings)
                 + (["screenshots missing"] if no_shots else [])
             )
             or "sent back"
@@ -1149,6 +1226,25 @@ def build_graph(team: Team, checkpointer):
             out["feedback"] = verdict["feedback"]
             out["gate"] = {"reason": "tester: " + verdict["feedback"].strip()[:500]}
         return out
+
+    def tester_benchmark(cs: TaskState, clean: str) -> tuple[Path | None, list[str]]:
+        """Pipeline tasks with routes: the tester runs the quick benchmark itself on the clean
+        checkout and screenshots that, not the developer's own output."""
+        sc = cfg["developers"][cs["assignee"]].get("screenshots") or {}
+        if not cs.get("routes") or "{runs}" not in sc.get("serve", ""):
+            return None, []
+        b = cfg["gates"]["benchmark"]
+        out = team.home / "bench-tester" / cs["task"]["id"]
+        shutil.rmtree(out, ignore_errors=True)
+        quick = ",".join(cs["task"].get("quick_only") or b["quick_only"])
+        cmd = b["command"].format(data=team.root / "data" / "samples", out=out)
+        team.emit(
+            "tester", f"quick benchmark on the clean checkout ({quick})", task=cs["task"]["id"]
+        )
+        r = team.run_proc(f"{cmd} --only {quick}", cwd=clean, timeout=b["quick_min"] * 60 * 4)
+        if not r["ok"]:
+            return out, [f"the tester's quick benchmark failed: {team.redact(r['output'][-300:])}"]
+        return out, []
 
     def after_test(s: TaskState):
         if s.get("gate", {}).get("blocked"):
