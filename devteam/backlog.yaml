@@ -174,25 +174,6 @@ tasks:
   branch: devteam/P3c
   pr: https://github.com/IzbassarO/qarau/pull/23
   done_at: '2026-10-16'
-- id: P4a-2
-  area: core
-  title: 'Dense reconstruction: first real GPU run (commercial licence)'
-  goal: 'A dense stage behind the Densifier interface, starting from branch wip/dense-stage (ADR 0008).
-    Model: Depth Anything V2 **Small only** (depth-anything/Depth-Anything-V2-Small-hf, Apache-2.0); Base
-    and Large are CC-BY-NC (non-commercial) and must never be loaded: the code refuses any other model
-    id, with a test. Exported to the viewer bundle.
-
-
-    Runs through the P4a-1 executor on a real GPU provider: the first paid run. No depends_on on purpose,
-    so finishing P4a-1 never moves it to todo: only the owner does, once a provider is funded.
-
-    '
-  licence: 'Depth Anything V2 Small code and weights: Apache-2.0 (owner confirmed 2026-10-15). Base/Large:
-    CC-BY-NC-4.0, forbidden.
-
-    '
-  status: blocked
-  blocked_reason: waits for owner to fund a GPU provider
 - id: P4b
   area: core
   title: Frame-to-point links for dense points
@@ -206,34 +187,57 @@ tasks:
   branch: devteam/P4b
   pr: https://github.com/IzbassarO/qarau/pull/36
   done_at: '2026-10-17'
-- id: P4c
+- id: P3e
   area: core
-  title: Dense only inside the region of interest
-  goal: 'When a site has a region of interest (A7), dense reconstruction and the later stages process
+  title: Refresh viewer runs
+  goal: 'The web app still shows runs made before the sky mask and far layer (P3b) and the parallax keyframes
+    (P2b). Re-run the current pipeline (sparse, on the CPU: no dense stage, no GPU, nothing paid) on every
+    reference video in data/samples and export each into data/runs under a NEW run name (e.g. <video>-2026-10-18)
+    with created_at set at export, so the web app lists the current results next to the old ones. Keep
+    every old run: never change, move or delete anything already in data/runs (the orchestrator checks
+    and blocks the task). Commit only the code and docs this needs (e.g. a refresh command in pipeline/,
+    a note in docs/); runs are data and are never committed. Report per video: run name, registered %,
+    points, far-layer points, keyframes, and any video that failed with its reason.
 
-    only the frames and points that see it; camera poses still use all frames. Without a region
-
-    the pipeline runs as before. Tests on a synthetic scene with a box; benchmark unchanged for
-
-    videos without a region.
+    '
+  writable:
+  - data/runs
+  status: todo
+- id: P5a
+  area: core
+  title: Metric scale and gravity from an A4 sheet or a measured distance
+  goal: 'The user marks an A4 sheet or one known distance; the map is scaled to metres and rotated so
+    gravity points down. Scale error is reported in the benchmark.
 
     '
   status: todo
-  depends_on:
-  - P4a-2
-  - A7
+- id: D1
+  area: core
+  title: Data foundation - storage layout and run catalog
+  goal: 'S3 layout: raw/ (immutable, never overwritten) and processed/<pipeline_version>/. Catalog tables
+    via Alembic (assets, captures, runs, stage_runs) record pipeline, model and parameter versions for
+    every result, and failed runs with their reasons.
+
+    '
+  licence: 'SQLAlchemy and Alembic (MIT), boto3 (Apache-2.0), Versity S3 Gateway (Apache-2.0), pgvector
+    (PostgreSQL licence). PostGIS (GPL-2.0): only as a separate, unmodified database server reached over
+    SQL (ADR 0010, owner 2026-10-15).
+
+    '
+  status: todo
 - id: S1
   area: core
   phase: server
   title: Server job queue with per-stage progress
-  goal: 'The pipeline runs as jobs from a durable queue: Valkey + RQ (ADR 0012; not Redis). Each stage
-    reports progress 0-100 to the API; the viewer shows the current stage and percent. A 30-minute video
-    is processed on a single worker without blocking the API.
+  goal: 'The pipeline runs as jobs from a durable queue: Valkey + RQ (ADR 0012; not Redis). The queue
+    runs the current sparse pipeline now; the dense stage (P4a-2) is plugged in later as one more stage.
+    Each stage reports progress 0-100 to the API (backend/), which U2 shows in the web app. A 30-minute
+    video is processed on a single worker without blocking the API.
 
 
     Acceptance:
 
-    - Upload -> job -> progress visible -> the map opens when the job is done.
+    - Upload -> job -> progress available from the API -> the run is in the catalog when done.
 
     - One stage can be re-run alone (stages are idempotent and read/write storage).
 
@@ -241,25 +245,41 @@ tasks:
 
     - Valkey runs in infra/ Docker Compose; no Redis image or Redis-only feature is used.
 
-
-    Note: the web part (stage + percent in the UI) is in web/, owned by dev_app. When S1 unblocks, it
-    becomes its own dev_app task; S1 itself delivers the progress API.
-
     '
   licence: 'Valkey (BSD-3-Clause), RQ (BSD-2-Clause), redis-py client (MIT). Redis server is not used:
     RSALv2/SSPLv1 since 7.4, AGPLv3 since 8.0 (owner 2026-10-15, ADR 0012).
 
     '
-  status: blocked
-  depends_on:
-  - P4a-2
-  blocked_reason: 'Waits for P4a-2 (dense stage): the queue runs the full pipeline, including the dense
-    stage.'
-- id: P5a
+  status: todo
+- id: A7a
   area: core
-  title: Metric scale and gravity from an A4 sheet or a measured distance
-  goal: 'The user marks an A4 sheet or one known distance; the map is scaled to metres and rotated so
-    gravity points down. Scale error is reported in the benchmark.
+  title: Region of interest API
+  goal: 'Backend half of A7 (split 2026-10-17: dev_app may not edit backend/). Only backend/ and docs/.
+    The web part on branch devteam/A7 already calls these routes; its contract docs/notes/roi-format.md
+    lands with A7, so do not create that file. The stored JSON (version 1): {version: 1, site_id, source_run,
+    frame (e.g. "reconstruction"), up_axis, min: [x, y, z], max: [x, y, z], created_at, created_by}; all
+    fields required, other fields ignored and dropped on rewrite.
+
+    - FastAPI routes GET / PUT / DELETE /api/sites/{site_id}/roi. Each declares its role with the existing
+    require_role dependency (backend/app/auth.py): GET viewer (200 JSON, 404 when none is saved), PUT
+    editor (validate, site_id must match the path, save, 200 with the JSON; bad body 422, body over 64
+    KiB 413), DELETE editor (204, also when already absent).
+
+    - A Pydantic v2 model for ROI version 1: required fields, finite numbers, min <= max per axis, ISO
+    8601 created_at with a timezone, up_axis x|y|z.
+
+    - Atomic write into the run catalog: <QARAU_RUNS_DIR>/sites/<site_id>/roi.json through a uniquely
+    named temp file in the same directory and os.replace. Corrupt stored JSON is an error (500), never
+    reported as absent.
+
+    - Path-traversal checks: site ids match [A-Za-z0-9][A-Za-z0-9._:-]* without ''..''; encoded separators,
+    traversal and symlinked site directories or files are rejected (400).
+
+    - backend/tests/test_roi.py covers each route, roles and the shared-token auth, validation, the atomic
+    write, traversal and symlinks; ruff, mypy and pytest pass.
+
+    '
+  licence: 'FastAPI (MIT) and Pydantic (MIT), already backend dependencies; no new library.
 
     '
   status: todo
@@ -298,19 +318,56 @@ tasks:
 
     '
   status: todo
-- id: D1
+- id: P4a-2
   area: core
-  title: Data foundation - storage layout and run catalog
-  goal: 'S3 layout: raw/ (immutable, never overwritten) and processed/<pipeline_version>/. Catalog tables
-    via Alembic (assets, captures, runs, stage_runs) record pipeline, model and parameter versions for
-    every result, and failed runs with their reasons.
+  title: 'Dense reconstruction: first real GPU run (commercial licence)'
+  goal: 'A dense stage behind the Densifier interface, starting from branch wip/dense-stage (ADR 0008).
+    Model: Depth Anything V2 **Small only** (depth-anything/Depth-Anything-V2-Small-hf, Apache-2.0); Base
+    and Large are CC-BY-NC (non-commercial) and must never be loaded: the code refuses any other model
+    id, with a test. Exported to the viewer bundle.
+
+
+    Runs through the P4a-1 executor on a real GPU provider: the first paid run. No depends_on on purpose,
+    so finishing P4a-1 never moves it to todo: only the owner does, once a provider is funded.
 
     '
-  licence: 'SQLAlchemy and Alembic (MIT), boto3 (Apache-2.0), Versity S3 Gateway (Apache-2.0), pgvector
-    (PostgreSQL licence). PostGIS (GPL-2.0): only as a separate, unmodified database server reached over
-    SQL (ADR 0010, owner 2026-10-15).
+  licence: 'Depth Anything V2 Small code and weights: Apache-2.0 (owner confirmed 2026-10-15). Base/Large:
+    CC-BY-NC-4.0, forbidden.
 
     '
+  status: blocked
+  blocked_reason: waits for owner to fund a GPU provider
+- id: P4c
+  area: core
+  title: Dense only inside the region of interest
+  goal: 'When a site has a region of interest (A7), dense reconstruction and the later stages process
+
+    only the frames and points that see it; camera poses still use all frames. Without a region
+
+    the pipeline runs as before. Tests on a synthetic scene with a box; benchmark unchanged for
+
+    videos without a region.
+
+    '
+  status: todo
+  depends_on:
+  - P4a-2
+  - A7
+- id: D2
+  area: core
+  title: Deploy online
+  goal: 'infra/ only (and docs/). A written deployment plan in docs/ and scripts in infra/ for one small
+    cloud server running web + API + queue (Valkey + RQ) + S3-compatible storage + PostgreSQL, with GPU
+    workers started on demand by the P4a-1 executor (never always on). HTTPS with automatic certificates,
+    login required, no public sign-up. The PR states the estimated monthly cost per component. Do not
+    create any paid account and spend nothing: the scripts are tested locally (Docker Compose or a local
+    VM); the owner runs them on a server he pays for. Customer data for Kazakhstan stays in Kazakhstan:
+    say which providers fit.
+
+    '
+  depends_on:
+  - S1
+  - U2
   status: todo
 - id: A1a
   area: app
@@ -479,30 +536,6 @@ tasks:
   branch: devteam/A6b
   pr: https://github.com/IzbassarO/qarau/pull/34
   done_at: '2026-10-17'
-- id: A7
-  area: app
-  title: Region of interest
-  goal: 'In top view the user draws a box around the object. It is saved per site and reused for later
-
-    inspections of that site; the viewer can hide points outside it (toggle). Store it with the
-
-    run catalog / site data (a documented JSON shape the pipeline can read later, for P4c), not
-
-    only in browser storage. i18n RU/KK/EN; unit tests for the box math and save/load; tester
-
-    screenshots of /viewer/notre-dame with a box drawn.
-
-    '
-  status: blocked
-  owner: dev_app
-  run: cont-20261017-123453-dev_app-4
-  branch: devteam/A7
-  blocked_reason: 'tester: The backend half of A7 is not delivered. The ROI router and its tests exist
-    only as docs/patches/a7-backend-roi.patch, so the real backend has no ROI routes, no persistence and
-    no pytest coverage. Server-side storage and the backend tests are explicit acceptance criteria. Run
-    the backend work under an owner allowed to write backend/ (for example, ask the orchestrator to grant
-    backend/ for this task, or file a companion task for dev_pipeline). Shipping a patch file does not
-    satisfy these '
 - id: A9
   area: app
   title: Observer mode
@@ -531,6 +564,41 @@ tasks:
   branch: devteam/A9
   pr: https://github.com/IzbassarO/qarau/pull/37
   done_at: '2026-10-17'
+- id: A1b
+  area: app
+  title: Simple local login
+  goal: 'A simple local login for the app shell (no external identity provider yet). Routes behind it;
+    credentials never hard-coded.
+
+    '
+  status: done
+  owner: dev_app
+  run: run-20261017-085251
+  branch: devteam/A1b
+  pr: https://github.com/IzbassarO/qarau/pull/27
+  done_at: '2026-10-17'
+- id: A7
+  area: app
+  title: Region of interest (web)
+  goal: 'Web part only (split 2026-10-17: the backend half is A7a). In top view the user draws a box around
+    the object; it is saved per site through the A7a API (docs/notes/roi-format.md) and reused for later
+    inspections of that site; the viewer can hide points outside it (toggle). i18n RU/KK/EN; unit tests
+    for the box math and save/load.
+
+
+    The work is done on branch devteam/A7 (previous work): it resumes there once A7a is merged, with dev
+    merged in, and checks itself against the real A7a routes. The tester cannot draw: make a saved box
+    visible on a route (e.g. loaded from the API) so the tester''s screenshot of /viewer/notre-dame shows
+    the box outline.
+
+    '
+  status: blocked
+  owner: dev_app
+  run: cont-20261017-123453-dev_app-4
+  branch: devteam/A7
+  blocked_reason: waits for A7a (Region of interest API); back to todo when it merges, resumes on devteam/A7
+  depends_on:
+  - A7a
 - id: O1
   area: app
   title: Organization map
@@ -545,6 +613,19 @@ tasks:
     screenshot of the organization page.
 
     '
+  status: todo
+- id: U2
+  area: app
+  title: Upload a video in the web app
+  goal: 'web/ only. "New inspection" uploads a video to the D1/S1 API with an upload progress bar, a clear
+    error for unsupported or too large files and a retry when the upload fails; then it shows the job''s
+    per-stage progress from the S1 API by reusing the A3 processing status view, and opens the map when
+    the job is done. All text via i18n (RU/KK/EN); unit tests with a mocked API; tester screenshots of
+    the upload screen and the progress view.
+
+    '
+  depends_on:
+  - S1
   status: todo
 - id: A8
   area: app
@@ -562,16 +643,4 @@ tasks:
   depends_on:
   - A6
   - P5a
-- id: A1b
-  area: app
-  title: Simple local login
-  goal: 'A simple local login for the app shell (no external identity provider yet). Routes behind it;
-    credentials never hard-coded.
-
-    '
-  status: done
-  owner: dev_app
-  run: run-20261017-085251
-  branch: devteam/A1b
-  pr: https://github.com/IzbassarO/qarau/pull/27
-  done_at: '2026-10-17'
+  - U2
