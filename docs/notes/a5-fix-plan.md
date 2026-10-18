@@ -4,7 +4,7 @@
    300 object points in a unit cube, 200 far points on a larger shell, a version-1
    manifest, little-endian XYZ float32 and first-seen/observation uint16 buffers,
    RGB uint8 buffers, and a small inline frame thumbnail. No files under `data/`.
-2. Intercept every `/api/runs/synthetic-far/**` request with `page.route`. Reuse the
+2. Serve the synthetic manifest and each asset with `page.route`. Reuse the
    existing public development viewer route and English locale setup. For the malformed
    case, replace only the far-position buffer with four bytes. Assert the warning,
    all 300 object points, and absence of the far toggle. Leave real-data skips intact.
@@ -35,3 +35,25 @@ Vitest are MIT. The fixture uses only TypeScript and Node buffers.
 - Playwright test discovery succeeds and lists both synthetic scenarios. The
   malformed-far test has no skip or filesystem reads. The existing Notre-Dame
   `existsSync` skip is unchanged. No screenshots were taken.
+
+## Tester follow-up
+
+- Replaced the broad throwing route handler with exact manifest/asset routes. Asset
+  routes use production `runUrl`: `web/points.position.f32` maps to
+  `/api/runs/synthetic-far/files/web/points.position.f32`, and the same mapping serves
+  colours, first-seen data, far arrays and the frame SVG. Other API endpoints are no
+  longer intercepted by the fixture.
+- Added `pnpm e2e:far-layer` and `pnpm check`. The latter runs lint, typecheck, Vitest
+  and the far-layer Playwright spec in sequence, retaining a failed exit status if
+  Playwright cannot run. No gate or workflow files were changed. Existing CI invokes
+  individual scripts; selecting `pnpm check` in those protected checks requires an
+  orchestrator change.
+- Re-ran `pnpm check --output=<A5-fix scratch>/playwright-check-followup` with the empty
+  runs directory. Lint, typecheck and all 499 Vitest tests passed; the log now visibly
+  includes the Playwright command, which fails before executing tests with the same
+  sandbox `listen EPERM ::1:5199`. Full-suite Playwright was retried as well. A passing
+  browser result remains blocked by the execution environment, not by a skipped test.
+- Build and the two scratch loader checks passed again. Playwright discovery also
+  succeeds after importing the production URL helper. Logs are in the assigned scratch
+  directory: `check-followup.log`, `build-followup.log` and
+  `playwright-full-followup.log`. No server is left listening on port 5199.

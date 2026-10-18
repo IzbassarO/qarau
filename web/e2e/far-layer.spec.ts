@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
-import type { Manifest } from '../src/lib/bundle';
+import { runUrl, type Manifest } from '../src/lib/bundle';
 import { makeFarBundle } from './fixtures/far-layer/makeFarBundle';
 
 const realManifestPath = path.resolve(
@@ -12,19 +12,18 @@ const realManifestPath = path.resolve(
 
 async function serveFarBundle(page: Page, { manifest, files }: ReturnType<typeof makeFarBundle>) {
   await page.addInitScript(() => localStorage.setItem('qarau.lang', 'en'));
-  const prefix = `/api/runs/${manifest.run_id}/`;
-  await page.route(`**${prefix}**`, (route) => {
-    const relative = new URL(route.request().url()).pathname.slice(prefix.length);
-    if (relative === 'manifest.json') return route.fulfill({ json: manifest });
-    const body = relative.startsWith('files/')
-      ? files.get(relative.slice('files/'.length))
-      : undefined;
-    if (!body) throw new Error(`Unexpected synthetic bundle request: ${relative}`);
-    return route.fulfill({
-      body,
-      contentType: relative.endsWith('.svg') ? 'image/svg+xml' : 'application/octet-stream',
-    });
-  });
+  await page.route(`**/api/runs/${encodeURIComponent(manifest.run_id)}/manifest.json`, (route) =>
+    route.fulfill({ json: manifest }),
+  );
+  // Use the loader's URL builder so every on-wire path keeps its /files/web/ prefix.
+  for (const [relative, body] of files) {
+    await page.route(`**${runUrl(manifest.run_id, relative)}`, (route) =>
+      route.fulfill({
+        body,
+        contentType: relative.endsWith('.svg') ? 'image/svg+xml' : 'application/octet-stream',
+      }),
+    );
+  }
 }
 
 async function layerState(page: Page) {
