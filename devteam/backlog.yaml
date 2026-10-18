@@ -648,7 +648,16 @@ tasks:
     other real-data tests. The e2e runs in CI.
 
     '
-  status: todo
+  status: blocked
+  owner: dev_app
+  run: cont-20261018-153430-dev_app-2
+  branch: devteam/A5-fix
+  blocked_reason: 'the tester sent it back twice in a row for the same reason, so no new round was started:
+    The change looks right, but the key criterion is unproven. The checks contain no Playwright run, so
+    I cannot confirm that the malformed-far test passes rather than skips. The fixture, the page.route
+    handlers and the manifest or URL paths are unverified against the real viewer. Please re-check by
+    reading bundle.ts and the viewer code. In particular check that the route glob `**${runUrl(...)}`
+    match'
 - id: O1
   area: app
   title: Organization map
