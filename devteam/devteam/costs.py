@@ -82,6 +82,9 @@ def _db(home: Path) -> sqlite3.Connection:
         db.execute("alter table usage add column state text default 'settled'")
     if "secs" not in cols:  # v1 db
         db.execute("alter table usage add column secs real default 0")
+    if "cache_read" not in cols:  # v2 db: prompt caching (tokens_in includes both)
+        db.execute("alter table usage add column cache_read int default 0")
+        db.execute("alter table usage add column cache_write int default 0")
     db.execute("""create table if not exists limits (
         day text, ts text, agent text, task text, reset_at real, waited_s real, message text)""")
     return db
@@ -121,11 +124,21 @@ def reserve(home: Path, cap: float, agent: str, model: str, task: str, max_usd: 
         db.close()
 
 
-def settle(home: Path, rid: int, tokens_in: int, tokens_out: int, usd: float):
+def settle(
+    home: Path,
+    rid: int,
+    tokens_in: int,
+    tokens_out: int,
+    usd: float,
+    cache_read: int = 0,
+    cache_write: int = 0,
+):
+    """tokens_in: all input, cache reads and writes included."""
     with _db(home) as db:
         db.execute(
-            "update usage set tokens_in=?, tokens_out=?, usd=?, state='settled' where rowid=?",
-            (tokens_in, tokens_out, usd, rid),
+            "update usage set tokens_in=?, tokens_out=?, usd=?, cache_read=?, cache_write=?, "
+            "state='settled' where rowid=?",
+            (tokens_in, tokens_out, usd, cache_read, cache_write, rid),
         )
 
 
@@ -190,15 +203,24 @@ def report(home: Path, console):
 
 
 def day_rows(home: Path, day: str) -> list[tuple]:
+    """(agent, model, calls, usd, billed, tokens_in, cache_read, cache_write) per agent/model."""
     db = _db(home)
     try:
         return db.execute(
-            """select agent, model, count(*), sum(usd), billed from usage
+            """select agent, model, count(*), sum(usd), billed, sum(tokens_in),
+            sum(cache_read), sum(cache_write) from usage
             where day = ? group by agent, model, billed order by agent""",
             (day,),
         ).fetchall()
     finally:
         db.close()
+
+
+def cache_hits(tokens_in, cache_read) -> str:
+    """Share of the input tokens read from the prompt cache: '62 % (81,000 tok)'."""
+    if not tokens_in:
+        return "—"
+    return f"{(cache_read or 0) / tokens_in * 100:.0f} % ({cache_read or 0:,} tok)"
 
 
 def subscription_rows(home: Path, day: str) -> list[tuple]:

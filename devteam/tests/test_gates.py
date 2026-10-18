@@ -265,22 +265,60 @@ def test_regression_rules():
     ]
 
 
-def test_conflict_with_dev_blocks_without_rewriting_history(repo):
+def theirs_lands_on_dev(repo):
+    """Someone else lands a conflicting change on dev while the task works."""
+    other = repo.parent / "other"
+    if not other.exists():
+        git(repo.parent, "clone", "-q", "-b", "dev", remote_of(repo), str(other))
+        (other / "pipeline" / "a.py").write_text("a = 'theirs'\n")
+        git(other, "commit", "-qam", "theirs")
+        git(other, "push", "-q", "origin", "dev")
+
+
+def test_conflict_with_dev_gets_a_resolve_step_then_merges_without_rewriting_history(repo):
+    """Owner, 2026-10-17: the orchestrator merges dev in before a round; on conflicts the
+    developer gets a short step with the file list (not a full round), then work goes on."""
+    seen = []
+
     def change(wt, s):
-        (wt / "pipeline" / "a.py").write_text("a = 'mine'\n")
-        # meanwhile someone else lands a conflicting change on dev
-        other = repo.parent / "other"
-        if not other.exists():
-            git(repo.parent, "clone", "-q", "-b", "dev", remote_of(repo), str(other))
-            (other / "pipeline" / "a.py").write_text("a = 'theirs'\n")
-            git(other, "commit", "-qam", "theirs")
-            git(other, "push", "-q", "origin", "dev")
+        seen.append(s.get("conflicts"))
+        if s.get("conflicts"):  # the resolve step: markers in, resolution out
+            assert "<<<<<<<" in (wt / "pipeline" / "a.py").read_text()
+            (wt / "pipeline" / "a.py").write_text("a = 'both'\n")
+            (wt / "web" / "app.ts").write_text("not part of resolving\n")  # reverted
+            return
+        if len(seen) == 1:
+            (wt / "pipeline" / "a.py").write_text("a = 'mine'\n")
+            theirs_lands_on_dev(repo)
+
+    team, graph = make(repo, Dev(change))
+    run(graph)
+    assert task(team)["status"] == "done"
+    assert seen == [None, ["pipeline/a.py"], None]  # round, resolve step, round
+    url = remote_of(repo)
+    assert git(url, "show", "dev:pipeline/a.py") == "a = 'both'\n"
+    assert git(url, "show", "dev:web/app.ts") == "export {}\n"
+    theirs = git(repo.parent / "other", "rev-parse", "HEAD").strip()
+    git(url, "merge-base", "--is-ancestor", theirs, "dev")  # merged in, never rebased away
+
+
+def test_conflict_markers_left_block_the_task(repo):
+    def change(wt, s):
+        if not s.get("conflicts"):
+            (wt / "pipeline" / "a.py").write_text("a = 'mine'\n")
+            theirs_lands_on_dev(repo)
 
     team, graph = make(repo, Dev(change))
     run(graph)
     t = task(team)
-    assert t["status"] == "blocked" and "conflicts with dev" in t["blocked_reason"]
-    assert team.gh.prs == {}  # nothing pushed or opened
+    assert (
+        t["status"] == "blocked" and "could not resolve conflicts with dev" in t["blocked_reason"]
+    )
+    assert "markers left in ['pipeline/a.py']" in t["blocked_reason"]
+    wt = Path(team.home / "worktrees" / "T-001")
+    assert not (wt / ".git").is_file() or "MERGING" not in git(wt, "status")  # merge aborted
+    assert team.gh.prs == {}  # nothing pushed
+    assert "theirs" not in git(repo, "log", "--format=%s", team.branch_for("T-001"))
 
 
 def test_forbidden_git_and_gh_actions(repo):

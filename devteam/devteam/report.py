@@ -33,14 +33,15 @@ def write_report(team, day: str | None = None) -> Path:
         "",
         "## Cost",
         "",
-        "| Agent | Model | Calls | $ | Billing |",
-        "| --- | --- | --- | --- | --- |",
+        "| Agent | Model | Calls | $ | Billing | Cache hits |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     rows = costs.day_rows(team.home, day)
     lines += [
-        f"| {a} | {m} | {n} | {usd:.3f} | {'API' if billed else 'subscription'} |"
-        for a, m, n, usd, billed in rows
-    ] or ["| — | — | 0 | 0 | — |"]
+        f"| {a} | {m} | {n} | {usd:.3f} | {'API' if billed else 'subscription'} | "
+        f"{costs.cache_hits(ti, cr) if billed else '—'} |"
+        for a, m, n, usd, billed, ti, cr, _cw in rows
+    ] or ["| — | — | 0 | 0 | — | — |"]
     lines += [
         "",
         f"API spend: **${sum(r[3] for r in rows if r[4]):.2f}** of "

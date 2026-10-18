@@ -78,7 +78,7 @@ def test_codex_developer_runs_resumes_and_logs_load(repo, tmp_path, monkeypatch)
         "worktree": str(repo),
     }
     out = RealAgents().develop(team, s)
-    assert out == {"session": "01a13f6c-eace", "summary": "DONE"}
+    assert out == {"session": "01a13f6c-eace", "summary": "DONE", "tokens": 29513 + 58}
     argv = (tmp_path / "argv").read_text().splitlines()
     scratch = team.home / "scratch" / "A1a"  # outside the worktree, writable in the sandbox
     assert argv[0] == f"exec --json --sandbox workspace-write -C {repo} --add-dir {scratch} -"

@@ -1,5 +1,5 @@
-"""Kerege CLI: devteam run [--continuous]|resume|stop|status|costs|report|release|cleanup|dashboard
-(--fake: no cost, local remote)."""
+"""Kerege CLI: devteam run [--continuous]|resume [task]|stop [task]|status|costs|report|release|
+cleanup|dashboard (--fake: no cost, local remote)."""
 
 import argparse
 import os
@@ -215,6 +215,27 @@ def stop(team: Team):
         print("the run was already gone")
 
 
+def control_task(team: Team, kind: str, tid: str):
+    """`devteam stop <task>` / `devteam resume <task>`: one task, the others keep going."""
+    if not any(t["id"] == tid for t in team.load_backlog()):
+        sys.exit(f"no task {tid} in the backlog")
+    team.request(kind, tid)
+    from devteam.dashboard import run_active
+
+    if run_active(team):
+        print(
+            f"{kind} {tid} sent to the running Kerege: "
+            + (
+                "its current step is killed within seconds and the task is blocked"
+                if kind == "stop"
+                else "back to todo when the brain next plans"
+            )
+        )
+        return
+    for line in team.apply_controls(running=False):
+        print(line)
+
+
 def show_status(team: Team):
     t = Table("id", "status", "owner", "title", "PR / reason")
     for task in team.load_backlog():
@@ -244,6 +265,7 @@ def main():
             "dashboard",
         ],
     )
+    p.add_argument("task", nargs="?", help="stop / resume: only this task, e.g. A7")
     p.add_argument(
         "--continuous",
         action="store_true",
@@ -255,6 +277,10 @@ def main():
     args = p.parse_args()
     team = make_team(args.fake)
     team.only = {t for t in args.only.split(",") if t}
+    if args.task and args.command in ("stop", "resume"):
+        return control_task(team, args.command, args.task)
+    if args.task:
+        sys.exit(f"`devteam {args.command}` takes no task id")
     if args.command == "run" and args.continuous:
         return run_continuous(team)
     if args.command == "dashboard":
