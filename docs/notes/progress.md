@@ -2,6 +2,18 @@
 
 Newest first. Keep it short.
 
+## 2026-10-17 — Kerege supervisor (A7 used 42.6 M tokens while going nowhere)
+
+- Per-task limits in `devteam/config.yaml` → `supervisor` (tokens per round / per task, minutes
+  per round), counted live; over a limit only that task stops and is blocked with the reason.
+- Same tester reason twice in a row → blocked; dev merged in before every round, conflicts get
+  a short resolve step; plans that need another developer's folders are blocked for a split.
+- `devteam stop <task>` / `devteam resume <task>`; dashboard agents only from the current run;
+  prompt caching for brain + tester with cache hits in the dashboard and report.
+- Backlog: A7 split into A7a (backend ROI API, dev_pipeline) + A7 (web, resumes on its branch);
+  new P3e (refresh viewer runs), U2 (upload in the web app), D2 (deploy online); S1 no longer
+  waits for dense. dev_pipeline order: P3e, P5a, D1, S1, A7a. A8 waits for U2.
+
 ## 2026-10-17 — Owner rule: no agent leaves a server running
 
 - CLAUDE.md / AGENTS.md: any server an agent starts is stopped when its check is done.
