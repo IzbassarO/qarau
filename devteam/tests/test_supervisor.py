@@ -174,7 +174,8 @@ def test_a_task_over_a_limit_is_blocked_and_the_others_keep_going(repo):
     assert git(remote_of(repo), "show", "dev:devteam/backlog.yaml").count("status: blocked") == 1
     assert s["stop_reason"] == "no plannable task left for any developer"
     d = D.collect(team, None)
-    assert any(k == "blocked" and "T-001" in t and "supervisor" in t for k, t, _u in d["attention"])
+    (a,) = [a for a in d["attention"] if a["kind"] == "blocked" and "T-001" in a["text"]]
+    assert "supervisor" in a["text"] and "devteam resume T-001" in a["do"]
 
 
 class Tokens(Fast):

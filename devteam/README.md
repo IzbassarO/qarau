@@ -45,14 +45,22 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   `run --continuous`. At the end it prints, and the daily report lists, every task, its
   result, the spend and why the run stopped (`.state/runs/<run>.json`). Plain `devteam run`
   is unchanged: one round, then the weekly release check.
-- Dashboard (`devteam dashboard`): one local read-only page (127.0.0.1 only, GET only,
-  refreshes every 20 s), real data only, no model calls: agents (status, current task, time on
-  it, from `.state/events.log` of the current run only: events before run.pid was written and
-  tasks the backlog says are not in progress never show as working), today's API spend vs the budget, subscription load per task,
-  subscription-limit events and reset times, the queue (todo / in progress / blocked / done
-  with PR links), open PRs, CI on `dev` (`gh`, cached 60 s), the latest commits, and "Needs
-  your attention": red CI on `dev`, blocked tasks, PRs waiting for the owner, spend above
-  80 % of the budget. Every value from `.env` is redacted.
+- Dashboard (`devteam dashboard`, v2): one local read-only page (127.0.0.1 only, GET only,
+  refreshes every 20 s keeping the open tab), real data only, no model calls, no network
+  assets (system fonts, inline CSS/JS: works offline). Summary row: run state and stop reason,
+  tasks done today, API spend vs budget, subscription tokens today, time running. "Needs your
+  attention" comes first and says what to do for each item (red CI, blocked tasks except those
+  only waiting for dependencies, PRs waiting for you, spend above 80 %, scope/bypass
+  violations). Agents as cards (status colour, task, time, last message, tool, tokens today),
+  the queue as columns, today's timeline per agent (working / waiting stretches from the
+  events log), subscription tokens per task as bars with the supervisor limit, limit events
+  with a live reset countdown, violations, API cost with prompt-cache hits, PRs, CI, commits.
+  **Office** tab: one room per department (Lead = brain, Core = dev_pipeline, App = dev_app,
+  Testing = tester); each agent is a figure at a desk whose look shows the real state
+  (working at a lit screen, waiting with the reset time, blocked with a red sign, idle);
+  click it for task, time, last messages and tokens today. Agent status comes only from the
+  current run's events (after run.pid was written) and never for a task the backlog says is
+  not in progress. Every value from `.env` is redacted.
 - Supervisor (`config.yaml` → `supervisor`, owner 2026-10-17): per task, `max_tokens_per_round`,
   `max_tokens_per_task` (all rounds of the task in this run) and `max_round_min` (a round
   commits only when it ends, so this is the longest a task goes without a new commit).

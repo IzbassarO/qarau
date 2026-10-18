@@ -89,7 +89,7 @@ def test_collect_shows_agents_spend_limits_queue_and_attention(team, monkeypatch
     assert (app["task"], app["state"]) == ("T-004", "waiting")
     assert d["agents"]["tester"] == []
     assert d["limits"][0][1:4] == ("dev_app", "T-004", now + 3600)
-    kinds = [(k, t) for k, t, _u in d["attention"]]
+    kinds = [(a["kind"], a["text"]) for a in d["attention"]]
     assert ("CI", "CI on dev is failure (abcdef12)") in kinds  # newest completed run
     assert any(k == "blocked" and "T-003" in t for k, t in kinds)
     assert any(k == "PR" and "#30" in t for k, t in kinds)  # waits for the owner
@@ -139,3 +139,81 @@ def test_gh_failure_is_shown_not_fatal(team):
     d = D.collect(team, D.GhCache(team, runner=broken))
     assert d["prs"] == {"error": "gh: not logged in"}
     assert "gh: not logged in" in D.render(d)
+
+
+# --- v2 (owner, 2026-10-17): summary, actions, cards, columns, timeline, office ----------------
+def test_v2_summary_actions_office_and_timeline(team, monkeypatch):
+    now = time.mktime(time.strptime("2026-10-17T12:00:00", "%Y-%m-%dT%H:%M:%S"))
+    (team.home / "run.pid").write_text(str(os.getpid()))
+    os.utime(team.home / "run.pid", (now - 7200, now - 7200))  # running for 2 h
+    monkeypatch.setattr(costs, "_today", lambda: "2026-10-17")
+    write_events(
+        team,
+        [
+            ev("dev_pipeline", "working", "T-001", "2026-10-17T10:30:00", "building the plan"),
+            ev("dev_app", "working", "T-002", "2026-10-17T10:15:00"),
+            ev("dev_app", "idle", "T-002", "2026-10-17T11:00:00"),
+            ev("dev_app", "waiting", "T-003", "2026-10-17T11:30:00", "subscription limit hit"),
+            ev("tester", "working", "T-002", "2026-10-17T11:00:00"),
+            ev("tester", "idle", "T-002", "2026-10-17T11:20:00", "BLOCKED: supervisor: x"),
+        ],
+    )
+    costs.record(
+        team.home, "dev_pipeline", "claude-code (subscription)", "T-001", 3_000_000, 1, 0, False
+    )
+    costs.record(team.home, "dev_app", "codex (subscription)", "T-002", 9_000_000, 2, 0, False)
+    costs.record_limit(team.home, "dev_app", "T-003", now + 5400, 600, "usage limit reached")
+    team.update_task("T-001", status="in_progress", owner="dev_pipeline")
+    team.update_task("T-003", status="in_progress", owner="dev_app")
+    team.update_task(
+        "T-002", status="blocked", blocked_reason="supervisor: the task used 12.0 M (limit 12 M)"
+    )
+    d = D.collect(team, fake_gh([], []), now=now)
+
+    assert d["run"] == {"state": "running", "reason": "", "secs": 7200}
+    assert d["sub_tokens"] == 12_000_003 and d["task_tokens"][0] == ("T-002", 9_000_002)
+    (a,) = [a for a in d["attention"] if a["kind"] == "blocked"]
+    assert "devteam resume T-002" in a["do"] and "supervisor" in a["do"]
+    office = d["office"]
+    assert office["dev_pipeline"]["state"] == "working" and office["dev_pipeline"]["room"] == "Core"
+    assert office["dev_app"]["state"] == "waiting" and office["dev_app"]["reset"] == now + 5400
+    assert office["tester"]["state"] == "blocked" and office["tester"]["task"] == "T-002"
+    assert office["brain"]["state"] == "idle" and office["brain"]["room"] == "Lead"
+    assert office["dev_app"]["tokens"] == 9_000_002
+    lanes = d["timeline"]["rows"]
+    assert [(s["task"], s["state"]) for s in lanes["dev_app"]] == [
+        ("T-002", "working"),
+        ("T-003", "waiting"),
+    ]
+    assert lanes["dev_app"][1]["end"] == now and lanes["dev_app"][1]["open"]
+
+    page = D.render(d)
+    for text in ("Needs your attention", "Tasks done today", "Subscription tokens today",
+                 "Running for", "2 h 00 min", "Office", "Core", "App", "Testing", "Lead",
+                 f"data-reset='{now + 5400:.0f}'", "Dashed line: the per-task limit"):  # fmt: skip
+        assert text in page, text
+    # offline: nothing loaded from the network
+    assert "<script src" not in page and "<link" not in page and "@import" not in page
+    for name in ("dev_pipeline", "dev_app", "tester", "brain"):  # a room and a panel each
+        assert f"class='room' data-who='{name}'" in page
+        assert f"class='who-panel' data-who='{name}'" in page
+
+
+def test_blocked_actions_tell_the_owner_what_to_do():
+    by = {"A7a": {"status": "todo"}, "P1": {"status": "done"}}
+    act = D.blocked_action
+    assert act({"id": "A7", "depends_on": ["A7a"], "blocked_reason": "waits for A7a"}, by) is None
+    assert "devteam resume X" in act({"id": "X", "blocked_reason": "stopped by the owner"}, by)
+    assert "backlog.yaml" in act({"id": "X", "blocked_reason": "needs a split before it"}, by)
+    assert "your decision" in act({"id": "X", "blocked_reason": "waits for owner to fund"}, by)
+    assert "packets/X.md" in act({"id": "X", "blocked_reason": "tester: no tests"}, by)
+    assert act({"id": "X", "depends_on": ["P1"], "blocked_reason": "tester: no"}, by)
+
+
+def test_office_figures_differ_by_state():
+    base = {"reset": None}
+    svgs = {s: D.figure({**base, "state": s}) for s in D.STATES}
+    assert len(set(svgs.values())) == 4
+    assert "#e2655b" in svgs["blocked"] and "#4fb3a0" in svgs["working"]
+    assert "14:30" in D.figure({"state": "waiting", "reset": time.mktime(
+        time.strptime("2026-10-17T14:30:00", "%Y-%m-%dT%H:%M:%S"))})  # fmt: skip

@@ -221,6 +221,20 @@ def day_rows(home: Path, day: str) -> list[tuple]:
         db.close()
 
 
+def agent_tokens(home: Path, day: str) -> dict[str, int]:
+    """Tokens in + out per agent today (API and subscription)."""
+    db = _db(home)
+    try:
+        rows = db.execute(
+            "select agent, sum(tokens_in) + sum(tokens_out) from usage where day = ? "
+            "group by agent",
+            (day,),
+        ).fetchall()
+    finally:
+        db.close()
+    return {a: n or 0 for a, n in rows}
+
+
 def cache_hits(tokens_in, cache_read) -> str:
     """Share of the input tokens read from the prompt cache: '62 % (81,000 tok)'."""
     if not tokens_in:
