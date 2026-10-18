@@ -76,15 +76,20 @@ def _db(home: Path) -> sqlite3.Connection:
     db.execute("""create table if not exists usage (
         day text, ts text, agent text, model text, task text,
         tokens_in int, tokens_out int, usd real, billed int, state text default 'settled',
-        secs real default 0)""")
+        secs real default 0, cache_read int default 0, cache_write int default 0)""")
     cols = {row[1] for row in db.execute("pragma table_info(usage)")}
-    if "state" not in cols:  # v0 db
-        db.execute("alter table usage add column state text default 'settled'")
-    if "secs" not in cols:  # v1 db
-        db.execute("alter table usage add column secs real default 0")
-    if "cache_read" not in cols:  # v2 db: prompt caching (tokens_in includes both)
-        db.execute("alter table usage add column cache_read int default 0")
-        db.execute("alter table usage add column cache_write int default 0")
+    for col, decl in (  # older dbs; tokens_in includes cache reads and writes
+        ("state", "text default 'settled'"),
+        ("secs", "real default 0"),
+        ("cache_read", "int default 0"),
+        ("cache_write", "int default 0"),
+    ):
+        if col not in cols:
+            try:
+                db.execute(f"alter table usage add column {col} {decl}")
+            except sqlite3.OperationalError as e:  # another thread or process added it first
+                if "duplicate column" not in str(e):
+                    raise
     db.execute("""create table if not exists limits (
         day text, ts text, agent text, task text, reset_at real, waited_s real, message text)""")
     return db

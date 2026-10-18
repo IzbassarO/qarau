@@ -639,3 +639,31 @@ def test_new_commits_on_a_merged_branch_get_a_new_pr(repo):
     team, first_pr, t = rerun_merged_task(repo, Quick())
     assert t["status"] == "done" and t["pr"] != first_pr  # a new PR, CI'd and merged
     assert team.gh.prs[int(t["pr"].rsplit("/", 1)[1])]["state"] == "MERGED"
+
+
+def test_old_cost_db_is_migrated_once_even_by_racing_threads(tmp_path):
+    """CI 2026-10-18: two threads both saw no cache_read column; the second ALTER failed."""
+    import sqlite3
+    import threading
+
+    db = sqlite3.connect(tmp_path / "costs.sqlite")
+    db.execute("create table usage (day text, ts text, agent text, model text, task text, "
+               "tokens_in int, tokens_out int, usd real, billed int)")  # fmt: skip
+    db.commit()
+    db.close()
+    errors = []
+
+    def open_it():
+        try:
+            costs._db(tmp_path).close()
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=open_it) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    cols = [r[1] for r in costs._db(tmp_path).execute("pragma table_info(usage)")]
+    assert cols[-4:] == ["state", "secs", "cache_read", "cache_write"]
