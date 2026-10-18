@@ -2,6 +2,19 @@
 
 Newest first. Keep it short.
 
+## 2026-10-18 — Kerege follow-ups
+
+- dev_app owns `web/` plus markdown in `docs/decisions/` and `docs/notes/` (plans, ADRs).
+- Scope-gate replay on merged PRs found three historic violations:
+  - A9 (#37) loosened a test threshold (0.5 → 0): task **A9-fix** restores it in code.
+  - A5 (#32) `test.skip(!manifest.far)` never runs (no far layer locally, no data in CI): task
+    **A5-fix** makes that e2e run on a synthetic bundle.
+  - P3c (#23) edited `pipeline/qarau_pipeline/benchmark_set.toml` (now a protected path):
+    **approved exception** by the owner (2026-10-18); the change stays.
+- GPU: task P4a-1b (queued right after P5a) adds a Modal provider (mocked in tests, token
+  from devteam/.env, never printed); budget 1.0 GPU h/day, 0.5 h per job. P4a-2 stays blocked
+  until the owner says the Modal account is ready.
+
 ## 2026-10-17 — Kerege supervisor (A7 used 42.6 M tokens while going nowhere)
 
 - Per-task limits in `devteam/config.yaml` → `supervisor` (tokens per round / per task, minutes

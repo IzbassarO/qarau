@@ -72,7 +72,8 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
 - Hard scope enforcement (`devteam/scope.py`, owner 2026-10-17, after A7 shipped its backend
   as a `.patch` under docs/): the tester's first step is a scope gate on
   `git diff dev...HEAD`. Every path must be in the developer's `owns` (config: dev_app
-  `web/` only; dev_pipeline `pipeline/`, `backend/`, `infra/`, `docs/`) or the task's
+  `web/` plus markdown only in `docs/decisions/` and `docs/notes/` — entries may be patterns
+  like `docs/notes/*.md`; dev_pipeline `pipeline/`, `backend/`, `infra/`, `docs/`) or the task's
   `writable`; a path outside → `out_of_scope`, no retry, blocked as "needs a split". Protected
   paths (devteam/, .github/, backlog.yaml, CLAUDE.md, AGENTS.md, plus `gates.protected`:
   benchmark video set, lint configs) → hard fail. A developer that even tries to write another

@@ -259,10 +259,10 @@ def test_outside_paths():
     assert outside_paths(["backend/tests/test_roi.py exists; web/src ok"], "dev_app", CFG, t) == [
         "backend/tests/test_roi.py"
     ]
-    assert outside_paths(
-        ["/viewer/notre-dame shows a box; docs/notes/x.md"], "dev_app", CFG, t
-    ) == [
-        "docs/notes/x.md"  # dev_app owns web/ only
+    viewer = ["/viewer/notre-dame shows a box; docs/notes/x.md and docs/notes/ explain it"]
+    assert outside_paths(viewer, "dev_app", CFG, t) == []  # markdown in docs/notes/ is its own
+    assert outside_paths(["docs/design/viewer-3d.md is updated"], "dev_app", CFG, t) == [
+        "docs/design/viewer-3d.md"
     ]
     assert (
         outside_paths(
@@ -509,8 +509,10 @@ def test_real_backlog_split_a7_p3e_and_order():
     core_todo = [
         t["id"] for t in tasks if t["area"] == "core" and t["status"] in ("todo", "blocked")
     ]
-    assert core_todo[:5] == ["P3e", "P5a", "D1", "S1", "A7a"]
+    assert core_todo[:6] == ["P3e", "P5a", "P4a-1b", "D1", "S1", "A7a"]
     app_todo = [t["id"] for t in tasks if t["area"] == "app" and t["status"] == "todo"]
-    assert app_todo[:2] == ["O1", "U2"]
+    assert app_todo[:4] == ["A9-fix", "A5-fix", "O1", "U2"]  # the historic violations first
+    assert by["P4a-1b"]["area"] == "core" and "MODAL_TOKEN_ID" in by["P4a-1b"]["goal"]
+    assert by["P4a-2"]["status"] == "blocked"  # until the owner says the Modal account is ready
     # A7a's own criteria-shaped goal stays inside dev_pipeline's folders
     assert outside_paths([by["A7a"]["goal"]], "dev_pipeline", CFG, by["A7a"]) == []

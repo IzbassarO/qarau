@@ -212,4 +212,5 @@ def test_paid_service_keys_never_reach_developers():
     from devteam.real import paid_service_key
 
     assert paid_service_key("RUNPOD_API_KEY") and paid_service_key("AWS_SECRET_ACCESS_KEY")
+    assert paid_service_key("MODAL_TOKEN_ID") and paid_service_key("MODAL_TOKEN_SECRET")
     assert not paid_service_key("PATH") and not paid_service_key("HOME")

@@ -54,9 +54,16 @@ def diff(path: str, minus=(), plus=(), new=False) -> str:
 # --- pure checks -----------------------------------------------------------------------------
 def test_scope_and_protected_paths_follow_the_config():
     paths = ["web/src/a.ts", "backend/app/roi.py", "docs/notes/x.md", "devteam/backlog.yaml"]
+    paths += ["docs/decisions/0020-x.md", "docs/design/v.md", "docs/notes/x.py", "docs/notes/a.png"]
     assert SC.check_paths(paths, CFG, "dev_app", {}) == {
         "protected": ["devteam/backlog.yaml"],
-        "out_of_scope": ["backend/app/roi.py", "docs/notes/x.md"],  # dev_app: web/ only
+        # dev_app: web/ plus markdown in docs/decisions/ and docs/notes/
+        "out_of_scope": [
+            "backend/app/roi.py",
+            "docs/design/v.md",
+            "docs/notes/a.png",
+            "docs/notes/x.py",
+        ],  # fmt: skip
     }
     ok = ["pipeline/a.py", "backend/app/roi.py", "infra/x.yml", "docs/notes/y.md"]
     assert SC.check_paths(ok, CFG, "dev_pipeline", {}) == {"protected": [], "out_of_scope": []}
@@ -266,14 +273,26 @@ def test_checks_run_on_a_clean_checkout_not_the_developers_worktree(repo):
     assert not (team.home / "check-wt" / "T-001").exists()  # the checkout is removed
 
 
-def test_web_developer_writing_docs_is_reverted_not_failed(repo):
-    """dev_app owns web/ only; a plan it writes to docs/ (as CLAUDE.md asks) is dropped."""
-    agents = Edits("docs/notes/t-002-plan.md")
-    agents.plan = only("T-002", "dev_app")
-    team, graph = make(repo, agents)
+def test_web_developer_keeps_markdown_plans_other_docs_are_reverted_not_failed(repo):
+    """dev_app owns web/ + markdown in docs/notes/ and docs/decisions/ (owner, 2026-10-18)."""
+
+    class Docs(Fast):
+        plan = staticmethod(only("T-002", "dev_app"))
+
+        def develop(self, team, s):
+            wt = Path(s["worktree"])
+            for p in ("docs/notes/t-002-plan.md", "docs/decisions/0099-x.md",
+                      "docs/design/spec.md", "docs/notes/tool.py"):  # fmt: skip
+                (wt / p).parent.mkdir(parents=True, exist_ok=True)
+                (wt / p).write_text("# x\n")
+            return super().develop(team, s)
+
+    team, graph = make(repo, Docs())
     run(graph)
     assert task(team, "T-002")["status"] == "done"
-    assert "docs/notes" not in git(repo, "show", "--stat", team.branch_for("T-002"))
+    files = git(repo, "diff", "--name-only", "dev", team.branch_for("T-002"))
+    assert "docs/notes/t-002-plan.md" in files and "docs/decisions/0099-x.md" in files
+    assert "docs/design/spec.md" not in files and "docs/notes/tool.py" not in files
     assert team.violations(time.strftime("%Y-%m-%d")) == []
 
 
@@ -285,3 +304,18 @@ def test_violations_reach_the_dashboard_and_the_report(repo):
     report = write_report(team).read_text()
     assert "## Scope and bypass violations" in report
     assert "T-002 (dev_app) **out_of_scope**" in report
+
+
+def test_briefs_say_what_each_developer_may_write_in_docs():
+    from devteam.real import docs_rule
+
+    app = docs_rule(CFG["developers"]["dev_app"])
+    assert "docs/decisions/*.md, docs/notes/*.md" in app and "never code" in app
+    assert "progress.md" in app
+    assert docs_rule(CFG["developers"]["dev_pipeline"]).startswith(
+        "Do not edit docs/notes/progress"
+    )
+    assert SC.owned("docs/notes/a.md", ["docs/notes/*.md"]) and not SC.owned(
+        "docs/notes/a.py", ["docs/notes/*.md"]
+    )
+    assert SC.folder("docs/notes/*.md") == "docs/notes/" and SC.folder("web/") == "web/"

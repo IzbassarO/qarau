@@ -109,7 +109,7 @@ developers:
   dev_app:
     tool: codex            # Codex CLI, your saved ChatGPT login
     areas: [app]
-    owns: [web/]           # web/ only (owner, 2026-10-17): plans and notes go in the summary
+    owns: [web/, docs/decisions/*.md, docs/notes/*.md]   # web/ + markdown plans and ADRs
     timeout_min: 60
     setup:                 # runs before every round: the Codex sandbox has no network
       - cd web && pnpm install --frozen-lockfile
