@@ -7,12 +7,10 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm e2e:far-layer",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "test": "vitest run",
     "e2e": "playwright test",
-    "e2e:far-layer": "playwright test e2e/far-layer.spec.ts --reporter=list",
     "synthetic": "node scripts/synthetic-bundle.mjs"
   },
   "dependencies": {

@@ -123,7 +123,12 @@ test('malformed far arrays warn while the real object cloud still renders', asyn
   bundle.files.set(manifest.far.position, Buffer.alloc(4));
   await serveFarBundle(page, bundle);
   await page.goto(`/viewer/${manifest.run_id}`);
+  await expect(page.locator('input[type="password"]')).toHaveCount(0);
   await page.waitForFunction(() => window.__qarau?.pointsLoaded);
+  await expect(page.getByRole('img', { name: en['panel.frame'], exact: true })).toHaveJSProperty(
+    'naturalWidth',
+    160,
+  );
   await expect(page.getByRole('alert')).toBeVisible();
   await expect(page.getByRole('alert')).toHaveText(en['viewer.far.errorBroken']);
   await expect(page.getByText(en['error.webgl'])).toHaveCount(0);
@@ -139,7 +144,12 @@ test('valid synthetic far arrays show the opt-in toggle without a warning', asyn
   const { manifest } = bundle;
   await serveFarBundle(page, bundle);
   await page.goto(`/viewer/${manifest.run_id}`);
+  await expect(page.locator('input[type="password"]')).toHaveCount(0);
   await page.waitForFunction(() => window.__qarau?.pointsLoaded);
+  await expect(page.getByRole('img', { name: en['panel.frame'], exact: true })).toHaveJSProperty(
+    'naturalWidth',
+    160,
+  );
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(page.getByText(en['error.webgl'])).toHaveCount(0);
   const before = await layerState(page);
