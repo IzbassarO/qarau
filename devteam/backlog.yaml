@@ -202,7 +202,12 @@ tasks:
     '
   writable:
   - data/runs
-  status: todo
+  status: blocked
+  owner: dev_pipeline
+  run: cont-20261018-153430-dev_pipeline-1
+  branch: devteam/P3e
+  blocked_reason: 'supervisor: the round ran 60 min without a new commit (limit 60 min). Raise the `supervisor`
+    limits in devteam/config.yaml or split the task, then `devteam resume P3e`'
 - id: P5a
   area: core
   title: Metric scale and gravity from an A4 sheet or a measured distance
