@@ -12,8 +12,14 @@ import yaml
 
 from devteam import costs
 from devteam import gates as G
+from devteam import supervise as SV
+from devteam.supervise import TaskHalted
 
 RETRY_WAITS = (15, 60, 180)  # seconds before each retry of a transient API failure
+# Prompt cache: brain calls come minutes to an hour apart, tester rounds of one task too, so the
+# 1-hour TTL (writes cost 2x input, reads ~0.05-0.1x: config `price_cache_read`).
+CACHE = {"type": "ephemeral", "ttl": "1h"}
+CACHE_WRITE_X = 2.0
 
 
 def transient(e: Exception) -> bool:
@@ -46,36 +52,41 @@ def llm_call(
     max_tokens: int = 16000,
     client=None,
     images: list[str] = (),
+    context: str = "",
 ) -> dict:
     """One structured-output call for `role` (a key of config.models). Reserves the
     worst-case cost first, settles to the real usage after. No SDK retries: transient failures
     (connection, timeout, 429, 5xx, overloaded) are retried here after RETRY_WAITS, each try
-    with its own reservation; then the error is raised (`devteam resume` re-runs the node)."""
+    with its own reservation; then the error is raised (`devteam resume` re-runs the node).
+    Prompt caching: `system` and `context` (the stable part of the user turn: repository
+    rules, the task and its criteria) are cached; images and `prompt` come after them."""
     m = team.cfg["models"][role]
     if m["provider"] != "anthropic":
         raise NotImplementedError(f"provider {m['provider']!r} for {role}: only anthropic so far")
     # Every token is at least one byte, so UTF-8 bytes bound the input tokens from above.
-    est_in = len((system + prompt + json.dumps(schema)).encode()) + 1000 + 2500 * len(images)
-    max_usd = (est_in * m["price_in"] + max_tokens * m["price_out"]) / 1e6
+    est_in = len((system + context + prompt + json.dumps(schema)).encode())
+    est_in += 1000 + 2500 * len(images)
+    # worst case: every input token is a cache write
+    max_usd = (est_in * m["price_in"] * CACHE_WRITE_X + max_tokens * m["price_out"]) / 1e6
     if client is None:
         if not team.secrets.get("ANTHROPIC_API_KEY"):
             raise RuntimeError("ANTHROPIC_API_KEY is missing in devteam/.env")
         client = anthropic.Anthropic(api_key=team.secrets["ANTHROPIC_API_KEY"])
     if hasattr(client, "with_options"):
         client = client.with_options(max_retries=0)  # one reservation = one request
-    content: str | list = prompt
-    if images:
-        content = [
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/png",
-                    "data": base64.b64encode(Path(i).read_bytes()).decode(),
-                },
-            }
-            for i in images
-        ] + [{"type": "text", "text": prompt}]
+    content: list = [{"type": "text", "text": context, "cache_control": CACHE}] if context else []
+    content += [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": base64.b64encode(Path(i).read_bytes()).decode(),
+            },
+        }
+        for i in images
+    ]
+    content.append({"type": "text", "text": prompt})
     for wait in (*RETRY_WAITS, None):
         rid = costs.reserve(
             team.home, team.cfg["daily_budget_usd"], role, m["model"], task, max_usd
@@ -84,7 +95,7 @@ def llm_call(
             with client.messages.stream(  # streaming: long thinking can't hit HTTP timeouts
                 model=m["model"],
                 max_tokens=max_tokens,
-                system=system,
+                system=[{"type": "text", "text": system, "cache_control": CACHE}],
                 messages=[{"role": "user", "content": content}],
                 output_config={
                     "effort": m["effort"],
@@ -102,11 +113,15 @@ def llm_call(
             team.emit(role, f"API call failed ({e}); retrying in {wait}s", task=task)
             time.sleep(wait)
     u = r.usage
-    tokens_in = (
-        u.input_tokens + (u.cache_creation_input_tokens or 0) + (u.cache_read_input_tokens or 0)
-    )  # ponytail: cache priced as plain input
-    usd = (tokens_in * m["price_in"] + u.output_tokens * m["price_out"]) / 1e6
-    costs.settle(team.home, rid, tokens_in, u.output_tokens, usd)
+    read, wrote = u.cache_read_input_tokens or 0, u.cache_creation_input_tokens or 0
+    usd = (
+        u.input_tokens * m["price_in"]
+        + read * m.get("price_cache_read", m["price_in"] * 0.1)
+        + wrote * m["price_in"] * CACHE_WRITE_X
+        + u.output_tokens * m["price_out"]
+    ) / 1e6
+    tokens_in = u.input_tokens + read + wrote
+    costs.settle(team.home, rid, tokens_in, u.output_tokens, usd, read, wrote)
     if r.stop_reason != "end_turn":
         raise RuntimeError(f"{role} stopped with {r.stop_reason}; no usable answer")
     return json.loads(next(b.text for b in r.content if b.type == "text"))
@@ -145,6 +160,13 @@ Never require edits to docs/notes/progress.md: developers may not touch it (para
 tasks would conflict there); the daily report covers progress.
 Never plan a step that spends money: no paid external services (RunPod, cloud GPUs, paid APIs);
 a task that needs one is the owner's call, so leave it out.
+A developer edits only its own folders (`owns` in <developers>); anything else is reverted,
+and the scope gate ends a task whose change leaves them.
+Never plan a task whose acceptance needs files outside the assignee's folders (A7 asked
+the web developer for backend/ routes and went round in circles). Do not plan such a task:
+list it in `needs_split` with the reason and the proposed parts, one per developer, and the
+owner splits it. Name a folder in a criterion only if the developer must change it there.
+A task with `writable` may also add new files in those data folders (never change existing ones).
 Pick at most one task per developer, in backlog order, only for the developers listed.
 Respect the repository rules (CLAUDE.md). Keep each task small enough for one PR."""
 
@@ -152,7 +174,9 @@ TESTER_SYSTEM = """You are the tester of Qarau's dev team. There is no human rev
 plus the automated checks decide whether this change merges into `dev`. Be strict and fair.
 Judge each acceptance criterion from the diff, the developer's summary and the check output.
 A criterion is met only if the diff shows it (code + tests), not just because the developer
-says so. Missing tests, placeholders, TODO stubs, silently skipped work, or edits unrelated to
+says so: the developer's summary is a claim, never evidence. The checks and screenshots were
+run by the orchestrator on a clean checkout of the committed code.
+Missing tests, placeholders, TODO stubs, silently skipped work, or edits unrelated to
 the task fail. Check results are given; failing checks are handled separately, but mention
 them in feedback if relevant. Screenshots of the app pages, when attached, are the real UI and
 were taken by the orchestrator for you: judge visible criteria (layout, text via i18n, errors
@@ -197,7 +221,7 @@ class RealAgents:
             if (root / "data" / "samples").exists()
             else []
         )
-        prompt = "\n\n".join(
+        context = "\n\n".join(  # stable between calls: cached
             [
                 "<claude_md>\n" + read("CLAUDE.md") + "\n</claude_md>",
                 "<phase1_plan>\n" + read("docs/plan/phase1.md") + "\n</phase1_plan>",
@@ -206,12 +230,16 @@ class RealAgents:
                 "<data_samples dir='data/samples' note='read-only, not in git'>\n"
                 + "\n".join(samples)
                 + "\n</data_samples>",
+                f"<benchmark_policy>\n{quick_policy(team)}\n</benchmark_policy>",
+            ]
+        )
+        prompt = "\n\n".join(
+            [
                 "<developers>\n"
                 + yaml.safe_dump(
                     {n: {"areas": d["areas"], "owns": d["owns"]} for n, d in devs.items()}
                 )
                 + "</developers>",
-                f"<benchmark_policy>\n{quick_policy(team)}\n</benchmark_policy>",
                 "<open_tasks>\n"
                 + yaml.safe_dump(todo, allow_unicode=True, sort_keys=False)
                 + "</open_tasks>",
@@ -247,9 +275,22 @@ class RealAgents:
                         ],
                         "additionalProperties": False,
                     },
-                }
+                },
+                "needs_split": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "task_id": {"type": "string"},
+                            "why": {"type": "string"},
+                            "parts": {"type": "string"},
+                        },
+                        "required": ["task_id", "why", "parts"],
+                        "additionalProperties": False,
+                    },
+                },
             },
-            "required": ["assignments"],
+            "required": ["assignments", "needs_split"],
             "additionalProperties": False,
         }
         out = llm_call(
@@ -260,8 +301,13 @@ class RealAgents:
             prompt,
             schema,
             max_tokens=32000,
+            context=context,
         )
-        return [
+        splits = [
+            {"task_id": x["task_id"], "split": f"{x['why']} Proposed parts: {x['parts']}"}
+            for x in out.get("needs_split") or []
+        ]
+        return splits + [
             {
                 "task_id": a["task_id"],
                 "assignee": a["assignee"],
@@ -275,8 +321,12 @@ class RealAgents:
     # --- developers ----------------------------------------------------------------------
     def develop(self, team, s):
         dev = team.cfg["developers"][s["assignee"]]
-        t0 = time.monotonic()
-        out = self._codex(team, s, dev) if dev["tool"] == "codex" else self._claude(team, s, dev)
+        t0, halted = time.monotonic(), None
+        try:
+            run = self._codex if dev["tool"] == "codex" else self._claude
+            out = run(team, s, dev)
+        except TaskHalted as e:  # killed by the supervisor or the owner: its tokens still count
+            halted, out = e, {"usage": getattr(e, "usage", {"in": 0, "out": 0, "usd": 0.0})}
         u = out.pop("usage")
         costs.record(
             team.home,
@@ -290,6 +340,9 @@ class RealAgents:
             billed=False,
             secs=time.monotonic() - t0,
         )
+        if halted:
+            raise halted
+        out["tokens"] = u["in"] + u["out"]
         if out.pop("error", None):  # usage limit, auth, crash: stop; `devteam resume` retries
             msg = f"{dev['tool']} failed: {team.redact(out['summary'][:800])}"
             hit, reset_at = costs.limit_reset(out["summary"])
@@ -316,12 +369,15 @@ Acceptance criteria (all must be visibly met in your diff, with tests):
 {crit}
 
 Rules:
-- Edit only {", ".join(dev["owns"])} and docs/. Anything else is reverted automatically.
-  Do not edit docs/notes/progress.md: parallel tasks would conflict there (the daily
-  report covers progress).
+- Edit only {", ".join(dev["owns"])}. Anything else is reverted automatically, and changing
+  another developer's folders or a protected file (devteam/, .github/, backlog.yaml,
+  CLAUDE.md, AGENTS.md, the benchmark video set, lint and gate configs) ends the task at once:
+  if the task needs them, say so in your summary instead. {docs_rule(dev)}
+- Never skip, focus (.only) or weaken tests, assertions or thresholds, never ship work as a
+  .patch / .diff file or as code under docs/: the scope gate refuses the change.
 - Do not commit, push, merge or create branches; the orchestrator commits your changes.
-- Never write keys or tokens into files. Never write under data/. Sample videos (read-only):
-  {team.root / "data" / "samples"}
+- Never write keys or tokens into files. Never write under data/{writable_rule(team, t)}. Sample
+  videos (read-only): {team.root / "data" / "samples"}
 - Scratch output (experiments, temp scripts, logs, renders) goes ONLY to
   {team.home / "scratch" / t["id"]}, never inside this worktree (no scratch/ or tmp files
   here): files outside your folders are reverted, and they bloat the review.
@@ -353,7 +409,8 @@ Rules:
             "claude",
             "-p",
             "--output-format",
-            "json",
+            "stream-json",  # usage per API message: the supervisor counts tokens live
+            "--verbose",
             "--permission-mode",
             "acceptEdits",
             "--allowedTools",
@@ -365,36 +422,31 @@ Rules:
             "--add-dir",
             str(team.home / "scratch" / s["task"]["id"]),
         ]
+        for d in s["task"].get("writable") or []:
+            cmd += ["--add-dir", str(team.root / d)]
         if dev.get("model"):
             cmd += ["--model", dev["model"]]
-        if s.get("session") and s.get("feedback"):
+        prompt = self._prompt(team, s, dev)
+        if s.get("session") and (s.get("feedback") or s.get("conflicts")):
             cmd += ["--resume", s["session"]]
-            prompt = (
-                f"The tester or the merge gates sent your work back:\n\n{s['feedback']}"
-                "\n\nFix it, run the checks again, and finish with a short summary."
-            )
+        r = self._run(team, s, dev, cmd, prompt, env, SV.ClaudeTokens())
+        results = [
+            e
+            for e in (_json(line) for line in r["stdout"].splitlines())
+            if e.get("type") == "result"
+        ]
+        if results:
+            out = results[-1]
         else:
-            prompt = self._brief(team, s, dev)
-        r = team.run_proc(
-            cmd,
-            cwd=s["worktree"],
-            timeout=dev["timeout_min"] * 60,
-            input=prompt,
-            env=env,
-            agent=s["assignee"],
-        )
-        try:
-            out = json.loads(r["stdout"])
-        except json.JSONDecodeError:
             if costs.limit_reset(r["stderr"] + r["stdout"])[0]:
                 raise costs.SubscriptionLimit(
                     f"claude: {team.redact((r['stderr'] or r['stdout'])[-800:])}",
                     costs.limit_reset(r["stderr"] + r["stdout"])[1],
-                ) from None
+                )
             raise RuntimeError(
-                f"claude gave no JSON (exit {r['code']}): "
+                f"claude gave no result (exit {r['code']}): "
                 f"{team.redact(r['stderr'][-800:] or r['stdout'][-800:])}"
-            ) from None
+            )
         u = out.get("usage") or {}
         return {
             "session": out.get("session_id") or s.get("session", ""),
@@ -420,26 +472,58 @@ Rules:
         }
         cmd = ["codex", "exec", "--json", "--sandbox", "workspace-write", "-C", s["worktree"]]
         cmd += ["--add-dir", str(team.home / "scratch" / s["task"]["id"])]  # writable too
+        for d in s["task"].get("writable") or []:
+            cmd += ["--add-dir", str(team.root / d)]
         if dev.get("model"):
             cmd += ["-m", dev["model"]]
+        prompt, resume = self._prompt(team, s, dev), ""
+        if s.get("session") and (s.get("feedback") or s.get("conflicts")):
+            resume = s["session"]
+            cmd += ["resume", resume, "-"]
+        else:
+            cmd += ["-"]
+        r = self._run(team, s, dev, cmd, prompt, env, SV.CodexTokens(resume))
+        return parse_codex(r["stdout"], r["ok"], r["stderr"], s.get("session", ""))
+
+    def _prompt(self, team, s, dev) -> str:
+        if s.get("conflicts"):
+            files = "\n".join(f"- {f}" for f in s["conflicts"])
+            return (
+                f"The orchestrator merged the latest `{team.cfg['base_branch']}` into this task "
+                f"branch and git reports conflicts in:\n{files}\n\nThis is a short step: resolve "
+                "the conflict markers (<<<<<<< ======= >>>>>>>) in exactly these files, keeping "
+                "the intent of both sides (the other team's changes and this task's work). Change "
+                "nothing else (other edits are reverted). Do not commit, merge or abort: the "
+                "orchestrator concludes the merge. Finish with a one-line summary."
+            )
         if s.get("session") and s.get("feedback"):
-            cmd += ["resume", s["session"], "-"]
-            prompt = (
+            return (
                 f"The tester or the merge gates sent your work back:\n\n{s['feedback']}"
                 "\n\nFix it, run the checks again, and finish with a short summary."
             )
-        else:
-            cmd += ["-"]
-            prompt = self._brief(team, s, dev)
-        r = team.run_proc(
-            cmd,
-            cwd=s["worktree"],
-            timeout=dev["timeout_min"] * 60,
-            input=prompt,
-            env=env,
-            agent=s["assignee"],
-        )
-        return parse_codex(r["stdout"], r["ok"], r["stderr"], s.get("session", ""))
+        return self._brief(team, s, dev)
+
+    def _run(self, team, s, dev, cmd, prompt, env, counter) -> dict:
+        """The developer's process, watched: tokens live, minutes, `devteam stop <task>`."""
+        watch = SV.RoundWatch(counter, s.get("tokens", 0), SV.limits(team.cfg))
+        try:
+            r = team.run_proc(
+                cmd,
+                cwd=s["worktree"],
+                timeout=dev["timeout_min"] * 60,
+                input=prompt,
+                env=env,
+                agent=s["assignee"],
+                watch=watch,
+            )
+        except TaskHalted as e:
+            e.usage = {"in": watch.tokens, "out": 0, "usd": 0.0}  # ponytail: in + out together
+            raise
+        if r["timed_out"]:
+            e = TaskHalted(f"supervisor: the round hit timeout_min ({dev['timeout_min']} min)")
+            e.usage = {"in": watch.tokens, "out": 0, "usd": 0.0}
+            raise e
+        return r
 
     # --- tester --------------------------------------------------------------------------
     def judge(self, team, s, checks):
@@ -459,10 +543,12 @@ Rules:
             or "(no checks)"
         )
         crit = "\n".join(f"- {c}" for c in s["criteria"])
-        prompt = (
+        context = (  # the same in every round of this task: cached
             f"<task>\n{s['task']['id']}: {s['task']['title']}\n"
             f"{s['task'].get('goal', '')}\n</task>\n\n<plan>\n{s['plan']}\n</plan>\n\n"
-            f"<acceptance_criteria>\n{crit}\n</acceptance_criteria>\n\n"
+            f"<acceptance_criteria>\n{crit}\n</acceptance_criteria>"
+        )
+        prompt = (
             f"<developer_summary>\n{s.get('dev_summary', '')}\n</developer_summary>\n\n"
             f"<checks>\n{check_text}\n</checks>\n\n"
             + (
@@ -502,7 +588,7 @@ Rules:
         shots = s.get("screenshots") or []
         if shots:
             prompt = (
-                "Screenshots above, in order: "
+                "Screenshots above (after the task), in order: "
                 + ", ".join(Path(p).name for p in shots)
                 + "\n\n"
                 + prompt
@@ -515,9 +601,37 @@ Rules:
             team.redact(prompt),
             schema,
             images=shots,
+            context=team.redact(context),
         )
         v["passed"] = v["passed"] and all(c["met"] for c in v["criteria"])
         return v
+
+
+def _json(line: str) -> dict:
+    try:
+        e = json.loads(line)
+    except ValueError:
+        return {}
+    return e if isinstance(e, dict) else {}
+
+
+def docs_rule(dev: dict) -> str:
+    if "docs/" in dev["owns"]:
+        return (
+            "Do not edit docs/notes/progress.md: parallel tasks would conflict there (the "
+            "daily report covers progress)."
+        )
+    return "You may not write docs/: put your plan and notes in the final summary."
+
+
+def writable_rule(team, task: dict) -> str:
+    if not task.get("writable"):
+        return ""
+    dirs = ", ".join(str(team.root / d) for d in task["writable"])
+    return (
+        f", except that this task may ADD new files and folders under {dirs} (never change, "
+        "move or delete an existing one there: the orchestrator checks and blocks the task)"
+    )
 
 
 def paid_service_key(name: str) -> bool:

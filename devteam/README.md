@@ -19,6 +19,8 @@ uv run devteam run --continuous  # keep going: next task per developer until a s
 uv run devteam dashboard       # read-only status page on http://127.0.0.1:8765 (--port N)
 uv run devteam stop            # from any terminal: stop everything now (agents, checks, CI wait)
 uv run devteam resume          # continue after stop, crash, usage limit or budget cap
+uv run devteam stop A7         # stop one task: its step is killed, it is blocked, others go on
+uv run devteam resume A7       # that task back to todo; it continues on its branch
 uv run devteam status          # backlog with PR links / blocked reasons
 uv run devteam report          # writes devteam/reports/YYYY-MM-DD.md
 uv run devteam release         # dev -> main now (also runs automatically every 7 days)
@@ -45,11 +47,58 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   is unchanged: one round, then the weekly release check.
 - Dashboard (`devteam dashboard`): one local read-only page (127.0.0.1 only, GET only,
   refreshes every 20 s), real data only, no model calls: agents (status, current task, time on
-  it, from `.state/events.log`), today's API spend vs the budget, subscription load per task,
+  it, from `.state/events.log` of the current run only: events before run.pid was written and
+  tasks the backlog says are not in progress never show as working), today's API spend vs the budget, subscription load per task,
   subscription-limit events and reset times, the queue (todo / in progress / blocked / done
   with PR links), open PRs, CI on `dev` (`gh`, cached 60 s), the latest commits, and "Needs
   your attention": red CI on `dev`, blocked tasks, PRs waiting for the owner, spend above
   80 % of the budget. Every value from `.env` is redacted.
+- Supervisor (`config.yaml` → `supervisor`, owner 2026-10-17): per task, `max_tokens_per_round`,
+  `max_tokens_per_task` (all rounds of the task in this run) and `max_round_min` (a round
+  commits only when it ends, so this is the longest a task goes without a new commit).
+  Developer tokens are counted live: Claude Code runs with `--output-format stream-json`
+  (usage per API message), Codex through the `token_count` events of its session rollout file
+  (`~/.codex/sessions`). Over a limit, or past `timeout_min`: the step's process group is
+  killed, what the round wrote is committed (same checks), the task is `blocked` with the
+  reason and what to do, and shows under "Needs your attention"; the other developers keep
+  going (`devteam/supervise.py`).
+- Loop detection: the tester's reason is the set of unmet criteria, failing checks and missing
+  screenshots. Sent back twice in a row for the same reason: no new round, `blocked`.
+- Before every round the orchestrator merges the latest `dev` into the task branch (never the
+  agent, never a rebase). Conflicts: a short "resolve conflicts" step with the file list
+  instead of a full round; the orchestrator concludes the merge only when no marker is left
+  and nothing else changed, then a normal round follows. Conflicts found by the gates go back
+  the same way; markers left after the step block the task.
+- Hard scope enforcement (`devteam/scope.py`, owner 2026-10-17, after A7 shipped its backend
+  as a `.patch` under docs/): the tester's first step is a scope gate on
+  `git diff dev...HEAD`. Every path must be in the developer's `owns` (config: dev_app
+  `web/` only; dev_pipeline `pipeline/`, `backend/`, `infra/`, `docs/`) or the task's
+  `writable`; a path outside → `out_of_scope`, no retry, blocked as "needs a split". Protected
+  paths (devteam/, .github/, backlog.yaml, CLAUDE.md, AGENTS.md, plus `gates.protected`:
+  benchmark video set, lint configs) → hard fail. A developer that even tries to write another
+  developer's code folders or a protected path is stopped the same way at the end of its
+  round (its own docs/ attempts are only reverted). Anti-bypass checks on the diff: new
+  `test.skip` / `.only` / `xfail` / `pytest.mark.skip` (a skip only while a data file is
+  missing is allowed), fewer assertions or tests, looser thresholds in tests, `.patch` /
+  `.diff` files, code under docs/ → sent back with the reason (twice → blocked). Every
+  violation goes to `.state/violations.jsonl`, "Needs your attention" and the daily report.
+- The tester never trusts the developer: setup, checks and screenshots run again on a fresh
+  detached checkout of the committed HEAD (pipeline tasks: the tester runs the quick benchmark
+  there itself and screenshots that); only the orchestrator sets a task to done, after every
+  gate passed (backlog.yaml is protected).
+- Plans stay inside the developer's folders: criteria that name another developer's folder
+  (or devteam/) are rejected; the brain lists such tasks in `needs_split` and the orchestrator
+  blocks them with the proposed split (A7 asked dev_app for backend/ and looped).
+- `devteam stop <task>` / `resume <task>`: a file in `.state/control/`; a running orchestrator
+  reads it every few seconds in a step, at every node and when it plans; with no run active
+  the CLI applies it at once (pushed to `dev` like any status). An owner stop never counts
+  toward "2 tasks in a row blocked".
+- `writable: [data/runs]` on a task lets its developer add new files there (extra `--add-dir`);
+  if a file that was there when the task started changes or disappears, the task is blocked.
+- Prompt caching: the brain's and tester's system prompts and their stable context (CLAUDE.md,
+  plans, benchmark notes, file list; the task, plan and criteria) are cached with the 1-hour
+  TTL; the costs log records cache reads and writes, priced with `price_cache_read` (writes
+  2x input), and the dashboard and report show the cache hit share per agent.
 - No leftover servers (owner rule): every developer and tester step runs in its own process
   group with `KEREGE_STEP=<id>` in its environment (`devteam/procs.py`). When the step ends
   (success, failure, timeout, Ctrl+C), everything in the group or carrying the marker is

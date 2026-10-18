@@ -20,12 +20,17 @@ EVENTS_TAIL = 400_000  # bytes of events.log read per refresh
 
 
 def run_active(team: Team) -> bool:
+    return run_started(team) is not None
+
+
+def run_started(team: Team) -> float | None:
+    """When the active run started (run.pid is written at start), None if no run is active."""
     pid_file = team.home / "run.pid"
     try:
         os.kill(int(pid_file.read_text()), 0)
-        return True
+        return pid_file.stat().st_mtime
     except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
-        return False
+        return None
 
 
 def recent_events(team: Team) -> list[dict]:
@@ -44,21 +49,29 @@ def recent_events(team: Team) -> list[dict]:
         return []
 
 
-def agent_states(events: list[dict], active: bool, now: float) -> dict[str, list[dict]]:
-    """Per agent: the tasks whose last event says working / waiting, with time on it."""
+def _epoch(ts: str) -> float:
+    return time.mktime(time.strptime(ts, "%Y-%m-%dT%H:%M:%S"))
+
+
+def agent_states(
+    events: list[dict], started: float | None, now: float, finished: set[str]
+) -> dict[str, list[dict]]:
+    """Per agent: the tasks whose last event *of the current run* says working / waiting, with
+    time on it. An older run's last word (a crash leaves "working") never counts, and a task
+    the backlog says is not in progress (`finished`: todo, done, blocked) is never shown as worked
+    on (P0, A2a on 2026-10-17)."""
+    out: dict[str, list[dict]] = {a: [] for a in AGENTS}
+    if started is None:
+        return out
     last: dict[tuple, dict] = {}
     for e in events:
-        if e.get("status") in ("working", "waiting", "idle"):
-            last[(e["agent"], e.get("task") or "backlog")] = e
-    out: dict[str, list[dict]] = {a: [] for a in AGENTS}
-    if not active:
-        return out
+        if e.get("status") in ("working", "waiting", "idle") and e.get("ts"):
+            if _epoch(e["ts"]) >= int(started):  # ts has whole seconds
+                last[(e["agent"], e.get("task") or "backlog")] = e
     for (agent, task), e in last.items():
-        if e["status"] == "idle":
+        if e["status"] == "idle" or task in finished:
             continue
-        since = None
-        if e.get("ts"):
-            since = now - time.mktime(time.strptime(e["ts"], "%Y-%m-%dT%H:%M:%S"))
+        since = now - _epoch(e["ts"])
         out.setdefault(agent, []).append(
             {"task": task, "state": e["status"], "secs": since, "msg": e.get("msg", "")}
         )
@@ -103,7 +116,8 @@ def packet_line(team: Team, tid: str) -> str:
 def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
     now = now or time.time()
     day = time.strftime("%Y-%m-%d", time.localtime(now))
-    active = run_active(team)
+    started = run_started(team)
+    active = started is not None
     tasks = team.load_backlog()
     spent, cap = costs.spent_today(team.home), team.cfg["daily_budget_usd"]
     base = team.cfg["base_branch"]
@@ -146,6 +160,10 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
                 attention.append(
                     ("PR", f"#{p['number']} {p['title']} → {p['baseRefName']}", p["url"])
                 )
+    for v in team.violations(day):  # the scope gate refused something today
+        attention.append(
+            ("violation", f"{v['task']} {v['agent']} {v['kind']}: {v['detail'][:300]}", "")
+        )
     if cap and spent > 0.8 * cap:
         attention.append(("spend", f"API spend ${spent:.2f} is above 80% of ${cap:.2f}", ""))
 
@@ -153,7 +171,12 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
     return {
         "now": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
         "active": active,
-        "agents": agent_states(recent_events(team), active, now),
+        "agents": agent_states(
+            recent_events(team),
+            started,
+            now,
+            {t["id"] for t in tasks if t["status"] != "in_progress"},
+        ),
         "spent": spent,
         "budget": cap,
         "cost_rows": costs.day_rows(team.home, day),
@@ -253,13 +276,20 @@ def render(d: dict) -> str:
         f"<b>${d['spent']:.2f}</b> of ${d['budget']:.2f} ({pct:.0f} %)"
         f"<div class='bar'><div class='{'hot' if pct > 80 else ''}' "
         f"style='width:{min(pct, 100):.0f}%'></div></div>"
-        "<table><tr><th>Agent</th><th>Model</th><th>Calls</th><th>$</th><th>Billing</th></tr>"
+        "<table><tr><th>Agent</th><th>Model</th><th>Calls</th><th>$</th><th>Billing</th>"
+        "<th>Prompt cache hits</th><th>Cache writes</th></tr>"
     )
     p += [
         f"<tr><td>{_e(a)}</td><td>{_e(m)}</td><td>{n}</td>"
         + (f"<td>{usd:.3f}</td>" if billed else f"<td class='muted'>≈ {usd:.2f}, not billed</td>")
-        + f"<td>{'API' if billed else 'subscription'}</td></tr>"
-        for a, m, n, usd, billed in d["cost_rows"]
+        + f"<td>{'API' if billed else 'subscription'}</td>"
+        + (
+            f"<td>{_e(costs.cache_hits(ti, cr))}</td><td>{cw or 0:,} tok</td>"
+            if billed
+            else "<td class='muted'>—</td><td class='muted'>—</td>"
+        )
+        + "</tr>"
+        for a, m, n, usd, billed, ti, cr, cw in d["cost_rows"]
     ]
     p.append("</table></section>")
     p.append("<h2>Subscription load per task (today)</h2><section><table><tr><th>Task</th>"

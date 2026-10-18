@@ -117,7 +117,7 @@ class Messy(Quick):
             f = Path(s["worktree"]) / "scratch" / "p3b" / f"render-{i}.png"
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text("png")
-        (Path(s["worktree"]) / "web" / "hack.ts").write_text("x\n")
+        (Path(s["worktree"]) / "notes.txt").write_text("x\n")  # in nobody's folders: reverted
         return super().develop(team, s)
 
 
@@ -128,7 +128,7 @@ def test_scratch_lives_outside_the_worktree_and_reverts_are_logged_briefly(repo)
     assert (team.home / "scratch" / "T-001").is_dir()
     reverted = [m for m in msgs(team) if m.startswith("touched forbidden files")]
     assert reverted  # one per round
-    assert set(reverted) == {"touched forbidden files, reverted: 31 file(s) in scratch/, web/"}
+    assert set(reverted) == {"touched forbidden files, reverted: 31 file(s) in notes.txt, scratch/"}
     wt = team.home / "worktrees" / "T-001"
     assert not (wt / "scratch").exists() or not any((wt / "scratch").rglob("*.png"))
 

@@ -6,8 +6,10 @@ test or gates fail -> back to develop (max N fixes) -> then "blocked".
 gates = merge latest dev in, secret scan, benchmark, push, PR into dev, GitHub CI, auto-merge.
 """
 
+import contextlib
 import fnmatch
 import hashlib
+import json
 import operator
 import os
 import re
@@ -28,10 +30,12 @@ from langgraph.types import Send
 
 from devteam import gates as G
 from devteam import procs
+from devteam import scope as SC
+from devteam import supervise as SV
 from devteam.costs import BudgetExceeded, SubscriptionLimit
+from devteam.supervise import TaskHalted
 
 AGENTS = ["brain", "dev_pipeline", "dev_app", "tester"]
-SHARED_DIRS = ["docs/"]  # any developer may touch these besides its own folders
 # Never touched by a developer, tracked or ignored. Checked by snapshot (git can't see ignored).
 PROTECTED = [".env", ".env.*", "*/.env", "*/.env.*", "data/*", "scratch/*", "*.sqlite"]
 PROTECTED_OK = [".env.example", "*/.env.example"]
@@ -64,6 +68,9 @@ FORBIDDEN_PUSH = {
 }
 RELEASE_TAG = re.compile(r"refs/tags/release-\d{4}-\d{2}-\d{2}(\.\d+)?")  # pushed, never moved
 FORBIDDEN_BRANCH = {"-D", "-d", "--delete", "-M", "-m", "--move", "-f", "--force"}
+POLL_S = 5  # a running step is checked this often (limits, `devteam stop <task>`)
+OWNER_STOP = "stopped by the owner"
+CONFLICT = re.compile(rb"^(<{7}|>{7})( |$)", re.M)  # markers git leaves (not "=======": markdown)
 
 
 def _feed(pipe, text: str):
@@ -94,6 +101,13 @@ def is_protected(path: str) -> bool:
 VISUAL = re.compile(r"\b(viewer|screenshots?)\b", re.I)  # criteria the tester must see
 
 
+def limit_hint(task_id: str) -> str:
+    return (
+        ". Raise the `supervisor` limits in devteam/config.yaml or split the task, then "
+        f"`devteam resume {task_id}`"
+    )
+
+
 def where(paths) -> str:
     """'3 file(s) in scratch/, web/': a log line, not a list of every path."""
     tops = sorted({p.split("/", 1)[0] + ("/" if "/" in p else "") for p in paths})
@@ -110,13 +124,33 @@ def resume_note(task: dict) -> str:
     )
 
 
+class PlanError(ValueError):
+    """`outside`: task id -> folders its criteria need that the assignee may not edit."""
+
+    def __init__(self, errors: list[str], outside: dict[str, list[str]]):
+        super().__init__("invalid plan: " + "; ".join(errors))
+        self.outside, self.only_outside = outside, len(errors) == len(outside)
+
+
+def outside_paths(criteria: list, dev: str, cfg: dict, task: dict) -> list[str]:
+    """Developer folders (any developer's `owns`, or devteam/) named in the criteria that `dev`
+    may not edit: such a task must be split first (A7 needed backend/ from dev_app)."""
+    known = {d for c in cfg["developers"].values() for d in c["owns"]} | {"devteam/"}
+    mine = tuple(cfg["developers"][dev]["owns"] + list(task.get("writable") or []))
+    alt = "|".join(map(re.escape, sorted(known)))
+    pat = rf"(?<![\w./-])((?:{alt})[\w./-]*)"
+    found = re.findall(pat, " ".join(map(str, criteria)))
+    branch = re.compile(r"devteam/[A-Z][\w.-]*")  # a task branch like devteam/A7, not a folder
+    return sorted({p for p in found if not p.startswith(mine) and not branch.fullmatch(p)})
+
+
 def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
     """The whole plan is valid or nothing happens. Returns assignments."""
     by_id = {t["id"]: t for t in todo}
     devs = cfg["developers"]
     ids = [p.get("task_id") for p in plans]
     who = [p.get("assignee") for p in plans]
-    errors = []
+    errors, outside = [], {}
     if len(set(ids)) != len(ids):
         errors.append(f"task ids repeat: {ids}")
     if len(set(who)) != len(who):
@@ -131,6 +165,14 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
             errors.append(
                 f"{tid}: area {by_id[tid].get('area')!r} is not {dev}'s ({devs[dev]['areas']})"
             )
+        elif bad := outside_paths(p.get("criteria") or [], dev, cfg, by_id[tid]):
+            outside[tid] = bad
+            errors.append(
+                f"{tid}: the criteria need {bad}, which {dev} may not edit (it owns "
+                f"{devs[dev]['owns']}). If the task must change them, do not plan it: "
+                "list it in needs_split with the parts per developer. If they are only read, "
+                "do not name them in the criteria"
+            )
         if not str(p.get("plan", "")).strip() or not p.get("criteria"):
             errors.append(f"{tid}: plan and acceptance criteria must not be empty")
         if VISUAL.search(" ".join(map(str, p.get("criteria") or []))) and not p.get("routes"):
@@ -138,7 +180,7 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
         if p.get("routes") and dev in devs and not devs[dev].get("screenshots"):
             errors.append(f"{tid}: routes given but {dev} has no screenshots config")
     if errors:
-        raise ValueError("invalid plan: " + "; ".join(errors))
+        raise PlanError(errors, outside)
     return [
         {
             "task": by_id[p["task_id"]],
@@ -167,14 +209,18 @@ class TaskState(TypedDict, total=False):
     feedback: str
     rounds: int  # developer rounds done
     fixes: int  # times the work was sent back (by tester or gates)
+    tokens: int  # subscription tokens the developer used on this task in this run
+    last_sendback: str  # the tester's last reason (unmet criteria, failing checks); "" = passed
+    after_dev: str  # "develop" after a resolve-conflicts step, else "test"
     verdict: dict
-    gate: dict
+    gate: dict  # gate["blocked"]: the task ends blocked with gate["reason"]
     results: Annotated[list, operator.add]
 
 
 class TeamState(TypedDict, total=False):
     developers: list[str]  # plan only for these (continuous mode: the one that is free)
     assignments: list[dict]
+    splits: list[dict]  # {task_id, split}: tasks the brain says need splitting first
     results: Annotated[list, operator.add]
 
 
@@ -204,6 +250,7 @@ class Team:
         # Orchestrator git calls are short, so they simply take turns.
         self._git_lock = threading.Lock()
         self._procs: set[subprocess.Popen] = set()
+        self._ctx = threading.local()  # .task: the task whose node runs in this thread
         self._status_commit = None  # the only commit push_status may push straight to dev
         self.only: set[str] = set()
         self.stopping = threading.Event()  # set: no node starts any more (clean stop)
@@ -298,11 +345,14 @@ class Team:
         input: str | None = None,
         env: dict | None = None,
         agent: str = "tester",
+        watch=None,
     ) -> dict:
         """Runs in its own process group, registered so stop() can kill the whole tree. When it
         ends (any way), everything it started is killed; a port it left listening is a warning
-        (owner rule: no agent leaves a server running)."""
-        marker = procs.new_marker()
+        (owner rule: no agent leaves a server running).
+        Every POLL_S: `devteam stop <task>` for the task of this thread, and `watch(new stdout
+        bytes, seconds so far)`; a reason from either kills the step: TaskHalted."""
+        marker, task, halted = procs.new_marker(), getattr(self._ctx, "task", ""), ""
         env = {**(os.environ if env is None else env), procs.MARKER: marker}
         # Output goes to files, not pipes: a server the step leaves in the background keeps a
         # pipe open, and reading it to EOF would wait for the timeout instead of the step.
@@ -321,11 +371,26 @@ class Team:
                 self._procs.add(p)
             if input:
                 threading.Thread(target=_feed, args=(p.stdin, input), daemon=True).start()
-            note = ""
+            note, t0, pos = "", time.monotonic(), 0
             try:
-                p.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                note = f"\ntimed out after {timeout // 60} min"
+                while True:
+                    try:
+                        p.wait(timeout=POLL_S)
+                        break
+                    except subprocess.TimeoutExpired:
+                        pass
+                    if (secs := time.monotonic() - t0) >= timeout:
+                        note = f"\ntimed out after {timeout // 60} min"
+                        break
+                    if task and (halted := self.stop_reason(task)):
+                        break
+                    if watch:
+                        new = b""  # pread: the child shares the file offset, never seek it
+                        while chunk := os.pread(fo.fileno(), 1 << 20, pos + len(new)):
+                            new += chunk
+                        pos += len(new)
+                        if halted := watch(new, secs):
+                            break
             finally:
                 with self._lock:
                     self._procs.discard(p)
@@ -341,8 +406,12 @@ class Team:
             fe.seek(0)
             out = fo.read().decode("utf-8", "replace")
             err = fe.read().decode("utf-8", "replace") + note
+        if halted:
+            self.emit(agent, f"killed: {halted}", task=task)
+            raise TaskHalted(halted, out)
         return {
             "ok": p.returncode == 0 and not note,
+            "timed_out": bool(note),
             "code": p.returncode,
             "stdout": out,
             "stderr": err,
@@ -356,6 +425,124 @@ class Team:
                     os.killpg(p.pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
+
+    # --- owner control: `devteam stop <task>` / `devteam resume <task>` -------------------
+    # The CLI leaves a file; a running orchestrator reads it (every POLL_S in a step, at node
+    # start, in the brain). With no run active the CLI applies it directly.
+    def control_file(self, kind: str, task_id: str) -> Path:
+        return self.home / "control" / f"{kind}-{task_id}"
+
+    def request(self, kind: str, task_id: str):
+        other = {"stop": "resume", "resume": "stop"}[kind]
+        self.control_file(other, task_id).unlink(missing_ok=True)
+        f = self.control_file(kind, task_id)
+        f.parent.mkdir(exist_ok=True)
+        f.write_text(time.strftime("%Y-%m-%dT%H:%M:%S"))
+
+    def stop_reason(self, task_id: str) -> str:
+        if self.control_file("stop", task_id).exists():
+            return f"{OWNER_STOP} (`devteam stop {task_id}`); `devteam resume {task_id}` continues"
+        return ""
+
+    def apply_controls(self, running: bool = True) -> list[str]:
+        """Stop / resume requests for tasks not in a step right now. `running`: an orchestrator
+        is active, so an in-progress task stops in its own step (and gets its packet)."""
+        out = []
+        for f in sorted((self.home / "control").glob("*-*")):
+            kind, tid = f.name.split("-", 1)
+            t = next((t for t in self.load_backlog() if t["id"] == tid), None)
+            if t is None or t["status"] in ("done", "dropped"):
+                f.unlink()
+                out.append(f"{tid}: {'unknown task' if t is None else t['status']}, nothing to do")
+            elif kind == "resume":
+                f.unlink()
+                if t["status"] == "blocked":
+                    self.update_task(tid, status="todo", blocked_reason=None)
+                    self.push_status(tid, f"backlog: {tid} todo (resumed by the owner)")
+                    out.append(f"{tid}: back to todo; it continues on its branch when planned")
+                else:
+                    out.append(f"{tid}: {t['status']}, nothing to resume")
+            elif t["status"] == "todo" or (t["status"] == "in_progress" and not running):
+                self.update_task(tid, status="blocked", blocked_reason=self.stop_reason(tid))
+                self.push_status(tid, f"backlog: {tid} blocked (stopped by the owner)")
+                if t["status"] == "todo":  # an in-progress one keeps it: a resumed round stops
+                    f.unlink()
+                out.append(f"{tid}: blocked, stopped by the owner")
+        for line in out:
+            self.emit("brain", line)
+        return out
+
+    def violation(self, task_id: str, agent: str, kind: str, detail: str):
+        """Scope / protected / bypass violations: kept for the dashboard and the report."""
+        row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "task": task_id, "agent": agent}
+        row.update(kind=kind, detail=self.redact(detail)[:1000])
+        with self._lock, open(self.home / "violations.jsonl", "a") as f:
+            f.write(json.dumps(row) + "\n")
+        self.emit("tester", f"VIOLATION {kind}: {detail[:300]}", task=task_id)
+
+    def violations(self, day: str) -> list[dict]:
+        try:
+            lines = (self.home / "violations.jsonl").read_text().splitlines()
+        except FileNotFoundError:
+            return []
+        return [r for r in map(json.loads, lines) if r["ts"].startswith(day)]
+
+    @contextlib.contextmanager
+    def clean_checkout(self, s):
+        """A fresh detached checkout of the task's committed HEAD: the tester's checks never
+        see the developer's untracked or ignored leftovers."""
+        path = self.home / "check-wt" / s["task"]["id"]
+        if path.exists():
+            self.git("worktree", "remove", "--force", str(path))
+        self.git("worktree", "add", "--detach", str(path), s["head"])
+        try:
+            yield str(path)
+        finally:
+            self.git("worktree", "remove", "--force", str(path))
+
+    # --- the task branch -----------------------------------------------------------------
+    def merge_base(self, wt: str) -> list[str]:
+        """Merges the latest dev into the task branch (a merge, never a rebase; the orchestrator
+        does it, not the agent). Returns the conflicting files with the merge left in progress
+        for a resolve step, [] when it merged cleanly or was up to date."""
+        base = self.cfg["base_branch"]
+        self.fetch(base)
+        r = subprocess.run(
+            ["git", "merge", "--no-edit", f"{self.remote_name}/{base}"],
+            cwd=wt,
+            capture_output=True,
+            text=True,
+        )
+        if not r.returncode:
+            return []
+        out = self.git("diff", "--name-only", "-z", "--diff-filter=U", cwd=wt)
+        if files := [f for f in out.split("\0") if f]:
+            return files
+        subprocess.run(["git", "merge", "--abort"], cwd=wt, capture_output=True)
+        raise TaskHalted(f"could not merge {base} into the task branch: {r.stderr[-400:]}")
+
+    def data_snapshot(self, task: dict) -> dict[str, list]:
+        """Files in the task's `writable` data folders (e.g. data/runs): a task may add new ones
+        there, never change or delete one that was there when it started."""
+        snap = {}
+        for d in task.get("writable") or []:
+            for dirpath, _dirs, names in os.walk(self.root / d):
+                for n in names:
+                    st = os.lstat(os.path.join(dirpath, n))
+                    snap[os.path.relpath(os.path.join(dirpath, n), self.root)] = [
+                        st.st_size,
+                        st.st_mtime_ns,
+                    ]
+        return snap
+
+    def data_at_start(self, task: dict) -> dict[str, list]:
+        """data_snapshot when this task started (kept in a file until it finishes): its own
+        new files from an earlier round may change, what was there before may not."""
+        f = self.home / "data-snap" / f"{task['id']}.json"
+        if not f.exists():
+            f.parent.mkdir(exist_ok=True)
+            f.write_text(json.dumps(self.data_snapshot(task)))
+        return json.loads(f.read_text())
 
     # --- git -----------------------------------------------------------------------------
     def _guard(self, args: tuple[str, ...]):
@@ -588,7 +775,7 @@ class Team:
         only if no secret is found. Returns {"refused": [...], "secrets": [...]}."""
         self.verify_worktree(s)
         wt = s["worktree"]
-        owns = self.cfg["developers"][s["assignee"]]["owns"] + SHARED_DIRS
+        owns = self.cfg["developers"][s["assignee"]]["owns"]
         if self.git("rev-parse", "HEAD", cwd=wt).strip() != head_before:
             self.git("reset", "-q", "--soft", head_before, cwd=wt)  # its commits get checked too
         self.git("reset", "-q", cwd=wt)  # unstage everything; we decide what goes in
@@ -751,7 +938,8 @@ def build_graph(team: Team, checkpointer):
                 team.git("worktree", "add", "-b", branch, str(path), theirs)
             else:
                 team.git("worktree", "add", "-b", branch, str(path), base_ref)
-        out = {"worktree": str(path), "branch": branch, "rounds": 0, "fixes": 0}
+        out = {"worktree": str(path), "branch": branch, "rounds": 0, "fixes": 0, "tokens": 0}
+        out["last_sendback"] = ""
         team.verify_worktree({**s, **out})
         # earlier work starts from today's dev: a merge, never a rebase (no-op on a new branch)
         r = subprocess.run(
@@ -759,7 +947,7 @@ def build_graph(team: Team, checkpointer):
         )
         if r.returncode:
             subprocess.run(["git", "merge", "--abort"], cwd=path, capture_output=True)
-            team.emit("brain", f"could not merge {base} into {branch}; the gates will", task=tid)
+            team.emit("brain", f"{base} conflicts with {branch}: resolved before round 1", task=tid)
         out["head"] = out["start"] = team.git("rev-parse", "HEAD", cwd=path).strip()
         out["snap"] = team.snapshot(str(path))
         team.emit(
@@ -770,19 +958,125 @@ def build_graph(team: Team, checkpointer):
         )
         return out
 
+    def halt(s: TaskState, reason: str) -> dict:
+        """The task ends blocked with this reason (a limit, the owner, a loop); the other
+        developers keep going."""
+        team.emit(
+            s.get("assignee", "brain"),
+            f"BLOCKED: {reason[:300]}",
+            task=s["task"]["id"],
+            to="reviewer",
+            status="idle",
+        )
+        return {"gate": {"merged": False, "blocked": True, "reason": reason, "lines": []}}
+
+    def resolve(s: TaskState, files: list[str]) -> dict:
+        """dev conflicts with the branch: a short step that only resolves the markers, instead
+        of a full round. The orchestrator concludes the merge; a normal round follows."""
+        dev, tid, wt = s["assignee"], s["task"]["id"], s["worktree"]
+        team.emit(dev, f"{base} conflicts in {files}: resolving them", task=tid, status="working")
+        snap = team.snapshot(wt)
+        untracked = "ls-files", "--others", "--exclude-standard", "-z"
+        new_before = set(team.git(*untracked, cwd=wt).split("\0"))
+        try:
+            out = team.agents.develop(team, {**s, "conflicts": files})
+        except BaseException:  # a limit, a crash, a stop: the next try merges afresh
+            subprocess.run(["git", "merge", "--abort"], cwd=wt, capture_output=True)
+            raise
+        tokens = s.get("tokens", 0) + out.get("tokens", 0)
+        # this step only resolves: anything else it touched is put back
+        changed = team.git("diff", "--name-only", "-z", cwd=wt).split("\0")
+        if others := sorted({p for p in changed if p} - set(files)):
+            team.git("checkout", "--", *others, cwd=wt)
+        for p in set(team.git(*untracked, cwd=wt).split("\0")) - new_before - set(files):
+            if p:
+                (Path(wt) / p).unlink(missing_ok=True)
+        if team.snapshot(wt) != snap:
+            subprocess.run(["git", "merge", "--abort"], cwd=wt, capture_output=True)
+            raise Violation("the resolve step changed protected files; check them, then resume")
+        left = [
+            f
+            for f in files
+            if (Path(wt) / f).is_file() and CONFLICT.search((Path(wt) / f).read_bytes())
+        ]
+        merging = subprocess.run(
+            ["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"], cwd=wt, capture_output=True
+        )
+        if merging.returncode:
+            raise Violation(f"the merge of {base} is no longer in progress after the resolve step")
+        secrets = []
+        if not left:
+            team.git("add", "-A", "--", *files, cwd=wt)
+            secrets = [f["file"] for f in G.gitleaks(team, wt, "--pre-commit", "--staged")]
+            secrets += G.env_secrets_in(team, wt, files)
+        if left or secrets:
+            subprocess.run(["git", "merge", "--abort"], cwd=wt, capture_output=True)
+            why = f"markers left in {left}" if left else f"secret scan found {sorted(secrets)}"
+            return {
+                **halt(
+                    s,
+                    f"could not resolve conflicts with {base} in {files} ({why}). Resolve them "
+                    f"by hand on {s['branch']}, then `devteam resume {tid}`",
+                ),
+                "tokens": tokens,
+            }
+        team.verify_worktree(s)
+        team.git("commit", "-q", "--no-edit", cwd=wt)  # concludes the merge
+        team.emit(dev, f"conflicts with {base} resolved in {files}", task=tid, status="idle")
+        return {
+            "session": out["session"],
+            "head": team.git("rev-parse", "HEAD", cwd=wt).strip(),
+            "snap": team.snapshot(wt),
+            "tokens": tokens,
+            "after_dev": "develop",
+        }
+
     def develop(s: TaskState):
         dev, tid, wt = s["assignee"], s["task"]["id"], s["worktree"]
         team.verify_worktree(s)
-        what = "fixing: " + s["feedback"][:200] if s.get("feedback") else "building the plan"
+        if why := SV.task_over(s.get("tokens", 0), SV.limits(cfg)):
+            return halt(s, why + limit_hint(tid))
         (team.home / "scratch" / tid).mkdir(parents=True, exist_ok=True)  # see the brief
+        # today's dev first, by the orchestrator (never the agent); conflicts: a resolve step.
+        # Only on a clean worktree at the accepted head: after a crash the round's leftovers
+        # (even commits the agent made) are checked by commit_round first, dev comes next round.
+        clean = not team.git("status", "--porcelain", "--untracked-files=no", cwd=wt).strip()
+        if clean and team.git("rev-parse", "HEAD", cwd=wt).strip() == s["head"]:
+            if files := team.merge_base(wt):
+                return resolve(s, files)
+            if (head := team.git("rev-parse", "HEAD", cwd=wt).strip()) != s["head"]:
+                s = {**s, "head": head, "snap": team.snapshot(wt)}  # dev's merge, accepted
+        what = "fixing: " + s["feedback"][:200] if s.get("feedback") else "building the plan"
         team.emit(dev, what, task=tid, status="working")
         if not team.fake:  # e.g. pnpm install: the Codex sandbox has no network
             for cmd in team.cfg["developers"][dev].get("setup", []):
                 r = team.run_proc(cmd, cwd=wt, timeout=1800, agent=dev)
                 if not r["ok"]:
                     raise RuntimeError(f"setup `{cmd}` failed: {team.redact(r['output'][-800:])}")
-        out = team.agents.develop(team, s)
+        data_before = team.data_at_start(s["task"]) if s["task"].get("writable") else {}
+        try:
+            out = team.agents.develop(team, s)
+        except TaskHalted as e:
+            team.commit_round(s, s["head"], s["snap"])  # what the round made stays on the branch
+            reason = str(e) + (limit_hint(tid) if str(e).startswith("supervisor") else "")
+            return {**halt(s, reason), "head": team.git("rev-parse", "HEAD", cwd=wt).strip()}
         res = team.commit_round(s, s["head"], s["snap"])
+        head = team.git("rev-parse", "HEAD", cwd=wt).strip()
+        if tried := [p for p in res["refused"] if SC.is_protected(p, cfg)]:
+            return {**refuse(s, "protected", tried, "tried to change"), "head": head}
+        if tried := [p for p in res["refused"] if SC.foreign(p, cfg, dev)]:
+            return {**refuse(s, "out_of_scope", tried, "tried to change"), "head": head}
+        data_after = team.data_snapshot(s["task"])
+        if touched := sorted(p for p, v in data_before.items() if data_after.get(p) != v):
+            return {
+                **halt(
+                    s,
+                    f"changed or deleted {len(touched)} existing file(s) under "
+                    f"{s['task']['writable']} (e.g. {touched[:5]}); a task may only add new "
+                    "files there. Check that data by hand before resuming.",
+                ),
+                "head": team.git("rev-parse", "HEAD", cwd=wt).strip(),
+            }
         summary = out["summary"]
         if res["refused"]:
             shown = res["refused"][:20]
@@ -807,27 +1101,76 @@ def build_graph(team: Team, checkpointer):
             "rounds": s.get("rounds", 0) + 1,
             "head": team.git("rev-parse", "HEAD", cwd=wt).strip(),
             "snap": team.snapshot(wt),
+            "tokens": s.get("tokens", 0) + out.get("tokens", 0),
+            "after_dev": "test",
         }
 
+    def after_develop(s: TaskState):
+        if s.get("gate", {}).get("blocked"):
+            return "finish"
+        return s.get("after_dev") or "test"
+
+    def refuse(s: TaskState, kind: str, paths: list[str], verb: str = "changed") -> dict:
+        """A scope or protected-path violation: logged for the owner, the task ends, no retry."""
+        dev, tid = s["assignee"], s["task"]["id"]
+        team.violation(tid, dev, kind, f"{verb} {paths}")
+        if kind == "out_of_scope":
+            return halt(
+                s,
+                "needs a split before it can be planned: out_of_scope: "
+                f"{dev} may only change {list(SC.allowed(cfg, dev, s['task']))}, it {verb} "
+                f"{paths[:10]}",
+            )
+        return halt(s, f"protected: {dev} {verb} files no agent may change: {paths[:10]}")
+
     def test(s: TaskState):
-        tid = s["task"]["id"]
-        team.emit("tester", "running checks", task=tid, status="working")
-        checks = [] if team.fake else team.run_checks(s)
-        for c in checks:
-            team.emit("tester", f"{'ok  ' if c['ok'] else 'FAIL'} {c['cmd']}", task=tid)
-        shots, problems = [], []
-        dev_shots: list[str] = []
-        if not team.fake:
-            shots, problems = G.screenshots(team, s, s.get("routes") or [])
-            dev_shots, dev_problems = G.dev_screenshots(team, s, s.get("routes") or [])
-            problems += dev_problems
-            if shots or problems:
-                team.emit(
-                    "tester", f"screenshots: {len(shots)} ok, {len(problems)} failed", task=tid
-                )
-        verdict = team.agents.judge(
-            team, {**s, "screenshots": shots + dev_shots, "screenshot_problems": problems}, checks
+        tid, dev, wt = s["task"]["id"], s["assignee"], s["worktree"]
+        team.emit(
+            "tester", "scope gate, then checks on a clean checkout", task=tid, status="working"
         )
+        # 1. scope gate on what the branch really changes (never on what the developer says)
+        team.fetch(base)
+        span = f"{team.remote_name}/{base}...HEAD"
+        paths = [p for p in team.git("diff", "--name-only", "-z", span, cwd=wt).split("\0") if p]
+        bad = SC.check_paths(paths, cfg, dev, s["task"])
+        if bad["protected"]:
+            return refuse(s, "protected", bad["protected"])
+        if bad["out_of_scope"]:
+            return refuse(s, "out_of_scope", bad["out_of_scope"])
+        findings = SC.bypass(team.git("diff", "-U0", span, cwd=wt), paths)
+        checks, shots, problems, dev_shots = [], [], [], []
+        if findings:  # no checks or judge: the change itself is refused
+            team.violation(tid, dev, "bypass", "; ".join(findings))
+            verdict = {
+                "passed": False,
+                "criteria": [],
+                "summary": "",
+                "how_to_try": "",
+                "feedback": "The scope gate refused this change (anti-bypass checks):\n- "
+                + "\n- ".join(findings)
+                + "\nDo the work in the code itself; never skip, focus or weaken tests.",
+            }
+        else:
+            if not team.fake:  # every check again, from a clean checkout of the committed HEAD
+                with team.clean_checkout(s) as clean:
+                    cs = {**s, "worktree": clean}
+                    checks = team.run_checks(cs)
+                    for c in checks:
+                        team.emit("tester", f"{'ok  ' if c['ok'] else 'FAIL'} {c['cmd']}", task=tid)
+                    runs, problems = tester_benchmark(cs, clean)
+                    shots, more = G.screenshots(team, cs, s.get("routes") or [], runs=runs)
+                    dev_shots, dev_problems = G.dev_screenshots(team, cs, s.get("routes") or [])
+                    problems += more + dev_problems
+                if shots or problems:
+                    team.emit(
+                        "tester", f"screenshots: {len(shots)} ok, {len(problems)} failed", task=tid
+                    )
+            verdict = team.agents.judge(
+                team,
+                {**s, "screenshots": shots + dev_shots, "screenshot_problems": problems},
+                checks,
+            )
+        verdict["bypass"] = findings
         verdict["screenshots"], verdict["screenshot_problems"] = shots + dev_shots, problems
         failed = [c for c in checks if not c["ok"]]
         verdict["judge_passed"] = verdict["passed"]
@@ -845,6 +1188,25 @@ def build_graph(team: Team, checkpointer):
         verdict["checks"] = checks
         snap = team.snapshot(s["worktree"])  # files the checks made are not the developer's
         fixes = s.get("fixes", 0) + (0 if verdict["passed"] else 1)
+        # the reason, comparable between rounds: the judge's wording changes, these do not
+        key = (
+            ""
+            if verdict["passed"]
+            else "\n".join(
+                sorted(f"criterion: {c['criterion']}" for c in verdict["criteria"] if not c["met"])
+                + sorted(f"check: {c['cmd']}" for c in failed)
+                + sorted(f"bypass: {f}" for f in findings)
+                + (["screenshots missing"] if no_shots else [])
+            )
+            or "sent back"
+        )
+        if key and key == s.get("last_sendback"):
+            out = halt(
+                s,
+                "the tester sent it back twice in a row for the same reason, so no new round "
+                f"was started: {verdict['feedback'].strip()[:400]}",
+            )
+            return {**out, "verdict": verdict, "fixes": fixes, "snap": snap, "last_sendback": key}
         if verdict["passed"]:
             team.emit(
                 "tester", "local checks and criteria pass", task=tid, to="gates", status="idle"
@@ -859,13 +1221,34 @@ def build_graph(team: Team, checkpointer):
             )
         else:
             team.emit("tester", "out of fix loops", task=tid, status="idle")
-        out = {"verdict": verdict, "fixes": fixes, "snap": snap, "gate": {}}
+        out = {"verdict": verdict, "fixes": fixes, "snap": snap, "gate": {}, "last_sendback": key}
         if not verdict["passed"]:
             out["feedback"] = verdict["feedback"]
             out["gate"] = {"reason": "tester: " + verdict["feedback"].strip()[:500]}
         return out
 
+    def tester_benchmark(cs: TaskState, clean: str) -> tuple[Path | None, list[str]]:
+        """Pipeline tasks with routes: the tester runs the quick benchmark itself on the clean
+        checkout and screenshots that, not the developer's own output."""
+        sc = cfg["developers"][cs["assignee"]].get("screenshots") or {}
+        if not cs.get("routes") or "{runs}" not in sc.get("serve", ""):
+            return None, []
+        b = cfg["gates"]["benchmark"]
+        out = team.home / "bench-tester" / cs["task"]["id"]
+        shutil.rmtree(out, ignore_errors=True)
+        quick = ",".join(cs["task"].get("quick_only") or b["quick_only"])
+        cmd = b["command"].format(data=team.root / "data" / "samples", out=out)
+        team.emit(
+            "tester", f"quick benchmark on the clean checkout ({quick})", task=cs["task"]["id"]
+        )
+        r = team.run_proc(f"{cmd} --only {quick}", cwd=clean, timeout=b["quick_min"] * 60 * 4)
+        if not r["ok"]:
+            return out, [f"the tester's quick benchmark failed: {team.redact(r['output'][-300:])}"]
+        return out, []
+
     def after_test(s: TaskState):
+        if s.get("gate", {}).get("blocked"):
+            return "finish"
         if s["verdict"]["passed"]:
             return "gates"
         return "develop" if s["fixes"] <= max_fixes else "finish"
@@ -926,9 +1309,8 @@ def build_graph(team: Team, checkpointer):
         if r.returncode:
             files = team.git("diff", "--name-only", "--diff-filter=U", cwd=wt).split()
             subprocess.run(["git", "merge", "--abort"], cwd=wt, capture_output=True)
-            # ponytail: conflicts block the task; add a "developer resolves markers" round
-            # if they become common (parallel tasks own different folders, so rare)
-            return stop(f"conflicts with {base} in {files}", block=True)
+            # dev moved since the round began: the next round starts with a resolve step
+            return stop(f"conflicts with {base} in {files}; resolve the markers")
         head = team.git("rev-parse", "HEAD", cwd=wt).strip()
         lines.append(f"up to date with `{base}` @ {base_sha[:8]}")
         # 2. Nothing with a secret is ever pushed (history can't be rewritten afterwards).
@@ -1012,6 +1394,8 @@ def build_graph(team: Team, checkpointer):
                 team.gh.open_pr(s["branch"], base, f"{tid}: {s['task']['title']}", packet)
         team.update_task(tid, **fields)
         team.push_status(tid, f"backlog: {tid} {status}" + (f" (#{g['number']})" if merged else ""))
+        team.control_file("stop", tid).unlink(missing_ok=True)  # applied: a resume starts clean
+        (team.home / "data-snap" / f"{tid}.json").unlink(missing_ok=True)
         if merged:
             team.unblock_ready()  # e.g. A4 done -> P3b back to todo
         if merged:  # finished: the worktree is no longer needed (branch and packet stay)
@@ -1021,7 +1405,15 @@ def build_graph(team: Team, checkpointer):
                 pass
         team.emit("tester", f"{status}: {packet.relative_to(team.root)}", task=tid, to="reviewer")
         return {
-            "results": [{"id": tid, "status": status, "packet": str(packet), "pr": g.get("pr", "")}]
+            "results": [
+                {
+                    "id": tid,
+                    "status": status,
+                    "packet": str(packet),
+                    "pr": g.get("pr", ""),
+                    "reason": "" if merged else fields["blocked_reason"],
+                }
+            ]
         }
 
     def loud(name, fn):
@@ -1031,8 +1423,14 @@ def build_graph(team: Team, checkpointer):
         def node(s: TaskState):
             if team.stopping.is_set():
                 raise StopRun(f"stopped before {name}")
+            tid = s["task"]["id"]
+            team._ctx.task = tid  # run_proc in this node checks `devteam stop <task>`
             try:
+                if name in ("develop", "test", "gates") and (why := team.stop_reason(tid)):
+                    return halt(s, why)
                 return fn(s)
+            except TaskHalted as e:  # a limit or the owner: this task ends, the others go on
+                return halt(s, str(e))
             except (SubscriptionLimit, BudgetExceeded):  # the caller waits or stops, no crash
                 raise
             except Exception as e:
@@ -1044,6 +1442,8 @@ def build_graph(team: Team, checkpointer):
                     status="idle",
                 )
                 raise
+            finally:
+                team._ctx.task = ""
 
         return node
 
@@ -1058,19 +1458,21 @@ def build_graph(team: Team, checkpointer):
         sub.add_node(name, loud(name, fn))
     sub.add_edge(START, "worktree")
     sub.add_edge("worktree", "develop")
-    sub.add_edge("develop", "test")
+    sub.add_conditional_edges("develop", after_develop, ["test", "develop", "finish"])
     sub.add_conditional_edges("test", after_test, ["gates", "develop", "finish"])
     sub.add_conditional_edges("gates", after_gates, ["develop", "finish"])
     sub.add_edge("finish", END)
 
     # --- top level -----------------------------------------------------------------------
     def brain(s: TeamState, config: RunnableConfig):
-        """Plans only; writes nothing. Tasks this run already claimed count as open again."""
+        """Plans; writes only the owner's stop / resume requests. Tasks this run already
+        claimed count as open again."""
         run = config["configurable"]["thread_id"]
         if team.stopping.is_set():
             raise StopRun("stopped before planning")
         devs = {d: cfg["developers"][d] for d in s.get("developers") or cfg["developers"]}
         team.emit("brain", "reading the backlog", status="working")
+        team.apply_controls()
         todo = [
             t
             for t in team.load_backlog()
@@ -1094,23 +1496,43 @@ def build_graph(team: Team, checkpointer):
             team.emit("brain", f"skipping tasks without a known area {sorted(known)}: {no_area}")
         areas = {a for d in devs.values() for a in d["areas"]}  # other developers' tasks wait
         todo = [t for t in todo if t.get("area") in areas]
-        assignments, feedback = [], None
+        assignments, splits, feedback = [], [], None
+        open_ids = {t["id"] for t in todo}
         for attempt in range(2):  # one retry with the validation errors
             plans = team.agents.plan(team, todo, feedback=feedback, devs=list(devs)) if todo else []
+            splits = [p for p in plans if p.get("split") and p.get("task_id") in open_ids]
+            plans = [p for p in plans if not p.get("split")]
             try:
                 assignments = validate_plan(plans, todo, {**cfg, "developers": devs})
                 break
-            except ValueError as e:
+            except PlanError as e:
+                if attempt and e.only_outside:  # never planned across folders: split first
+                    splits += [
+                        {"task_id": t, "split": f"its criteria need {paths}"}
+                        for t, paths in e.outside.items()
+                    ]
+                    plans = [p for p in plans if p["task_id"] not in e.outside]
+                    assignments = validate_plan(plans, todo, {**cfg, "developers": devs})
+                    break
                 if attempt:
                     raise
                 feedback = str(e)
                 team.emit("brain", f"plan rejected, re-planning: {e}")
         team.emit("brain", f"planned {len(assignments)} task(s)", status="idle")
-        return {"assignments": assignments}
+        return {"assignments": assignments, "splits": splits}
 
     def claim(s: TeamState, config: RunnableConfig):
         """Writes the checkpointed assignments to the backlog. Idempotent."""
         run = config["configurable"]["thread_id"]
+        for sp in s.get("splits") or []:  # the owner splits them in the backlog
+            reason = (
+                "needs a split before it can be planned: the work spans folders of more than one "
+                f"developer ({sp['split']}). Split it in backlog.yaml (one task per developer, "
+                "depends_on between them)"
+            )
+            team.update_task(sp["task_id"], status="blocked", blocked_reason=reason[:500])
+            team.push_status(sp["task_id"], f"backlog: {sp['task_id']} blocked (needs a split)")
+            team.emit("brain", reason, task=sp["task_id"], to="reviewer")
         for a in s["assignments"]:
             team.update_task(a["task"]["id"], status="in_progress", owner=a["assignee"], run=run)
             team.emit(

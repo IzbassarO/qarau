@@ -20,7 +20,7 @@ from pathlib import Path
 
 from devteam import costs
 from devteam.costs import BudgetExceeded, SubscriptionLimit
-from devteam.graph import SHARED_DIRS, StopRun, Team
+from devteam.graph import OWNER_STOP, StopRun, Team
 
 UNKNOWN_RESET_RETRY_S = 1800  # a limit without a reset time: try again every 30 min
 MIN_WAIT_S = 60
@@ -34,7 +34,7 @@ class Continuous:
         self.max_wait_s = c.get("limit_wait_max_hours", 5) * 3600
         self.team, self.graph, self.clock = team, graph, clock
         for name, d in team.cfg["developers"].items():  # devteam edits itself only by hand
-            if any(p.startswith("devteam") for p in d["owns"] + SHARED_DIRS):
+            if any(p.startswith("devteam") for p in d["owns"]):
                 raise ValueError(f"{name} owns devteam/: continuous mode refuses to start")
         self.events: queue.Queue = queue.Queue()  # for the live view
         self.cond = threading.Condition()
@@ -135,7 +135,13 @@ class Continuous:
             task=task,
             status="waiting",
         )
-        return not self.team.stopping.wait(wait)  # Ctrl+C ends the wait
+        deadline = time.monotonic() + wait
+        while (left := deadline - time.monotonic()) > 0:
+            if self.team.stopping.wait(min(30, left)):  # Ctrl+C ends the wait
+                return False
+            if task and self.team.stop_reason(task):  # the step runs again and stops the task
+                break
+        return True
 
     def dev_loop(self, dev: str):
         thread, n = self.resume.get(dev), 0
@@ -190,7 +196,11 @@ class Continuous:
                     self.ended += 1
                     self.results += [{**r, "dev": dev} for r in vals.get("results", [])]
                     self.cond.notify_all()  # an ended task can unblock work for the others
-                    streak = self.results[-2:]
+                    # the owner's own `devteam stop <task>` is not a failure of the team
+                    ours = [
+                        r for r in self.results if not str(r.get("reason")).startswith(OWNER_STOP)
+                    ]
+                    streak = ours[-2:]
                     if len(streak) == 2 and all(r["status"] == "blocked" for r in streak):
                         reason = f"2 tasks in a row ended blocked ({streak[0]['id']}, "
                         reason += f"{streak[1]['id']})"

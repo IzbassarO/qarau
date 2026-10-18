@@ -47,7 +47,8 @@ def ev(agent, status, task, ts, msg="m"):
 
 def test_collect_shows_agents_spend_limits_queue_and_attention(team, monkeypatch):
     now = time.mktime(time.strptime("2026-10-17T12:00:00", "%Y-%m-%dT%H:%M:%S"))
-    (team.home / "run.pid").write_text(str(os.getpid()))  # a live run
+    (team.home / "run.pid").write_text(str(os.getpid()))  # a live run, started at 11:00
+    os.utime(team.home / "run.pid", (now - 3600, now - 3600))
     write_events(
         team,
         [

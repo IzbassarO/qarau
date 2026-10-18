@@ -10,6 +10,13 @@ max_fix_loops: 3          # times a task is sent back (tester or gates), then "b
 
 gates:
   ci_timeout_min: 40
+  # No agent may change these; devteam/, .github/, backlog.yaml, CLAUDE.md and AGENTS.md are
+  # always protected (devteam/scope.py). A change is a hard fail, the task is blocked.
+  protected:
+    - pipeline/qarau_pipeline/benchmark_set.toml   # the videos the benchmark gate measures
+    - web/eslint.config.*
+    - .gitleaks*
+    - .pre-commit-config.yaml
   benchmark:
     when_paths: [pipeline/]   # run only when the change touches these
     # Contract (task P1): writes {out}/results.json, reads videos from {data} (read-only);
@@ -39,6 +46,15 @@ continuous:
   max_tasks: 8               # tasks taken per run; then no new ones, running ones finish
   limit_wait_max_hours: 5    # subscription limit: wait for the reset, at most this long
 
+# Supervisor (owner, 2026-10-17): per task, so one task going wrong never burns the plan or
+# stops the others (A7 used 42.6 M tokens while blocked, P2b 17 M). Tokens = subscription tokens
+# of the developer (in + cached + out, as the dashboard shows them), counted live. Over a limit:
+# that step is killed, the task is blocked with the reason, the other developers keep going.
+supervisor:
+  max_tokens_per_round: 8000000   # one developer round
+  max_tokens_per_task: 12000000   # all rounds of the task in this run (resume starts again)
+  max_round_min: 60               # a round commits only when it ends: the longest without a commit
+
 # provider: anthropic for now. Prices are $ per 1M tokens, used for the cost report.
 models:
   brain:
@@ -47,18 +63,20 @@ models:
     effort: high
     price_in: 4.0
     price_out: 20.0
+    price_cache_read: 0.2   # prompt cache hits; 1 h cache writes cost 2x price_in
   tester:
     provider: anthropic
     model: claude-sonnet-5-5
     effort: medium
     price_in: 2.0
     price_out: 10.0
+    price_cache_read: 0.2
 
 developers:
   dev_pipeline:
     tool: claude           # Claude Code headless, your subscription (CLAUDE_CODE_OAUTH_TOKEN)
     areas: [core]          # backlog tasks with this area may go to this developer
-    owns: [pipeline/, backend/, infra/]
+    owns: [pipeline/, backend/, infra/, docs/]   # enforced on the diff (scope gate)
     timeout_min: 90
     allowed_tools:
       - Read
@@ -91,7 +109,7 @@ developers:
   dev_app:
     tool: codex            # Codex CLI, your saved ChatGPT login
     areas: [app]
-    owns: [web/]
+    owns: [web/]           # web/ only (owner, 2026-10-17): plans and notes go in the summary
     timeout_min: 60
     setup:                 # runs before every round: the Codex sandbox has no network
       - cd web && pnpm install --frozen-lockfile
