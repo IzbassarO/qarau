@@ -255,10 +255,10 @@ tasks:
   area: core
   title: Region of interest API
   goal: 'Backend half of A7 (split 2026-10-17: dev_app may not edit backend/). Only backend/ and docs/.
-    The web part on branch devteam/A7 already calls these routes; its contract docs/notes/roi-format.md
-    lands with A7, so do not create that file. The stored JSON (version 1): {version: 1, site_id, source_run,
-    frame (e.g. "reconstruction"), up_axis, min: [x, y, z], max: [x, y, z], created_at, created_by}; all
-    fields required, other fields ignored and dropped on rewrite.
+    The contract is docs/notes/roi-format.md; the web part on branch devteam/A7 already calls these routes.
+    The stored JSON (version 1): {version: 1, site_id, source_run, frame (e.g. "reconstruction"), up_axis,
+    min: [x, y, z], max: [x, y, z], created_at, created_by}; all fields required, other fields ignored
+    and dropped on rewrite.
 
     - FastAPI routes GET / PUT / DELETE /api/sites/{site_id}/roi. Each declares its role with the existing
     require_role dependency (backend/app/auth.py): GET viewer (200 JSON, 404 when none is saved), PUT

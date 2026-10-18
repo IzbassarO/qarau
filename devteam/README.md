@@ -69,6 +69,23 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   instead of a full round; the orchestrator concludes the merge only when no marker is left
   and nothing else changed, then a normal round follows. Conflicts found by the gates go back
   the same way; markers left after the step block the task.
+- Hard scope enforcement (`devteam/scope.py`, owner 2026-10-17, after A7 shipped its backend
+  as a `.patch` under docs/): the tester's first step is a scope gate on
+  `git diff dev...HEAD`. Every path must be in the developer's `owns` (config: dev_app
+  `web/` only; dev_pipeline `pipeline/`, `backend/`, `infra/`, `docs/`) or the task's
+  `writable`; a path outside → `out_of_scope`, no retry, blocked as "needs a split". Protected
+  paths (devteam/, .github/, backlog.yaml, CLAUDE.md, AGENTS.md, plus `gates.protected`:
+  benchmark video set, lint configs) → hard fail. A developer that even tries to write another
+  developer's code folders or a protected path is stopped the same way at the end of its
+  round (its own docs/ attempts are only reverted). Anti-bypass checks on the diff: new
+  `test.skip` / `.only` / `xfail` / `pytest.mark.skip` (a skip only while a data file is
+  missing is allowed), fewer assertions or tests, looser thresholds in tests, `.patch` /
+  `.diff` files, code under docs/ → sent back with the reason (twice → blocked). Every
+  violation goes to `.state/violations.jsonl`, "Needs your attention" and the daily report.
+- The tester never trusts the developer: setup, checks and screenshots run again on a fresh
+  detached checkout of the committed HEAD (pipeline tasks: the tester runs the quick benchmark
+  there itself and screenshots that); only the orchestrator sets a task to done, after every
+  gate passed (backlog.yaml is protected).
 - Plans stay inside the developer's folders: criteria that name another developer's folder
   (or devteam/) are rejected; the brain lists such tasks in `needs_split` and the orchestrator
   blocks them with the proposed split (A7 asked dev_app for backend/ and looped).

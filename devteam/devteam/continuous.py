@@ -20,7 +20,7 @@ from pathlib import Path
 
 from devteam import costs
 from devteam.costs import BudgetExceeded, SubscriptionLimit
-from devteam.graph import OWNER_STOP, SHARED_DIRS, StopRun, Team
+from devteam.graph import OWNER_STOP, StopRun, Team
 
 UNKNOWN_RESET_RETRY_S = 1800  # a limit without a reset time: try again every 30 min
 MIN_WAIT_S = 60
@@ -34,7 +34,7 @@ class Continuous:
         self.max_wait_s = c.get("limit_wait_max_hours", 5) * 3600
         self.team, self.graph, self.clock = team, graph, clock
         for name, d in team.cfg["developers"].items():  # devteam edits itself only by hand
-            if any(p.startswith("devteam") for p in d["owns"] + SHARED_DIRS):
+            if any(p.startswith("devteam") for p in d["owns"]):
                 raise ValueError(f"{name} owns devteam/: continuous mode refuses to start")
         self.events: queue.Queue = queue.Queue()  # for the live view
         self.cond = threading.Condition()

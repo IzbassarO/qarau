@@ -259,9 +259,11 @@ def test_outside_paths():
     assert outside_paths(["backend/tests/test_roi.py exists; web/src ok"], "dev_app", CFG, t) == [
         "backend/tests/test_roi.py"
     ]
-    assert (
-        outside_paths(["/viewer/notre-dame shows a box; docs/notes/x.md"], "dev_app", CFG, t) == []
-    )
+    assert outside_paths(
+        ["/viewer/notre-dame shows a box; docs/notes/x.md"], "dev_app", CFG, t
+    ) == [
+        "docs/notes/x.md"  # dev_app owns web/ only
+    ]
     assert (
         outside_paths(
             ["runs on data/samples, writes out/web/manifest.json"], "dev_pipeline", CFG, t

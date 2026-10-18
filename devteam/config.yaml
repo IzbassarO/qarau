@@ -10,6 +10,13 @@ max_fix_loops: 3          # times a task is sent back (tester or gates), then "b
 
 gates:
   ci_timeout_min: 40
+  # No agent may change these; devteam/, .github/, backlog.yaml, CLAUDE.md and AGENTS.md are
+  # always protected (devteam/scope.py). A change is a hard fail, the task is blocked.
+  protected:
+    - pipeline/qarau_pipeline/benchmark_set.toml   # the videos the benchmark gate measures
+    - web/eslint.config.*
+    - .gitleaks*
+    - .pre-commit-config.yaml
   benchmark:
     when_paths: [pipeline/]   # run only when the change touches these
     # Contract (task P1): writes {out}/results.json, reads videos from {data} (read-only);
@@ -69,7 +76,7 @@ developers:
   dev_pipeline:
     tool: claude           # Claude Code headless, your subscription (CLAUDE_CODE_OAUTH_TOKEN)
     areas: [core]          # backlog tasks with this area may go to this developer
-    owns: [pipeline/, backend/, infra/]
+    owns: [pipeline/, backend/, infra/, docs/]   # enforced on the diff (scope gate)
     timeout_min: 90
     allowed_tools:
       - Read
@@ -102,7 +109,7 @@ developers:
   dev_app:
     tool: codex            # Codex CLI, your saved ChatGPT login
     areas: [app]
-    owns: [web/]
+    owns: [web/]           # web/ only (owner, 2026-10-17): plans and notes go in the summary
     timeout_min: 60
     setup:                 # runs before every round: the Codex sandbox has no network
       - cd web && pnpm install --frozen-lockfile
