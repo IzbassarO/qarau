@@ -1,7 +1,7 @@
 import type { Manifest } from '../../../src/lib/bundle';
 
 /** Small on-wire bundle: explicit little-endian buffers, no filesystem or random data. */
-export function makeFarBundle() {
+export function makeFarBundle({ brokenFar = false } = {}) {
   const objectCount = 300;
   const farCount = 200;
   const position = Buffer.alloc(objectCount * 12);
@@ -76,7 +76,8 @@ export function makeFarBundle() {
     [manifest.points.color, color],
     [manifest.points.first_seen, firstSeen],
     [manifest.points.num_obs, numObs],
-    [manifest.far.position, farPosition],
+    // One float cannot hold the declared far XYZ triplets; keep object arrays intact.
+    [manifest.far.position, brokenFar ? farPosition.subarray(0, 4) : farPosition],
     [manifest.far.color, farColor],
     [
       manifest.frames[0].thumb,

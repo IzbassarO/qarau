@@ -6,19 +6,24 @@ Arrays use little-endian XYZ float32, RGB uint8 and first-seen/observation uint1
 Exact `page.route` handlers use production `runUrl`, preserving `/files/web/` paths.
 The Vite viewer uses the existing `RequireAuth allowInDev` route.
 
-The malformed test truncates far positions to four bytes and checks the warning,
-300 rendered object points and absent far toggle. A valid control checks the far
-count and toggle. Real-data skips are unchanged; no local data or binary blobs are
-required. Extra password/thumbnail assertions and unrelated npm scripts were removed.
-No dependencies added: Playwright/TypeScript are Apache-2.0; Three.js/Vitest are MIT.
+Route interception keeps the fixture in memory and uses the real viewer fetch and
+parser paths without depending on Vite's local runs directory or backend data.
+The malformed test uses the builder's `brokenFar` option to truncate far positions
+to four bytes and checks the warning, 300 rendered object points and absent far
+toggle. A valid control checks the far count and toggle. Real-data skips are
+unchanged; no local data or binary blobs are required.
 
-Verification: lint, typecheck, 499 Vitest tests and build passed. Playwright attempts
-with an empty `QARAU_RUNS_DIR` fail before tests at Vite startup (`listen EPERM` on
-both IPv4 and IPv6); a browser pass remains unverified. Latest logs are in assigned
-scratch: `lint-typecheck-revision3.log`, `test-build-revision3.log` and
-`playwright-revision3.log`.
+`web/src/lib/farFixture.test.ts` imports the same builder and tests the actual
+`loadManifest` and `loadBundle` parsers through an in-memory fetch mock. The intact
+fixture must load 300 object points and 200 far points. The exact broken variant
+used by e2e must raise the recoverable `FarLayerError` with `farError: 'broken'`,
+drop the far layer and preserve the object's positions, colours and assembly data.
 
-Completion requires the orchestrator to run `pnpm exec playwright test
-e2e/far-layer.spec.ts --reporter=list` outside this sandbox with an empty runs
-directory. Its check list and CI workflow are protected and currently omit Playwright.
-No servers are left running.
+No dependencies added. Installed package licences checked: Playwright/TypeScript
+are Apache-2.0; React/Three.js/Vitest are MIT, all permitting commercial use.
+
+Verification for this revision: `pnpm lint`, `pnpm typecheck`, `pnpm test` (501 tests
+in 29 files) and `pnpm build` passed from `web/`. Vite reports the application's
+chunk exceeding 500 kB; no production modules or build settings changed.
+Playwright and the `/viewer/demo` visual check remain for the tester's e2e gate.
+No Playwright runs, screenshots or servers were started in this revision.

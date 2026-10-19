@@ -117,10 +117,8 @@ for (const run of ['demo', 'notre-dame']) {
 }
 
 test('malformed far arrays warn while the real object cloud still renders', async ({ page }) => {
-  const bundle = makeFarBundle();
+  const bundle = makeFarBundle({ brokenFar: true });
   const { manifest } = bundle;
-  // A single float cannot hold the 200 XYZ triplets declared by the manifest.
-  bundle.files.set(manifest.far.position, Buffer.alloc(4));
   await serveFarBundle(page, bundle);
   await page.goto(`/viewer/${manifest.run_id}`);
   await page.waitForFunction(() => window.__qarau?.pointsLoaded);
