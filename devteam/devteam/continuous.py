@@ -181,11 +181,16 @@ class Continuous:
                 self._idle(dev)
                 self.halt(f"daily API budget reached: {e}")
                 return
-            except Exception as e:  # crash: stop everything, the owner fixes and runs again
-                self._idle(dev)
+            except Exception as e:  # crash: only this developer pauses, the others go on;
+                # its round stays pending and resumes first in the next run (2026-10-18 23:39:
+                # a vanished `claude` stopped the whole run)
                 at = traceback.extract_tb(e.__traceback__)[-1]  # where, for the owner
                 where = f"{Path(at.filename).name}:{at.lineno}"
-                self.halt(f"{dev} crashed at {where}: {self.team.redact(str(e))[:300]}")
+                reason = f"{dev} paused: crashed at {where}: {self.team.redact(str(e))[:300]}"
+                with self.cond:
+                    self.paused[dev] = reason
+                self._idle(dev)
+                self.say("brain", reason)
                 return
             self.limit_since.pop(dev, None)
             self._set_pending(dev, None)

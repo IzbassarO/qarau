@@ -178,10 +178,17 @@ def screenshots(
             "the port. Stop it; screenshots are only taken of a fresh server."
         ]
     marker = procs.new_marker()
-    srv = subprocess.Popen(  # {data}: the main checkout's data/ (runs to show, read-only)
-        sc["serve"].format(  # {runs}: the developer's quick benchmark output (pipeline tasks)
+    if runs is None:  # a task that writes runs is shown runs_dir, others their quick benchmark
+        runs = (
+            team.runs_dir
+            if team.writes_runs(s["task"])
+            else team.home / "bench-dev" / s["task"]["id"]
+        )
+    srv = subprocess.Popen(  # {runs_dir}: config runs_dir (QARAU_RUNS_DIR), read-only here
+        sc["serve"].format(  # {runs}: the runs this task's screenshots show (pipeline tasks)
             data=shlex.quote(str(team.root / "data")),
-            runs=shlex.quote(str(runs or team.home / "bench-dev" / s["task"]["id"])),
+            runs_dir=shlex.quote(str(team.runs_dir)),
+            runs=shlex.quote(str(runs)),
         ),
         shell=True,
         cwd=s["worktree"],
@@ -236,8 +243,8 @@ def dev_screenshots(team, s, routes: list[str]) -> tuple[list[str], list[str]]:
     """Pipeline tasks: the same routes on dev's cached gate benchmark, same viewer code, so the
     tester compares dev and the branch. Never runs the benchmark (~70 min) for this."""
     sc = team.cfg["developers"][s["assignee"]].get("screenshots") or {}
-    if "{runs}" not in sc.get("serve", "") or not routes:
-        return [], []
+    if "{runs}" not in sc.get("serve", "") or not routes or team.writes_runs(s["task"]):
+        return [], []  # a task's new runs don't exist in dev's benchmark output: nothing to compare
     dev = f"{team.remote_name}/{team.cfg['base_branch']}"
     runs = team.home / "bench" / bench_key(team, dev)
     if not (runs / "results.json").exists():

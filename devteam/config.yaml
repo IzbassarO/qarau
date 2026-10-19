@@ -4,6 +4,11 @@
 # when every gate is green. dev -> main: weekly release PR, merged only if CI and the full
 # benchmark are green on dev.
 base_branch: dev
+# Viewer runs (relative to the main checkout): the one place the pipeline writes runs to, the web
+# viewer and backend read them from, and the tester screenshots. Every step gets it as
+# QARAU_RUNS_DIR ({runs_dir} in commands). P3e wrote data/runs while the tester's viewer read the
+# quick benchmark output: "manifest.json not found" (2026-10-18).
+runs_dir: data/runs
 release_branch: main
 release_every_days: 7
 max_fix_loops: 3          # times a task is sent back (tester or gates), then "blocked"
@@ -43,7 +48,7 @@ gates:
   # EPERM), so developers never run e2e themselves (A5-fix, 2026-10-18).
   e2e:
     when_paths: [web/]
-    command: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_E2E_PORT={port} QARAU_RUNS_DIR={data}/runs pnpm exec playwright test --reporter=list
+    command: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_E2E_PORT={port} QARAU_RUNS_DIR={runs_dir} pnpm exec playwright test --reporter=list
     timeout_min: 20
   # Run on the backlog every status commit would push to dev, before it is pushed: a failure
   # keeps the status local and warns (778e072 `backlog: A9-fix done (#41)` turned dev CI red).
@@ -110,7 +115,8 @@ developers:
       - "Bash(git branch:*)"
       - "Bash(gh:*)"
     setup: []
-    screenshots:           # viewer on the developer's quick benchmark output ({runs}); routes /viewer/<video>
+    screenshots:           # viewer on the quick benchmark output ({runs}); routes /viewer/<video>.
+                           # A task that writes runs_dir (writable) is shown runs_dir instead.
       serve: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_RUNS_DIR={runs} pnpm exec vite --port 5197 --strictPort
       url: http://localhost:5197
       shoot: cd web && pnpm exec playwright screenshot --viewport-size=1440,900 --wait-for-timeout=4000 {url} {png}
@@ -127,7 +133,7 @@ developers:
     setup:                 # runs before every round: the Codex sandbox has no network
       - cd web && pnpm install --frozen-lockfile
     screenshots:           # pages from the plan's `routes`; the tester sees them
-      serve: cd web && QARAU_RUNS_DIR={data}/runs pnpm exec vite --port 5198 --strictPort
+      serve: cd web && QARAU_RUNS_DIR={runs_dir} pnpm exec vite --port 5198 --strictPort
       url: http://localhost:5198
       shoot: cd web && pnpm exec playwright screenshot --viewport-size=1440,900 --wait-for-timeout=2500 {url} {png}
     checks:

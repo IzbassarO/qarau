@@ -253,6 +253,7 @@ class Team:
         gh: Any = None,
     ):
         self.root, self.cfg, self.secrets, self.agents, self.fake = root, cfg, secrets, agents, fake
+        self.runs_dir = root / cfg.get("runs_dir", "data/runs")  # QARAU_RUNS_DIR for every step
         self.home = root / "devteam" / ".state" / ("fake" if fake else "")
         self.home.mkdir(parents=True, exist_ok=True)
         self.branch_prefix = "devteam-fake" if fake else "devteam"
@@ -540,6 +541,34 @@ class Team:
         subprocess.run(["git", "merge", "--abort"], cwd=wt, capture_output=True)
         raise TaskHalted(f"could not merge {base} into the task branch: {r.stderr[-400:]}")
 
+    def writes_runs(self, task: dict) -> bool:
+        """The task makes viewer runs (`writable: [data/runs]`, e.g. P3e): its screenshots show
+        runs_dir, where it wrote them, not a benchmark output."""
+        return self.cfg.get("runs_dir", "data/runs") in (task.get("writable") or [])
+
+    def dev_merge(self, wt: str, head: str) -> bool:
+        """HEAD is dev merged onto `head` (a fast-forward, or a clean merge commit): what
+        develop() does before a round. A crash after it (2026-10-18 23:39) left HEAD there while
+        the checkpoint kept `head`; the next round then counted dev's changes (backlog.yaml
+        status commits too) as the developer's. A merge commit's tree must equal git's own
+        merge, so no other change rides along."""
+        dev = f"{self.remote_name}/{self.cfg['base_branch']}"
+
+        def ancestor(a: str, b: str) -> bool:
+            r = subprocess.run(["git", "merge-base", "--is-ancestor", a, b], cwd=wt)
+            return r.returncode == 0
+
+        if ancestor(head, "HEAD") and ancestor("HEAD", dev):
+            return True  # fast-forward: nothing on the branch but dev's own commits
+        parents = self.git("rev-list", "--parents", "-n1", "HEAD", cwd=wt).split()[1:]
+        if len(parents) != 2 or parents[0] != head or not ancestor(parents[1], dev):
+            return False
+        merged = subprocess.run(  # exit 1 on conflicts: a resolved merge is not "clean"
+            ["git", "merge-tree", "--write-tree", *parents], cwd=wt, capture_output=True, text=True
+        )
+        tree = self.git("rev-parse", "HEAD^{tree}", cwd=wt).strip()
+        return not merged.returncode and merged.stdout.strip() == tree
+
     def data_snapshot(self, task: dict) -> dict[str, list]:
         """Files in the task's `writable` data folders (e.g. data/runs): a task may add new ones
         there, never change or delete one that was there when it started."""
@@ -668,7 +697,7 @@ class Team:
         The pre-push hook lets through only a fast-forward that changes backlog.yaml alone.
         The backlog tests run on the new backlog first: if they fail, nothing is pushed (the
         status stays in the working copy) and the owner is told why. Returns None then."""
-        base, rn, err, refused = self.cfg["base_branch"], self.remote_name, None, ""
+        base, rn, err, refused, pushed = self.cfg["base_branch"], self.remote_name, None, "", ""
         with self._lock:  # no emit() inside: it takes the same lock
             mine = next(t for t in self.load_backlog() if t["id"] == task_id)
             for attempt in range(3):
@@ -693,6 +722,7 @@ class Team:
                 )
                 tree = self.git("write-tree", env=env).strip()
                 if tree == self.git("rev-parse", f"{parent}^{{tree}}").strip():
+                    pushed = parent
                     break  # dev already says so (a resumed finish)
                 self._status_commit = self.git(
                     "commit-tree", tree, "-p", parent, "-m", message
@@ -701,6 +731,7 @@ class Team:
                     self.git(
                         "push", "-q", self.remote_url, f"{self._status_commit}:refs/heads/{base}"
                     )
+                    pushed = self._status_commit
                     break
                 except RuntimeError:  # dev moved meanwhile: rebuild on the new tip
                     if attempt == 2:
@@ -709,9 +740,11 @@ class Team:
                     self._status_commit = None
             if refused:
                 pass  # nothing was pushed: the checkout stays as it is
-            elif not self.fake and self.git("branch", "--show-current").strip() == base:
+            elif pushed and not self.fake and self.git("branch", "--show-current").strip() == base:
+                # to the commit just pushed: a push by URL leaves origin/dev behind, so the
+                # checkout stayed one status behind with backlog.yaml modified (2026-10-18)
                 try:  # keep the main checkout on dev in step; local edits ride along
-                    self.git("merge", "-q", "--ff-only", "--autostash", f"{rn}/{base}")
+                    self.git("merge", "-q", "--ff-only", "--autostash", pushed)
                 except RuntimeError as e:
                     err = e
         if refused:
@@ -1094,7 +1127,10 @@ def build_graph(team: Team, checkpointer):
         # Only on a clean worktree at the accepted head: after a crash the round's leftovers
         # (even commits the agent made) are checked by commit_round first, dev comes next round.
         clean = not team.git("status", "--porcelain", "--untracked-files=no", cwd=wt).strip()
-        if clean and team.git("rev-parse", "HEAD", cwd=wt).strip() == s["head"]:
+        head = team.git("rev-parse", "HEAD", cwd=wt).strip()
+        if clean and head != s["head"] and team.dev_merge(wt, s["head"]):
+            s = {**s, "head": head, "snap": team.snapshot(wt)}  # our merge, then a crash
+        if clean and head == s["head"]:
             if files := team.merge_base(wt):
                 return resolve(s, files)
             if (head := team.git("rev-parse", "HEAD", cwd=wt).strip()) != s["head"]:
@@ -1287,7 +1323,9 @@ def build_graph(team: Team, checkpointer):
         e = cfg["gates"].get("e2e")
         if not e or not any(p.startswith(tuple(e["when_paths"])) for p in paths):
             return []
-        cmd = e["command"].format(port=procs.free_port(), data=team.root / "data")
+        cmd = e["command"].format(
+            port=procs.free_port(), data=team.root / "data", runs_dir=team.runs_dir
+        )
         team.emit("tester", "e2e (Playwright) on the clean checkout", task=cs["task"]["id"])
         r = team.run_proc(cmd, cwd=clean, timeout=e["timeout_min"] * 60)
         return [{"cmd": cmd, "kind": "e2e", "ok": r["ok"], "output": e2e_output(r["output"])}]
@@ -1298,6 +1336,8 @@ def build_graph(team: Team, checkpointer):
         sc = cfg["developers"][cs["assignee"]].get("screenshots") or {}
         if not cs.get("routes") or "{runs}" not in sc.get("serve", ""):
             return None, []
+        if team.writes_runs(cs["task"]):  # the runs it made are the ones to look at
+            return team.runs_dir, []
         b = cfg["gates"]["benchmark"]
         out = team.home / "bench-tester" / cs["task"]["id"]
         shutil.rmtree(out, ignore_errors=True)
@@ -1501,8 +1541,8 @@ def build_graph(team: Team, checkpointer):
             except Exception as e:
                 team.emit(
                     s.get("assignee", "brain"),
-                    f"CRASHED in {name}: {e}. The run stops when the other tasks finish; "
-                    "`devteam stop` now, fix, then `devteam resume`.",
+                    f"CRASHED in {name}: {e}. This developer stops here, the others go on; "
+                    "fix it, then `devteam resume`.",
                     task=s["task"]["id"],
                     status="idle",
                 )
@@ -1600,6 +1640,8 @@ def build_graph(team: Team, checkpointer):
             team.emit("brain", reason, task=sp["task_id"], to="reviewer")
         for a in s["assignments"]:
             team.update_task(a["task"]["id"], status="in_progress", owner=a["assignee"], run=run)
+            # on dev too: a claim kept only in the main checkout left backlog.yaml modified there
+            team.push_status(a["task"]["id"], f"backlog: {a['task']['id']} in_progress")
             team.emit(
                 "brain",
                 f"{a['task']['title']} — plan with {len(a['criteria'])} criteria",
