@@ -672,10 +672,12 @@ tasks:
     local data); the Codex sandbox cannot open a port, so dev_app does not run e2e itself.
 
     '
-  status: todo
+  status: done
   owner: dev_app
-  run: cont-20261018-153430-dev_app-2
+  run: cont-20261018-231850-dev_app-1
   branch: devteam/A5-fix
+  pr: https://github.com/IzbassarO/qarau/pull/43
+  done_at: '2026-10-18'
 - id: O1
   area: app
   title: Organization map (web)
