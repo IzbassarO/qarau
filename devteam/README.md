@@ -32,9 +32,9 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
 
 - Continuous mode (`run --continuous`, limits in `config.yaml` → `continuous`): one loop per
   developer. When a developer's task ends (merged or blocked), the brain plans the next task
-  for that developer only; the others keep working. Stops when: no plannable task is left for
-  any developer; the daily API budget is reached; 2 tasks in a row end blocked; `max_hours`
-  (clean stop) or `max_tasks` (no new tasks, running ones finish); Ctrl+C. The first Ctrl+C
+  for that developer only; the others keep working. Stops when no developer can take a task
+  (nothing plannable, or paused after 2 blocked in a row, see below); the daily API budget is
+  reached; `max_hours` (clean stop) or `max_tasks` (no new tasks, running ones finish); Ctrl+C. The first Ctrl+C
   finishes the current steps cleanly (a running developer or check is not killed); a second
   one kills everything now. A Claude Code / Codex plan limit is logged with its reset time
   (when the tool prints one), the developer waits until the reset (every 30 min when unknown,
@@ -62,10 +62,14 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   current run's events (after run.pid was written) and never for a task the backlog says is
   not in progress. Every value from `.env` is redacted.
 - Supervisor (`config.yaml` → `supervisor`, owner 2026-10-17): per task, `max_tokens_per_round`,
-  `max_tokens_per_task` (all rounds of the task in this run) and `max_round_min` (a round
-  commits only when it ends, so this is the longest a task goes without a new commit).
-  Developer tokens are counted live: Claude Code runs with `--output-format stream-json`
-  (usage per API message), Codex through the `token_count` events of its session rollout file
+  `max_tokens_per_task` (all rounds of the task in this run), `max_idle_min` (no output from
+  the developer and no CPU work in its processes: long COLMAP, benchmark or e2e work is
+  progress, CPU sampled every minute) and `max_round_min` (the longest round). A task may set
+  its own in backlog.yaml, e.g. P3e `supervisor: {max_round_min: 180}` (2026-10-18: P3e was
+  killed at 60 min with its refresh done). Developer tokens are counted live: Claude Code runs
+  with `--output-format stream-json` (usage per API message; a killed round's output tokens
+  come from its session transcript in `~/.claude/projects`, the stream has only the count at
+  each message's start), Codex through the `token_count` events of its session rollout file
   (`~/.codex/sessions`). Over a limit, or past `timeout_min`: the step's process group is
   killed, what the round wrote is committed (same checks), the task is `blocked` with the
   reason and what to do, and shows under "Needs your attention"; the other developers keep
@@ -94,7 +98,10 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
 - The tester never trusts the developer: setup, checks and screenshots run again on a fresh
   detached checkout of the committed HEAD (pipeline tasks: the tester runs the quick benchmark
   there itself and screenshots that); only the orchestrator sets a task to done, after every
-  gate passed (backlog.yaml is protected).
+  gate passed (backlog.yaml is protected). A branch that changes web/ also gets the Playwright
+  e2e run there (`gates.e2e`): a fresh Vite on a free port (`QARAU_E2E_PORT`, never a reused
+  server), killed with the step after; the judge sees every test line (passed / failed /
+  skipped). Developers never run e2e: a Codex sandbox cannot open a port.
 - Plans stay inside the developer's folders: criteria that name another developer's folder
   (or devteam/) are rejected; the brain lists such tasks in `needs_split` and the orchestrator
   blocks them with the proposed split (A7 asked dev_app for backend/ and looped).
@@ -102,6 +109,9 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   reads it every few seconds in a step, at every node and when it plans; with no run active
   the CLI applies it at once (pushed to `dev` like any status). An owner stop never counts
   toward "2 tasks in a row blocked".
+- A developer whose 2 tasks in a row end blocked pauses for the rest of the run (it is said in
+  the events and the stop reason); the others keep going, and the run ends only when no
+  developer can take a task.
 - `writable: [data/runs]` on a task lets its developer add new files there (extra `--add-dir`);
   if a file that was there when the task started changes or disappears, the task is blocked.
 - Prompt caching: the brain's and tester's system prompts and their stable context (CLAUDE.md,

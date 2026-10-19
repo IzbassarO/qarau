@@ -69,6 +69,7 @@ FORBIDDEN_PUSH = {
 RELEASE_TAG = re.compile(r"refs/tags/release-\d{4}-\d{2}-\d{2}(\.\d+)?")  # pushed, never moved
 FORBIDDEN_BRANCH = {"-D", "-d", "--delete", "-M", "-m", "--move", "-f", "--force"}
 POLL_S = 5  # a running step is checked this often (limits, `devteam stop <task>`)
+CPU_EVERY_S = 60  # supervisor: how often a round's CPU use is sampled
 OWNER_STOP = "stopped by the owner"
 CONFLICT = re.compile(rb"^(<{7}|>{7})( |$)", re.M)  # markers git leaves (not "=======": markdown)
 
@@ -101,9 +102,18 @@ def is_protected(path: str) -> bool:
 VISUAL = re.compile(r"\b(viewer|screenshots?)\b", re.I)  # criteria the tester must see
 
 
+def e2e_output(out: str) -> str:
+    """Playwright's list reporter: every test's line (passed, failed or skipped: the judge must
+    see that a test ran rather than skipped) and the summary, not the server log."""
+    lines = out.splitlines()
+    tests = [x.strip() for x in lines if " › " in x]
+    return "\n".join(tests + [x for x in lines[-40:] if " › " not in x])[-6000:]
+
+
 def limit_hint(task_id: str) -> str:
     return (
-        ". Raise the `supervisor` limits in devteam/config.yaml or split the task, then "
+        ". Raise the `supervisor` limits in devteam/config.yaml (or the task's own `supervisor:` "
+        "in backlog.yaml) or split the task, then "
         f"`devteam resume {task_id}`"
     )
 
@@ -356,7 +366,8 @@ class Team:
         ends (any way), everything it started is killed; a port it left listening is a warning
         (owner rule: no agent leaves a server running).
         Every POLL_S: `devteam stop <task>` for the task of this thread, and `watch(new stdout
-        bytes, seconds so far)`; a reason from either kills the step: TaskHalted."""
+        bytes, seconds so far, CPU seconds by pid every CPU_EVERY_S or None)`; a reason from
+        either kills the step: TaskHalted."""
         marker, task, halted = procs.new_marker(), getattr(self._ctx, "task", ""), ""
         env = {**(os.environ if env is None else env), procs.MARKER: marker}
         # Output goes to files, not pipes: a server the step leaves in the background keeps a
@@ -376,7 +387,7 @@ class Team:
                 self._procs.add(p)
             if input:
                 threading.Thread(target=_feed, args=(p.stdin, input), daemon=True).start()
-            note, t0, pos = "", time.monotonic(), 0
+            note, t0, pos, cpu_at = "", time.monotonic(), 0, -CPU_EVERY_S
             try:
                 while True:
                     try:
@@ -394,7 +405,10 @@ class Team:
                         while chunk := os.pread(fo.fileno(), 1 << 20, pos + len(new)):
                             new += chunk
                         pos += len(new)
-                        if halted := watch(new, secs):
+                        cpu = None
+                        if secs - cpu_at >= CPU_EVERY_S:
+                            cpu, cpu_at = procs.cpu_times(p.pid, marker), secs
+                        if halted := watch(new, secs, cpu):
                             break
             finally:
                 with self._lock:
@@ -1039,7 +1053,7 @@ def build_graph(team: Team, checkpointer):
     def develop(s: TaskState):
         dev, tid, wt = s["assignee"], s["task"]["id"], s["worktree"]
         team.verify_worktree(s)
-        if why := SV.task_over(s.get("tokens", 0), SV.limits(cfg)):
+        if why := SV.task_over(s.get("tokens", 0), SV.limits(cfg, s["task"])):
             return halt(s, why + limit_hint(tid))
         (team.home / "scratch" / tid).mkdir(parents=True, exist_ok=True)  # see the brief
         # today's dev first, by the orchestrator (never the agent); conflicts: a resolve step.
@@ -1159,7 +1173,7 @@ def build_graph(team: Team, checkpointer):
             if not team.fake:  # every check again, from a clean checkout of the committed HEAD
                 with team.clean_checkout(s) as clean:
                     cs = {**s, "worktree": clean}
-                    checks = team.run_checks(cs)
+                    checks = team.run_checks(cs) + e2e_gate(cs, clean, paths)
                     for c in checks:
                         team.emit("tester", f"{'ok  ' if c['ok'] else 'FAIL'} {c['cmd']}", task=tid)
                     runs, problems = tester_benchmark(cs, clean)
@@ -1231,6 +1245,18 @@ def build_graph(team: Team, checkpointer):
             out["feedback"] = verdict["feedback"]
             out["gate"] = {"reason": "tester: " + verdict["feedback"].strip()[:500]}
         return out
+
+    def e2e_gate(cs: TaskState, clean: str, paths: list[str]) -> list[dict]:
+        """Playwright e2e for a change under gates.e2e.when_paths (web/): the tester runs it on
+        the clean checkout with a fresh server on a free port, killed with the step after. A
+        Codex sandbox cannot open a port (listen EPERM): a developer never runs it (A5-fix)."""
+        e = cfg["gates"].get("e2e")
+        if not e or not any(p.startswith(tuple(e["when_paths"])) for p in paths):
+            return []
+        cmd = e["command"].format(port=procs.free_port(), data=team.root / "data")
+        team.emit("tester", "e2e (Playwright) on the clean checkout", task=cs["task"]["id"])
+        r = team.run_proc(cmd, cwd=clean, timeout=e["timeout_min"] * 60)
+        return [{"cmd": cmd, "kind": "e2e", "ok": r["ok"], "output": e2e_output(r["output"])}]
 
     def tester_benchmark(cs: TaskState, clean: str) -> tuple[Path | None, list[str]]:
         """Pipeline tasks with routes: the tester runs the quick benchmark itself on the clean

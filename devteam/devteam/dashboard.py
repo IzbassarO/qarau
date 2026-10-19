@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -958,6 +959,13 @@ def page(team: Team, gh: GhCache) -> str:
     return team.redact(render(collect(team, gh)))
 
 
+class Server(ThreadingHTTPServer):
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], ConnectionError):  # reset / broken pipe: the browser
+            return  # closed the tab or reloaded mid-response, nothing went wrong here
+        super().handle_error(request, client_address)
+
+
 def make_server(team: Team, port: int, gh: GhCache | None = None) -> ThreadingHTTPServer:
     gh = gh or GhCache(team)
 
@@ -977,7 +985,7 @@ def make_server(team: Team, port: int, gh: GhCache | None = None) -> ThreadingHT
         def log_message(self, *args):  # quiet terminal
             pass
 
-    return ThreadingHTTPServer(("127.0.0.1", port), Handler)  # local only
+    return Server(("127.0.0.1", port), Handler)  # local only
 
 
 def serve(team: Team, port: int):

@@ -10,6 +10,7 @@ from devteam.gates import EMPTY_BENCH
 HERE = Path(__file__).parents[1]
 CFG = yaml.safe_load((HERE / "config.yaml").read_text())
 CFG["gates"]["benchmark"]["command"] = EMPTY_BENCH  # tests that need numbers set their own
+CFG["gates"]["e2e"]["command"] = "echo e2e on port {port}"  # never a real Playwright run
 
 
 def git(repo, *args):

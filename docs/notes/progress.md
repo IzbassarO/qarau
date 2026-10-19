@@ -2,6 +2,18 @@
 
 Newest first. Keep it short.
 
+## 2026-10-18 — Kerege run 2 (cont-20261018-153430) fixes
+
+- dev CI was red from 778e072 (`backlog: A9-fix done (#41)`): a devteam test asserted live task
+  statuses in the real backlog; it now checks structure and order only.
+- Tester runs Playwright e2e (fresh Vite on a free port, clean checkout) for web/ changes; a
+  Codex sandbox cannot open a port. A5-fix can be resumed (`devteam resume A5-fix`).
+- P3e was killed at 60 min while its refresh had finished (5 runs `*-2026-10-18` in data/runs,
+  code on devteam/P3e). Supervisor: idle = no output and no CPU work (20 min); per-task
+  `supervisor:` overrides (P3e: 180 min); killed Claude rounds now record output tokens.
+- O1 split: O1a (backend, after S1) + O1 (web, depends on O1a).
+- 2 blocked in a row now pauses that developer only; the dashboard ignores dropped connections.
+
 ## 2026-10-18 — Kerege follow-ups
 
 - dev_app owns `web/` plus markdown in `docs/decisions/` and `docs/notes/` (plans, ADRs).

@@ -385,7 +385,7 @@ Rules:
 - Your runs are on uncommitted code, so anything tagged with a commit hash shows "+dirty";
   that is expected. If a request needs a commit, say so instead of trying to commit.
 - Do not try to take screenshots: the tester screenshots the app pages itself and judges
-  visual criteria from them.
+  visual criteria from them.{e2e_rule(team, dev)}
 - Stop every server you start (dev server, preview, test server) as soon as its check is
   done; never leave a listening port. When your run ends, the orchestrator kills anything
   you left and reports each port it had to close.
@@ -505,23 +505,24 @@ Rules:
 
     def _run(self, team, s, dev, cmd, prompt, env, counter) -> dict:
         """The developer's process, watched: tokens live, minutes, `devteam stop <task>`."""
-        watch = SV.RoundWatch(counter, s.get("tokens", 0), SV.limits(team.cfg))
+        lim = SV.limits(team.cfg, s["task"])
+        watch = SV.RoundWatch(counter, s.get("tokens", 0), lim)
         try:
             r = team.run_proc(
                 cmd,
                 cwd=s["worktree"],
-                timeout=dev["timeout_min"] * 60,
+                timeout=max(dev["timeout_min"], lim["max_round_min"]) * 60,
                 input=prompt,
                 env=env,
                 agent=s["assignee"],
                 watch=watch,
             )
         except TaskHalted as e:
-            e.usage = {"in": watch.tokens, "out": 0, "usd": 0.0}  # ponytail: in + out together
+            e.usage = {**counter.usage(), "usd": 0.0}
             raise
         if r["timed_out"]:
             e = TaskHalted(f"supervisor: the round hit timeout_min ({dev['timeout_min']} min)")
-            e.usage = {"in": watch.tokens, "out": 0, "usd": 0.0}
+            e.usage = {**counter.usage(), "usd": 0.0}
             raise e
         return r
 
@@ -537,7 +538,8 @@ Rules:
         stat = team.git("diff", "--stat", f"{base}...HEAD", cwd=s["worktree"])
         check_text = (
             "\n\n".join(
-                f"$ {c['cmd']}  -> {'ok' if c['ok'] else 'FAILED'}\n{c['output'][-2000:]}"
+                f"$ {c['cmd']}  -> {'ok' if c['ok'] else 'FAILED'}\n"
+                + c["output"][-(6000 if c.get("kind") == "e2e" else 2000) :]
                 for c in checks
             )
             or "(no checks)"
@@ -628,6 +630,18 @@ def docs_rule(dev: dict) -> str:
             f"code (a long code block is refused). {progress}"
         )
     return "You may not write docs/: put your plan and notes in the final summary."
+
+
+def e2e_rule(team, dev: dict) -> str:
+    e = team.cfg["gates"].get("e2e")
+    if not e or not any(o.startswith(w) for o in dev["owns"] for w in e["when_paths"]):
+        return ""
+    return (
+        "\n- Playwright e2e tests (web/e2e) are run by the tester, not inside your sandbox: it "
+        "cannot open a port. Write or update them and run the checks below; the tester runs "
+        "every e2e test from a clean checkout with its own fresh server and shows the judge "
+        "which ones passed, failed or skipped."
+    )
 
 
 def writable_rule(team, task: dict) -> str:

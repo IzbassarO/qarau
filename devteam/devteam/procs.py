@@ -8,6 +8,7 @@ Uses `ps` and `lsof`, present on macOS and the Ubuntu CI runners.
 
 import os
 import signal
+import socket
 import subprocess
 import time
 import uuid
@@ -37,6 +38,31 @@ def step_pids(pgid: int, marker: str) -> set[int]:
         if tag in rest.split():
             pids.add(int(pid))
     return pids - {me}
+
+
+def _cpu_s(t: str) -> float:
+    """`ps -o time=`: [dd-]hh:mm:ss (procps) or m:ss.cc (BSD)."""
+    days, _, t = t.rpartition("-")
+    secs = 0.0
+    for part in t.split(":"):
+        secs = secs * 60 + float(part)
+    return secs + int(days or 0) * 86400
+
+
+def cpu_times(pgid: int, marker: str) -> dict[int, float]:
+    """CPU seconds so far of each live process of the step (the supervisor's progress signal)."""
+    pids = step_pids(pgid, marker)
+    if not pids:
+        return {}
+    out = _ps("-o", "pid=,time=", "-p", ",".join(map(str, pids)))
+    return {int(pid): _cpu_s(t) for pid, t in (line.split() for line in out.splitlines())}
+
+
+def free_port() -> int:
+    """A TCP port nobody listens on right now (for a step's own fresh server)."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
 
 
 def listening(pids: set[int]) -> list[tuple[int, int]]:
