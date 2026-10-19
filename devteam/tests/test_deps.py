@@ -155,8 +155,10 @@ def test_dev_screenshots_use_devs_cached_benchmark(repo, tmp_path):
     shots, problems = G.dev_screenshots(team, s, ["/viewer/notre-dame"])
     assert [Path(x).name for x in shots] == ["dev-viewer-notre-dame.png"] and problems == []
     assert (tmp_path / "runs").read_text().strip() == str(cache)
-    s["assignee"] = "dev_app"  # its pages don't come from a benchmark: nothing to compare
-    assert G.dev_screenshots(team, s, ["/"]) == ([], [])
+    # dev_app: its "before" is the page built from dev (test_run4), not a benchmark cache
+    s["assignee"] = "dev_app"
+    team.cfg["developers"]["dev_app"]["screenshots"] = None
+    assert G.dev_screenshots(team, s, ["/"]) == ([], [])  # no screenshots config: nothing
 
 
 @pytest.mark.backlog

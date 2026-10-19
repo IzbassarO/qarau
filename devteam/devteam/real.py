@@ -148,13 +148,18 @@ on the committed code. Developers run only the QUICK benchmark (named in the pro
 their own numbers; the full benchmark runs only at the merge gate and at release, so never
 ask a developer to run the full set.
 List `routes` for every task whose acceptance mentions a visual result in the viewer, pipeline
-tasks too: the app pages (e.g. "/", "/viewer/demo") the tester screenshots and looks at; []
-only for tasks with nothing to see. For pipeline tasks the viewer serves the developer's quick
-benchmark output, so routes are "/viewer/<video>" for videos in that run. Developers cannot
-take screenshots (Codex runs in a sandbox with no network and no browser): never require a
-developer to produce, attach or commit a screenshot. Write visual criteria as what the page
-must show ("/viewer/demo shows a black canvas with points and no error banner"); the tester
-judges them from its own screenshots of `routes`, and a missing screenshot fails the task.
+tasks too: the app pages (e.g. "/", "/viewer/demo") the tester screenshots and looks at; [] only
+for tasks with nothing to see. The tester signs in first, so pages behind the login are fine; to
+see the login page itself use "/?signed-out". A route must show the task's own output: for
+pipeline tasks the viewer serves the quick benchmark output, so routes are "/viewer/<video>" for
+videos in that run; a task with `runs_before_task` writes new runs into the runs dir, so its
+"/viewer/<run>" routes name runs it creates (e.g. "<video>-<suffix>"), never one listed in
+`runs_before_task` (the plan is rejected otherwise), and the plan tells the developer those
+exact run names. Developers cannot take screenshots (Codex runs in a sandbox with no network and
+no browser): never require a developer to produce, attach or commit a screenshot. Write visual
+criteria as what the page must show ("/viewer/demo shows a black canvas with points and no error
+banner"); the tester judges them from its own screenshots of `routes`, and a missing screenshot
+fails the task.
 A task with `previous_work` already has commits on its devteam/<id> branch: the developer
 continues on that branch (dev merged in), so plan only what is still missing; say in the plan
 that the earlier work is there. Tasks whose `depends_on` are not all done never reach you.
@@ -189,8 +194,11 @@ viewer (web or pipeline task) with no screenshot of yours (none attached, or lis
 <screenshots_failed>) is NOT met: never pass it from the code alone.
 Developers run only a quick benchmark subset; the full benchmark is a merge gate after you:
 never fail a criterion because the developer did not run the full set.
-Screenshots named `dev-*.png` show the same page on current `dev` (same viewer code, dev's
-benchmark output) for criteria that compare the branch with dev.
+Screenshots named `dev-*.png` are the "before": pipeline tasks, the same page with the
+branch's viewer code on dev's benchmark output; web tasks, the same page built from current
+`dev`. Use them for criteria that compare the branch with dev.
+In `criteria`, give each criterion's `number`: its position (1, 2, ...) in
+<acceptance_criteria>, so a criterion keeps the same identity in every round.
 Sparse point clouds never look like the object: do not judge whether a building or object is
 recognisable before dense reconstruction (task P4). Judge only what the criterion names (e.g. no
 wall or band of points in the sky, far points only in the far layer).
@@ -395,8 +403,11 @@ Acceptance criteria (all must be visibly met in your diff, with tests):
 Rules:
 - Edit only {", ".join(dev["owns"])}. Anything else is reverted automatically, and changing
   another developer's folders or a protected file (devteam/, .github/, backlog.yaml,
-  CLAUDE.md, AGENTS.md, the benchmark video set, lint and gate configs) ends the task at once:
-  if the task needs them, say so in your summary instead. {docs_rule(dev)}
+  CLAUDE.md, AGENTS.md, .claude/, .agents/, the benchmark video set, lint and gate configs)
+  ends the task at once: if the task needs them, say so in your summary instead.
+  {docs_rule(dev)}
+- Never download or install skills, plugins or tools (no skill installer, no network fetch of
+  agent instructions): use only what the repository already has.{design_rule(dev)}
 - Never skip, focus (.only) or weaken tests, assertions or thresholds, never ship work as a
   .patch / .diff file or as code under docs/: the scope gate refuses the change.
 - Do not commit, push, merge or create branches; the orchestrator commits your changes.
@@ -578,7 +589,7 @@ Rules:
             )
             or "(no checks)"
         )
-        crit = "\n".join(f"- {c}" for c in s["criteria"])
+        crit = "\n".join(f"{i}. {c}" for i, c in enumerate(s["criteria"], 1))
         context = (  # the same in every round of this task: cached
             f"<task>\n{s['task']['id']}: {s['task']['title']}\n"
             f"{s['task'].get('goal', '')}\n</task>\n\n<plan>\n{s['plan']}\n</plan>\n\n"
@@ -606,11 +617,12 @@ Rules:
                     "items": {
                         "type": "object",
                         "properties": {
+                            "number": {"type": "integer"},
                             "criterion": {"type": "string"},
                             "met": {"type": "boolean"},
                             "note": {"type": "string"},
                         },
-                        "required": ["criterion", "met", "note"],
+                        "required": ["number", "criterion", "met", "note"],
                         "additionalProperties": False,
                     },
                 },
@@ -624,7 +636,7 @@ Rules:
         shots = s.get("screenshots") or []
         if shots:
             prompt = (
-                "Screenshots above (after the task), in order: "
+                "Screenshots above (after the task; dev-* = before), in order: "
                 + ", ".join(Path(p).name for p in shots)
                 + "\n\n"
                 + prompt
@@ -649,6 +661,17 @@ def _json(line: str) -> dict:
     except ValueError:
         return {}
     return e if isinstance(e, dict) else {}
+
+
+def design_rule(dev: dict) -> str:
+    """Web developers: our design rules first, then Anthropic's frontend-design skill (Codex
+    reads it as a skill through .agents/skills; UX1, owner 2026-10-19)."""
+    if not any(o.startswith("web/") for o in dev["owns"]):
+        return ""
+    return (
+        "\n- Any visual change in web/ follows docs/design/DESIGN.md (our rules, they win) and the "
+        "frontend-design skill (.claude/skills/frontend-design/SKILL.md)."
+    )
 
 
 def docs_rule(dev: dict) -> str:
