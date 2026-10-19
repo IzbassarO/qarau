@@ -20,8 +20,13 @@ for (const run of ['notre-dame', 'room', 'aegviidu']) {
     await expect(
       modes.getByRole('button', { name: en['viewer.mode.orbit'], exact: true }),
     ).toHaveAttribute('aria-pressed', 'true');
-    for (const label of [en['viewer.mode.walk'], en['viewer.mode.observer']])
-      await expect(modes.getByRole('button', { name: label, exact: true })).toBeDisabled();
+    await expect(
+      modes.getByRole('button', { name: en['viewer.mode.walk'], exact: true }),
+    ).toBeDisabled();
+    // Observer is a real mode since A9 (#37): available, not active until chosen
+    const observer = modes.getByRole('button', { name: en['viewer.mode.observer'], exact: true });
+    await expect(observer).toBeEnabled();
+    await expect(observer).toHaveAttribute('aria-pressed', 'false');
     for (const label of [
       'toolbar.top',
       'toolbar.front',
