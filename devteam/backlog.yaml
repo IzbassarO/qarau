@@ -216,7 +216,13 @@ tasks:
     gravity points down. Scale error is reported in the benchmark.
 
     '
-  status: todo
+  status: blocked
+  owner: dev_pipeline
+  run: cont-20261018-234550-dev_pipeline-1
+  branch: devteam/P5a
+  blocked_reason: 'supervisor: this round used 8.2 M subscription tokens (limit 8 M per round). Raise
+    the `supervisor` limits in devteam/config.yaml (or the task''s own `supervisor:` in backlog.yaml)
+    or split the task, then `devteam resume P5a`'
 - id: P4a-1b
   area: core
   title: Modal GPU provider for the dense executor
