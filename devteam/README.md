@@ -140,8 +140,19 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   gate and at release, cached per `pipeline/` tree; a task may set its own `quick_only`.
 - Screenshots: any task whose criteria mention the viewer lists `routes`; the tester
   screenshots them (pipeline tasks: the viewer on the quick benchmark output). A missing
-  screenshot fails the task even if the judge passed. Pipeline tasks also get `dev-*.png`: the
-  same routes on dev's cached gate benchmark, so the tester can compare with dev.
+  screenshot fails the task even if the judge passed. `dev-*.png` are the "before": pipeline
+  tasks, the same routes on dev's cached gate benchmark; web tasks, the same routes built from a
+  fresh checkout of dev. The tester signs in first (`devteam/shoot.mjs`, A1b login) with
+  `QARAU_TEST_USER` / `QARAU_TEST_PASSWORD` from `.env` (passed in the environment, never
+  printed; missing -> a warning, the page is shot as it is); `"/?signed-out"` shows the login
+  page itself. Plan check: a `/viewer/<run>` route shows the task's own output, i.e. a quick
+  benchmark video, or for a task that writes runs a run not in `runs_before_task` (the runs
+  dir at the task's start; the snapshot is kept until the task is done).
+- Loop detection compares failing criteria by their number in the plan (the judge returns it),
+  never by the judge's wording (P3e was sent back 3 times for one criterion, 2026-10-19).
+- Skills: `.claude/skills/` (pinned, licence checked, `.claude/skills/README.md`); Codex reads
+  them through symlinks in `.agents/skills/`. Both are protected; agents never download skills.
+  Web developers are told to follow `docs/design/DESIGN.md`, then the frontend-design skill.
 - Dependencies: a task may list `depends_on: [ids]`. The brain never plans it until all of
   them are `done`; a `blocked` task whose dependencies are all done goes back to `todo` (pushed
   to `dev` like any status) when the last one merges, or at the next `devteam run`.

@@ -110,6 +110,15 @@ def e2e_output(out: str) -> str:
     return "\n".join(tests + [x for x in lines[-40:] if " › " not in x])[-6000:]
 
 
+def criterion_key(c: dict, criteria: list) -> str:
+    """The same criterion in every round: its number in the plan, not the judge's wording
+    (2026-10-19: P3e was sent back 3 times for one criterion, worded differently each time)."""
+    n = c.get("number")
+    if isinstance(n, int) and 1 <= n <= len(criteria):
+        return f"criterion #{n}"
+    return f"criterion: {c.get('criterion', '')}"
+
+
 def limit_hint(task_id: str) -> str:
     return (
         ". Raise the `supervisor` limits in devteam/config.yaml (or the task's own `supervisor:` "
@@ -159,6 +168,44 @@ def outside_paths(criteria: list, dev: str, cfg: dict, task: dict) -> list[str]:
     )
 
 
+def writes_runs(cfg: dict, task: dict) -> bool:
+    """The task makes viewer runs (`writable: [data/runs]`, e.g. P3e): its screenshots show
+    runs_dir, where it wrote them, not a benchmark output."""
+    return cfg.get("runs_dir", "data/runs") in (task.get("writable") or [])
+
+
+VIEWER_RUN = re.compile(r"^/viewer/([^/?#]+)")
+
+
+def route_errors(p: dict, task: dict, cfg: dict) -> list[str]:
+    """A /viewer/<run> route must show the task's own output (2026-10-19: P3e's routes named
+    old runs, so the tester never saw the new ones). A task that writes runs: a run that was
+    not there before the task (`runs_before_task`). Other pipeline tasks: a video of the quick
+    benchmark their screenshots serve."""
+    sc = cfg["developers"].get(p.get("assignee"), {}).get("screenshots") or {}
+    if "{runs}" not in sc.get("serve", ""):
+        return []  # web pages show runs_dir as it is: no run is the task's own
+    tid, errors = p.get("task_id"), []
+    before = set(task.get("runs_before_task") or [])
+    quick = task.get("quick_only") or cfg["gates"]["benchmark"]["quick_only"]
+    for route in p.get("routes") or []:
+        if not (m := VIEWER_RUN.match(route)):
+            continue
+        run = m.group(1)
+        if writes_runs(cfg, task) and run in before:
+            errors.append(
+                f"{tid}: route {route} shows run {run!r}, which was in "
+                f"{cfg.get('runs_dir', 'data/runs')} before the task: name a run this task "
+                "creates or changes (a new name, e.g. <video>-<suffix>)"
+            )
+        elif not writes_runs(cfg, task) and run not in quick:
+            errors.append(
+                f"{tid}: route {route} shows {run!r}, but this task's screenshots serve its quick "
+                f"benchmark output: {quick}"
+            )
+    return errors
+
+
 def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
     """The whole plan is valid or nothing happens. Returns assignments."""
     by_id = {t["id"]: t for t in todo}
@@ -194,6 +241,8 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
             errors.append(f"{tid}: criteria mention the viewer or screenshots but list no routes")
         if p.get("routes") and dev in devs and not devs[dev].get("screenshots"):
             errors.append(f"{tid}: routes given but {dev} has no screenshots config")
+        elif tid in by_id and dev in devs:
+            errors += route_errors(p, by_id[tid], cfg)
     if errors:
         raise PlanError(errors, outside)
     return [
@@ -542,9 +591,12 @@ class Team:
         raise TaskHalted(f"could not merge {base} into the task branch: {r.stderr[-400:]}")
 
     def writes_runs(self, task: dict) -> bool:
-        """The task makes viewer runs (`writable: [data/runs]`, e.g. P3e): its screenshots show
-        runs_dir, where it wrote them, not a benchmark output."""
-        return self.cfg.get("runs_dir", "data/runs") in (task.get("writable") or [])
+        return writes_runs(self.cfg, task)
+
+    def runs_before_task(self, task: dict) -> list[str]:
+        """Run ids in runs_dir when the task started (its data snapshot)."""
+        rel = Path(self.cfg.get("runs_dir", "data/runs"))
+        return sorted({Path(k).relative_to(rel).parts[0] for k in self.data_at_start(task)})
 
     def dev_merge(self, wt: str, head: str) -> bool:
         """HEAD is dev merged onto `head` (a fast-forward, or a clean merge commit): what
@@ -1282,7 +1334,7 @@ def build_graph(team: Team, checkpointer):
             ""
             if verdict["passed"]
             else "\n".join(
-                sorted(f"criterion: {c['criterion']}" for c in verdict["criteria"] if not c["met"])
+                sorted(criterion_key(c, s["criteria"]) for c in verdict["criteria"] if not c["met"])
                 + sorted(f"check: {c['cmd']}" for c in failed)
                 + sorted(f"bypass: {f}" for f in findings)
                 + (["screenshots missing"] if no_shots else [])
@@ -1500,7 +1552,8 @@ def build_graph(team: Team, checkpointer):
         team.update_task(tid, **fields)
         team.push_status(tid, f"backlog: {tid} {status}" + (f" (#{g['number']})" if merged else ""))
         team.control_file("stop", tid).unlink(missing_ok=True)  # applied: a resume starts clean
-        (team.home / "data-snap" / f"{tid}.json").unlink(missing_ok=True)
+        if merged:  # blocked keeps it: a resumed task's baseline is still before its first round
+            (team.home / "data-snap" / f"{tid}.json").unlink(missing_ok=True)
         if merged:
             team.unblock_ready()  # e.g. A4 done -> P3b back to todo
         if merged:  # finished: the worktree is no longer needed (branch and packet stay)
@@ -1594,6 +1647,8 @@ def build_graph(team: Team, checkpointer):
         for t in todo:  # merged_tasks() fetched the task branches
             if work := team.prior_work(t["id"]):
                 t["previous_work"] = work
+            if team.writes_runs(t):  # routes must name runs it makes, never these
+                t["runs_before_task"] = team.runs_before_task(t)
         if team.only:  # `devteam run --only P1`
             todo = [t for t in todo if t["id"] in team.only]
         known = {a for d in cfg["developers"].values() for a in d["areas"]}

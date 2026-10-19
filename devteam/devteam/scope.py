@@ -12,8 +12,17 @@ import fnmatch
 import re
 
 # Always protected; config.yaml `gates.protected` adds more (benchmark set, lint configs).
-PROTECTED = ["devteam/*", ".github/*", "*backlog.yaml", "CLAUDE.md", "AGENTS.md", "*/CLAUDE.md",
-             "*/AGENTS.md"]  # fmt: skip
+PROTECTED = [
+    "devteam/*",
+    ".github/*",
+    "*backlog.yaml",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "*/CLAUDE.md",
+    "*/AGENTS.md",
+    ".claude/*",
+    ".agents/*",
+]  # fmt: skip  (skills: owner adds them)
 DOCS = ("docs/",)  # another developer's docs/: reverted, not a reason to split the task
 CODE_EXT = (".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".sh", ".sql", ".toml", ".rs")
 PATCH_EXT = (".patch", ".diff", ".rej", ".orig")

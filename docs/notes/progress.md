@@ -2,6 +2,19 @@
 
 Newest first. Keep it short.
 
+## 2026-10-19 — Kerege run 4 fixes (after the P3e rehearsal)
+
+- Tester screenshots sign in first (A1b login, test user from devteam/.env); "/?signed-out"
+  shows the login page. P3e was blocked only because "/" showed the login form.
+- Plan check: `/viewer/<run>` routes must show the task's own output (P3e's routes named old
+  runs). The data snapshot of a blocked task is kept, so its own runs stay "its own".
+- Loop detection by criterion number, not wording.
+- UX1a (design system, login page, control centre) and UX1b (run list, viewer chrome), first
+  in dev_app order. frontend-design skill (anthropics/skills dbd4588, Apache-2.0) in
+  .claude/skills, `.agents/skills` symlink for Codex; rules in docs/design/DESIGN.md.
+- Owner: add QARAU_TEST_USER / QARAU_TEST_PASSWORD to devteam/.env (any non-empty pair works
+  on the dev server).
+
 ## 2026-10-19 — Kerege run 3 (18–19 Oct) fixes
 
 - `claude` vanished at 23:39 (failed self-update) and stopped the run: developer CLIs are

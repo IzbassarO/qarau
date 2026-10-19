@@ -447,6 +447,36 @@ tasks:
   - S1
   - U2
   status: todo
+- id: UX1a
+  area: app
+  title: 'Visual design pass, part 1: design system, login page, control centre'
+  goal: 'web/ only; no new features and no behaviour changes. Follow docs/design/DESIGN.md, then the
+    frontend-design skill. One design system in web/src/index.css: colour and spacing tokens, a type
+    scale, light and dark themes from the same tokens (the theme follows prefers-color-scheme; the 3D
+    viewer canvas stays black). Engineering look: calm, dense, readable; finding colours (critical red,
+    watch orange, not-seen gray, inspected blue) only for their meaning. Apply it to the login page and
+    the control centre (the main pane at /). All text through i18n en/ru/kk (Russian and Kazakh fit
+    without clipping). Vitest and the e2e tests stay green (update only markup-dependent assertions,
+    never loosen them). Tester screenshots, before (dev-*) and after: routes "/?signed-out" (the
+    login page) and "/" (the control centre, signed in), in the dark theme.
+
+    '
+  status: todo
+- id: UX1b
+  area: app
+  title: 'Visual design pass, part 2: run list and viewer chrome'
+  goal: 'web/ only; no new features and no behaviour changes. Uses the UX1a design system
+    (docs/design/DESIGN.md). The run list (sidebar of the control centre) shows each run''s name and
+    date clearly, newest first, dense and readable; the viewer chrome (top bar, side panels, timeline,
+    controls around the black canvas) uses the same tokens, type scale and spacing. The canvas stays
+    black and the finding colours keep their meaning. i18n en/ru/kk; Vitest and e2e green (update only
+    markup-dependent assertions, never loosen them). Tester screenshots, before (dev-*) and after:
+    "/" (the run list) and "/viewer/notre-dame" (viewer chrome).
+
+    '
+  status: todo
+  depends_on:
+  - UX1a
 - id: A1a
   area: app
   title: Control center layout with sites and inspections

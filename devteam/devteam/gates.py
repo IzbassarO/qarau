@@ -161,6 +161,10 @@ def bench_table(res: dict) -> str:
 
 
 # --- screenshots (web and pipeline tasks) ---------------------------------------------------
+SHOOT = Path(__file__).with_name("shoot.mjs")  # {shoot}: signs in, then screenshots one page
+TEST_LOGIN = ("QARAU_TEST_USER", "QARAU_TEST_PASSWORD")  # devteam/.env: the tester's test user
+
+
 def screenshots(
     team, s, routes: list[str], runs: Path | None = None, prefix: str = ""
 ) -> tuple[list[str], list[str]]:
@@ -200,6 +204,14 @@ def screenshots(
     with team._lock:
         team._procs.add(srv)  # `devteam stop` kills it too
     paths, problems = [], []
+    login = {k: team.secrets[k] for k in TEST_LOGIN if team.secrets.get(k)}
+    if len(login) < len(TEST_LOGIN):  # said, not a failed screenshot: the page is still shot
+        team.emit(
+            "tester",
+            f"WARNING: no {' / '.join(TEST_LOGIN)} in devteam/.env: pages behind the login show "
+            "the login form",
+            task=s["task"]["id"],
+        )
     try:
         for _ in range(60):
             if srv.poll() is not None:  # exited, e.g. --strictPort on a busy port
@@ -213,14 +225,19 @@ def screenshots(
             name = prefix + (re.sub(r"[^A-Za-z0-9]+", "-", route).strip("-") or "root")
             png = out / f"{name}.png"
             r = team.run_proc(
-                sc["shoot"].format(url=shlex.quote(sc["url"] + route), png=shlex.quote(str(png))),
+                sc["shoot"].format(
+                    url=shlex.quote(sc["url"] + route),
+                    png=shlex.quote(str(png)),
+                    shoot=shlex.quote(str(SHOOT)),
+                ),
                 cwd=s["worktree"],
                 timeout=120,
+                env={**os.environ, **login},  # never on the command line, never printed
             )
             if r["ok"] and png.exists():
                 paths.append(str(png))
             else:
-                problems.append(f"{route}: {r['output'][-300:]}")
+                problems.append(f"{route}: {team.redact(r['output'][-300:])}")
     finally:
         procs.reap(srv.pid, marker)  # the server and anything it started; the port is free
         srv.wait()
@@ -240,12 +257,24 @@ def _answers(url: str) -> bool:
 
 
 def dev_screenshots(team, s, routes: list[str]) -> tuple[list[str], list[str]]:
-    """Pipeline tasks: the same routes on dev's cached gate benchmark, same viewer code, so the
-    tester compares dev and the branch. Never runs the benchmark (~70 min) for this."""
+    """`dev-*`, the "before". Pipeline tasks: the same routes on dev's cached gate benchmark,
+    same viewer code (never runs the benchmark, ~70 min, for this). Web tasks: the same routes
+    built from current dev, on a fresh checkout of it (UX1: before/after of each page)."""
     sc = team.cfg["developers"][s["assignee"]].get("screenshots") or {}
-    if "{runs}" not in sc.get("serve", "") or not routes or team.writes_runs(s["task"]):
+    if not sc or not routes or team.writes_runs(s["task"]):
         return [], []  # a task's new runs don't exist in dev's benchmark output: nothing to compare
     dev = f"{team.remote_name}/{team.cfg['base_branch']}"
+    if "{runs}" not in sc["serve"]:
+        tid = s["task"]["id"]
+        head = team.git("rev-parse", dev).strip()
+        with team.clean_checkout(
+            {**s, "task": {**s["task"], "id": f"{tid}-dev"}, "head": head}
+        ) as wt:
+            for cmd in team.cfg["developers"][s["assignee"]].get("setup", []):
+                r = team.run_proc(cmd, cwd=wt, timeout=1800)
+                if not r["ok"]:
+                    return [], [f"dev screenshots skipped: `{cmd}` failed on {dev}"]
+            return screenshots(team, {**s, "worktree": wt}, routes, prefix="dev-")
     runs = team.home / "bench" / bench_key(team, dev)
     if not (runs / "results.json").exists():
         return [], [f"no cached benchmark of {dev} to compare with: dev screenshots skipped"]
