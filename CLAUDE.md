@@ -153,6 +153,8 @@ Kazakhstan stays on servers in Kazakhstan.
 
 Full screen specs and interactive prototypes: `docs/design/` (start with
 `docs/design/viewer-3d.md` — the 3D viewer with video ↔ map sync is the core screen).
+Visual rules for every page (tokens, light/dark, density): `docs/design/DESIGN.md`, then the
+frontend-design skill in `.claude/skills/` (pinned, Apache-2.0). Agents never download skills.
 
 ## How we work: you own the engineering
 
