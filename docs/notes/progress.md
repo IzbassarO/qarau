@@ -2,6 +2,22 @@
 
 Newest first. Keep it short.
 
+## 2026-10-19 — Kerege run 3 (18–19 Oct) fixes
+
+- `claude` vanished at 23:39 (failed self-update) and stopped the run: developer CLIs are
+  resolved to absolute paths at run start and checked before each round (one retry after 30 s);
+  any crash now pauses only that developer, its round resumes next run.
+- P3e "protected: backlog.yaml" was a false positive: the orchestrator merged dev into
+  devteam/P3e, the step crashed (the missing `claude`), and the resumed round counted dev's
+  changes as the developer's. Fixed (a dev merge left by a crash is recognised). The main
+  checkout lagged one status commit behind (backlog.yaml modified): now synced to the pushed
+  commit; `in_progress` is pushed too.
+- P3e "manifest.json not found": its runs are in data/runs, the tester's viewer read the quick
+  benchmark output. One setting, `runs_dir` (QARAU_RUNS_DIR), for developer, tester and e2e.
+- P5a split (8.2 M tokens in one round, limit 8 M kept): P5a-1 distance + gravity (continues
+  on devteam/P5a-1 from P5a's round), P5a-2 A4 sheet (depends on P5a-1). P5a dropped.
+- Owner: `devteam resume P3e` and `devteam resume P5a-1` after the merge.
+
 ## 2026-10-18 — Kerege run 2 (cont-20261018-153430) fixes
 
 - dev CI was red from 778e072 (`backlog: A9-fix done (#41)`): a devteam test asserted live task

@@ -212,17 +212,41 @@ tasks:
 - id: P5a
   area: core
   title: Metric scale and gravity from an A4 sheet or a measured distance
-  goal: 'The user marks an A4 sheet or one known distance; the map is scaled to metres and rotated so
-    gravity points down. Scale error is reported in the benchmark.
+  goal: 'Split on 2026-10-19 into P5a-1 (measured distance + gravity) and P5a-2 (A4 sheet): one round
+    used 8.2 M tokens (limit 8 M). Its round is on branch devteam/P5a (b26082f).
+
+    '
+  status: dropped
+  owner: dev_pipeline
+  branch: devteam/P5a
+- id: P5a-1
+  area: core
+  title: Metric scale from a measured distance, and gravity
+  goal: 'The user marks two points in two or more frames and gives the distance between them in metres
+    (a JSON scale reference, docs/notes/scale-reference-format.md); the map is scaled to metres and
+    rotated so gravity points down (camera up estimate, refined by the floor plane). The export records
+    metric, scale source, gravity source and scale error; the benchmark reports scale_err_cm for a video
+    that has a reference. Not in this task: the A4 sheet (P5a-2). The branch devteam/P5a-1 already has
+    the first draft from P5a (scale.py, ADR 0018, tests; never checked): finish and verify it, and leave
+    the a4 reference kind out of this branch (it comes back in P5a-2).
 
     '
   status: blocked
-  owner: dev_pipeline
-  run: cont-20261018-234550-dev_pipeline-1
-  branch: devteam/P5a
-  blocked_reason: 'supervisor: this round used 8.2 M subscription tokens (limit 8 M per round). Raise
-    the `supervisor` limits in devteam/config.yaml (or the task''s own `supervisor:` in backlog.yaml)
-    or split the task, then `devteam resume P5a`'
+  blocked_reason: 'split from P5a (8.2 M tokens in one round, limit 8 M); `devteam resume P5a-1` to start
+    it on its branch'
+- id: P5a-2
+  area: core
+  title: Metric scale from an A4 sheet
+  goal: 'An A4 sheet as the scale reference: the user marks its four corners in order in two or more
+    frames; the scale is fitted to the four edges and two diagonals (210 x 297 mm, both orientations),
+    and the fit residual is reported as the scale error. Reuses the reference format, triangulation and
+    alignment of P5a-1; a first draft of the A4 fit is in commit b26082f on branch devteam/P5a. Automatic
+    detection of the sheet in images is not in this task.
+
+    '
+  status: todo
+  depends_on:
+  - P5a-1
 - id: P4a-1b
   area: core
   title: Modal GPU provider for the dense executor
@@ -550,7 +574,7 @@ tasks:
     \ saved per user.\n- The horizon stays level (no roll). \"Align to surface\": click it, then a point;\
     \ the camera\n  turns to face that surface head-on. Preset views (top, front, side, 3/4) and \"reset\
     \ view\".\n- Orbit mode is the default. The ground is the outer terrain (not building floors), estimated\n\
-    \  as the dominant lowest plane until P5a gives gravity; the camera never goes below it and\n  cannot\
+    \  as the dominant lowest plane until P5a-1 gives gravity; the camera never goes below it and\n  cannot\
     \ look up from under it; it stays inside the scene box plus a margin; zoom has a min and\n  max distance.\n\
     - The camera path is a thin line with dots; a frustum only for the current or selected frame,\n  never\
     \ for all frames.\n- A mode switch with three modes (keys 1/2/3): Orbit, Walk (A8, shown disabled\
@@ -570,7 +594,7 @@ tasks:
 
     (thumbnails; a click jumps to that moment of the video) and the number of views. Height and
 
-    distances in metres only once P5a provides scale, confidence only once P6 provides it; until
+    distances in metres only once P5a-1 provides scale, confidence only once P6 provides it; until
 
     then the panel says they are not available (never a made-up number). i18n RU/KK/EN; unit tests
 
@@ -596,7 +620,7 @@ tasks:
 
     while the keyboard moves. A minimap in the corner (top view) shows the user as a circle with a
 
-    view cone. Optional third-person view with the circle visible. Once P5a gives metric scale, an
+    view cone. Optional third-person view with the circle visible. Once P5a-1 gives metric scale, an
 
     optional 1.75 m human figure for scale (hidden until then). Plain, engineering-like visual
 
@@ -719,7 +743,7 @@ tasks:
   title: Walk mode
   goal: 'First-person view to go inside buildings: the floor is the surface directly under the camera
 
-    (raycast down), eye height 1.6 m (needs metric scale from P5a), walls can be passed through;
+    (raycast down), eye height 1.6 m (needs metric scale from P5a-1), walls can be passed through;
 
     arrows/WASD and two-finger trackpad movement. Enables the Walk entry of the A6 mode switch.
 
@@ -729,5 +753,5 @@ tasks:
   status: todo
   depends_on:
   - A6
-  - P5a
+  - P5a-1
   - U2
