@@ -94,7 +94,36 @@ Checks after the run:
 
 ## Viewing the runs
 
-The viewer must serve `data/runs`: the API with its default `QARAU_RUNS_DIR=../data/runs`, or
-`cd web && QARAU_RUNS_DIR=../data/runs pnpm exec vite`; then `/` lists the dated runs next to
-the old ones and `/viewer/notre-dame-2026-10-19` opens one. A viewer pointed at a benchmark
-output shows "manifest.json not found" for these names.
+From the repo root (port 5197 as in the tester's setup; any free port works; stop the server
+when done):
+
+```sh
+cd web && pnpm install --frozen-lockfile && \
+  QARAU_RUNS_DIR=/Users/izbassar/Documents/Startup/qarau/data/runs pnpm exec vite --port 5197 --strictPort
+```
+
+The Vite dev server serves `/api/runs*` from `QARAU_RUNS_DIR` itself (`web/vite-dev-runs.ts`),
+without any auth. Run names the pages must show:
+
+| Page | Login | Shows |
+| --- | --- | --- |
+| `/viewer/notre-dame-2026-10-19` | none in dev (`RequireAuth allowInDev`) | today's notre-dame run |
+| `/viewer/room-2026-10-19` | none in dev | today's room run |
+| `/` | required (A1b), see below | all runs: the five `*-2026-10-19` next to the old ones |
+
+`/viewer/notre-dame` and `/viewer/room` are the OLD runs (still in `data/runs`, untouched), not
+the refreshed ones; the criterion for this task is met by the dated names above.
+
+**Login on `/`.** `/` always shows the login form until the browser tab has a session
+(`web/src/auth`, A1b; dev builds included). With the dev server above, sign in with any
+non-empty username and password: the login probe is `GET /api/runs`, which the dev middleware
+answers 200 without checking the token. Against the real API instead, the password is the
+backend's `QARAU_API_TOKEN` (any non-empty value when it is unset). A scripted browser can skip
+the form the way the e2e tests do (`web/e2e/control-center.spec.ts`): before loading the page,
+set `sessionStorage['qarau.auth.session'] = 'Bearer dev'` (e.g. Playwright `addInitScript`).
+
+A plain `playwright screenshot <url>/` therefore always captures the login page. To get a
+screenshot of `/` with the runs, either the screenshot step signs in first (orchestrator,
+`devteam/config.yaml` `shoot`, a protected file), or the web app opens `/` without a session
+in dev (`web/src/main.tsx`, the web developer's folder; it is a security-related default, so
+it needs the owner's OK). Neither is in this task's folders.
