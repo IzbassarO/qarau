@@ -77,6 +77,8 @@ def run_project(run: Path, scale: float | None = None, **over: Any) -> dict[str,
     P = {**PARAMS, **over}
     mpath = run / "web/manifest.json"
     man = json.loads(mpath.read_text())
+    if scale is None and man["world"].get("metric"):  # bundle already in metres (ADR 0018)
+        scale = 1.0
     obs_doc = json.loads((run / "segmentation/observations.json").read_text())
     obs = obs_doc["observations"]
     if not obs:

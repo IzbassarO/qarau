@@ -36,17 +36,37 @@ def load_manifest(path: Path = MANIFEST) -> list[dict[str, Any]]:
     return entries
 
 
+def scale_reference(entry: dict[str, Any], out: Path, manifest: Path) -> Path | None:
+    """Manifest `scale_reference`: a path (relative to the manifest) or an inline table, which
+    is written to <out>/scale_ref.input.json. None when the entry has none."""
+    ref = entry.get("scale_reference")
+    if ref is None:
+        return None
+    if isinstance(ref, dict):
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "scale_ref.input.json").write_text(json.dumps(ref))
+        return out / "scale_ref.input.json"
+    return (manifest.parent / ref).resolve()
+
+
 def run_video(
-    video: Path, out: Path, timeout_s: float, max_frames: int | None = None
+    video: Path,
+    out: Path,
+    timeout_s: float,
+    max_frames: int | None = None,
+    scale_ref: Path | None = None,
 ) -> dict[str, Any]:
     """`qarau_pipeline run` in a child process: pycolmap cannot be interrupted in-process and
-    a COLMAP crash must not take the other videos down. Returns the reconstruction metrics."""
+    a COLMAP crash must not take the other videos down. Returns the reconstruction metrics
+    plus the export's scale_error_cm."""
     out.mkdir(parents=True, exist_ok=True)
     log = out / "log.txt"
     with log.open("w") as f:
         cmd = [sys.executable, "-m", "qarau_pipeline", "run", "--video", str(video)]
         if max_frames:
             cmd += ["--max-frames", str(max_frames)]
+        if scale_ref:
+            cmd += ["--scale-ref", str(scale_ref)]
         p = subprocess.run(
             [*cmd, "--out", str(out)], cwd=PKG.parent, stdout=f, stderr=subprocess.STDOUT,
             timeout=timeout_s,
@@ -55,8 +75,10 @@ def run_video(
         lines = log.read_text().strip().splitlines()
         raise StageError(f"exit {p.returncode}: {lines[-1] if lines else 'no output'}")
     stages = {s["name"]: s["metrics"] for s in read_run(out)}
-    dropped = stages.get("export", {}).get("dropped_points", {})
-    return {**stages["reconstruction"], "dropped_points": sum(dropped.values())}
+    export = stages.get("export", {})
+    dropped = sum(export.get("dropped_points", {}).values())
+    return {**stages["reconstruction"], "dropped_points": dropped,
+            "scale_error_cm": export.get("scale_error_cm")}  # fmt: skip
 
 
 def video_row(m: dict[str, Any], time_s: float, max_frames: int | None = None) -> dict[str, Any]:
@@ -69,7 +91,7 @@ def video_row(m: dict[str, Any], time_s: float, max_frames: int | None = None) -
         "points_total": m["points_total"],
         "points_dropped_low_parallax": m["points_dropped_low_parallax"],
         "points_dropped_reproj": m["points_dropped_reproj"],
-        "scale_err_cm": None,  # P5/P7: needs a reference scale
+        "scale_err_cm": m.get("scale_error_cm"),  # A4 reference only (P5a); else None
         "time_s": round(time_s, 1),
         "frames_used": used,
         "registered": reg,
@@ -176,7 +198,8 @@ def run_benchmark(
         print(f"benchmark: {name} ({e['file']})", flush=True)
         t0 = time.perf_counter()
         try:
-            m = run_video(video, out / name, timeout_s, e.get("max_frames"))
+            ref = scale_reference(e, out / name, manifest)
+            m = run_video(video, out / name, timeout_s, e.get("max_frames"), ref)
             res["videos"][name] = video_row(m, time.perf_counter() - t0, e.get("max_frames"))
         except subprocess.TimeoutExpired:
             res["errors"][name] = f"timeout after {timeout_s:g} s"

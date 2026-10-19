@@ -1,9 +1,10 @@
-"""CLI: python -m qarau_pipeline {run,quality,export,segment,project,dense-remote,benchmark} ..."""
+"""CLI: python -m qarau_pipeline {run,quality,export,scale,segment,project,dense-remote,...}"""
 
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Any
 
 from . import frames as frames_stage
 from . import quality
-from .interfaces import StageError, run_stage
+from .interfaces import StageError, read_run, run_stage
 from .keyframes import MODES, KeyframeParams, subsample
 from .segmentation import GroundedSam2, ManualMasks, SamApiSegmenter, parse_prompt, segment_stage
 
@@ -28,29 +29,65 @@ def _ffmpeg_version() -> str:
 # torch abort in the same process (segment stage), so the segment path must not load it.
 
 
+SCALE_REF = "scale_ref.json"  # the run's scale reference (ADR 0018), copied in by run/scale
+
+
 def _export(
     out: Path,
     sparse: Path,
     frames: list[dict[str, Any]],
     source: dict[str, Any],
     dense: Path | None = None,
+    ref: Path | None = None,
 ) -> None:
+    """ref: a new scale reference, stored as <out>/scale_ref.json once the export succeeded;
+    None = the stored one, if any. Always from the untouched sparse model: never compounds."""
     import pycolmap
 
     from .export import export_bundle
+    from .scale import load_reference
+
+    stored = out / SCALE_REF
+    ref_path = ref or (stored if stored.exists() else None)
 
     def go() -> dict[str, Any]:
+        sref = load_reference(ref_path) if ref_path else None
         rec = pycolmap.Reconstruction(str(sparse))
         dp = None
         if dense is not None:
             from .visibility import load_dense, max_frames_per_point
 
             dp = load_dense(dense, rec, frames, max_frames_per_point())
-        return export_bundle(rec, frames, out, source, out.name, dp)
+        m = export_bundle(rec, frames, out, source, out.name, dp, sref)
+        if ref is not None and ref.resolve() != stored.resolve():
+            shutil.copyfile(ref, stored)
+        return m
 
-    params = {"sparse": str(sparse), **({"dense": str(dense)} if dense else {})}
+    params = {"sparse": str(sparse), **({"dense": str(dense)} if dense else {}),
+              **({"scale_ref": str(ref_path)} if ref_path else {})}  # fmt: skip
     res = run_stage(out, "export", f"pycolmap {pycolmap.__version__}", params, go)
     print("export:", res.metrics)
+
+
+def cmd_scale(a: argparse.Namespace) -> None:
+    """Re-export an existing run with a scale reference (same dense layer as before). A bad
+    reference is refused before anything in the run changes."""
+    import pycolmap
+
+    from .export import frames_from_json
+    from .scale import load_reference, triangulate_reference
+
+    run, ref = Path(a.run).resolve(), Path(a.ref).resolve()
+    sparse = run / "colmap/sparse/0"
+    if not sparse.is_dir() or not (run / "frames.json").is_file():
+        raise StageError(f"{run} is not a reconstructed run (no colmap/sparse/0 or frames.json)")
+    frames = frames_from_json(run)
+    triangulate_reference(pycolmap.Reconstruction(str(sparse)), load_reference(ref),
+                          {f["name"] for f in frames})  # fmt: skip
+    prev = next((s for s in read_run(run) if s["name"] == "export"), {})
+    dense = prev.get("params", {}).get("dense")
+    source = json.loads((run / "frames.json").read_text())["source"]
+    _export(run, sparse, frames, source, Path(dense) if dense else None, ref)
 
 
 def cmd_export(a: argparse.Namespace) -> None:
@@ -134,7 +171,10 @@ def cmd_run(a: argparse.Namespace) -> None:
         lambda: rc.reconstruct(out / "frames", names, out / "colmap", dropped),
     )  # fmt: skip
     print("reconstruction:", res.metrics)
-    _export(out, out / "colmap/sparse/0", frames_from_json(out), fj["source"])
+    ref = Path(a.scale_ref).resolve() if a.scale_ref else None
+    if ref is None:  # a full run starts clean: no reference from an earlier run applies
+        (out / SCALE_REF).unlink(missing_ok=True)
+    _export(out, out / "colmap/sparse/0", frames_from_json(out), fj["source"], ref=ref)
 
 
 def cmd_segment(a: argparse.Namespace) -> None:
@@ -204,7 +244,13 @@ def main(argv: list[str] | None = None) -> None:
                    help="largest model only, no leftover registration (pre-P3)")  # fmt: skip
     r.add_argument("--no-sky-mask", dest="sky_mask", action="store_false",
                    help="extract features in the sky too (pre-P3b, ADR 0013)")  # fmt: skip
+    r.add_argument("--scale-ref", metavar="JSON", help="A4 sheet or known distance marked in "
+                   "frames: metric map (docs/notes/scale-reference-format.md)")  # fmt: skip
     r.set_defaults(fn=cmd_run)
+    sc = sub.add_parser("scale", help="re-export a run in metres from a scale reference")
+    sc.add_argument("--run", required=True)
+    sc.add_argument("--ref", required=True, metavar="JSON")
+    sc.set_defaults(fn=cmd_scale)
     e = sub.add_parser("export", help="COLMAP model -> LAZ/PLY + viewer bundle")
     e.add_argument("--sparse", required=True)
     e.add_argument("--images", help="image dir (image-set input); omit to use <out>/frames.json")

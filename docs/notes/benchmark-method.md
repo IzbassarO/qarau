@@ -45,7 +45,8 @@ hanging still leaves room inside the gate's 90 min), output and log in
 - `frames_used` = kept frames given to COLMAP; `registered` / `points` / `reproj_px` = the
   largest model (most registered images); `models` = all models COLMAP built.
 - `registered_pct` = 100 · registered / frames_used.
-- `scale_err_cm` = `null` until a scale reference exists (P5/P7).
+- `scale_err_cm` = the export's `scale_error_cm` (ADR 0018) when the manifest entry has a
+  `scale_reference` of kind `a4`; `null` (empty cell) otherwise. See "Scale reference" below.
 - `time_s` = wall-clock of the whole child run, export included.
 - `dropped_points` = points the export stage removed (non-finite + far outliers, rule in
   `docs/architecture.md`, export row); shown as `dropped N` in Notes when N > 0.
@@ -53,6 +54,27 @@ hanging still leaves room inside the gate's 90 min), output and log in
 **Exit code.** 0 only if every required video and every present optional video ran. A missing
 required video, a failure or a timeout → listed under `errors`, the other videos still run,
 exit 1. A missing optional video → `skipped`, not an error.
+
+**Scale reference (P5a).** A manifest entry may carry `scale_reference`: a path to a reference
+JSON (relative to `benchmark_set.toml`) or an inline table with the same content
+(`docs/notes/scale-reference-format.md`). The benchmark passes it as `run --scale-ref`
+(an inline table is first written to `<out>/<name>/scale_ref.input.json`) and fills
+"Scale err cm" from the export's `scale_error_cm` (A4 only). No video has one yet: no A4 sheet
+was found in the room frames, and `benchmark_set.toml` is a protected file the dev team does
+not edit. How the owner adds one for room:
+1. Lay an A4 sheet flat on the floor and film the room walk again, passing the sheet from 2–3
+   directions (or use any rectangle/distance measured with a tape, kind `distance`, but that
+   gives no error value).
+2. Run the benchmark once (or `run --video`); open `<out>/room/frames/` and pick 2–3 frames per
+   corner where the sheet is sharp; read the corner pixels (any image viewer that shows
+   coordinates; frames are already rotation-corrected).
+3. Write `pipeline/qarau_pipeline/benchmark_refs/room-a4.json` (kind `a4`, the 4 corners in
+   order) and add `scale_reference = "benchmark_refs/room-a4.json"` to the room entry. Frame
+   names stay valid while the frames stage and the video are unchanged; a change there means
+   re-marking.
+4. Check with `python -m qarau_pipeline scale --run <out>/room --ref <that file>`: the export
+   prints `scale_error_cm`; well-marked corners give < 1 cm. P7 (AprilTags) will replace the
+   manual marks with detected ground truth.
 
 **--record** (manual runs only; the merge gate never passes it) also writes
 `docs/benchmarks/<short sha>.json` (copy of results.json) and appends one row per video to the

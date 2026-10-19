@@ -26,7 +26,11 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     fail: dict[str, BaseException] = {}
 
     def fake_run_video(
-        video: Path, out: Path, timeout_s: float, max_frames: int | None = None
+        video: Path,
+        out: Path,
+        timeout_s: float,
+        max_frames: int | None = None,
+        scale_ref: Path | None = None,
     ) -> dict[str, Any]:
         calls[video.name] = max_frames
         if video.name in fail:
@@ -147,6 +151,73 @@ def test_largest_model_selected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert (row["models"], row["registered"], row["points"]) == (3, 80, 4000)
     assert (row["frames_used"], row["registered_pct"], row["reproj_px"]) == (100, 80.0, 0.58)
     assert row["time_s"] == 12.3
+
+
+SCALE_SET = """
+[[video]]
+name = "by-path"
+file = "a.mp4"
+required = true
+scale_reference = "refs/room-a4.json"
+
+[[video]]
+name = "inline"
+file = "b.mp4"
+required = true
+scale_reference = {version = 1, kind = "a4", points = []}
+
+[[video]]
+name = "none"
+file = "c.mp4"
+required = true
+"""
+
+
+def test_scale_err_filled_only_with_a_reference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Manifest scale_reference (path or inline) -> `run --scale-ref` -> the export's
+    scale_error_cm in the 'Scale err cm' column; no reference -> empty."""
+    data, out = tmp_path / "data", tmp_path / "out"
+    data.mkdir()
+    for f in ("a.mp4", "b.mp4", "c.mp4"):
+        (data / f).write_bytes(b"x")
+    (tmp_path / "refs").mkdir()
+    (tmp_path / "refs/room-a4.json").write_text(json.dumps({"version": 1, "kind": "a4"}))
+    manifest = tmp_path / "set.toml"
+    manifest.write_text(SCALE_SET)
+    cmds: dict[str, list[str]] = {}
+
+    def fake_child(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        run_dir = Path(cmd[cmd.index("--out") + 1])
+        cmds[run_dir.name] = cmd
+        err = None
+        if "--scale-ref" in cmd:  # the pipeline would measure it; the fake keys it on the file
+            ref = json.loads(Path(cmd[cmd.index("--scale-ref") + 1]).read_text())
+            err = {"by-path": 0.42, "inline": 1.5}[run_dir.name] if ref["kind"] == "a4" else None
+        rec = {"images_in": 10, "registered_images": 10, "models": 1, "points": 100,
+               "points_total": 120, "points_dropped_low_parallax": 15,
+               "points_dropped_reproj": 5, "mean_reproj_error_px": 0.5}  # fmt: skip
+        exp = {"dropped_points": {"non_finite": 0}, "scale_error_cm": err}
+        stages = [{"name": "reconstruction", "metrics": rec}, {"name": "export", "metrics": exp}]
+        (run_dir / "run.json").write_text(json.dumps(stages))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(benchmark.subprocess, "run", fake_child)
+    monkeypatch.setattr(
+        benchmark, "_git", lambda repo, *a: "abc1234" if a[0] == "rev-parse" else ""
+    )
+    assert benchmark.run_benchmark(data, out, repo_root=tmp_path, manifest=manifest) == 0
+    res = json.loads((out / "results.json").read_text())
+    errs = {n: v["scale_err_cm"] for n, v in res["videos"].items()}
+    assert errs == {"by-path": 0.42, "inline": 1.5, "none": None}
+    assert "--scale-ref" not in cmds["none"]
+    assert cmds["by-path"][cmds["by-path"].index("--scale-ref") + 1] == str(
+        tmp_path / "refs/room-a4.json"
+    )
+    md = (out / "results.md").read_text()
+    assert "| by-path | abc1234 | 10 | 100.0 | 1 | 100 | 120 | 15 | 5 | 0.5 | 0.42 |" in md
+    assert "| none | abc1234 | 10 | 100.0 | 1 | 100 | 120 | 15 | 5 | 0.5 |  |" in md
 
 
 def test_one_failure_others_still_run(env: dict[str, Any]) -> None:

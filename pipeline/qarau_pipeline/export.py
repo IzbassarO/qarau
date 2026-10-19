@@ -17,6 +17,9 @@ import numpy as np
 import pycolmap
 
 from .interfaces import DensePoints, stage_seconds
+from .scale import ScaleRef, align, rotation_between, triangulate_reference
+
+__all__ = ["rotation_between"]  # re-exported: it lived here before P5a
 
 NEVER = 65535
 THUMB_W = 960
@@ -44,28 +47,6 @@ def qvec_from_matrix(R: np.ndarray) -> np.ndarray:
     q_arr = np.array(q)
     q_arr /= np.linalg.norm(q_arr)
     return -q_arr if q_arr[0] < 0 else q_arr
-
-
-def rotation_between(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Smallest rotation taking unit vector a to unit vector b (Rodrigues)."""
-    v, c = np.cross(a, b), float(np.dot(a, b))
-    if c < -1 + 1e-9:  # antiparallel: half-turn about any perpendicular axis
-        axis = np.cross(a, [1.0, 0, 0] if abs(a[0]) < 0.9 else [0, 1.0, 0])
-        axis /= np.linalg.norm(axis)
-        return 2 * np.outer(axis, axis) - np.eye(3)
-    K = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
-    return np.eye(3) + K + K @ K / (1 + c)
-
-
-def estimate_up(Rs: np.ndarray, centers: np.ndarray) -> np.ndarray:
-    """Up vector in COLMAP world. Mean of cameras' -y axes; plane-fit normal if degenerate."""
-    up = -Rs[:, 1, :].mean(axis=0)  # row 1 of R_cam_from_world = world direction of cam +y
-    if np.linalg.norm(up) > 0.3 or len(centers) < 3:
-        return up / (np.linalg.norm(up) or 1.0)
-    # ponytail: nadir/planar flights only; sign taken from the weak mean, arbitrary if ~0
-    _, _, vt = np.linalg.svd(centers - centers.mean(axis=0))
-    n = vt[2]
-    return n if np.dot(n, up) >= 0 else -n
 
 
 # ---------------------------------------------------------------- cameras
@@ -193,8 +174,7 @@ def filter_rows(
 def dense_layer(
     dense: DensePoints,
     centers: np.ndarray,
-    A: np.ndarray,
-    c: np.ndarray,
+    tf: Callable[[np.ndarray], np.ndarray],
     n_frames: int,
     w: Callable[[str, np.ndarray, str], str],
 ) -> dict[str, Any]:
@@ -210,7 +190,7 @@ def dense_layer(
     n = int(keep.sum())
     return {
         "count": n,
-        "position": w("dense.position.f32", dense.xyz[keep] @ A.T - c, "<f4"),
+        "position": w("dense.position.f32", tf(dense.xyz[keep]), "<f4"),
         "color": w("dense.color.u8", dense.rgb[keep], "u1"),
         "densifier": dense.densifier,
         "frame_links_source": dense.links_source,
@@ -232,7 +212,9 @@ def export_bundle(
     source: dict[str, Any],
     run_id: str,
     dense: DensePoints | None = None,
+    ref: ScaleRef | None = None,
 ) -> dict[str, Any]:
+    """ref: scale reference (ADR 0018); without it the bundle is upright but not metric."""
     t0 = time.perf_counter()
     web = out / "web"
     (web / "thumbs").mkdir(parents=True, exist_ok=True)
@@ -271,13 +253,12 @@ def export_bundle(
     N = len(pids)
     rgb = np.array([rec.points3D[int(p)].color for p in pids], dtype=np.uint8)
 
-    # alignment: up -> +Z, point centroid -> origin, no scale
-    A = rotation_between(estimate_up(Rs, centers), np.array([0.0, 0, 1]))
-    c = (xyz @ A.T).mean(axis=0)  # centroid in rotated frame
-    # x' = A x - c
-    xyz_a = xyz @ A.T - c
-    W = np.eye(4)
-    W[:3, :3], W[:3, 3] = A, -c
+    # alignment (ADR 0018): one similarity x' = s A x + T; up -> +Z, floor at z = 0,
+    # x/y centroid at the origin, metres when a scale reference is given
+    marked, ref_px = triangulate_reference(rec, ref, set(idx_by_name)) if ref else (None, None)
+    al = align(xyz, Rs, centers, marked, ref)
+    xyz_a = al.apply(xyz)
+    W = al.matrix()
 
     # CSR both directions from tracks
     pt_l: list[int] = []
@@ -329,7 +310,7 @@ def export_bundle(
                 cv2.imwrite(str(out / e["thumb"]), img, [cv2.IMWRITE_JPEG_QUALITY, 85])
     for iid, fi in reg.items():
         im, cam = rec.images[iid], rec.cameras[rec.images[iid].camera_id]
-        Rn, tn = R[iid] @ A.T, t[iid] + R[iid] @ (A.T @ c)
+        Rn, tn = al.pose(R[iid], t[iid])
         params = [float(x) for x in cam.params]
         entries[fi].update(
             registered=True,
@@ -353,7 +334,7 @@ def export_bundle(
         "world": {
             "up": [0, 0, 1], "world_from_colmap": W.flatten().tolist(),
             "bounds": {"min": xyz_a.min(0).tolist(), "max": xyz_a.max(0).tolist()},
-            "z_range": zr.tolist(),
+            "z_range": zr.tolist(), **al.info,
         },
         "points": {
             "count": N,
@@ -364,7 +345,7 @@ def export_bundle(
         },
         "far": {
             "count": len(far_xyz),
-            "position": w("far.position.f32", far_xyz @ A.T - c, "<f4"),
+            "position": w("far.position.f32", al.apply(far_xyz), "<f4"),
             "color": w("far.color.u8", far_rgb, "u1"),
             "rule": f"nearest camera distance > {FAR_K:g} x median",
         },
@@ -387,10 +368,12 @@ def export_bundle(
             "processing_s": {k: v for k, v in secs.items() if k in ("frames", "reconstruction")},
         },
     }  # fmt: skip
-    extra: dict[str, Any] = {}
+    extra: dict[str, Any] = {**al.metrics}
+    if ref_px is not None:
+        extra["scale_marks_reproj_px"] = round(ref_px, 3)
     if dense is not None:
-        d = manifest["dense"] = dense_layer(dense, centers, A, c, F, w)
-        extra = {"dense_points": d["count"], "dense_linked_points": d["linked_points"],
+        d = manifest["dense"] = dense_layer(dense, centers, al.apply, F, w)
+        extra |= {"dense_points": d["count"], "dense_linked_points": d["linked_points"],
                  "frame_links_source": d["frame_links_source"]}  # fmt: skip
 
     write_laz_ply(out, xyz_a, rgb)

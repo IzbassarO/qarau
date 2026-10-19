@@ -133,7 +133,10 @@ def test_up_alignment_and_round_trip(bundle) -> None:
     out, m, truth, *_ = bundle
     pos = np.fromfile(out / m["points"]["position"], "<f4").reshape(-1, 3)
     W = np.array(m["world"]["world_from_colmap"]).reshape(4, 4)
-    assert np.allclose(pos.mean(axis=0), 0, atol=1e-4)  # centroid at origin
+    assert np.allclose(pos[:, :2].mean(axis=0), 0, atol=1e-4)  # x/y centroid at origin
+    # no floor plane in 40 random points: camera gravity, floor = 2nd height percentile (ADR 0018)
+    assert np.percentile(pos[:, 2], 2) == pytest.approx(0, abs=1e-4)
+    assert m["world"]["gravity_source"] == "cameras" and m["world"]["metric"] is False
     assert np.allclose(truth["pts"] @ W[:3, :3].T + W[:3, 3], pos, atol=1e-4)
     for f in m["frames"]:
         if f["registered"]:
