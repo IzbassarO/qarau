@@ -1,12 +1,11 @@
-"""refresh: every benchmark_set.toml video -> current sparse CPU pipeline -> a NEW viewer run.
+"""refresh-runs: every benchmark_set.toml video -> current sparse CPU pipeline -> a NEW viewer run.
 
-`python -m qarau_pipeline refresh --data D --runs R --suffix S --out O` writes R/<video>-<S> per
-video and the summary to O/summary.json. Same child-process `run` as the benchmark (sparse
-COLMAP on the CPU, never dense or dense_remote). Append-only on R: a target name that already
-exists stops the command before any work (with keep_existing it is left untouched and its
-numbers are read back from its run.json instead); each run is built in a hidden temp dir inside
-R and renamed into place only when done, so a failure never leaves a partial run under the final
-name and nothing already in R is touched.
+`python -m qarau_pipeline refresh-runs --data D --runs R --suffix S` writes R/<video>-<S> per
+video and the summary R/refresh-<S>.json. Same child-process `run` as the benchmark (sparse
+COLMAP on the CPU, never dense or dense_remote). Append-only on R: a video whose target name
+already exists is skipped and that path is never opened for writing; each run is built in a
+hidden temp dir inside R and renamed into place only when done, so a failure never leaves a
+partial run under the final name and nothing already in R is touched.
 """
 
 from __future__ import annotations
@@ -20,12 +19,16 @@ from pathlib import Path
 from typing import Any
 
 from .benchmark import MANIFEST, load_manifest, run_video
-from .interfaces import StageError, read_run
+from .interfaces import StageError
 
 COLS = ("run", "registered_pct", "points", "far_points", "keyframes", "status")
 
 
-def _row(run: Path, m: dict[str, Any]) -> dict[str, Any]:
+def _row(run: str, status: str) -> dict[str, Any]:
+    return {**dict.fromkeys(COLS), "run": run, "status": status}
+
+
+def _ok(run: Path, m: dict[str, Any]) -> dict[str, Any]:
     stats = json.loads((run / "web/manifest.json").read_text())["stats"]
     used, reg = m["images_in"], m["registered_images"]
     return {
@@ -45,7 +48,6 @@ def refresh(
     only: list[str] | None = None,
     timeout_s: float = 1800,
     manifest: Path = MANIFEST,
-    keep_existing: bool = False,
 ) -> dict[str, dict[str, Any]]:
     data, runs = Path(data_dir).resolve(), Path(runs_dir).resolve()
     entries = load_manifest(manifest)
@@ -54,21 +56,16 @@ def refresh(
         if unknown:
             raise StageError(f"unknown benchmark video(s): {', '.join(sorted(unknown))}")
         entries = [e for e in entries if e["name"] in only]
-    targets = {e["name"]: runs / f"{e['name']}-{suffix}" for e in entries}
-    taken = [t.name for t in targets.values() if t.exists() or t.is_symlink()]
-    if taken and not keep_existing:
-        raise StageError(f"run(s) already exist in {runs}, pick another --suffix: {taken}")
     runs.mkdir(parents=True, exist_ok=True)
     res: dict[str, dict[str, Any]] = {}
     for e in entries:
-        name, final = e["name"], targets[e["name"]]
+        name, final = e["name"], runs / f"{e['name']}-{suffix}"
         video = data / e["file"]
-        if final.name in taken:  # keep_existing: only read, never rewritten
-            stages = {s["name"]: s["metrics"] for s in read_run(final)}
-            res[name] = {**_row(final, stages["reconstruction"]), "status": "ok (existing run)"}
+        if final.exists() or final.is_symlink():  # never written, renamed or deleted
+            res[name] = _row(final.name, "skipped: run already exists")
             continue
         if not video.is_file():
-            res[name] = {"run": final.name, "status": f"skipped: video missing ({e['file']})"}
+            res[name] = _row(final.name, f"skipped: video missing ({e['file']})")
             continue
         print(f"refresh: {name} -> {final.name}", flush=True)
         # leading dot: the API lists only names matching [A-Za-z0-9]..., so a run being built
@@ -82,14 +79,19 @@ def refresh(
             if final.exists() or final.is_symlink():  # appeared while we ran: never replace it
                 raise StageError(f"{final.name} appeared during the run; not replaced")
             os.rename(tmp, final)
-            res[name] = _row(final, m)
+            res[name] = _ok(final, m)
         except subprocess.TimeoutExpired:
-            res[name] = {"run": final.name, "status": f"failed: timeout after {timeout_s:g} s"}
+            res[name] = _row(final.name, f"failed: timeout after {timeout_s:g} s")
         except Exception as err:  # noqa: BLE001 - one video's failure must not stop the rest
-            res[name] = {"run": final.name, "status": f"failed: {type(err).__name__}: {err}"}
+            res[name] = _row(final.name, f"failed: {type(err).__name__}: {err}")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)  # our own temp dir, gone after a rename
         print(f"refresh: {name}: {res[name]}", flush=True)
+    if not only:  # image folders, archives, other clips: listed so nothing is silently ignored
+        files = {e["file"] for e in load_manifest(manifest)}
+        for p in sorted(data.iterdir()):
+            if not p.name.startswith(".") and p.name not in files:
+                res[p.name] = _row("", "skipped: not a reference video")
     return res
 
 
@@ -97,5 +99,6 @@ def markdown(res: dict[str, dict[str, Any]]) -> str:
     head = "| Video | Run | Registered % | Points | Far-layer points | Keyframes | Status |"
     rows = [head, "| --- " * 7 + "|"]
     for n, r in res.items():
-        rows.append(f"| {n} | " + " | ".join(str(r.get(k, "—")) for k in COLS) + " |")
+        cells = ("—" if r[k] in (None, "") else str(r[k]) for k in COLS)
+        rows.append(f"| {n} | " + " | ".join(cells) + " |")
     return "\n".join(rows)

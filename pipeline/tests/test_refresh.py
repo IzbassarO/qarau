@@ -1,6 +1,6 @@
 import json
 import subprocess
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +71,11 @@ def go(env: dict[str, Any], **kw: Any) -> dict[str, dict[str, Any]]:
     return refresh.refresh(env["data"], env["runs"], "2026-10-18", manifest=env["manifest"], **kw)
 
 
+def cli(env: dict[str, Any], *extra: str) -> None:
+    main(["refresh-runs", "--data", str(env["data"]), "--runs", str(env["runs"]),
+          "--suffix", "2026-10-18", *extra])  # fmt: skip
+
+
 def snapshot(root: Path) -> dict[str, Any]:
     return {
         str(p.relative_to(root)): (
@@ -99,44 +104,32 @@ def test_new_runs_next_to_old_ones(env: dict[str, Any]) -> None:
     assert "| b | b-2026-10-18 | 75.0 |" in refresh.markdown(res)
 
 
-def test_created_at_has_timezone(env: dict[str, Any]) -> None:
-    t0 = datetime.now().astimezone().replace(microsecond=0)
+def test_created_at_is_utc_iso(env: dict[str, Any]) -> None:
+    t0 = datetime.now(UTC).replace(microsecond=0)
     go(env, only=["a"])
     m = json.loads((env["runs"] / "a-2026-10-18/web/manifest.json").read_text())
     created = datetime.fromisoformat(m["created_at"])
-    assert created.tzinfo is not None and created >= t0  # taken at export, not copied
+    assert created.utcoffset() == timedelta(0) and created >= t0  # taken at export, not copied
 
 
-def test_refuses_existing_name(env: dict[str, Any]) -> None:
+def test_existing_run_skipped_byte_identical(env: dict[str, Any]) -> None:
     (env["runs"] / "b-2026-10-18/web").mkdir(parents=True)
     (env["runs"] / "b-2026-10-18/web/manifest.json").write_text('{"keep": "me"}')
-    before = snapshot(env["runs"])
-    with pytest.raises(StageError, match="b-2026-10-18"):
-        go(env)
-    assert snapshot(env["runs"]) == before and env["calls"] == {}  # refused before any work
-
-
-def test_keep_existing_reuses_numbers_untouched(env: dict[str, Any]) -> None:
-    first = go(env, only=["a"])["a"]
-    before = snapshot(env["runs"])
-    res = go(env, keep_existing=True)
-    after = snapshot(env["runs"])
-    assert {k: after[k] for k in before} == before and env["calls"]["a.webm"] is None
-    assert res["a"] == {**first, "status": "ok (existing run)"}  # read back from run.json
-    assert res["b"]["status"] == "ok" and (env["runs"] / "b-2026-10-18").is_dir()
-
-
-def test_refuses_existing_symlink_name(env: dict[str, Any]) -> None:
     (env["runs"] / "a-2026-10-18").symlink_to("missing-target")  # dangling link counts too
-    with pytest.raises(StageError):
-        go(env)
+    before = snapshot(env["runs"])
+    res = go(env)
+    assert snapshot(env["runs"]) == before and env["calls"] == {}  # nothing run, nothing written
+    for n in ("a", "b"):
+        assert res[n] == {**dict.fromkeys(refresh.COLS), "run": f"{n}-2026-10-18",
+                          "status": "skipped: run already exists"}  # fmt: skip
 
 
 def test_failure_reported_and_next_video_exported(env: dict[str, Any]) -> None:
     env["fail"]["a.webm"] = StageError("exit 1: no registered images")
     res = go(env)
-    assert res["a"]["status"] == "failed: StageError: exit 1: no registered images"
-    assert res["b"]["status"] == "ok"
+    assert res["a"] == {**dict.fromkeys(refresh.COLS), "run": "a-2026-10-18",
+                        "status": "failed: StageError: exit 1: no registered images"}  # fmt: skip
+    assert res["b"]["status"] == "ok" and res["b"]["points"] > 0
     names = sorted(p.name for p in env["runs"].iterdir())
     assert names == ["b-2026-10-18", "old", "old-link"]  # no partial a, no temp dir left
 
@@ -153,6 +146,16 @@ def test_missing_video_skipped(env: dict[str, Any]) -> None:
     res = go(env)
     assert res["a"]["status"].startswith("skipped: video missing")
     assert not (env["runs"] / "a-2026-10-18").exists() and res["b"]["status"] == "ok"
+
+
+def test_other_samples_listed_as_not_reference(env: dict[str, Any]) -> None:
+    (env["data"] / "south-building/images").mkdir(parents=True)
+    (env["data"] / "south-building.zip").write_bytes(b"zip")
+    (env["data"] / ".DS_Store").write_bytes(b"")
+    res = go(env)
+    assert list(res) == ["a", "b", "south-building", "south-building.zip"]
+    assert res["south-building"]["status"] == "skipped: not a reference video"
+    assert "south-building" not in go(env, only=["a"])  # --only: just the named videos
 
 
 def test_dense_never_invoked(env: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,28 +188,29 @@ def test_child_command_is_sparse_run(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert not any("dense" in c for c in cmd)
 
 
-def test_cli_refresh(env: dict[str, Any]) -> None:
+def test_cli_refresh_runs(env: dict[str, Any]) -> None:
     """The real benchmark_set.toml names; a failed video makes the command exit 1."""
     for f in ("notre_dame_oubiels.webm", "IMG_8315.MOV"):
         (env["data"] / f).write_bytes(b"not a real video")
     env["fail"]["IMG_8315.MOV"] = StageError("boom")
-    out = env["data"].parent / "summary"
     with pytest.raises(SystemExit) as e:
-        main(["refresh", "--data", str(env["data"]), "--runs", str(env["runs"]), "--suffix",
-              "2026-10-18", "--out", str(out), "--only", "notre-dame,room"])  # fmt: skip
+        cli(env, "--only", "notre-dame,room")
     assert e.value.code == 1
     assert (env["runs"] / "notre-dame-2026-10-18/web/manifest.json").is_file()
     assert not (env["runs"] / "room-2026-10-18").exists()
-    summary = json.loads((out / "summary.json").read_text())
-    assert set(summary["notre-dame"]) == {*refresh.COLS}
+    summary = json.loads((env["runs"] / "refresh-2026-10-18.json").read_text())
+    assert all(set(r) == {*refresh.COLS} for r in summary.values())  # every column, every row
     assert summary["notre-dame"]["status"] == "ok" and summary["notre-dame"]["keyframes"] == 8
-    assert summary["room"] == {"run": "room-2026-10-18", "status": "failed: StageError: boom"}
-    assert "| room | room-2026-10-18 |" in (out / "summary.md").read_text()
+    assert summary["room"]["status"] == "failed: StageError: boom"
+    assert "| room | room-2026-10-18 | — |" in refresh.markdown(summary)
 
 
-def test_cli_refuses_summary_inside_runs(env: dict[str, Any]) -> None:
+def test_cli_never_overwrites_summary(env: dict[str, Any], tmp_path: Path) -> None:
+    (env["runs"] / "refresh-2026-10-18.json").write_text("old")
     before = snapshot(env["runs"])
     with pytest.raises(SystemExit):
-        main(["refresh", "--data", str(env["data"]), "--runs", str(env["runs"]),
-              "--suffix", "x", "--out", str(env["runs"] / "old")])  # fmt: skip
-    assert snapshot(env["runs"]) == before and env["calls"] == {}
+        cli(env)
+    assert snapshot(env["runs"]) == before and env["calls"] == {}  # refused before any work
+    with pytest.raises(SystemExit) as e:
+        cli(env, "--out", str(tmp_path / "elsewhere"))
+    assert e.value.code == 0 and (tmp_path / "elsewhere/refresh-2026-10-18.json").is_file()
