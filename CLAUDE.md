@@ -175,7 +175,8 @@ You must:
 - **Keep `docs/notes/progress.md` current**: what is done, what is next, known issues,
   decisions waiting for the owner. Short, newest first.
 - **Commit in small, meaningful steps** on a feature branch; open a PR into `dev` with `gh`,
-  with screenshots and what you verified. It merges when every gate is green.
+  with screenshots and what you verified, then report to the owner. A Claude Code session
+  never merges it (see "Delivery").
 - Leave the code better: if something in this file is wrong or missing, propose the change.
 
 Stop and ask the owner only for: spending money or adding a paid service; anything about
@@ -192,6 +193,10 @@ modes; security-sensitive defaults. Everything else — decide, document, contin
   (when `pipeline/` changed; `devteam/config.yaml` → `gates.benchmark`), and the secret scan
   (gitleaks) is clean. Otherwise the work goes back to the developer, at most 3 times,
   then the task is **blocked** and listed in the daily report.
+- **Who merges** (owner, 2026-10-19): Kerege's gated auto-merge of its own task PRs
+  (`devteam/<task>` → `dev`) stays as described above. A Claude Code session (interactive or
+  any other session outside Kerege) **never merges a PR into `dev` or `main`**, even with every
+  gate green: it opens the PR, reports what it verified, and the owner merges.
 - `dev` → `main`: an automatic weekly release PR, merged only if CI and the full benchmark
   are green on `dev`. Nothing else reaches `main`.
 - **Forbidden for every agent:** force-push; rewriting published history (rebase, amend,
