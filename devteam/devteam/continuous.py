@@ -45,6 +45,7 @@ class Continuous:
         self.stop_reason = ""
         self.draining = False  # no new tasks, rounds in flight finish
         self.limit_since: dict[str, float] = {}
+        self.paused: dict[str, str] = {}  # developer -> why it takes no more tasks this run
         self.state_file = team.home / "continuous.json"
         self.run_id = time.strftime("cont-%Y%m%d-%H%M%S")
         self.t0 = clock()
@@ -196,14 +197,18 @@ class Continuous:
                     self.ended += 1
                     self.results += [{**r, "dev": dev} for r in vals.get("results", [])]
                     self.cond.notify_all()  # an ended task can unblock work for the others
-                    # the owner's own `devteam stop <task>` is not a failure of the team
-                    ours = [
-                        r for r in self.results if not str(r.get("reason")).startswith(OWNER_STOP)
+                    # per developer: one developer's bad streak never stops the others; the
+                    # owner's own `devteam stop <task>` is not a failure of the team
+                    mine = [
+                        r
+                        for r in self.results
+                        if r["dev"] == dev and not str(r.get("reason")).startswith(OWNER_STOP)
                     ]
-                    streak = ours[-2:]
+                    streak = mine[-2:]
                     if len(streak) == 2 and all(r["status"] == "blocked" for r in streak):
-                        reason = f"2 tasks in a row ended blocked ({streak[0]['id']}, "
-                        reason += f"{streak[1]['id']})"
+                        reason = f"{dev} paused: 2 of its tasks in a row ended blocked "
+                        reason += f"({streak[0]['id']}, {streak[1]['id']})"
+                        self.paused[dev] = reason
                     else:
                         continue
                 else:
@@ -225,7 +230,7 @@ class Continuous:
                     if self.ended == ended_before:
                         return
                     continue
-            self.halt(reason)
+            self.say("brain", reason, status="")  # the run goes on while anyone can work
             return
 
     def _idle(self, dev: str):
@@ -260,7 +265,14 @@ class Continuous:
 
     def finish(self) -> dict:
         if not self.stop_reason:
-            self.stop_reason = "no plannable task left for any developer"
+            why = list(self.paused.values())
+            if len(why) < len(self.team.cfg["developers"]):
+                why.append(
+                    "no plannable task left for " + ("the others" if why else "any developer")
+                )
+            self.stop_reason = (
+                "no developer can take a task: " if self.paused else ""
+            ) + "; ".join(why)
         self.team.stopping.set()  # the timer thread ends
         summary = {
             "run": self.run_id,
