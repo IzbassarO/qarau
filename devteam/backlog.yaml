@@ -206,6 +206,8 @@ tasks:
   owner: dev_pipeline
   run: cont-20261018-153430-dev_pipeline-1
   branch: devteam/P3e
+  supervisor:  # the refresh re-runs COLMAP on every reference video (54 min on 2026-10-18)
+    max_round_min: 180
   blocked_reason: 'supervisor: the round ran 60 min without a new commit (limit 60 min). Raise the `supervisor`
     limits in devteam/config.yaml or split the task, then `devteam resume P3e`'
 - id: P5a
@@ -275,6 +277,24 @@ tasks:
 
     '
   status: todo
+- id: O1a
+  area: core
+  title: Organizations and sites API
+  goal: 'Backend half of O1 (split 2026-10-18: dev_app may not edit backend/). Only backend/ and docs/.
+    Organization and Site SQLAlchemy models (Site: name, optional lat/lon) through an Alembic migration
+    (Alembic comes with D1). Seed the organization "Syracuse University" with zero sites (no invented demo
+    sites). Two authenticated routes, each declaring its role with the existing require_role dependency
+    (backend/app/auth.py): GET /api/organizations/{id} and GET /api/organizations/{id}/sites (sites with
+    nullable coordinates). backend/tests cover the seed, the empty site list, an unknown organization (404)
+    and the auth requirement; ruff, mypy and pytest pass.
+
+    '
+  licence: 'SQLAlchemy and Alembic (MIT), FastAPI and Pydantic (MIT): already used or added by D1.
+
+    '
+  status: todo
+  depends_on:
+  - D1
 - id: A7a
   area: core
   title: Region of interest API
@@ -650,7 +670,8 @@ tasks:
     bundle with a far layer through page.route (fixture under web/e2e/, a few hundred points, written
     by the test or a tiny generator script), then break the far arrays and assert the warning, the object
     count and the missing toggle as today. Remove that test.skip; keep the existsSync-based skips of the
-    other real-data tests. The e2e runs in CI.
+    other real-data tests. The tester''s e2e gate runs it (Playwright from a clean checkout
+    with real local data); the Codex sandbox cannot open a port, so dev_app does not run e2e itself.
 
     '
   status: blocked
@@ -665,24 +686,20 @@ tasks:
     match'
 - id: O1
   area: app
-  title: Organization map
-  goal: 'An organization page with a MapLibre map of the organization''s sites as markers; clicking a
-
-    site opens its inspections. Only real sites, no invented demo sites: a site without
-
-    coordinates is listed beside the map, not placed. Seed the organization "Syracuse University"
-
-    with no sites (the page then says there are no sites yet). i18n RU/KK/EN; unit tests; tester
-
-    screenshot of the organization page.
+  title: Organization map (web)
+  goal: 'Web part only (split 2026-10-18: the backend half is O1a). An organization page (e.g. /org/:id)
+    with a MapLibre map (maplibre-gl, BSD-3-Clause; a plain style or a free no-key basemap that works
+    offline in tests) of the organization''s sites from the O1a API as markers; clicking a site opens its
+    inspections. Only real sites, no invented demo sites: a site without coordinates is listed beside the
+    map, not placed. With no sites the page says there are no sites yet (Syracuse University, seeded by
+    O1a). i18n RU/KK/EN (keys.test.ts passes); Vitest tests for marker vs. side-list placement, the empty
+    state and click navigation; tester screenshot of the organization page.
 
     '
   status: blocked
-  blocked_reason: 'needs a split before it can be planned: the work spans folders of more than one developer
-    (The goal needs a real organization and its sites from the backend. The current backend (backend/app:
-    auth, health, runs, settings) has no Organization or Site model and no API for them. Seeding "Syracuse
-    University" means a database change: an Alembic migration plus seed data. Serving it needs authenticated
-    API routes that declare a role (CLAUDE.md). All of that lives in backend/, which is outside dev_app'''
+  blocked_reason: waits for O1a (Organizations and sites API); back to todo when it merges
+  depends_on:
+  - O1a
 - id: U2
   area: app
   title: Upload a video in the web app
