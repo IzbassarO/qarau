@@ -150,6 +150,11 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   pre-push hook lets a push to `dev` through only if it fast-forwards and changes nothing but
   `devteam/backlog.yaml`. The main checkout, when on `dev`, is then fast-forwarded
   (`--autostash`, your local edits stay). Never reset `backlog.yaml` by hand.
+- A status commit never reaches CI untested: before the push, `gates.backlog_check` runs the
+  `backlog`-marked tests on the backlog it would push (`DEVTEAM_BACKLOG`). If they fail, nothing
+  is pushed, the status stays local (shown as drift) and a warning names the failing test
+  (2026-10-18: `backlog: A9-fix done (#41)` turned dev CI red). Backlog tests check structure
+  and order, never a status Kerege writes.
 - `devteam run` refuses to start while the backlog's status fields differ from `origin/dev`
   (it prints them; after a crash use `devteam resume`). The brain skips any task whose
   `devteam/<id>` branch is already merged into `dev`.

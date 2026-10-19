@@ -24,6 +24,9 @@ dev = ["pytest>=8", "ruff>=0.6"]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.pytest.ini_options]
+markers = ["backlog: checks of the real backlog, run before every status commit (gates.backlog_check)"]
+
 [tool.ruff]
 line-length = 100
 

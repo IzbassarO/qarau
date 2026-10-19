@@ -5,6 +5,7 @@ one developer instead of the run, quiet dashboard on closed connections."""
 import copy
 import io
 import json
+import os
 import socket
 import sqlite3
 import subprocess
@@ -18,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from conftest import CFG, HERE, remote_of
+from conftest import CFG, HERE, git, real_backlog, remote_of
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from devteam import continuous as C
@@ -30,8 +31,6 @@ from devteam.agents import FakeAgents
 from devteam.graph import Team, build_graph
 from devteam.real import RealAgents, e2e_rule
 from devteam.supervise import TaskHalted
-
-REAL = yaml.safe_load((HERE / "backlog.yaml").read_text())["tasks"]
 
 
 class Fast(FakeAgents):
@@ -63,17 +62,52 @@ def only(tid, dev):
 
 
 # --- 1. dev CI: the real-backlog test survives every status Kerege writes -----------------------
-@pytest.mark.parametrize("status", ["todo", "done", "blocked", "in_progress"])
-def test_real_backlog_test_does_not_depend_on_task_status(monkeypatch, tmp_path, status):
-    """778e072 (`backlog: A9-fix done (#41)`) turned dev red: the test asserted live statuses."""
-    import test_supervisor as TS
-
+@pytest.mark.parametrize("status", ["done", "blocked", "in_progress"])
+def test_backlog_check_passes_whatever_status_kerege_writes(tmp_path, status):
+    """778e072 (`backlog: A9-fix done (#41)`) turned dev red: a test asserted live statuses.
+    The configured check (gates.backlog_check, every `backlog`-marked test) on the real backlog
+    with every status changed, as a status commit would push it."""
     data = yaml.safe_load((HERE / "backlog.yaml").read_text())
     for t in data["tasks"]:
         t["status"] = status
-    (tmp_path / "backlog.yaml").write_text(yaml.safe_dump(data))
-    monkeypatch.setattr(TS, "HERE", tmp_path)
-    TS.test_real_backlog_split_a7_p3e_and_order()
+    path = tmp_path / "backlog.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    cmd = yaml.safe_load((HERE / "config.yaml").read_text())["gates"]["backlog_check"]
+    r = subprocess.run(
+        cmd, shell=True, cwd=HERE, env={**os.environ, "DEVTEAM_BACKLOG": str(path)},
+        capture_output=True, text=True,
+    )  # fmt: skip
+    assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-1000:]
+    assert " passed" in r.stdout and "deselected" in r.stdout  # only the backlog tests ran
+
+
+NO_T001_DONE = (
+    f'{sys.executable} -c "import os, sys, yaml; t = yaml.safe_load(open(os.environ['
+    "'DEVTEAM_BACKLOG']))['tasks']; sys.exit('FAILED test_x: T-001 is done' if any(x['id'] == "
+    "'T-001' and x['status'] == 'done' for x in t) else 0)\""
+)
+
+
+def test_a_status_commit_that_fails_the_backlog_check_is_not_pushed(repo):
+    gates = {**copy.deepcopy(CFG["gates"]), "backlog_check": NO_T001_DONE}
+    team, _ = make(repo, fake=False, gates=gates)
+    git(repo, "checkout", "-q", "-b", "work")  # the dev checkout fast-forward is tested elsewhere
+
+    def dev():
+        team.fetch("dev")
+        return yaml.safe_load(team.git("show", f"{team.remote_name}/dev:devteam/backlog.yaml"))[
+            "tasks"
+        ]
+
+    team.update_task("T-002", status="done")
+    assert team.push_status("T-002", "backlog: T-002 done") == "backlog: T-002 done"
+    assert next(t for t in dev() if t["id"] == "T-002")["status"] == "done"
+    team.update_task("T-001", status="done")
+    assert team.push_status("T-001", "backlog: T-001 done") is None  # refused, not pushed
+    assert next(t for t in dev() if t["id"] == "T-001")["status"] == "todo"
+    assert task(team, "T-001")["status"] == "done"  # kept locally, shown as drift
+    log = (team.home / "events.log").read_text()
+    assert "`backlog: T-001 done` not pushed to dev" in log and "T-001 is done" in log
 
 
 # --- 2. e2e gate --------------------------------------------------------------------------------
@@ -146,7 +180,7 @@ def test_web_developer_is_told_the_tester_runs_e2e():
         team, CFG["developers"]["dev_app"]
     )
     assert e2e_rule(team, CFG["developers"]["dev_pipeline"]) == ""
-    a5 = next(t for t in REAL if t["id"] == "A5-fix")
+    a5 = next(t for t in real_backlog() if t["id"] == "A5-fix")
     assert "e2e gate" in a5["goal"] and "runs in CI" not in a5["goal"]
 
 
@@ -173,7 +207,7 @@ def test_round_watch_counts_cpu_work_as_progress():
 def test_a_task_sets_its_own_round_limit():
     cfg = {"supervisor": {"max_round_min": 60}}
     assert SV.limits(cfg)["max_round_min"] == 60 and SV.limits(cfg)["max_idle_min"] == 20
-    p3e = next(t for t in REAL if t["id"] == "P3e")
+    p3e = next(t for t in real_backlog() if t["id"] == "P3e")
     assert SV.limits(cfg, p3e)["max_round_min"] == 180
     assert SV.limits(cfg, p3e)["max_tokens_per_task"] == SV.DEFAULTS["max_tokens_per_task"]
 
@@ -274,15 +308,16 @@ def test_codex_counter_keeps_input_and_output_apart(tmp_path):
 
 
 # --- 4. O1 split ----------------------------------------------------------------------------
+@pytest.mark.backlog
 def test_o1_is_split_into_a_backend_task_and_the_web_page():
-    by = {t["id"]: t for t in REAL}
+    by = {t["id"]: t for t in real_backlog()}
     o1a, o1 = by["O1a"], by["O1"]
     assert (
         o1a["area"] == "core" and "backend/" in o1a["goal"] and "Syracuse University" in o1a["goal"]
     )
     assert "require_role" in o1a["goal"] and "Alembic" in o1a["goal"]
     assert o1["area"] == "app" and o1["depends_on"] == ["O1a"]
-    core = [t["id"] for t in REAL if t["area"] == "core"]
+    core = [t["id"] for t in by.values() if t["area"] == "core"]
     assert core.index("O1a") == core.index("S1") + 1
     assert GR.outside_paths([o1a["goal"]], "dev_pipeline", CFG, o1a) == []
     assert GR.outside_paths([o1["goal"]], "dev_app", CFG, o1) == []

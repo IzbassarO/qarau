@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from conftest import CFG, HERE, git, remote_of
+from conftest import CFG, HERE, git, real_backlog, remote_of
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from devteam import cli, costs
@@ -497,8 +497,9 @@ def test_writable_data_folder_may_only_grow(repo, change):
 # --- 5, 6, 10: the real backlog -----------------------------------------------------------------
 # Kerege's status commits (`backlog: A9-fix done (#41)`) go straight to dev, so these tests check
 # structure and queue order only, never a status Kerege changes (that turned dev CI red at 778e072).
+@pytest.mark.backlog
 def test_real_backlog_split_a7_p3e_and_order():
-    tasks = yaml.safe_load((HERE / "backlog.yaml").read_text())["tasks"]
+    tasks = real_backlog()
     by = {t["id"]: t for t in tasks}
     for t in tasks:  # every dependency exists
         assert set(t.get("depends_on") or []) <= set(by), t["id"]

@@ -665,8 +665,10 @@ class Team:
         """Commits this task's status fields onto origin/dev and pushes them straight to dev:
         dev holds the record (a status kept only in the working copy got lost on 2026-10-16).
         Built on a fresh origin/dev each try, so a race costs a retry; never forced or rebased.
-        The pre-push hook lets through only a fast-forward that changes backlog.yaml alone."""
-        base, rn, err = self.cfg["base_branch"], self.remote_name, None
+        The pre-push hook lets through only a fast-forward that changes backlog.yaml alone.
+        The backlog tests run on the new backlog first: if they fail, nothing is pushed (the
+        status stays in the working copy) and the owner is told why. Returns None then."""
+        base, rn, err, refused = self.cfg["base_branch"], self.remote_name, None, ""
         with self._lock:  # no emit() inside: it takes the same lock
             mine = next(t for t in self.load_backlog() if t["id"] == task_id)
             for attempt in range(3):
@@ -681,6 +683,8 @@ class Team:
                             else:
                                 t.pop(k, None)
                 text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100)
+                if refused := self.backlog_check(text):
+                    break
                 blob = self.git("hash-object", "-w", "--stdin", input=text).strip()
                 env = {"GIT_INDEX_FILE": str(self.home / "status.index")}
                 self.git("read-tree", parent, env=env)
@@ -703,14 +707,44 @@ class Team:
                         raise
                 finally:
                     self._status_commit = None
-            if not self.fake and self.git("branch", "--show-current").strip() == base:
+            if refused:
+                pass  # nothing was pushed: the checkout stays as it is
+            elif not self.fake and self.git("branch", "--show-current").strip() == base:
                 try:  # keep the main checkout on dev in step; local edits ride along
                     self.git("merge", "-q", "--ff-only", "--autostash", f"{rn}/{base}")
                 except RuntimeError as e:
                     err = e
+        if refused:
+            self.emit(
+                "brain",
+                f"WARNING: `{message}` not pushed to {base}: the backlog tests fail on it, "
+                f"so it would turn CI red. Fix the test or the backlog by hand:\n{refused}",
+                task=task_id,
+            )
+            return None
         if err:
             self.emit("brain", f"could not fast-forward the checkout: {err}; pull by hand")
         return message
+
+    def backlog_check(self, text: str) -> str:
+        """gates.backlog_check on the backlog a status commit would push (DEVTEAM_BACKLOG):
+        the failing output, or "" (owner, 2026-10-18: 778e072 `backlog: A9-fix done (#41)`
+        turned dev CI red). Not run_proc: it is called under self._lock."""
+        cmd = self.cfg["gates"].get("backlog_check")
+        if not cmd or self.fake:
+            return ""
+        path = self.home / "backlog-check.yaml"
+        path.write_text(text)
+        r = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=self.root / "devteam",
+            env={**os.environ, "DEVTEAM_BACKLOG": str(path)},
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        return "" if r.returncode == 0 else self.redact((r.stdout + r.stderr)[-1500:])
 
     def backlog_drift(self) -> list[str]:
         """Status fields that differ between the backlog file and the one on origin/dev."""

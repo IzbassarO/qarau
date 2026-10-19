@@ -45,6 +45,9 @@ gates:
     when_paths: [web/]
     command: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_E2E_PORT={port} QARAU_RUNS_DIR={data}/runs pnpm exec playwright test --reporter=list
     timeout_min: 20
+  # Run on the backlog every status commit would push to dev, before it is pushed: a failure
+  # keeps the status local and warns (778e072 `backlog: A9-fix done (#41)` turned dev CI red).
+  backlog_check: uv run --quiet pytest -q -m backlog -p no:cacheprovider tests
 daily_budget_usd: 3.0     # API spend cap (brain + tester); subscriptions are not counted
 
 # `devteam run --continuous` (Kerege): per developer, plan the next task when one ends.

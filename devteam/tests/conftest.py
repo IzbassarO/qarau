@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -11,6 +12,13 @@ HERE = Path(__file__).parents[1]
 CFG = yaml.safe_load((HERE / "config.yaml").read_text())
 CFG["gates"]["benchmark"]["command"] = EMPTY_BENCH  # tests that need numbers set their own
 CFG["gates"]["e2e"]["command"] = "echo e2e on port {port}"  # never a real Playwright run
+CFG["gates"]["backlog_check"] = ""  # tests that need it set their own
+
+
+def real_backlog() -> list[dict]:
+    """devteam/backlog.yaml, or the one a status commit is about to push (DEVTEAM_BACKLOG)."""
+    path = os.environ.get("DEVTEAM_BACKLOG") or HERE / "backlog.yaml"
+    return yaml.safe_load(Path(path).read_text())["tasks"]
 
 
 def git(repo, *args):
