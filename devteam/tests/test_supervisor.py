@@ -96,7 +96,8 @@ def test_token_counters_read_what_the_tools_print(tmp_path):
 
 
 def test_round_watch_limits():
-    lim = {"max_tokens_per_round": 100, "max_tokens_per_task": 150, "max_round_min": 1}
+    lim = {**SV.DEFAULTS, "max_tokens_per_round": 100, "max_tokens_per_task": 150}
+    lim["max_round_min"] = 1
     counter = SimpleNamespace(n=0, feed=lambda chunk: counter.n)
     w = SV.RoundWatch(counter, 0, lim)
     assert w(b"", 10) == ""
@@ -104,7 +105,7 @@ def test_round_watch_limits():
     assert "this round used" in w(b"", 10) and "limit 0.0001 M per round" in w(b"", 10)
     counter.n = 60
     assert "the task used" in SV.RoundWatch(counter, 90, lim)(b"", 10)
-    assert "without a new commit (limit 1 min)" in SV.RoundWatch(counter, 0, lim)(b"", 61)
+    assert "the round ran 1 min (limit 1 min per round" in SV.RoundWatch(counter, 0, lim)(b"x", 61)
 
 
 FAKE_CLAUDE = """#!{py}
@@ -494,6 +495,8 @@ def test_writable_data_folder_may_only_grow(repo, change):
 
 
 # --- 5, 6, 10: the real backlog -----------------------------------------------------------------
+# Kerege's status commits (`backlog: A9-fix done (#41)`) go straight to dev, so these tests check
+# structure and queue order only, never a status Kerege changes (that turned dev CI red at 778e072).
 def test_real_backlog_split_a7_p3e_and_order():
     tasks = yaml.safe_load((HERE / "backlog.yaml").read_text())["tasks"]
     by = {t["id"]: t for t in tasks}
@@ -501,19 +504,20 @@ def test_real_backlog_split_a7_p3e_and_order():
         assert set(t.get("depends_on") or []) <= set(by), t["id"]
     assert by["A7a"]["area"] == "core" and "backend/" in by["A7a"]["goal"]
     assert by["A7"]["depends_on"] == ["A7a"] and by["A7"]["branch"] == "devteam/A7"
-    assert by["A7"]["status"] == "blocked"  # back to todo when A7a merges (unblock_ready)
-    assert by["P3e"]["status"] == "todo" and by["P3e"]["writable"] == ["data/runs"]
-    assert "P4a-2" not in (by["S1"].get("depends_on") or []) and by["S1"]["status"] == "todo"
+    assert by["P3e"]["writable"] == ["data/runs"]
+    assert "P4a-2" not in (by["S1"].get("depends_on") or [])
     assert by["U2"]["area"] == "app" and by["U2"]["depends_on"] == ["S1"]
     assert by["D2"]["area"] == "core" and by["D2"]["depends_on"] == ["S1", "U2"]
     assert "U2" in by["A8"]["depends_on"]  # no new viewer features before upload
-    core_todo = [
-        t["id"] for t in tasks if t["area"] == "core" and t["status"] in ("todo", "blocked")
-    ]
-    assert core_todo[:6] == ["P3e", "P5a", "P4a-1b", "D1", "S1", "A7a"]
-    app_todo = [t["id"] for t in tasks if t["area"] == "app" and t["status"] == "todo"]
-    assert app_todo[:4] == ["A9-fix", "A5-fix", "O1", "U2"]  # the historic violations first
+
+    def order(area, ids):
+        return [t["id"] for t in tasks if t["area"] == area and t["id"] in ids]
+
+    core = ["P3e", "P5a", "P4a-1b", "D1", "S1", "O1a", "A7a"]
+    assert order("core", core) == core
+    app = ["A9-fix", "A5-fix", "O1", "U2", "A8"]  # the historic violations first
+    assert order("app", app) == app
     assert by["P4a-1b"]["area"] == "core" and "MODAL_TOKEN_ID" in by["P4a-1b"]["goal"]
-    assert by["P4a-2"]["status"] == "blocked"  # until the owner says the Modal account is ready
+    assert "Modal account" in by["P4a-2"].get("blocked_reason", "")  # until the owner says so
     # A7a's own criteria-shaped goal stays inside dev_pipeline's folders
     assert outside_paths([by["A7a"]["goal"]], "dev_pipeline", CFG, by["A7a"]) == []
