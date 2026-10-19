@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from devteam import gates as G
 from devteam import supervise as SV
 from devteam.supervise import TaskHalted
 
+TOOL_RETRY_S = 30  # a developer CLI that is gone (mid self-update) is looked up again once
 RETRY_WAITS = (15, 60, 180)  # seconds before each retry of a transient API failure
 # Prompt cache: brain calls come minutes to an hour apart, tester rounds of one task too, so the
 # 1-hour TTL (writes cost 2x input, reads ~0.05-0.1x: config `price_cache_read`).
@@ -205,6 +207,28 @@ class RealAgents:
     """v1: brain (API), dev_pipeline (Claude Code headless, subscription), tester (API)."""
 
     TOOLS = {"claude", "codex"}  # developer tools implemented
+
+    def __init__(self):
+        # absolute paths at run start; checked again before every round (tool())
+        self.paths = {t: shutil.which(t) for t in self.TOOLS}
+
+    def tool(self, team, name: str) -> str:
+        """The developer CLI's absolute path, checked before each round. Gone (2026-10-18 23:39:
+        `claude` vanished in a failed self-update and the run stopped): looked up on PATH again,
+        then once more after TOOL_RETRY_S; still gone -> the round crashes, which pauses only
+        this developer (continuous mode) and the round resumes next run."""
+        for wait in (0, TOOL_RETRY_S):
+            if wait:
+                team.stopping.wait(wait)
+            p = self.paths.get(name)
+            if not (p and os.access(p, os.X_OK)):
+                p = self.paths[name] = shutil.which(name)
+            if p:
+                return os.path.abspath(p)
+        raise RuntimeError(
+            f"`{name}` not found on PATH (checked again after {TOOL_RETRY_S} s): reinstall it, "
+            "then `devteam resume`"
+        )
 
     # --- brain ---------------------------------------------------------------------------
     def plan(self, team, todo, feedback=None, devs=None):
@@ -405,8 +429,9 @@ Rules:
         if not team.secrets.get("CLAUDE_CODE_OAUTH_TOKEN"):
             raise RuntimeError("CLAUDE_CODE_OAUTH_TOKEN is missing in devteam/.env")
         env["CLAUDE_CODE_OAUTH_TOKEN"] = team.secrets["CLAUDE_CODE_OAUTH_TOKEN"]
+        env["QARAU_RUNS_DIR"] = str(team.runs_dir)
         cmd = [
-            "claude",
+            self.tool(team, "claude"),
             "-p",
             "--output-format",
             "stream-json",  # usage per API message: the supervisor counts tokens live
@@ -470,7 +495,16 @@ Rules:
             if k not in ("OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL")
             and not paid_service_key(k)
         }
-        cmd = ["codex", "exec", "--json", "--sandbox", "workspace-write", "-C", s["worktree"]]
+        env["QARAU_RUNS_DIR"] = str(team.runs_dir)
+        cmd = [
+            self.tool(team, "codex"),
+            "exec",
+            "--json",
+            "--sandbox",
+            "workspace-write",
+            "-C",
+            s["worktree"],
+        ]
         cmd += ["--add-dir", str(team.home / "scratch" / s["task"]["id"])]  # writable too
         for d in s["task"].get("writable") or []:
             cmd += ["--add-dir", str(team.root / d)]
@@ -651,6 +685,12 @@ def writable_rule(team, task: dict) -> str:
     return (
         f", except that this task may ADD new files and folders under {dirs} (never change, "
         "move or delete an existing one there: the orchestrator checks and blocks the task)"
+        + (
+            f". Viewer runs go to $QARAU_RUNS_DIR ({team.runs_dir}), never anywhere else: the "
+            "tester's viewer screenshots read exactly that directory"
+            if team.writes_runs(task)
+            else ""
+        )
     )
 
 

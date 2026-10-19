@@ -111,9 +111,17 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   toward "2 tasks in a row blocked".
 - A developer whose 2 tasks in a row end blocked pauses for the rest of the run (it is said in
   the events and the stop reason); the others keep going, and the run ends only when no
-  developer can take a task.
+  developer can take a task. A crash (any error in a step) pauses only that developer the same
+  way; its round stays in `.state/continuous.json` and the next run resumes it first.
+- `claude` / `codex` are resolved to absolute paths at run start and checked before every
+  round; a missing one is looked up on PATH again, then once more after 30 s, then the round
+  crashes (2026-10-18 23:39: `claude` vanished in a failed self-update and stopped the run).
 - `writable: [data/runs]` on a task lets its developer add new files there (extra `--add-dir`);
   if a file that was there when the task started changes or disappears, the task is blocked.
+- Runs dir: `config.yaml` → `runs_dir` (default `data/runs` of the main checkout) is the one
+  place viewer runs live. Every developer gets it as `QARAU_RUNS_DIR`; commands use
+  `{runs_dir}` (e2e, dev_app screenshots). A task with `runs_dir` in its `writable` (P3e) is
+  screenshot on that directory, with no quick benchmark and no `dev-*` comparison.
 - Prompt caching: the brain's and tester's system prompts and their stable context (CLAUDE.md,
   plans, benchmark notes, file list; the task, plan and criteria) are cached with the 1-hour
   TTL; the costs log records cache reads and writes, priced with `price_cache_read` (writes
@@ -148,8 +156,14 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   branch, pr, done_at`, `blocked_reason`) straight to `dev` as `backlog: P3 done (#18)`:
   built on a fresh `origin/dev`, retried on a race, never forced, never to `main`. The
   pre-push hook lets a push to `dev` through only if it fast-forwards and changes nothing but
-  `devteam/backlog.yaml`. The main checkout, when on `dev`, is then fast-forwarded
-  (`--autostash`, your local edits stay). Never reset `backlog.yaml` by hand.
+  `devteam/backlog.yaml`. The main checkout, when on `dev`, is then fast-forwarded to the
+  commit just pushed (`--autostash`, your local edits stay), so no status stays uncommitted
+  there; claiming a task (`in_progress`) is pushed the same way. Never reset `backlog.yaml` by
+  hand.
+- A crash right after the orchestrator merged `dev` into a task branch (before the step was
+  checkpointed) is recognised on resume: a fast-forward or a clean merge of `dev` (its tree
+  equals git's own merge) is accepted as the orchestrator's, so dev's changes are never
+  counted as the developer's (P3e, 2026-10-18: "protected: backlog.yaml").
 - A status commit never reaches CI untested: before the push, `gates.backlog_check` runs the
   `backlog`-marked tests on the backlog it would push (`DEVTEAM_BACKLOG`). If they fail, nothing
   is pushed, the status stays local (shown as drift) and a warning names the failing test
