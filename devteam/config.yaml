@@ -37,10 +37,22 @@ gates:
     quick_only: [notre-dame, room]
     # A task may set its own `quick_only` in the backlog (e.g. videos its screenshots need).
     quick_min: 11
+  # Playwright e2e, run by the tester on its clean checkout for tasks that change web/: a fresh
+  # Vite on a free port ({port} -> QARAU_E2E_PORT; web/playwright.config.ts never reuses a server),
+  # stopped after with everything the step started. A Codex sandbox cannot open a port (listen
+  # EPERM), so developers never run e2e themselves (A5-fix, 2026-10-18).
+  e2e:
+    when_paths: [web/]
+    command: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_E2E_PORT={port} QARAU_RUNS_DIR={data}/runs pnpm exec playwright test --reporter=list
+    timeout_min: 20
+  # Run on the backlog every status commit would push to dev, before it is pushed: a failure
+  # keeps the status local and warns (778e072 `backlog: A9-fix done (#41)` turned dev CI red).
+  backlog_check: uv run --quiet pytest -q -m backlog -p no:cacheprovider tests
 daily_budget_usd: 3.0     # API spend cap (brain + tester); subscriptions are not counted
 
 # `devteam run --continuous` (Kerege): per developer, plan the next task when one ends.
-# Stops at: no plannable task, daily budget, 2 tasks in a row blocked, these limits, Ctrl+C.
+# A developer with 2 tasks in a row blocked pauses; the run stops when no developer can take a
+# task, at the daily budget, these limits, Ctrl+C.
 continuous:
   max_hours: 10              # then a clean stop (current steps finish, the next run resumes)
   max_tasks: 8               # tasks taken per run; then no new ones, running ones finish
@@ -53,7 +65,8 @@ continuous:
 supervisor:
   max_tokens_per_round: 8000000   # one developer round
   max_tokens_per_task: 12000000   # all rounds of the task in this run (resume starts again)
-  max_round_min: 60               # a round commits only when it ends: the longest without a commit
+  max_round_min: 60               # longest round; a task may set its own (backlog `supervisor:`)
+  max_idle_min: 20                # no output from the developer and no CPU work in its processes
 
 # provider: anthropic for now. Prices are $ per 1M tokens, used for the cost report.
 models:

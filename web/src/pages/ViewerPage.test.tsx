@@ -126,6 +126,30 @@ it.each(['', '&point=0'])(
   },
 );
 
+it('switches /viewer/aegviidu from Orbit to Observer with its mode button', async () => {
+  const bundle = { ...createDemo('en').bundle, runId: 'aegviidu' };
+  vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+  vi.spyOn(bundleApi, 'loadBundle').mockResolvedValue(bundle);
+  const setSensitivity = vi.spyOn(ViewerEngine.prototype, 'setSensitivity');
+  renderViewer('aegviidu');
+  const observer = await screen.findByRole('button', { name: LANGS.en['viewer.mode.observer'] });
+  await waitFor(() => expect(setSensitivity).toHaveBeenCalled());
+  const engine = setSensitivity.mock.contexts.at(-1) as ViewerEngine;
+  expect(engine.observerMode).toBe(false);
+  fireEvent.click(observer);
+  expect(engine.observerMode).toBe(true);
+  expect(engine.controls.enabled).toBe(false);
+  expect(observer.getAttribute('aria-pressed')).toBe('true');
+  expect(
+    screen
+      .getByRole('button', { name: LANGS.en['viewer.mode.orbit'] })
+      .getAttribute('aria-pressed'),
+  ).toBe('false');
+  expect(screen.getByTestId('observer-minimap')).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toBe(LANGS.en['canvas.observerHint']);
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
 it('moves immediately after clicking third-person view and lets V return to first person', () => {
   const setSensitivity = vi.spyOn(ViewerEngine.prototype, 'setSensitivity');
   renderViewer('demo', '?mode=observer');

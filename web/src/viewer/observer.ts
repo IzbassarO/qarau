@@ -44,6 +44,13 @@ export interface ObserverContext {
 }
 
 const PITCH_LIMIT = (89 * Math.PI) / 180;
+const DEFAULT_DISTANCE_FACTOR = 0.8;
+// Six percent of the scene diagonal per second keeps short WASD presses visible.
+const MIN_SPEED_DIAGONAL_FRACTION = 0.06;
+// Limit normal travel to half a scene per second, and cap very large scenes before boost.
+const MAX_SPEED_DIAGONAL_FRACTION = 0.5;
+const MAX_DEFAULT_SPEED = 100;
+const DEFAULT_BOOST_MULTIPLIER = 4;
 const WORLD_UP = new Vector3(0, 0, 1);
 const clampPitch = (pitch: number) => Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, pitch));
 const finite = (value: number | undefined, fallback: number) =>
@@ -112,15 +119,23 @@ export function step(
   const diagonal = ctx.bounds.isEmpty()
     ? 1
     : Math.max(ctx.bounds.getSize(new Vector3()).length(), 1e-6);
-  const minSpeed = Math.max(0, finite(ctx.minSpeed, diagonal * 0.005));
-  const maxSpeed = Math.max(minSpeed, finite(ctx.maxSpeed, diagonal * 0.5));
+  const defaultMaxSpeed = Math.min(diagonal * MAX_SPEED_DIAGONAL_FRACTION, MAX_DEFAULT_SPEED);
+  // Nearest-point speed vanishes on geometry; A9's 0.5%-diagonal floor still barely moved.
+  // Cap the floor too, so a huge scene cannot force speed above the default maximum.
+  const minSpeed = Math.max(
+    0,
+    finite(ctx.minSpeed, Math.min(diagonal * MIN_SPEED_DIAGONAL_FRACTION, defaultMaxSpeed)),
+  );
+  const maxSpeed = Math.max(minSpeed, finite(ctx.maxSpeed, defaultMaxSpeed));
   const distance = nearestPointDistance(ctx.points, state.position);
-  const factor = Math.max(0, finite(ctx.distanceFactor, 0.8));
+  const factor = Math.max(0, finite(ctx.distanceFactor, DEFAULT_DISTANCE_FACTOR));
   const adaptiveSpeed = Math.min(
     maxSpeed,
     Math.max(minSpeed, Number.isFinite(distance) ? distance * factor : maxSpeed),
   );
-  const speed = adaptiveSpeed * (input.boost ? Math.max(1, finite(ctx.boostMultiplier, 4)) : 1);
+  const speed =
+    adaptiveSpeed *
+    (input.boost ? Math.max(1, finite(ctx.boostMultiplier, DEFAULT_BOOST_MULTIPLIER)) : 1);
   const forwardInput = Number(!!input.forward) - Number(!!input.backward);
   const strafeInput = Number(!!input.right) - Number(!!input.left);
   const verticalInput = Number(!!input.up) - Number(!!input.down);

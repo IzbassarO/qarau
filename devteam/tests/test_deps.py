@@ -4,8 +4,9 @@ earlier branch, dev screenshots to compare with, scratch output outside the repo
 import socket
 from pathlib import Path
 
+import pytest
 import yaml
-from conftest import CFG, git, remote_of
+from conftest import CFG, git, real_backlog, remote_of
 from test_fixes import Quick, dev_backlog, make, p, statuses
 
 from devteam import gates as G
@@ -158,8 +159,9 @@ def test_dev_screenshots_use_devs_cached_benchmark(repo, tmp_path):
     assert G.dev_screenshots(team, s, ["/"]) == ([], [])
 
 
+@pytest.mark.backlog
 def test_real_backlog_dependencies_name_existing_tasks():
-    tasks = yaml.safe_load((Path(__file__).parents[1] / "backlog.yaml").read_text())["tasks"]
+    tasks = real_backlog()
     ids = {t["id"] for t in tasks}
     for t in tasks:
         assert set(t.get("depends_on") or []) <= ids - {t["id"]}, t["id"]

@@ -69,6 +69,7 @@ FORBIDDEN_PUSH = {
 RELEASE_TAG = re.compile(r"refs/tags/release-\d{4}-\d{2}-\d{2}(\.\d+)?")  # pushed, never moved
 FORBIDDEN_BRANCH = {"-D", "-d", "--delete", "-M", "-m", "--move", "-f", "--force"}
 POLL_S = 5  # a running step is checked this often (limits, `devteam stop <task>`)
+CPU_EVERY_S = 60  # supervisor: how often a round's CPU use is sampled
 OWNER_STOP = "stopped by the owner"
 CONFLICT = re.compile(rb"^(<{7}|>{7})( |$)", re.M)  # markers git leaves (not "=======": markdown)
 
@@ -101,9 +102,18 @@ def is_protected(path: str) -> bool:
 VISUAL = re.compile(r"\b(viewer|screenshots?)\b", re.I)  # criteria the tester must see
 
 
+def e2e_output(out: str) -> str:
+    """Playwright's list reporter: every test's line (passed, failed or skipped: the judge must
+    see that a test ran rather than skipped) and the summary, not the server log."""
+    lines = out.splitlines()
+    tests = [x.strip() for x in lines if " › " in x]
+    return "\n".join(tests + [x for x in lines[-40:] if " › " not in x])[-6000:]
+
+
 def limit_hint(task_id: str) -> str:
     return (
-        ". Raise the `supervisor` limits in devteam/config.yaml or split the task, then "
+        ". Raise the `supervisor` limits in devteam/config.yaml (or the task's own `supervisor:` "
+        "in backlog.yaml) or split the task, then "
         f"`devteam resume {task_id}`"
     )
 
@@ -356,7 +366,8 @@ class Team:
         ends (any way), everything it started is killed; a port it left listening is a warning
         (owner rule: no agent leaves a server running).
         Every POLL_S: `devteam stop <task>` for the task of this thread, and `watch(new stdout
-        bytes, seconds so far)`; a reason from either kills the step: TaskHalted."""
+        bytes, seconds so far, CPU seconds by pid every CPU_EVERY_S or None)`; a reason from
+        either kills the step: TaskHalted."""
         marker, task, halted = procs.new_marker(), getattr(self._ctx, "task", ""), ""
         env = {**(os.environ if env is None else env), procs.MARKER: marker}
         # Output goes to files, not pipes: a server the step leaves in the background keeps a
@@ -376,7 +387,7 @@ class Team:
                 self._procs.add(p)
             if input:
                 threading.Thread(target=_feed, args=(p.stdin, input), daemon=True).start()
-            note, t0, pos = "", time.monotonic(), 0
+            note, t0, pos, cpu_at = "", time.monotonic(), 0, -CPU_EVERY_S
             try:
                 while True:
                     try:
@@ -394,7 +405,10 @@ class Team:
                         while chunk := os.pread(fo.fileno(), 1 << 20, pos + len(new)):
                             new += chunk
                         pos += len(new)
-                        if halted := watch(new, secs):
+                        cpu = None
+                        if secs - cpu_at >= CPU_EVERY_S:
+                            cpu, cpu_at = procs.cpu_times(p.pid, marker), secs
+                        if halted := watch(new, secs, cpu):
                             break
             finally:
                 with self._lock:
@@ -651,8 +665,10 @@ class Team:
         """Commits this task's status fields onto origin/dev and pushes them straight to dev:
         dev holds the record (a status kept only in the working copy got lost on 2026-10-16).
         Built on a fresh origin/dev each try, so a race costs a retry; never forced or rebased.
-        The pre-push hook lets through only a fast-forward that changes backlog.yaml alone."""
-        base, rn, err = self.cfg["base_branch"], self.remote_name, None
+        The pre-push hook lets through only a fast-forward that changes backlog.yaml alone.
+        The backlog tests run on the new backlog first: if they fail, nothing is pushed (the
+        status stays in the working copy) and the owner is told why. Returns None then."""
+        base, rn, err, refused = self.cfg["base_branch"], self.remote_name, None, ""
         with self._lock:  # no emit() inside: it takes the same lock
             mine = next(t for t in self.load_backlog() if t["id"] == task_id)
             for attempt in range(3):
@@ -667,6 +683,8 @@ class Team:
                             else:
                                 t.pop(k, None)
                 text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100)
+                if refused := self.backlog_check(text):
+                    break
                 blob = self.git("hash-object", "-w", "--stdin", input=text).strip()
                 env = {"GIT_INDEX_FILE": str(self.home / "status.index")}
                 self.git("read-tree", parent, env=env)
@@ -689,14 +707,44 @@ class Team:
                         raise
                 finally:
                     self._status_commit = None
-            if not self.fake and self.git("branch", "--show-current").strip() == base:
+            if refused:
+                pass  # nothing was pushed: the checkout stays as it is
+            elif not self.fake and self.git("branch", "--show-current").strip() == base:
                 try:  # keep the main checkout on dev in step; local edits ride along
                     self.git("merge", "-q", "--ff-only", "--autostash", f"{rn}/{base}")
                 except RuntimeError as e:
                     err = e
+        if refused:
+            self.emit(
+                "brain",
+                f"WARNING: `{message}` not pushed to {base}: the backlog tests fail on it, "
+                f"so it would turn CI red. Fix the test or the backlog by hand:\n{refused}",
+                task=task_id,
+            )
+            return None
         if err:
             self.emit("brain", f"could not fast-forward the checkout: {err}; pull by hand")
         return message
+
+    def backlog_check(self, text: str) -> str:
+        """gates.backlog_check on the backlog a status commit would push (DEVTEAM_BACKLOG):
+        the failing output, or "" (owner, 2026-10-18: 778e072 `backlog: A9-fix done (#41)`
+        turned dev CI red). Not run_proc: it is called under self._lock."""
+        cmd = self.cfg["gates"].get("backlog_check")
+        if not cmd or self.fake:
+            return ""
+        path = self.home / "backlog-check.yaml"
+        path.write_text(text)
+        r = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=self.root / "devteam",
+            env={**os.environ, "DEVTEAM_BACKLOG": str(path)},
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        return "" if r.returncode == 0 else self.redact((r.stdout + r.stderr)[-1500:])
 
     def backlog_drift(self) -> list[str]:
         """Status fields that differ between the backlog file and the one on origin/dev."""
@@ -1039,7 +1087,7 @@ def build_graph(team: Team, checkpointer):
     def develop(s: TaskState):
         dev, tid, wt = s["assignee"], s["task"]["id"], s["worktree"]
         team.verify_worktree(s)
-        if why := SV.task_over(s.get("tokens", 0), SV.limits(cfg)):
+        if why := SV.task_over(s.get("tokens", 0), SV.limits(cfg, s["task"])):
             return halt(s, why + limit_hint(tid))
         (team.home / "scratch" / tid).mkdir(parents=True, exist_ok=True)  # see the brief
         # today's dev first, by the orchestrator (never the agent); conflicts: a resolve step.
@@ -1159,7 +1207,7 @@ def build_graph(team: Team, checkpointer):
             if not team.fake:  # every check again, from a clean checkout of the committed HEAD
                 with team.clean_checkout(s) as clean:
                     cs = {**s, "worktree": clean}
-                    checks = team.run_checks(cs)
+                    checks = team.run_checks(cs) + e2e_gate(cs, clean, paths)
                     for c in checks:
                         team.emit("tester", f"{'ok  ' if c['ok'] else 'FAIL'} {c['cmd']}", task=tid)
                     runs, problems = tester_benchmark(cs, clean)
@@ -1231,6 +1279,18 @@ def build_graph(team: Team, checkpointer):
             out["feedback"] = verdict["feedback"]
             out["gate"] = {"reason": "tester: " + verdict["feedback"].strip()[:500]}
         return out
+
+    def e2e_gate(cs: TaskState, clean: str, paths: list[str]) -> list[dict]:
+        """Playwright e2e for a change under gates.e2e.when_paths (web/): the tester runs it on
+        the clean checkout with a fresh server on a free port, killed with the step after. A
+        Codex sandbox cannot open a port (listen EPERM): a developer never runs it (A5-fix)."""
+        e = cfg["gates"].get("e2e")
+        if not e or not any(p.startswith(tuple(e["when_paths"])) for p in paths):
+            return []
+        cmd = e["command"].format(port=procs.free_port(), data=team.root / "data")
+        team.emit("tester", "e2e (Playwright) on the clean checkout", task=cs["task"]["id"])
+        r = team.run_proc(cmd, cwd=clean, timeout=e["timeout_min"] * 60)
+        return [{"cmd": cmd, "kind": "e2e", "ok": r["ok"], "output": e2e_output(r["output"])}]
 
     def tester_benchmark(cs: TaskState, clean: str) -> tuple[Path | None, list[str]]:
         """Pipeline tasks with routes: the tester runs the quick benchmark itself on the clean

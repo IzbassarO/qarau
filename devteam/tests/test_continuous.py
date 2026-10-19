@@ -61,13 +61,13 @@ def test_max_tasks_stops_taking_new_tasks(repo):
     assert sorted(statuses(team).values()) == ["done", "todo", "todo"]
 
 
-def test_two_blocked_tasks_in_a_row_stop_the_run(repo):
+def test_two_blocked_tasks_in_a_row_pause_the_developer(repo):
     team, graph = make(repo, max_fix_loops=0)  # the fake tester fails round 1: blocked
     s = C.Continuous(team, graph).run()
-    assert [r["status"] for r in s["tasks"]] == ["blocked", "blocked"]
-    assert s["stop_reason"].startswith("2 tasks in a row ended blocked")
-    # T-003 may have started in between; the stop leaves it to resume, never finished
-    assert statuses(team)["T-003"] in ("todo", "in_progress")
+    assert [r["status"] for r in s["tasks"]] == ["blocked"] * 3  # every task was tried
+    assert s["stop_reason"].startswith(
+        "no developer can take a task: dev_pipeline paused: 2 of its tasks in a row ended blocked"
+    )
 
 
 def test_budget_reached_stops_before_any_task(repo):
