@@ -190,7 +190,13 @@ def cmd_refresh(a: argparse.Namespace) -> None:
     from .refresh import markdown, refresh
 
     only = [n for s in a.only for n in s.split(",") if n] if a.only else None
-    res = refresh(a.data, a.runs, a.suffix, only, a.timeout_s)
+    out, runs = Path(a.out).resolve(), Path(a.runs).resolve()
+    if out.is_relative_to(runs):
+        raise StageError(f"--out must be outside --runs ({runs}): runs are append-only")
+    res = refresh(a.data, a.runs, a.suffix, only, a.timeout_s, keep_existing=a.keep_existing)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "summary.json").write_text(json.dumps(res, indent=2) + "\n")
+    (out / "summary.md").write_text(markdown(res) + "\n")
     print(json.dumps(res, indent=2))
     print(markdown(res))
     sys.exit(1 if any(r["status"].startswith("failed") for r in res.values()) else 0)
@@ -262,7 +268,10 @@ def main(argv: list[str] | None = None) -> None:
     rf.add_argument("--data", required=True, help="dir with the reference videos (read-only)")
     rf.add_argument("--runs", required=True, help="viewer runs dir, e.g. ../data/runs")
     rf.add_argument("--suffix", required=True, help="run name = <video>-<suffix>, e.g. a date")
+    rf.add_argument("--out", required=True, help="summary.json/.md go here (not inside --runs)")
     rf.add_argument("--only", nargs="+", metavar="NAME", help="manifest names to run (a,b or a b)")
+    rf.add_argument("--keep-existing", action="store_true",
+                    help="leave an existing run untouched, report its numbers")  # fmt: skip
     rf.add_argument("--timeout-s", type=float, default=1800, help="per video (default 1800)")
     rf.set_defaults(fn=cmd_refresh)
     a = p.parse_args(argv)

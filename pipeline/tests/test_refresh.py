@@ -11,7 +11,7 @@ import synth
 
 from qarau_pipeline import benchmark, dense_remote, refresh, visibility
 from qarau_pipeline.cli import main
-from qarau_pipeline.interfaces import StageError
+from qarau_pipeline.interfaces import StageError, run_stage
 
 SET = """
 [[video]]
@@ -58,8 +58,10 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         (out / "web/partial.f32").write_bytes(b"half")  # a run that dies mid-way
         if video.name in fail:
             raise fail[video.name]
+        m = {"images_in": 8, "registered_images": len(s["views"])}
+        run_stage(out, "reconstruction", "fake", {}, lambda: m)
         main(["export", "--sparse", str(sparse), "--images", str(images), "--out", str(out)])
-        return {"images_in": 8, "registered_images": len(s["views"])}
+        return m
 
     monkeypatch.setattr(refresh, "run_video", fake_run_video)
     return {"data": data, "runs": runs, "manifest": manifest, "calls": calls, "fail": fail}
@@ -112,6 +114,16 @@ def test_refuses_existing_name(env: dict[str, Any]) -> None:
     with pytest.raises(StageError, match="b-2026-10-18"):
         go(env)
     assert snapshot(env["runs"]) == before and env["calls"] == {}  # refused before any work
+
+
+def test_keep_existing_reuses_numbers_untouched(env: dict[str, Any]) -> None:
+    first = go(env, only=["a"])["a"]
+    before = snapshot(env["runs"])
+    res = go(env, keep_existing=True)
+    after = snapshot(env["runs"])
+    assert {k: after[k] for k in before} == before and env["calls"]["a.webm"] is None
+    assert res["a"] == {**first, "status": "ok (existing run)"}  # read back from run.json
+    assert res["b"]["status"] == "ok" and (env["runs"] / "b-2026-10-18").is_dir()
 
 
 def test_refuses_existing_symlink_name(env: dict[str, Any]) -> None:
@@ -178,9 +190,23 @@ def test_cli_refresh(env: dict[str, Any]) -> None:
     for f in ("notre_dame_oubiels.webm", "IMG_8315.MOV"):
         (env["data"] / f).write_bytes(b"not a real video")
     env["fail"]["IMG_8315.MOV"] = StageError("boom")
+    out = env["data"].parent / "summary"
     with pytest.raises(SystemExit) as e:
-        main(["refresh", "--data", str(env["data"]), "--runs", str(env["runs"]),
-              "--suffix", "2026-10-18", "--only", "notre-dame,room"])  # fmt: skip
+        main(["refresh", "--data", str(env["data"]), "--runs", str(env["runs"]), "--suffix",
+              "2026-10-18", "--out", str(out), "--only", "notre-dame,room"])  # fmt: skip
     assert e.value.code == 1
     assert (env["runs"] / "notre-dame-2026-10-18/web/manifest.json").is_file()
     assert not (env["runs"] / "room-2026-10-18").exists()
+    summary = json.loads((out / "summary.json").read_text())
+    assert set(summary["notre-dame"]) == {*refresh.COLS}
+    assert summary["notre-dame"]["status"] == "ok" and summary["notre-dame"]["keyframes"] == 8
+    assert summary["room"] == {"run": "room-2026-10-18", "status": "failed: StageError: boom"}
+    assert "| room | room-2026-10-18 |" in (out / "summary.md").read_text()
+
+
+def test_cli_refuses_summary_inside_runs(env: dict[str, Any]) -> None:
+    before = snapshot(env["runs"])
+    with pytest.raises(SystemExit):
+        main(["refresh", "--data", str(env["data"]), "--runs", str(env["runs"]),
+              "--suffix", "x", "--out", str(env["runs"] / "old")])  # fmt: skip
+    assert snapshot(env["runs"]) == before and env["calls"] == {}

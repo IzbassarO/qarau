@@ -151,15 +151,17 @@ reproj_px, points, scale_err_cm, time_s). Exit 0 only if every required and ever
 optional video ran. The merge gate uses it; `--record` adds a per-commit row to
 `docs/notes/benchmark.md`. Method: `docs/notes/benchmark-method.md`.
 
-`python -m qarau_pipeline refresh --data D --runs R --suffix S [--only a,b]` runs the same
-videos through the same sparse CPU `run` (never dense or `dense_remote`) and exports each as a
-NEW viewer run `R/<video>-<S>` (e.g. `notre-dame-2026-10-18`), so the web app lists current
-results next to older runs. Append-only: if any target name exists it refuses before any work;
-each run is built in a hidden `R/.<name>.*` temp dir and renamed into place when done, so a
-failed video leaves nothing under its name and the others still run. `created_at` in the
-manifest is the export time. Prints a JSON summary and a Markdown table (run, registered %,
-points, far-layer points, keyframes, status); exit 1 if a video failed. Example:
-`docs/notes/p3e-refresh.md`.
+`python -m qarau_pipeline refresh --data D --runs R --suffix S --out O [--only a,b]
+[--keep-existing]` runs the same videos through the same sparse CPU `run` (never dense or
+`dense_remote`) and exports each as a NEW viewer run `R/<video>-<S>` (e.g.
+`notre-dame-2026-10-18`), so the web app lists current results next to older runs.
+Append-only: if any target name exists it refuses before any work (`--keep-existing`: leaves it
+untouched and reports its numbers instead); each run is built in a hidden `R/.<name>.*` temp
+dir and renamed into place when done, so a failed video leaves nothing under its name and the
+others still run. `created_at` in the manifest is the export time. Prints and writes
+`O/summary.json` + `O/summary.md` (run, registered %, points, far-layer points, keyframes,
+status; `O` must be outside `R`); exit 1 if a video failed. Example:
+`docs/notes/p3e-refresh-2026-10-18.md`.
 
 ## Deployment shapes
 

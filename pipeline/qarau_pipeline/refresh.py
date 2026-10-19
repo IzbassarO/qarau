@@ -1,10 +1,12 @@
 """refresh: every benchmark_set.toml video -> current sparse CPU pipeline -> a NEW viewer run.
 
-`python -m qarau_pipeline refresh --data D --runs R --suffix S` writes R/<video>-<S> per video.
-Same child-process `run` as the benchmark (sparse COLMAP on the CPU, never dense or
-dense_remote). Append-only on R: a target name that already exists stops the command before any
-work; each run is built in a hidden temp dir inside R and renamed into place only when done, so
-a failure never leaves a partial run under the final name and nothing already in R is touched.
+`python -m qarau_pipeline refresh --data D --runs R --suffix S --out O` writes R/<video>-<S> per
+video and the summary to O/summary.json. Same child-process `run` as the benchmark (sparse
+COLMAP on the CPU, never dense or dense_remote). Append-only on R: a target name that already
+exists stops the command before any work (with keep_existing it is left untouched and its
+numbers are read back from its run.json instead); each run is built in a hidden temp dir inside
+R and renamed into place only when done, so a failure never leaves a partial run under the final
+name and nothing already in R is touched.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .benchmark import MANIFEST, load_manifest, run_video
-from .interfaces import StageError
+from .interfaces import StageError, read_run
 
 COLS = ("run", "registered_pct", "points", "far_points", "keyframes", "status")
 
@@ -43,6 +45,7 @@ def refresh(
     only: list[str] | None = None,
     timeout_s: float = 1800,
     manifest: Path = MANIFEST,
+    keep_existing: bool = False,
 ) -> dict[str, dict[str, Any]]:
     data, runs = Path(data_dir).resolve(), Path(runs_dir).resolve()
     entries = load_manifest(manifest)
@@ -53,13 +56,17 @@ def refresh(
         entries = [e for e in entries if e["name"] in only]
     targets = {e["name"]: runs / f"{e['name']}-{suffix}" for e in entries}
     taken = [t.name for t in targets.values() if t.exists() or t.is_symlink()]
-    if taken:
+    if taken and not keep_existing:
         raise StageError(f"run(s) already exist in {runs}, pick another --suffix: {taken}")
     runs.mkdir(parents=True, exist_ok=True)
     res: dict[str, dict[str, Any]] = {}
     for e in entries:
         name, final = e["name"], targets[e["name"]]
         video = data / e["file"]
+        if final.name in taken:  # keep_existing: only read, never rewritten
+            stages = {s["name"]: s["metrics"] for s in read_run(final)}
+            res[name] = {**_row(final, stages["reconstruction"]), "status": "ok (existing run)"}
+            continue
         if not video.is_file():
             res[name] = {"run": final.name, "status": f"skipped: video missing ({e['file']})"}
             continue
