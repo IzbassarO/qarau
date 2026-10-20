@@ -151,6 +151,17 @@ reproj_px, points, scale_err_cm, time_s). Exit 0 only if every required and ever
 optional video ran. The merge gate uses it; `--record` adds a per-commit row to
 `docs/notes/benchmark.md`. Method: `docs/notes/benchmark-method.md`.
 
+`python -m qarau_pipeline refresh --data D --runs R --suffix S [--only a,b] [--report F]`
+runs the same videos through the same sparse CPU `run` (never dense or `dense_remote`) and
+exports each as a NEW viewer run `R/<video>-<S>` (e.g. `notre-dame-p3e`), so the web app lists
+current results next to older runs. Append-only: a video whose target name exists fails before
+any work and that path is never opened; each run is built in a temp dir outside `R` (`--work`,
+same filesystem) and renamed into place when done, so a failed video leaves nothing in `R` and
+the others still run. Nothing else is written into `R`. `created_at` in the manifest is the
+export time (UTC). Prints a table (run, registered %, points, far-layer points, keyframes,
+time, status), `--report` also writes it as Markdown; exit 1 if a video failed. Usage:
+`docs/notes/refresh-runs.md`.
+
 ## Deployment shapes
 
 | Shape | Who | What runs where |
