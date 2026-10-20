@@ -127,6 +127,7 @@ Create folders when the first real file needs them, not before.
 | LLM | provider interface: Meta Model API, local vLLM, Anthropic API for dev |
 | Web | React 19, Vite, Three.js, MapLibre GL, TanStack Query, Tailwind |
 | Desktop | Tauri 2 |
+| Mobile | Flutter (later) |
 | Infra | Docker Compose now; Kubernetes/Nomad later; Ansible for customer installs |
 | CI | GitHub Actions: lint, tests, builds |
 | Quality | ruff + mypy (Python), ESLint + Prettier + tsc (web), pytest, Vitest |
@@ -153,6 +154,8 @@ Kazakhstan stays on servers in Kazakhstan.
 
 Full screen specs and interactive prototypes: `docs/design/` (start with
 `docs/design/viewer-3d.md` — the 3D viewer with video ↔ map sync is the core screen).
+Visual rules for every page (tokens, light/dark, density): `docs/design/DESIGN.md`, then the
+frontend-design skill in `.claude/skills/` (pinned, Apache-2.0). Agents never download skills.
 
 ## How we work: you own the engineering
 
@@ -175,7 +178,8 @@ You must:
 - **Keep `docs/notes/progress.md` current**: what is done, what is next, known issues,
   decisions waiting for the owner. Short, newest first.
 - **Commit in small, meaningful steps** on a feature branch; open a PR into `dev` with `gh`,
-  with screenshots and what you verified. It merges when every gate is green.
+  with screenshots and what you verified, then report to the owner. A Claude Code session
+  never merges it (see "Delivery").
 - Leave the code better: if something in this file is wrong or missing, propose the change.
 
 Stop and ask the owner only for: spending money or adding a paid service; anything about
@@ -192,6 +196,10 @@ modes; security-sensitive defaults. Everything else — decide, document, contin
   (when `pipeline/` changed; `devteam/config.yaml` → `gates.benchmark`), and the secret scan
   (gitleaks) is clean. Otherwise the work goes back to the developer, at most 3 times,
   then the task is **blocked** and listed in the daily report.
+- **Who merges** (owner, 2026-10-19): Kerege's gated auto-merge of its own task PRs
+  (`devteam/<task>` → `dev`) stays as described above. A Claude Code session (interactive or
+  any other session outside Kerege) **never merges a PR into `dev` or `main`**, even with every
+  gate green: it opens the PR, reports what it verified, and the owner merges.
 - `dev` → `main`: an automatic weekly release PR, merged only if CI and the full benchmark
   are green on `dev`. Nothing else reaches `main`.
 - **Forbidden for every agent:** force-push; rewriting published history (rebase, amend,
@@ -223,6 +231,10 @@ modes; security-sensitive defaults. Everything else — decide, document, contin
   (`docs/architecture.md`, ADR in `docs/decisions/` for real decisions).
 - **Schema changes only via Alembic migrations.**
 - **Every API route declares a role**; no unauthenticated routes except health checks.
+- **Thin clients** (owner, 2026-10-19). The core is `pipeline/` + the `backend/` API. Every
+  client (the web app now; the desktop app on Tauri and the mobile app on Flutter later) uses
+  only the backend API: no processing and no business logic in a client, which only shows
+  data, takes input and calls the API. Every new endpoint is in the OpenAPI schema.
 - **Test on real footage.** A stage is not done until it runs on a real phone video in
   `data/samples/` and its output is inspected visually.
 - **Licences:** before using any model or library, check that its licence allows

@@ -119,7 +119,7 @@ developers:
                            # A task that writes runs_dir (writable) is shown runs_dir instead.
       serve: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_RUNS_DIR={runs} pnpm exec vite --port 5197 --strictPort
       url: http://localhost:5197
-      shoot: cd web && pnpm exec playwright screenshot --viewport-size=1440,900 --wait-for-timeout=4000 {url} {png}
+      shoot: cd web && node {shoot} {url} {png} 1440,900 4000   # signs in first (devteam/.env test user)
     checks:                # same as GitHub CI, so CI rarely surprises
       - cd pipeline && uv run ruff check . && uv run ruff format --check . && uv run mypy .
       - cd pipeline && uv run pytest -q
@@ -135,7 +135,7 @@ developers:
     screenshots:           # pages from the plan's `routes`; the tester sees them
       serve: cd web && QARAU_RUNS_DIR={runs_dir} pnpm exec vite --port 5198 --strictPort
       url: http://localhost:5198
-      shoot: cd web && pnpm exec playwright screenshot --viewport-size=1440,900 --wait-for-timeout=2500 {url} {png}
+      shoot: cd web && node {shoot} {url} {png} 1440,900 2500
     checks:
       - cd web && pnpm lint && pnpm typecheck
       - cd web && pnpm test && pnpm build

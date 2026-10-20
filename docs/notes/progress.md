@@ -2,6 +2,31 @@
 
 Newest first. Keep it short.
 
+## 2026-10-19 — Backlog: Modal, reference sheet size, thin clients, UX brief
+
+- Modal GPU smoke test passed (T4, CUDA in PyTorch, ~$0.003, nothing left running). The $30
+  workspace usage limit is not visible from the CLI: owner checks it in the dashboard.
+- dev_pipeline order: P3e → P4a-1b → P5a-1 → P5a-2 → D1 → S1 → O1a → A7a. P4a-1b is mocks
+  only (no real Modal call); P4a-2 (first paid GPU run) stays blocked until P4a-1b is merged
+  and the owner gives the command. P3e and P5a-1 are blocked: `devteam resume` them.
+- P5a-2: sheet size letter (default) / a4 / custom, shown in the run report.
+- CLAUDE.md: thin clients rule (web, desktop, mobile use only the backend API; OpenAPI).
+- UX1a / DESIGN.md: product style brief, tokens in web/src/design/tokens.json, screenshots at
+  1440x900 (mobile width waits for multi-viewport screenshots in Kerege).
+
+## 2026-10-19 — Kerege run 4 fixes (after the P3e rehearsal)
+
+- Tester screenshots sign in first (A1b login, test user from devteam/.env); "/?signed-out"
+  shows the login page. P3e was blocked only because "/" showed the login form.
+- Plan check: `/viewer/<run>` routes must show the task's own output (P3e's routes named old
+  runs). The data snapshot of a blocked task is kept, so its own runs stay "its own".
+- Loop detection by criterion number, not wording.
+- UX1a (design system, login page, control centre) and UX1b (run list, viewer chrome), first
+  in dev_app order. frontend-design skill (anthropics/skills dbd4588, Apache-2.0) in
+  .claude/skills, `.agents/skills` symlink for Codex; rules in docs/design/DESIGN.md.
+- Owner: add QARAU_TEST_USER / QARAU_TEST_PASSWORD to devteam/.env (any non-empty pair works
+  on the dev server).
+
 ## 2026-10-19 — Kerege run 3 (18–19 Oct) fixes
 
 - `claude` vanished at 23:39 (failed self-update) and stopped the run: developer CLIs are
