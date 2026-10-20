@@ -2,6 +2,59 @@ import { expect, test } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 import ru from '../src/i18n/ru.json' with { type: 'json' };
 import kk from '../src/i18n/kk.json' with { type: 'json' };
+import tokens from '../src/design/tokens.json' with { type: 'json' };
+
+for (const theme of ['light', 'dark'] as const) {
+  for (const [lang, t] of Object.entries({ en, ru, kk })) {
+    test(`signed-in home uses ${theme} tokens and fits labels: ${lang}`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      await page.addInitScript((locale) => {
+        localStorage.setItem('qarau.lang', locale);
+        sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
+      }, lang);
+      await page.route('**/api/runs', (route) =>
+        route.fulfill({
+          json: [
+            {
+              run_id: 'tank-survey',
+              title: t['demo.inspectionTitle'],
+              site: { id: 'tank-farm', name: t['demo.siteName'] },
+              created_at: '2026-10-16T15:00:00Z',
+            },
+          ],
+        }),
+      );
+      await page.goto('/');
+      const rgb = (hex: string) =>
+        `rgb(${[1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16)).join(', ')})`;
+      await expect(page.locator('body')).toHaveCSS('background-color', rgb(tokens[theme].bg));
+      const navigation = page.getByRole('navigation', { name: t['shell.sites'] });
+      await expect(navigation).toBeVisible();
+      await expect(page.locator('.sidebar-container')).toHaveCSS(
+        'background-color',
+        rgb(tokens[theme].surface),
+      );
+      await expect(page.getByRole('heading', { name: t['shell.emptyTitle'] })).toBeVisible();
+      await expect(navigation.getByRole('button', { name: t['inspection.new'] })).toBeVisible();
+      await expect(
+        navigation.getByRole('link', { name: new RegExp(t['demo.inspectionTitle']) }),
+      ).toHaveAttribute('href', '/inspections/tank-survey');
+      await expect(navigation.getByRole('button', { name: t['auth.signOut'] })).toBeVisible();
+      for (const label of await page
+        .locator(
+          '.shell-button, .site-name, .inspection-link-title, .sidebar-heading h2, .empty-state h1',
+        )
+        .all()) {
+        expect(await label.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+          true,
+        );
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    });
+  }
+}
 
 for (const [lang, t] of Object.entries({ en, ru, kk })) {
   test(`control center default processing demo: ${lang}`, async ({ page }) => {
@@ -44,6 +97,10 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
     await expect(page.getByRole('heading', { name: t['demo.inspectionTitle'] })).toBeVisible();
     await expect(page.getByText(t['demo.notice'])).toBeVisible();
     await page.waitForFunction(() => window.__qarau?.pointsLoaded);
+    await expect(page.locator('canvas').locator('..')).toHaveCSS(
+      'background-color',
+      'rgb(0, 0, 0)',
+    );
     await page.evaluate(() => document.fonts.ready);
     await page.evaluate(
       () =>

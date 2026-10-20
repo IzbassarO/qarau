@@ -49,8 +49,6 @@ export function NewInspectionDialog({ onClose }: { onClose: () => void }) {
       <label className="upload-picker" htmlFor="inspection-video">
         <svg
           aria-hidden="true"
-          width="28"
-          height="28"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"

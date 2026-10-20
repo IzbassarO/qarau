@@ -65,7 +65,6 @@ export function InspectionView({
         {demoBundle && <span className="demo-badge">{t('shell.demo')}</span>}
       </header>
       {demoBundle && <p className="demo-notice">{t('demo.notice')}</p>}
-      <ProcessingSteps steps={steps} />
       <section aria-labelledby="inspection-map-title" className="inspection-map-section">
         <div className="section-heading">
           <h2 id="inspection-map-title">{t('inspection.mapAndVideo')}</h2>
@@ -88,6 +87,7 @@ export function InspectionView({
           </p>
         )}
       </section>
+      <ProcessingSteps steps={steps} />
     </article>
   );
 }
