@@ -68,8 +68,12 @@ it('shows the labelled demo with its viewer and stages without requesting the ba
   vi.stubGlobal('fetch', fetch);
   renderRoute('/inspections/demo');
   expect(screen.getByRole('heading', { name: 'Tank farm survey' })).toBeTruthy();
-  expect(screen.getByText(/Synthetic map, illustrated frames/)).toBeTruthy();
-  expect(screen.getAllByText('Demo').length).toBeGreaterThan(0);
+  expect(
+    screen.getByText(
+      'Example inspection with a sample map, images and processing steps. These are not inspection results.',
+    ),
+  ).toBeTruthy();
+  expect(screen.getAllByText('Example').length).toBeGreaterThan(0);
   expect(screen.getByTestId('embedded-viewer')).toBeTruthy();
   expect(screen.getByText('3D reconstruction')).toBeTruthy();
   expect(fetch).not.toHaveBeenCalled();
@@ -112,7 +116,9 @@ it('lists the real runs on home, not the demo', async () => {
   const notreDame = await screen.findByRole('link', { name: /^notre-dame-p3/ });
   expect(notreDame.getAttribute('title')).toBe('notre_dame.webm');
   const room = screen.getByRole('link', { name: /^room/ });
-  expect(room.textContent).toMatch(/^room · 16 Oct/);
+  expect(within(room).getByText('room').className).toBe('inspection-link-name');
+  expect(within(room).getByRole('time').textContent).toBe('16 Oct');
+  expect(within(room).getByRole('time').getAttribute('datetime')).toBe('2026-10-16T15:00:00Z');
   expect(room.getAttribute('href')).toBe('/inspections/room');
   expect(screen.queryByText('Tank farm survey')).toBeNull();
   expect(screen.queryByTestId('embedded-viewer')).toBeNull();
@@ -221,7 +227,7 @@ it('loads a selected backend run into the existing embedded viewer with truthful
   expect(screen.getByText('Date unavailable')).toBeTruthy();
   expect(screen.getAllByText('Status unavailable').length).toBeGreaterThan(0);
   expect(screen.queryByText('Completed')).toBeNull();
-  expect(screen.queryByText(/Synthetic map/)).toBeNull();
+  expect(screen.queryByText(/Example inspection with a sample map/)).toBeNull();
 });
 
 it('keeps the embedded object viewer available after a recoverable far-layer failure', async () => {

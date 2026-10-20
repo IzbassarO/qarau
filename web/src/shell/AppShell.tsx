@@ -77,8 +77,6 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
             <svg
               aria-hidden="true"
               viewBox="0 0 20 20"
-              width="20"
-              height="20"
               fill="none"
               stroke="currentColor"
               strokeWidth="1.5"
@@ -138,14 +136,7 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
           ) : (
             <div className="empty-state">
               <div className="empty-symbol" aria-hidden="true">
-                <svg
-                  viewBox="0 0 48 48"
-                  width="48"
-                  height="48"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.25"
-                >
+                <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.25">
                   <path d="m24 6 16 9v18l-16 9-16-9V15zM8 15l16 9 16-9M24 24v18" />
                   <circle cx="24" cy="24" r="4" fill="currentColor" />
                 </svg>

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useI18n, type Key } from '../i18n';
-import { LangSwitch, Logo } from '../viewer/ui';
+import { LanguageSwitch, Wordmark } from '../shell/ShellIdentity';
 import { AuthError } from './auth';
 import { useAuth } from './AuthProvider';
 import '../shell/shell.css';
@@ -36,11 +36,10 @@ export function LoginPage() {
   return (
     <main className="login-page">
       <header className="login-header">
-        <Logo />
-        <LangSwitch />
+        <LanguageSwitch />
       </header>
       <section className="login-card" aria-labelledby="login-title">
-        <p className="eyebrow">{t('shell.product')}</p>
+        <Wordmark />
         <h1 id="login-title">{t('auth.title')}</h1>
         <p className="login-description">{t('auth.description')}</p>
         <form onSubmit={(event) => void submit(event)} aria-label={t('auth.title')}>
