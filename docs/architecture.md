@@ -122,8 +122,11 @@ download `fused.ply` + `fused.ply.vis`, stop). Guarantees: a started worker is a
 `timeout_s` for the whole job, the remaining time passed to every call, `DenseTimeoutError`
 past it; before any start, `used today + est_hours_per_job > daily_gpu_hours_budget` (UTC
 day, JSON ledger under `data/`) raises `BudgetExceededError`. Config: `pipeline/config.yaml`
-→ `dense_remote` (`enabled: false`). Only a fake provider exists until a paid GPU account is
-approved; the default `run`/`benchmark` path does not use it.
+→ `dense_remote` (`enabled: false`, `provider: fake | modal`). Providers: a fake one for tests
+and the Modal one (`dense_modal.py`, ADR 0018: injected client, lazy `modal` import, image
+from `infra/colmap-cuda`, token only from `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`), which
+nothing calls until the owner approves the paid account (P4a-2); the default
+`run`/`benchmark` path does not use either.
 
 **Dense points and their frame links (`visibility.py`, ADR 0017).** `python -m
 qarau_pipeline export --sparse S --out O --dense D` reads `D/fused.ply` and adds the bundle

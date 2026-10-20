@@ -3,7 +3,8 @@
 The executor guarantees: a worker that was started is always stopped (finally, retried, a
 failed stop is a loud error naming the worker); one wall-clock deadline for the whole job;
 no worker is started when the day's GPU-hour budget cannot cover the job's estimate.
-The only provider is the fake one (dense_fake.py) until the owner approves a paid account.
+Providers: the fake one (dense_fake.py) and Modal (dense_modal.py, ADR 0018), which is not
+called until the owner approves a paid account (P4a-2).
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ REMOTE_IMAGES = "/work/images"
 REMOTE_SPARSE = "/work/sparse"
 REMOTE_DENSE = "/work/dense"
 RESULTS = ("fused.ply", "fused.ply.vis")
+PROVIDERS = ("fake", "modal")  # dense_remote.provider; absent means fake
 
 Clock = Callable[[], datetime]
 T = TypeVar("T")
@@ -97,6 +99,17 @@ class DenseRemoteConfig:
     ledger_path: Path
     image: str
     gpu_type: str
+    provider: str = "fake"
+
+
+def make_provider(cfg: DenseRemoteConfig) -> GpuProvider:
+    """The real provider named by dense_remote.provider (the fake is built by tests and the
+    demo CLI, with its own directory and clock)."""
+    if cfg.provider == "modal":
+        from .dense_modal import ModalGpuProvider  # no vendor code until a real job asks for it
+
+        return ModalGpuProvider.from_env()
+    raise DenseConfigError(f"dense_remote.provider {cfg.provider!r} is not a real GPU provider")
 
 
 def load_dense_remote_config(path: Path = DEFAULT_CONFIG) -> DenseRemoteConfig:
@@ -128,6 +141,9 @@ def load_dense_remote_config(path: Path = DEFAULT_CONFIG) -> DenseRemoteConfig:
     enabled = get("enabled")
     if not isinstance(enabled, bool):
         raise DenseConfigError(f"{path}: dense_remote.enabled must be true or false")
+    provider = sec.get("provider", "fake")
+    if provider not in PROVIDERS:
+        raise DenseConfigError(f"{path}: dense_remote.provider must be one of {PROVIDERS}")
     cfg = DenseRemoteConfig(
         enabled=enabled,
         timeout_s=number("timeout_s"),
@@ -136,6 +152,7 @@ def load_dense_remote_config(path: Path = DEFAULT_CONFIG) -> DenseRemoteConfig:
         ledger_path=path.parent / text("ledger_path"),
         image=text("image"),
         gpu_type=text("gpu_type"),
+        provider=provider,
     )
     # The estimate is what the budget check books, so it must cover the longest a job can run.
     if cfg.timeout_s > cfg.est_hours_per_job * 3600:
