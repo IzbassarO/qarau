@@ -506,8 +506,10 @@ tasks:
 
 
     Acceptance: before (dev-*) and after screenshots of the login page ("/?signed-out") and the control
-    centre ("/", signed in) at 1440 px and at 390 px wide, in the review packet; at 390 px nothing is
-    clipped and there is no horizontal scroll.
+    centre ("/", signed in) at 1440x900, in the review packet.
+
+
+    Note: Mobile-width screenshots come with a later Kerege change (multi-viewport screenshots).
 
     '
   status: todo

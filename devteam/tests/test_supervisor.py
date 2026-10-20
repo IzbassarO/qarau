@@ -525,6 +525,7 @@ def test_real_backlog_split_a7_p3e_and_order():
     )
     sheet = by["P5a-2"]["goal"]
     assert "letter = 215.9 x 279.4 mm (the default" in sheet and "a4 = 210 x 297 mm" in sheet
-    assert "390 px" in by["UX1a"]["goal"] and "tokens.json" in by["UX1a"]["goal"]
+    assert "1440x900" in by["UX1a"]["goal"] and "tokens.json" in by["UX1a"]["goal"]
+    assert "390" not in by["UX1a"]["goal"]  # no viewport Kerege cannot shoot yet
     # A7a's own criteria-shaped goal stays inside dev_pipeline's folders
     assert outside_paths([by["A7a"]["goal"]], "dev_pipeline", CFG, by["A7a"]) == []

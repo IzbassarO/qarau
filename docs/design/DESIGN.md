@@ -64,4 +64,5 @@ literal values.
 - No new features or behaviour changes in a design pass: the same pages, the same data, the
   same tests (updated only where the markup changed).
 - Before/after screenshots of each changed page come from the tester (`dev-*` = before), at
-  1440 px and 390 px wide; at 390 px nothing is clipped and there is no horizontal scroll.
+  1440x900. Mobile-width screenshots come with a later Kerege change (multi-viewport
+  screenshots).

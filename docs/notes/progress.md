@@ -12,7 +12,7 @@ Newest first. Keep it short.
 - P5a-2: sheet size letter (default) / a4 / custom, shown in the run report.
 - CLAUDE.md: thin clients rule (web, desktop, mobile use only the backend API; OpenAPI).
 - UX1a / DESIGN.md: product style brief, tokens in web/src/design/tokens.json, screenshots at
-  1440 and 390 px. Known gap: Kerege shoots only 1440×900 (config.yaml `shoot`).
+  1440x900 (mobile width waits for multi-viewport screenshots in Kerege).
 
 ## 2026-10-19 — Kerege run 4 fixes (after the P3e rehearsal)
 
