@@ -13,8 +13,6 @@ function StateIcon({ status }: { status: ProcessingStep['status'] }) {
     <span className={`step-icon ${status}`} aria-hidden="true">
       <svg
         viewBox="0 0 24 24"
-        width="20"
-        height="20"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.7"

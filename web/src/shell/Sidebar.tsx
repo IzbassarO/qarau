@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, NavLink } from 'react-router';
 import { useI18n } from '../i18n';
 import { UNASSIGNED_SITE_ID, type Site } from '../lib/inspections';
-import { LangSwitch, Logo } from '../viewer/ui';
+import { LanguageSwitch, Wordmark } from './ShellIdentity';
 import { useAuth } from '../auth/AuthProvider';
 
 /** "16 Oct" / "16 окт." — day first in every UI language. */
@@ -37,7 +37,7 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
   return (
     <nav className="shell-sidebar" aria-label={t('shell.sites')}>
       <Link to="/" className="sidebar-brand" aria-label={t('shell.home')} onClick={onNavigate}>
-        <Logo />
+        <Wordmark />
       </Link>
       <button className="shell-button primary new-inspection" onClick={onNewInspection}>
         <span aria-hidden="true">+</span> {t('inspection.new')}
@@ -61,14 +61,7 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
               aria-expanded={!collapsed.has(site.id)}
               aria-controls={`site-inspections-${index}`}
             >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 16 16"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-              >
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor">
                 <path d={collapsed.has(site.id) ? 'm6 4 4 4-4 4' : 'm4 6 4 4 4-4'} />
               </svg>
               <span className="site-name">
@@ -89,12 +82,11 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
                   >
                     <span className={`status-dot ${inspection.status}`} aria-hidden="true" />
                     <span className="inspection-link-title">
-                      {inspection.title}
+                      <span className="inspection-link-name">{inspection.title}</span>
                       {inspection.createdAt && (
-                        <span className="inspection-link-date">
-                          {' · '}
+                        <time className="inspection-link-date" dateTime={inspection.createdAt}>
                           {shortDate(inspection.createdAt, lang)}
-                        </span>
+                        </time>
                       )}
                     </span>
                     <span className="sr-only">{t(`status.${inspection.status}`)}</span>
@@ -109,7 +101,7 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
         <Link to="/inspections/demo" onClick={onNavigate} className="demo-link">
           {t('shell.openDemo')} <span className="demo-badge">{t('shell.demo')}</span>
         </Link>
-        <LangSwitch />
+        <LanguageSwitch />
         <button type="button" className="shell-button" onClick={signOut}>
           {t('auth.signOut')}
         </button>

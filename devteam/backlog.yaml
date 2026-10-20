@@ -510,9 +510,12 @@ tasks:
     Note: Mobile-width screenshots come with a later Kerege change (multi-viewport screenshots).
 
     '
-  status: in_progress
+  status: done
   owner: dev_app
   run: cont-20261020-180854-dev_app-1
+  branch: devteam/UX1a
+  pr: https://github.com/IzbassarO/qarau/pull/49
+  done_at: '2026-10-20'
 - id: UX1b
   area: app
   title: 'Visual design pass, part 2: run list and viewer chrome'

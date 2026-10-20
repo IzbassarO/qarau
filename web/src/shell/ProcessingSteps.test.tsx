@@ -80,7 +80,7 @@ it('keeps unknown stages, statuses, error codes and raw detail accessible with f
   expect(screen.getByText('new_stage')).toBeTruthy();
   expect(screen.getByText('waiting_for_device')).toBeTruthy();
   expect(screen.getByText(LANGS.en['processing.error.unknown.whatToDo'])).toBeTruthy();
-  fireEvent.click(screen.getByText('Pipeline details'));
+  fireEvent.click(screen.getByText('Processing details'));
   expect(screen.getByText('future_failure')).toBeTruthy();
   expect(screen.getByText('Camera metadata is missing. <script>unsafe()</script>')).toBeTruthy();
   expect(document.querySelector('.step-detail script')).toBeNull();
