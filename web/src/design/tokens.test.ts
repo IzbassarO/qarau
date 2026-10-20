@@ -61,6 +61,16 @@ function contrast(first: string, second: string) {
 }
 
 describe('platform-neutral design tokens', () => {
+  it('preserves the existing viewer finding and coverage palette', () => {
+    expect(tokens.shared.color).toMatchObject({
+      'finding-critical': '#f0565c',
+      'finding-watch': '#f2a33a',
+      'finding-not-seen': '#6b727d',
+      'finding-inspected': '#5b9bff',
+      'viewer-canvas': '#000000',
+    });
+  });
+
   it.each(['light', 'dark'] as const)('meets AA contrast for %s text and form controls', (mode) => {
     const palette = tokens[mode];
     for (const background of [palette.bg, palette.surface, palette['surface-raised']]) {

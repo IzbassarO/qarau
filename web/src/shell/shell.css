@@ -243,15 +243,21 @@
   border-left-color: var(--color-accent);
 }
 .inspection-link-title {
+  flex: 1;
   min-width: 0;
+}
+.inspection-link-name {
+  display: block;
   overflow-wrap: anywhere;
 }
 .inspection-source {
   overflow-wrap: anywhere;
 }
 .inspection-link-date {
+  display: block;
   color: var(--color-text-muted);
-  white-space: nowrap;
+  font-size: var(--type-xs);
+  overflow-wrap: anywhere;
 }
 .status-dot {
   display: inline-block;
@@ -356,6 +362,17 @@
 }
 .empty-state .shell-button {
   margin-top: var(--spacing-2);
+}
+.empty-symbol {
+  color: var(--color-text-muted);
+}
+.empty-symbol svg {
+  width: var(--size-control);
+  height: var(--size-control);
+}
+.empty-note {
+  color: var(--color-text-muted);
+  font-size: var(--type-xs);
 }
 .api-error {
   display: flex;

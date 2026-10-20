@@ -134,12 +134,20 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
               <p>{t(runs.isError ? 'shell.connectionHint' : 'inspection.selectOther')}</p>
             </div>
           ) : (
-            <div className="empty-state home-empty">
+            <div className="empty-state">
+              <div className="empty-symbol" aria-hidden="true">
+                <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.25">
+                  <path d="m24 6 16 9v18l-16 9-16-9V15zM8 15l16 9 16-9M24 24v18" />
+                  <circle cx="24" cy="24" r="4" fill="currentColor" />
+                </svg>
+              </div>
+              <p className="eyebrow">{t('shell.product')}</p>
               <h1>{t('shell.emptyTitle')}</h1>
               <p>{t('shell.emptyDescription')}</p>
               <button className="shell-button primary" onClick={() => setDialogOpen(true)}>
                 <span aria-hidden="true">+</span> {t('inspection.new')}
               </button>
+              <span className="empty-note">{t('shell.emptyNote')}</span>
             </div>
           )}
         </main>

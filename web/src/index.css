@@ -37,10 +37,10 @@
   --size-viewer-tools: calc(var(--layout-viewer-tools) * 1px);
   --size-viewer-panel: calc(var(--layout-viewer-panel) * 1px);
   --size-focus-width: calc(var(--layout-focus-width) * 1px);
-  --color-finding-critical: #d43c3c;
-  --color-finding-watch: #e29422;
-  --color-finding-not-seen: #808892;
-  --color-finding-inspected: #528ee0;
+  --color-finding-critical: #f0565c;
+  --color-finding-watch: #f2a33a;
+  --color-finding-not-seen: #6b727d;
+  --color-finding-inspected: #5b9bff;
   --color-viewer-canvas: #000000;
   --color-viewer-text: #b0b7c1;
   --font-family: system-ui, sans-serif;

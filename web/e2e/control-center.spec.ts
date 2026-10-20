@@ -34,7 +34,9 @@ for (const theme of ['light', 'dark'] as const) {
         'background-color',
         rgb(tokens[theme].surface),
       );
-      await expect(page.getByRole('heading', { name: t['shell.emptyTitle'] })).toBeVisible();
+      await expect(
+        page.getByRole('main').getByRole('heading', { name: t['shell.emptyTitle'], exact: true }),
+      ).toBeVisible();
       await expect(navigation.getByRole('button', { name: t['inspection.new'] })).toBeVisible();
       await expect(
         navigation.getByRole('link', { name: new RegExp(t['demo.inspectionTitle']) }),
@@ -45,9 +47,13 @@ for (const theme of ['light', 'dark'] as const) {
           '.shell-button, .site-name, .inspection-link-title, .sidebar-heading h2, .empty-state h1',
         )
         .all()) {
-        expect(await label.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
-          true,
-        );
+        const size = await label.evaluate((element) => ({
+          text: element.textContent,
+          className: element.className,
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+        }));
+        expect(size.scrollWidth, JSON.stringify(size)).toBeLessThanOrEqual(size.clientWidth);
       }
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -130,9 +136,10 @@ test('home lists the real runs, not the demo', async ({ page }) => {
   );
   await page.goto('/');
   const navigation = page.getByRole('navigation');
-  await expect(navigation.getByRole('link', { name: /^notre-dame/ })).toContainText(
-    'notre-dame · 16 Oct',
-  );
+  const inspection = navigation.getByRole('link', { name: /^notre-dame/ });
+  await expect(inspection.locator('.inspection-link-name')).toHaveText('notre-dame');
+  await expect(inspection.getByRole('time')).toHaveText('16 Oct');
+  await expect(inspection.getByRole('time')).toHaveAttribute('datetime', '2026-10-16T15:00:00Z');
   await expect(navigation.getByRole('link', { name: /Tank farm survey/ })).toHaveCount(0);
 });
 

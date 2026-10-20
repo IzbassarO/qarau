@@ -116,7 +116,9 @@ it('lists the real runs on home, not the demo', async () => {
   const notreDame = await screen.findByRole('link', { name: /^notre-dame-p3/ });
   expect(notreDame.getAttribute('title')).toBe('notre_dame.webm');
   const room = screen.getByRole('link', { name: /^room/ });
-  expect(room.textContent).toMatch(/^room · 16 Oct/);
+  expect(within(room).getByText('room').className).toBe('inspection-link-name');
+  expect(within(room).getByRole('time').textContent).toBe('16 Oct');
+  expect(within(room).getByRole('time').getAttribute('datetime')).toBe('2026-10-16T15:00:00Z');
   expect(room.getAttribute('href')).toBe('/inspections/room');
   expect(screen.queryByText('Tank farm survey')).toBeNull();
   expect(screen.queryByTestId('embedded-viewer')).toBeNull();

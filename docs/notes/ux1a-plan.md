@@ -14,8 +14,8 @@ all commercially usable, as recorded in the task brief.
 
 Login: a centred, bordered form card with a text wordmark, left-aligned labels and
 one full-width primary action. Control centre: a quiet sites/inspections rail and
-an aligned main heading; concise empty state; inspection map before processing
-details, so the viewer carries the visual weight. Avoid decorative cards, uppercase
+an aligned main heading; concise empty state; keep the existing inspection block
+order and content, with the map as the largest panel. Avoid decorative cards, uppercase
 eyebrows and marketing copy. Keep routes, controls, handlers and requests intact.
 
 Review against the product brief: violet distinguishes navigation/actions from
@@ -24,9 +24,18 @@ finding colours. Flexible rows and wrapping accommodate Russian and Kazakh.
 
 Touch `web/src/index.css`, new design token/tests, auth login markup/styles, shell
 components/styles, and the three i18n dictionaries. Keep viewer source unchanged;
-retain its existing CSS variable names as aliases to the new tokens. Update only
+retain its existing CSS variable names as aliases to the new tokens, and preserve
+all four finding/coverage colours exactly. Update only
 markup/style-dependent existing assertions and add theme/token coverage.
 
 Verify with pnpm lint, typecheck, test and build. The tester runs Playwright and
 captures before (`dev-*`) and after login and signed-in home at 1440×900. Do not
-start a server or take screenshots in this worktree. Do not edit progress.md.
+take screenshots separately. Do not edit progress.md.
+
+Round 2: run the requested themed, far-layer and orono-dense Playwright checks.
+The sandbox rejects Vite's listening socket (EPERM) and Chromium's Mach bootstrap
+registration, including a browser launch without a server. Keep those limitations
+explicit; the tester must execute the browser checks. Scope the home heading
+selector to main with an exact accessible name, since the sites heading also
+contains “inspections” in all three languages. Put sidebar dates below titles;
+preserve strict overflow assertions and report the offending element on failure.

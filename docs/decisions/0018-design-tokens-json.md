@@ -12,7 +12,8 @@ are also numbers. There are no CSS declarations or expressions in the JSON.
 dimensions to CSS lengths centrally, and components reference those lengths.
 Dark colours override light colours through `prefers-color-scheme`. The viewer
 canvas is black in both themes. Reserved finding colours do not encode processing
-states or navigation. A separate berry colour identifies form errors.
+states or navigation. Preserve the viewer's existing red, orange, gray and blue
+values when introducing these tokens. A separate berry colour identifies form errors.
 
 Shared aliases store token names, rather than repeated palette values, to preserve
 the existing viewer's Tailwind utilities without editing viewer source. `@theme

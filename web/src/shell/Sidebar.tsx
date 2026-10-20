@@ -82,12 +82,11 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
                   >
                     <span className={`status-dot ${inspection.status}`} aria-hidden="true" />
                     <span className="inspection-link-title">
-                      {inspection.title}
+                      <span className="inspection-link-name">{inspection.title}</span>
                       {inspection.createdAt && (
-                        <span className="inspection-link-date">
-                          {' · '}
+                        <time className="inspection-link-date" dateTime={inspection.createdAt}>
                           {shortDate(inspection.createdAt, lang)}
-                        </span>
+                        </time>
                       )}
                     </span>
                     <span className="sr-only">{t(`status.${inspection.status}`)}</span>
