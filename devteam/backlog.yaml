@@ -214,6 +214,44 @@ tasks:
     inside pipeline/, backend/ or docs/. It needs either a screenshot step that signs in first or a dev-mode
     bypass of the login on /, both owned by the orchestrator or owner. Until the screenshot of / shows
     the runs lis'
+- id: P4a-1b
+  area: core
+  title: Modal GPU provider for the dense executor
+  goal: 'A Modal provider for the P4a-1 executor: one more implementation of the existing GpuProvider
+    interface (pipeline/qarau_pipeline/dense_remote.py, ADR 0016) that starts a GPU worker, uploads frames,
+    runs COLMAP dense, downloads the results and always stops (finally / error / timeout). Config in pipeline/config.yaml:
+    provider: modal, daily_gpu_hours_budget 1.0, est_hours_per_job 0.5 (timeout_s within the estimate,
+    as the loader requires); dense_remote.enabled stays false. Record the Modal client licence (Apache-2.0)
+    and the decision in an ADR.
+
+
+    Acceptance:
+
+    - No real GPU job and no real Modal call in this task: no account, no token, no spending (developers
+    have no Modal token). The first real GPU run is P4a-2 only.
+
+    - Every Modal call the adapter makes (start, upload, run, download, stop) is covered by tests with
+    a mocked or fake Modal client: success, error and timeout, and the worker is stopped on each path.
+
+    - The adapter sits behind the existing GpuProvider interface: RemoteDenseExecutor is used as it is,
+    and its existing tests pass unchanged.
+
+    - The Modal image (COLMAP built with CUDA, from infra/colmap-cuda) is defined in code but not built
+    or run on a GPU in this task, and never pushed to a public registry; a test checks the definition
+    without building it.
+
+    - The token is read only from the environment (MODAL_TOKEN_ID / MODAL_TOKEN_SECRET; at run time the
+    owner provides them), never from a file in the repository, and never printed, logged or written to
+    a file: a test with a fake token checks it never appears in logs, errors or the run report.
+
+    - ruff, mypy and pytest pass. P4a-2 stays blocked until this task is merged and the owner gives the
+    command.
+
+    '
+  licence: 'modal Python client: Apache-2.0. Modal itself is a paid service: no real call in this task.
+
+    '
+  status: todo
 - id: P5a
   area: core
   title: Metric scale and gravity from an A4 sheet or a measured distance
@@ -231,9 +269,9 @@ tasks:
     (a JSON scale reference, docs/notes/scale-reference-format.md); the map is scaled to metres and rotated
     so gravity points down (camera up estimate, refined by the floor plane). The export records metric,
     scale source, gravity source and scale error; the benchmark reports scale_err_cm for a video that
-    has a reference. Not in this task: the A4 sheet (P5a-2). The branch devteam/P5a-1 already has the
-    first draft from P5a (scale.py, ADR 0018, tests; never checked): finish and verify it, and leave the
-    a4 reference kind out of this branch (it comes back in P5a-2).
+    has a reference. Not in this task: the reference sheet (P5a-2). The branch devteam/P5a-1 already has
+    the first draft from P5a (scale.py, ADR 0018, tests; never checked): finish and verify it, and leave
+    the sheet (Letter / A4) reference kind out of this branch (it comes back in P5a-2).
 
     '
   status: blocked
@@ -241,36 +279,35 @@ tasks:
     it on its branch
 - id: P5a-2
   area: core
-  title: Metric scale from an A4 sheet
-  goal: 'An A4 sheet as the scale reference: the user marks its four corners in order in two or more frames;
-    the scale is fitted to the four edges and two diagonals (210 x 297 mm, both orientations), and the
-    fit residual is reported as the scale error. Reuses the reference format, triangulation and alignment
-    of P5a-1; a first draft of the A4 fit is in commit b26082f on branch devteam/P5a. Automatic detection
-    of the sheet in images is not in this task.
+  title: Metric scale from a reference sheet (Letter, A4 or custom)
+  goal: 'A paper sheet of known size as the scale reference: the user marks its four corners in order
+    in two or more frames; the scale is fitted to the four edges and two diagonals (both orientations),
+    and the fit residual is reported as the scale error. The sheet size is a parameter of the scale reference
+    (docs/notes/scale-reference-format.md): letter = 215.9 x 279.4 mm (the default: the owner is in the
+    US), a4 = 210 x 297 mm, or custom = width x height in mm. Reuses the reference format, triangulation
+    and alignment of P5a-1; a first draft of the A4 fit (hard-coded 210 x 297 mm) is in commit b26082f
+    on branch devteam/P5a. Automatic detection of the sheet in images is not in this task.
+
+
+    Acceptance:
+
+    - Without a size the sheet is letter; a4 and custom width x height in mm are accepted; an unknown
+    size name or a non-positive custom size is a clear error.
+
+    - The run report (and the export metadata) shows which sheet size was used: its name and its dimensions
+    in mm (e.g. "letter 215.9 x 279.4 mm").
+
+    - Tests: synthetic scenes with a letter sheet and with an a4 sheet each recover the known scale; the
+    custom size is parsed and validated.
+
+    - docs/notes/scale-reference-format.md documents the size parameter and its default.
+
+    - ruff, mypy and pytest pass.
 
     '
   status: todo
   depends_on:
   - P5a-1
-- id: P4a-1b
-  area: core
-  title: Modal GPU provider for the dense executor
-  goal: 'A Modal provider for the P4a-1 executor behind the existing GpuProvider interface (pipeline/qarau_pipeline/dense_remote.py,
-    ADR 0016): start a GPU worker, upload frames, run COLMAP dense, download the results, always stop
-    (finally / error / timeout). The image is built by Modal from infra/colmap-cuda (Modal image build);
-    it is never pushed to a public registry. The token is read from devteam/.env as MODAL_TOKEN_ID / MODAL_TOKEN_SECRET
-    at run time and is never printed, logged or written to a file (a test checks a fake token never appears
-    in logs or errors). Config in pipeline/config.yaml: daily_gpu_hours_budget 1.0, est_hours_per_job
-    0.5 (timeout_s within the estimate, as the loader requires); dense_remote.enabled stays false. Tests
-    use a mocked Modal client only: no real Modal call, no account, no spending (developers have no Modal
-    token). Record the Modal client licence (Apache-2.0) and the decision in an ADR. P4a-2 stays blocked
-    until the owner says the Modal account is ready.
-
-    '
-  licence: 'modal Python client: Apache-2.0. Modal itself is a paid service: no real call in this task.
-
-    '
-  status: todo
 - id: D1
   area: core
   title: Data foundation - storage layout and run catalog
@@ -414,7 +451,8 @@ tasks:
 
     '
   status: blocked
-  blocked_reason: 'waits for the owner: Modal account not ready yet (P4a-1b adds the provider)'
+  blocked_reason: 'waits for the owner: P4a-1b (Modal provider) merged, then the owner''s explicit command
+    to start the first paid run on the Modal account'
 - id: P4c
   area: core
   title: Dense only inside the region of interest
@@ -450,28 +488,41 @@ tasks:
 - id: UX1a
   area: app
   title: 'Visual design pass, part 1: design system, login page, control centre'
-  goal: 'web/ only; no new features and no behaviour changes. Follow docs/design/DESIGN.md, then the
-    frontend-design skill. One design system in web/src/index.css: colour and spacing tokens, a type
-    scale, light and dark themes from the same tokens (the theme follows prefers-color-scheme; the 3D
-    viewer canvas stays black). Engineering look: calm, dense, readable; finding colours (critical red,
-    watch orange, not-seen gray, inspected blue) only for their meaning. Apply it to the login page and
-    the control centre (the main pane at /). All text through i18n en/ru/kk (Russian and Kazakh fit
-    without clipping). Vitest and the e2e tests stay green (update only markup-dependent assertions,
-    never loosen them). Tester screenshots, before (dev-*) and after: routes "/?signed-out" (the
-    login page) and "/" (the control centre, signed in), in the dark theme.
+  goal: 'web/ only; no new features and no behaviour changes. Follow the design rules DESIGN.md (its "Product
+    style" brief), then the frontend-design skill. Product style: an enterprise industrial inspection
+    tool, not an AI demo. Calm neutral palette with one accent, light and dark themes, clear hierarchy,
+    the 3D viewer is the hero. No gradients, glow, glassmorphism, emoji, AI-sparkle icons, marketing copy,
+    or developer/debug text in the UI; plain language for engineers. Finding colours (critical red, watch
+    orange, not-seen gray, inspected blue) only for their meaning; the 3D viewer canvas stays black.
+
+
+    Design tokens (colour, type, spacing, radius, for light and dark) are defined once in a platform-neutral
+    JSON file (web/src/design/tokens.json) so the desktop and mobile apps can reuse them; web/src/index.css
+    takes its values from it (generated, or kept identical by a Vitest test), with no literal colours
+    or sizes in components. The theme follows prefers-color-scheme. Apply it to the login page and the
+    control centre (the main pane at /). All text through i18n en/ru/kk (Russian and Kazakh fit without
+    clipping). Vitest and the e2e tests stay green (update only markup-dependent assertions, never loosen
+    them).
+
+
+    Acceptance: before (dev-*) and after screenshots of the login page ("/?signed-out") and the control
+    centre ("/", signed in) at 1440x900, in the review packet.
+
+
+    Note: Mobile-width screenshots come with a later Kerege change (multi-viewport screenshots).
 
     '
   status: todo
 - id: UX1b
   area: app
   title: 'Visual design pass, part 2: run list and viewer chrome'
-  goal: 'web/ only; no new features and no behaviour changes. Uses the UX1a design system
-    (docs/design/DESIGN.md). The run list (sidebar of the control centre) shows each run''s name and
-    date clearly, newest first, dense and readable; the viewer chrome (top bar, side panels, timeline,
-    controls around the black canvas) uses the same tokens, type scale and spacing. The canvas stays
-    black and the finding colours keep their meaning. i18n en/ru/kk; Vitest and e2e green (update only
-    markup-dependent assertions, never loosen them). Tester screenshots, before (dev-*) and after:
-    "/" (the run list) and "/viewer/notre-dame" (viewer chrome).
+  goal: 'web/ only; no new features and no behaviour changes. Uses the UX1a design system (the design
+    rules, DESIGN.md). The run list (sidebar of the control centre) shows each run''s name and date clearly,
+    newest first, dense and readable; the viewer chrome (top bar, side panels, timeline, controls around
+    the black canvas) uses the same tokens, type scale and spacing. The canvas stays black and the finding
+    colours keep their meaning. i18n en/ru/kk; Vitest and e2e green (update only markup-dependent assertions,
+    never loosen them). Tester screenshots, before (dev-*) and after: "/" (the run list) and "/viewer/notre-dame"
+    (viewer chrome).
 
     '
   status: todo

@@ -514,11 +514,18 @@ def test_real_backlog_split_a7_p3e_and_order():
     def order(area, ids):
         return [t["id"] for t in tasks if t["area"] == area and t["id"] in ids]
 
-    core = ["P3e", "P5a", "P4a-1b", "D1", "S1", "O1a", "A7a"]
+    core = ["P3e", "P4a-1b", "P5a-1", "P5a-2", "D1", "S1", "O1a", "A7a"]  # owner, 2026-10-19
     assert order("core", core) == core
     app = ["A9-fix", "A5-fix", "O1", "U2", "A8"]  # the historic violations first
     assert order("app", app) == app
     assert by["P4a-1b"]["area"] == "core" and "MODAL_TOKEN_ID" in by["P4a-1b"]["goal"]
     assert "Modal account" in by["P4a-2"].get("blocked_reason", "")  # until the owner says so
+    assert (
+        "P4a-1b" in by["P4a-2"]["blocked_reason"] and "no real Modal call" in by["P4a-1b"]["goal"]
+    )
+    sheet = by["P5a-2"]["goal"]
+    assert "letter = 215.9 x 279.4 mm (the default" in sheet and "a4 = 210 x 297 mm" in sheet
+    assert "1440x900" in by["UX1a"]["goal"] and "tokens.json" in by["UX1a"]["goal"]
+    assert "390" not in by["UX1a"]["goal"]  # no viewport Kerege cannot shoot yet
     # A7a's own criteria-shaped goal stays inside dev_pipeline's folders
     assert outside_paths([by["A7a"]["goal"]], "dev_pipeline", CFG, by["A7a"]) == []

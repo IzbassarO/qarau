@@ -5,6 +5,15 @@ first; the frontend-design skill (`.claude/skills/frontend-design/SKILL.md`, Ant
 Apache-2.0) is the general method. Where the two disagree, these rules win: the skill itself
 says the brief's own words win.
 
+## Product style (owner brief, 2026-10-19)
+
+An enterprise industrial inspection tool, not an AI demo.
+
+- Calm neutral palette with one accent; light and dark themes; clear hierarchy. The 3D viewer
+  is the hero of the product.
+- Never in the UI: gradients, glow, glassmorphism, emoji, AI-sparkle icons, marketing copy,
+  developer or debug text. Plain language for engineers.
+
 ## Look: an engineering tool
 
 - Calm, dense and readable: engineers check findings for hours. Information first; no hero
@@ -15,8 +24,10 @@ says the brief's own words win.
 
 ## Tokens
 
-All colours, spacing, radii and type sizes are tokens in one place (`web/src/index.css`,
-`@theme`), never literal values in components.
+All colours, type, spacing and radii are tokens, defined once in a platform-neutral JSON file
+(`web/src/design/tokens.json`, light and dark) so the desktop and mobile apps reuse the same
+values. `web/src/index.css` (`@theme`) takes its values from that file; components never use
+literal values.
 
 - **Colour.** Neutral greys for surfaces, lines and text; one interface accent for links,
   focus and the primary action.
@@ -52,4 +63,6 @@ All colours, spacing, radii and type sizes are tokens in one place (`web/src/ind
 
 - No new features or behaviour changes in a design pass: the same pages, the same data, the
   same tests (updated only where the markup changed).
-- Before/after screenshots of each changed page come from the tester (`dev-*` = before).
+- Before/after screenshots of each changed page come from the tester (`dev-*` = before), at
+  1440x900. Mobile-width screenshots come with a later Kerege change (multi-viewport
+  screenshots).

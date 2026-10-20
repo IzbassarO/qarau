@@ -127,6 +127,7 @@ Create folders when the first real file needs them, not before.
 | LLM | provider interface: Meta Model API, local vLLM, Anthropic API for dev |
 | Web | React 19, Vite, Three.js, MapLibre GL, TanStack Query, Tailwind |
 | Desktop | Tauri 2 |
+| Mobile | Flutter (later) |
 | Infra | Docker Compose now; Kubernetes/Nomad later; Ansible for customer installs |
 | CI | GitHub Actions: lint, tests, builds |
 | Quality | ruff + mypy (Python), ESLint + Prettier + tsc (web), pytest, Vitest |
@@ -230,6 +231,10 @@ modes; security-sensitive defaults. Everything else — decide, document, contin
   (`docs/architecture.md`, ADR in `docs/decisions/` for real decisions).
 - **Schema changes only via Alembic migrations.**
 - **Every API route declares a role**; no unauthenticated routes except health checks.
+- **Thin clients** (owner, 2026-10-19). The core is `pipeline/` + the `backend/` API. Every
+  client (the web app now; the desktop app on Tauri and the mobile app on Flutter later) uses
+  only the backend API: no processing and no business logic in a client, which only shows
+  data, takes input and calls the API. Every new endpoint is in the OpenAPI schema.
 - **Test on real footage.** A stage is not done until it runs on a real phone video in
   `data/samples/` and its output is inspected visually.
 - **Licences:** before using any model or library, check that its licence allows
