@@ -1,5 +1,5 @@
 """CLI: python -m qarau_pipeline {run,quality,export,segment,project,dense-remote,benchmark,
-refresh-runs} ..."""
+refresh} ..."""
 
 from __future__ import annotations
 
@@ -190,15 +190,15 @@ def cmd_refresh(a: argparse.Namespace) -> None:
     from .refresh import markdown, refresh
 
     only = [n for s in a.only for n in s.split(",") if n] if a.only else None
-    summary = Path(a.out or a.runs) / f"refresh-{a.suffix}.json"
-    if summary.exists() or summary.is_symlink():  # append-only: never overwrite, even a summary
-        raise StageError(f"{summary} already exists, pick another --suffix or --out")
-    res = refresh(a.data, a.runs, a.suffix, only, a.timeout_s)
-    summary.parent.mkdir(parents=True, exist_ok=True)
-    with summary.open("x") as f:
-        f.write(json.dumps(res, indent=2) + "\n")
-    print(markdown(res))
-    print(f"summary: {summary}")
+    report = Path(a.report).resolve() if a.report else None
+    if report and report.is_relative_to(Path(a.runs).resolve()):  # a doc, never a file in runs
+        raise StageError(f"--report {report} must be outside --runs")
+    res = refresh(a.data, a.runs, a.suffix, only, a.timeout_s, work_dir=a.work)
+    table = markdown(res)
+    print(table)
+    if report:
+        report.write_text(f"# Refresh report: suffix `{a.suffix}`\n\n{table}\n")
+        print(f"report: {report}")
     sys.exit(1 if any(r["status"].startswith("failed") for r in res.values()) else 0)
 
 
@@ -263,13 +263,15 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("--record", action="store_true", help="also write docs/benchmarks/<sha>.json"
                    " and append rows to docs/notes/benchmark.md")  # fmt: skip
     b.set_defaults(fn=cmd_benchmark)
-    rf = sub.add_parser("refresh-runs", help="every reference video -> sparse CPU run -> NEW "
+    rf = sub.add_parser("refresh", help="every reference video -> sparse CPU run -> NEW "
                         "<runs>/<video>-<suffix> (never touches existing runs)")  # fmt: skip
     rf.add_argument("--data", required=True, help="dir with the reference videos (read-only)")
     rf.add_argument("--runs", required=True, help="viewer runs dir, e.g. ../data/runs")
-    rf.add_argument("--suffix", required=True, help="run name = <video>-<suffix>, e.g. a date")
-    rf.add_argument("--out", help="dir for refresh-<suffix>.json (default: --runs)")
+    rf.add_argument("--suffix", required=True, help="run name = <video>-<suffix>, e.g. p3e")
     rf.add_argument("--only", nargs="+", metavar="NAME", help="manifest names to run (a,b or a b)")
+    rf.add_argument("--work", help="where runs are built: outside --runs, same filesystem "
+                    "(default: the system temp dir)")  # fmt: skip
+    rf.add_argument("--report", help="also write the table as Markdown to this file")
     rf.add_argument("--timeout-s", type=float, default=1800, help="per video (default 1800)")
     rf.set_defaults(fn=cmd_refresh)
     a = p.parse_args(argv)

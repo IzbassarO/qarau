@@ -29,9 +29,9 @@ max_frames = 150
 
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Two fake videos, a runs dir with one old run, run_video = real export of a synthetic
-    wall model (so the bundle and its created_at come from export.py)."""
-    data, runs = tmp_path / "data", tmp_path / "runs"
+    """Two fake videos, a runs dir with one old run and a stray summary file, run_video = real
+    export of a synthetic wall model (so the bundle and its created_at come from export.py)."""
+    data, runs, work = tmp_path / "data", tmp_path / "runs", tmp_path / "work"
     data.mkdir()
     for f in ("a.webm", "b.webm"):
         (data / f).write_bytes(b"not a real video")
@@ -39,6 +39,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     (runs / "old/web/manifest.json").write_text('{"run_id": "old"}')
     (runs / "old/cloud.ply").write_bytes(b"\x00\x01ply")
     (runs / "old-link").symlink_to("old")
+    (runs / "refresh-2026-10-19.json").write_text('{"left": "by round 2"}')
     manifest = tmp_path / "set.toml"
     manifest.write_text(SET)
     s = synth.wall_scene()
@@ -48,12 +49,14 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     for i in s["views"]:
         cv2.imwrite(str(images / f"f{i}.jpg"), np.zeros((240, 320, 3), np.uint8))
     calls: dict[str, int | None] = {}
+    outs: list[Path] = []
     fail: dict[str, Exception] = {}
 
     def fake_run_video(
         video: Path, out: Path, timeout_s: float, max_frames: int | None = None
     ) -> dict[str, Any]:
         calls[video.name] = max_frames
+        outs.append(out)
         (out / "web").mkdir(parents=True, exist_ok=True)
         (out / "web/partial.f32").write_bytes(b"half")  # a run that dies mid-way
         if video.name in fail:
@@ -64,16 +67,19 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return m
 
     monkeypatch.setattr(refresh, "run_video", fake_run_video)
-    return {"data": data, "runs": runs, "manifest": manifest, "calls": calls, "fail": fail}
+    return {"data": data, "runs": runs, "work": work, "manifest": manifest, "calls": calls,
+            "outs": outs, "fail": fail}  # fmt: skip
 
 
 def go(env: dict[str, Any], **kw: Any) -> dict[str, dict[str, Any]]:
-    return refresh.refresh(env["data"], env["runs"], "2026-10-18", manifest=env["manifest"], **kw)
+    return refresh.refresh(
+        env["data"], env["runs"], "p3e", manifest=env["manifest"], work_dir=env["work"], **kw
+    )
 
 
 def cli(env: dict[str, Any], *extra: str) -> None:
-    main(["refresh-runs", "--data", str(env["data"]), "--runs", str(env["runs"]),
-          "--suffix", "2026-10-18", *extra])  # fmt: skip
+    main(["refresh", "--data", str(env["data"]), "--runs", str(env["runs"]), "--suffix", "p3e",
+          "--work", str(env["work"]), *extra])  # fmt: skip
 
 
 def snapshot(root: Path) -> dict[str, Any]:
@@ -86,66 +92,89 @@ def snapshot(root: Path) -> dict[str, Any]:
     }
 
 
+OLD = ["old", "old-link", "refresh-2026-10-19.json"]
+
+
 def test_new_runs_next_to_old_ones(env: dict[str, Any]) -> None:
+    """(b) unrelated runs and stray files untouched; only <name>-<suffix> dirs added."""
     before = snapshot(env["runs"])
     res = go(env)
-    assert sorted(p.name for p in env["runs"].iterdir()) == [
-        "a-2026-10-18", "b-2026-10-18", "old", "old-link"
-    ]  # fmt: skip
+    assert sorted(p.name for p in env["runs"].iterdir()) == ["a-p3e", "b-p3e", *OLD]
     after = snapshot(env["runs"])
-    assert {k: after[k] for k in before} == before  # old run byte-identical, mtimes too
+    assert {k: after[k] for k in before} == before  # old run + stray json byte-identical, mtimes
     assert env["calls"] == {"a.webm": None, "b.webm": 150}  # per-video max_frames reused
+    assert all(not o.is_relative_to(env["runs"]) for o in env["outs"])  # built outside runs
+    assert list(env["work"].iterdir()) == []  # temp dirs cleaned up
     r = res["b"]
-    assert r["status"] == "ok" and r["run"] == "b-2026-10-18"
-    assert r["keyframes"] == 8 and r["registered_pct"] == 75.0
-    m = json.loads((env["runs"] / "b-2026-10-18/web/manifest.json").read_text())
-    assert m["run_id"] == "b-2026-10-18"
+    assert r["status"] == "ok" and r["run"] == "b-p3e"
+    assert r["keyframes"] == 8 and r["registered_pct"] == 75.0 and r["time_s"] >= 0
+    m = json.loads((env["runs"] / "b-p3e/web/manifest.json").read_text())
+    assert m["run_id"] == "b-p3e"  # export named it: built under its final name
     assert r["points"] == m["stats"]["points"] > 0 and r["far_points"] == m["stats"]["far_points"]
-    assert "| b | b-2026-10-18 | 75.0 |" in refresh.markdown(res)
+    assert "| b | b-p3e | 75.0 |" in refresh.markdown(res)
 
 
 def test_created_at_is_utc_iso(env: dict[str, Any]) -> None:
+    """(c) created_at written at export: parseable, UTC, recent."""
     t0 = datetime.now(UTC).replace(microsecond=0)
     go(env, only=["a"])
-    m = json.loads((env["runs"] / "a-2026-10-18/web/manifest.json").read_text())
+    m = json.loads((env["runs"] / "a-p3e/web/manifest.json").read_text())
     created = datetime.fromisoformat(m["created_at"])
-    assert created.utcoffset() == timedelta(0) and created >= t0  # taken at export, not copied
+    assert created.utcoffset() == timedelta(0)
+    assert t0 <= created <= datetime.now(UTC)  # taken at export, not copied
 
 
-def test_existing_run_skipped_byte_identical(env: dict[str, Any]) -> None:
-    (env["runs"] / "b-2026-10-18/web").mkdir(parents=True)
-    (env["runs"] / "b-2026-10-18/web/manifest.json").write_text('{"keep": "me"}')
-    (env["runs"] / "a-2026-10-18").symlink_to("missing-target")  # dangling link counts too
+def test_existing_run_refused_byte_identical(env: dict[str, Any]) -> None:
+    """(a) a run dir with the target name: that video fails, its files are unchanged."""
+    (env["runs"] / "b-p3e/web").mkdir(parents=True)
+    (env["runs"] / "b-p3e/web/manifest.json").write_text('{"keep": "me"}')
+    (env["runs"] / "a-p3e").symlink_to("missing-target")  # dangling link counts too
     before = snapshot(env["runs"])
     res = go(env)
     assert snapshot(env["runs"]) == before and env["calls"] == {}  # nothing run, nothing written
+    status = "failed: run already exists, pick another --suffix"
     for n in ("a", "b"):
-        assert res[n] == {**dict.fromkeys(refresh.COLS), "run": f"{n}-2026-10-18",
-                          "status": "skipped: run already exists"}  # fmt: skip
+        assert res[n] == {**dict.fromkeys(refresh.COLS), "run": f"{n}-p3e", "status": status}
 
 
 def test_failure_reported_and_next_video_exported(env: dict[str, Any]) -> None:
+    """(d) one video fails with a reason, the next one still exports."""
     env["fail"]["a.webm"] = StageError("exit 1: no registered images")
     res = go(env)
-    assert res["a"] == {**dict.fromkeys(refresh.COLS), "run": "a-2026-10-18",
+    assert res["a"] == {**dict.fromkeys(refresh.COLS), "run": "a-p3e",
                         "status": "failed: StageError: exit 1: no registered images"}  # fmt: skip
     assert res["b"]["status"] == "ok" and res["b"]["points"] > 0
-    names = sorted(p.name for p in env["runs"].iterdir())
-    assert names == ["b-2026-10-18", "old", "old-link"]  # no partial a, no temp dir left
+    assert sorted(p.name for p in env["runs"].iterdir()) == ["b-p3e", *OLD]  # no partial a
+    assert list(env["work"].iterdir()) == []
 
 
 def test_timeout_reported(env: dict[str, Any]) -> None:
     env["fail"]["a.webm"] = subprocess.TimeoutExpired("run", 5)
     res = go(env, timeout_s=5)
     assert res["a"]["status"] == "failed: timeout after 5 s" and res["b"]["status"] == "ok"
-    assert not (env["runs"] / "a-2026-10-18").exists()
+    assert not (env["runs"] / "a-p3e").exists()
 
 
-def test_missing_video_skipped(env: dict[str, Any]) -> None:
+def test_missing_video_failed(env: dict[str, Any]) -> None:
     (env["data"] / "a.webm").unlink()
     res = go(env)
-    assert res["a"]["status"].startswith("skipped: video missing")
-    assert not (env["runs"] / "a-2026-10-18").exists() and res["b"]["status"] == "ok"
+    assert res["a"]["status"] == "failed: video missing (a.webm)"
+    assert not (env["runs"] / "a-p3e").exists() and res["b"]["status"] == "ok"
+
+
+def test_only_runs_in_given_order(env: dict[str, Any]) -> None:
+    res = go(env, only=["b", "a"])
+    assert list(res) == ["b", "a"] and list(env["calls"]) == ["b.webm", "a.webm"]
+    with pytest.raises(StageError, match="unknown benchmark video"):
+        go(env, only=["nope"])
+
+
+def test_work_dir_inside_runs_refused(env: dict[str, Any]) -> None:
+    before = snapshot(env["runs"])
+    with pytest.raises(StageError, match="outside --runs"):
+        refresh.refresh(env["data"], env["runs"], "p3e", manifest=env["manifest"],
+                        work_dir=env["runs"] / "w")  # fmt: skip
+    assert snapshot(env["runs"]) == before
 
 
 def test_other_samples_listed_as_not_reference(env: dict[str, Any]) -> None:
@@ -155,10 +184,11 @@ def test_other_samples_listed_as_not_reference(env: dict[str, Any]) -> None:
     res = go(env)
     assert list(res) == ["a", "b", "south-building", "south-building.zip"]
     assert res["south-building"]["status"] == "skipped: not a reference video"
-    assert "south-building" not in go(env, only=["a"])  # --only: just the named videos
 
 
 def test_dense_never_invoked(env: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    """(e) the dense entry points raise if called; refresh still exports every video."""
+
     def boom(*a: Any, **k: Any) -> None:
         raise AssertionError("dense must not run")
 
@@ -167,9 +197,7 @@ def test_dense_never_invoked(env: dict[str, Any], monkeypatch: pytest.MonkeyPatc
     res = go(env)
     assert all(r["status"] == "ok" for r in res.values())
     for n in ("a", "b"):
-        assert "dense" not in json.loads(
-            (env["runs"] / f"{n}-2026-10-18/web/manifest.json").read_text()
-        )
+        assert "dense" not in json.loads((env["runs"] / f"{n}-p3e/web/manifest.json").read_text())
 
 
 def test_child_command_is_sparse_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -188,29 +216,24 @@ def test_child_command_is_sparse_run(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert not any("dense" in c for c in cmd)
 
 
-def test_cli_refresh_runs(env: dict[str, Any]) -> None:
-    """The real benchmark_set.toml names; a failed video makes the command exit 1."""
+def test_cli_refresh_report(env: dict[str, Any], tmp_path: Path) -> None:
+    """The real benchmark_set.toml names; Markdown report outside runs; a failure -> exit 1."""
     for f in ("notre_dame_oubiels.webm", "IMG_8315.MOV"):
         (env["data"] / f).write_bytes(b"not a real video")
     env["fail"]["IMG_8315.MOV"] = StageError("boom")
+    report = tmp_path / "report.md"
     with pytest.raises(SystemExit) as e:
-        cli(env, "--only", "notre-dame,room")
+        cli(env, "--only", "notre-dame,room", "--report", str(report))
     assert e.value.code == 1
-    assert (env["runs"] / "notre-dame-2026-10-18/web/manifest.json").is_file()
-    assert not (env["runs"] / "room-2026-10-18").exists()
-    summary = json.loads((env["runs"] / "refresh-2026-10-18.json").read_text())
-    assert all(set(r) == {*refresh.COLS} for r in summary.values())  # every column, every row
-    assert summary["notre-dame"]["status"] == "ok" and summary["notre-dame"]["keyframes"] == 8
-    assert summary["room"]["status"] == "failed: StageError: boom"
-    assert "| room | room-2026-10-18 | — |" in refresh.markdown(summary)
+    assert sorted(p.name for p in env["runs"].iterdir()) == ["notre-dame-p3e", *OLD]
+    text = report.read_text()
+    assert "| notre-dame | notre-dame-p3e | 75.0 | " in text
+    assert "| room | room-p3e | — | — | — | — | — | failed: StageError: boom |" in text
 
 
-def test_cli_never_overwrites_summary(env: dict[str, Any], tmp_path: Path) -> None:
-    (env["runs"] / "refresh-2026-10-18.json").write_text("old")
+def test_cli_report_inside_runs_refused(env: dict[str, Any]) -> None:
     before = snapshot(env["runs"])
-    with pytest.raises(SystemExit):
-        cli(env)
-    assert snapshot(env["runs"]) == before and env["calls"] == {}  # refused before any work
     with pytest.raises(SystemExit) as e:
-        cli(env, "--out", str(tmp_path / "elsewhere"))
-    assert e.value.code == 0 and (tmp_path / "elsewhere/refresh-2026-10-18.json").is_file()
+        cli(env, "--report", str(env["runs"] / "report.md"))
+    assert e.value.code == 1 and env["calls"] == {}  # refused before any work
+    assert snapshot(env["runs"]) == before
