@@ -202,12 +202,14 @@ tasks:
     '
   writable:
   - data/runs
-  status: in_progress
+  status: done
   owner: dev_pipeline
   run: cont-20261019-223446-dev_pipeline-1
   branch: devteam/P3e
   supervisor:
     max_round_min: 180
+  pr: https://github.com/IzbassarO/qarau/pull/48
+  done_at: '2026-10-20'
 - id: P4a-1b
   area: core
   title: Modal GPU provider for the dense executor
