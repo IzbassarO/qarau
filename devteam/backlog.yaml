@@ -202,18 +202,12 @@ tasks:
     '
   writable:
   - data/runs
-  status: blocked
+  status: todo
   owner: dev_pipeline
   run: cont-20261019-080942-dev_pipeline-1
   branch: devteam/P3e
   supervisor:
     max_round_min: 180
-  blocked_reason: 'tester: The code, tests, docs and checks are fine. The only unmet criterion is that
-    the screenshot of / shows the login page, not the runs list, so I cannot confirm the new dated runs
-    are listed. The developer''s summary is only a claim and is not visual evidence. This is not fixable
-    inside pipeline/, backend/ or docs/. It needs either a screenshot step that signs in first or a dev-mode
-    bypass of the login on /, both owned by the orchestrator or owner. Until the screenshot of / shows
-    the runs lis'
 - id: P4a-1b
   area: core
   title: Modal GPU provider for the dense executor
