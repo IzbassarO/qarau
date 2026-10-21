@@ -120,8 +120,23 @@ E2E = (
 )
 
 
-def e2e_team(repo, tmp_path, code=0, dev="dev_app"):
-    agents = Fast()
+class Judged(Fast):
+    """Counts the LLM tester calls."""
+
+    judged = 0
+    feedback = ""
+
+    def judge(self, team, s, checks):
+        self.judged += 1
+        return super().judge(team, s, checks)
+
+    def develop(self, team, s):
+        self.feedback = s.get("feedback") or self.feedback
+        return super().develop(team, s)
+
+
+def e2e_team(repo, tmp_path, code=0, dev="dev_app", agents=None, loops=0):
+    agents = agents or Fast()
     agents.plan = only("T-002" if dev == "dev_app" else "T-001", dev)
     devs = copy.deepcopy(CFG["developers"])
     for d in devs.values():
@@ -130,7 +145,7 @@ def e2e_team(repo, tmp_path, code=0, dev="dev_app"):
     gates = copy.deepcopy(CFG["gates"])
     log = tmp_path / "e2e.log"
     gates["e2e"]["command"] = E2E.format(py=sys.executable, log=str(log), port="{port}", code=code)
-    team, graph = make(repo, agents, fake=False, developers=devs, gates=gates, max_fix_loops=0)
+    team, graph = make(repo, agents, fake=False, developers=devs, gates=gates, max_fix_loops=loops)
     graph.invoke({}, {"configurable": {"thread_id": "r"}})
     return team, log
 
@@ -160,6 +175,23 @@ def test_failed_e2e_sends_the_task_back_with_each_test_line(repo, tmp_path):
     assert "- FAIL: `" in packet and "http.server" in packet
 
 
+def test_failed_e2e_goes_back_without_calling_the_llm_tester(repo, tmp_path):
+    agents = Judged()
+    team, _ = e2e_team(repo, tmp_path, code=1, agents=agents, loops=1)
+    assert agents.judged == 0  # neither round: the e2e failed both times
+    assert "e2e failed: sent back without the LLM tester" in (team.home / "events.log").read_text()
+    reason = task(team, "T-002")["blocked_reason"]
+    assert "Kerege ran the e2e tests (Playwright) right after your round" in reason
+    assert "Failing checks:" in agents.feedback and "1 passed, 1 skipped" in agents.feedback
+    assert "screenshots missing" not in reason
+
+
+def test_passing_e2e_still_goes_to_the_llm_tester(repo, tmp_path):
+    agents = Judged()
+    e2e_team(repo, tmp_path, agents=agents)
+    assert agents.judged == 1
+
+
 def test_e2e_runs_only_when_the_branch_changes_web(repo, tmp_path):
     team, log = e2e_team(repo, tmp_path, dev="dev_pipeline")
     assert not log.exists()
@@ -176,9 +208,7 @@ def test_judge_sees_which_e2e_tests_ran_or_skipped():
 
 def test_web_developer_is_told_the_tester_runs_e2e():
     team = SimpleNamespace(cfg=CFG)
-    assert "run by the tester, not inside your sandbox" in e2e_rule(
-        team, CFG["developers"]["dev_app"]
-    )
+    assert "run by Kerege, not inside your sandbox" in e2e_rule(team, CFG["developers"]["dev_app"])
     assert e2e_rule(team, CFG["developers"]["dev_pipeline"]) == ""
     a5 = next(t for t in real_backlog() if t["id"] == "A5-fix")
     assert "e2e gate" in a5["goal"] and "runs in CI" not in a5["goal"]

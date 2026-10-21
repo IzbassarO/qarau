@@ -1280,7 +1280,7 @@ def build_graph(team: Team, checkpointer):
         if bad["out_of_scope"]:
             return refuse(s, "out_of_scope", bad["out_of_scope"])
         findings = SC.bypass(team.git("diff", "-U0", span, cwd=wt), paths)
-        checks, shots, problems, dev_shots = [], [], [], []
+        checks, shots, problems, dev_shots, e2e_failed = [], [], [], [], False
         if findings:  # no checks or judge: the change itself is refused
             team.violation(tid, dev, "bypass", "; ".join(findings))
             verdict = {
@@ -1296,28 +1296,45 @@ def build_graph(team: Team, checkpointer):
             if not team.fake:  # every check again, from a clean checkout of the committed HEAD
                 with team.clean_checkout(s) as clean:
                     cs = {**s, "worktree": clean}
-                    checks = team.run_checks(cs) + e2e_gate(cs, clean, paths)
+                    # e2e first, run by Kerege outside the developer's sandbox: when it fails,
+                    # the round goes back with the failures and no LLM tester call
+                    e2e = e2e_gate(cs, clean, paths)
+                    e2e_failed = any(not c["ok"] for c in e2e)
+                    checks = team.run_checks(cs) + e2e
                     for c in checks:
                         team.emit("tester", f"{'ok  ' if c['ok'] else 'FAIL'} {c['cmd']}", task=tid)
-                    runs, problems = tester_benchmark(cs, clean)
-                    shots, more = G.screenshots(team, cs, s.get("routes") or [], runs=runs)
-                    dev_shots, dev_problems = G.dev_screenshots(team, cs, s.get("routes") or [])
-                    problems += more + dev_problems
+                    if not e2e_failed:
+                        runs, problems = tester_benchmark(cs, clean)
+                        shots, more = G.screenshots(team, cs, s.get("routes") or [], runs=runs)
+                        routes = s.get("routes") or []
+                        dev_shots, dev_problems = G.dev_screenshots(team, cs, routes)
+                        problems += more + dev_problems
                 if shots or problems:
                     team.emit(
                         "tester", f"screenshots: {len(shots)} ok, {len(problems)} failed", task=tid
                     )
-            verdict = team.agents.judge(
-                team,
-                {**s, "screenshots": shots + dev_shots, "screenshot_problems": problems},
-                checks,
-            )
+            if e2e_failed:
+                team.emit("tester", "e2e failed: sent back without the LLM tester", task=tid)
+                verdict = {
+                    "passed": False,
+                    "criteria": [],
+                    "summary": "",
+                    "how_to_try": "",
+                    "feedback": "Kerege ran the e2e tests (Playwright) right after your round and "
+                    "they fail, so the tester did not review this round. Fix them first.",
+                }
+            else:
+                verdict = team.agents.judge(
+                    team,
+                    {**s, "screenshots": shots + dev_shots, "screenshot_problems": problems},
+                    checks,
+                )
         verdict["bypass"] = findings
         verdict["screenshots"], verdict["screenshot_problems"] = shots + dev_shots, problems
         failed = [c for c in checks if not c["ok"]]
         verdict["judge_passed"] = verdict["passed"]
         # a visual criterion passes only on the tester's own screenshots, one per route
-        no_shots = len(shots) < len(s.get("routes") or [])
+        no_shots = not e2e_failed and len(shots) < len(s.get("routes") or [])
         verdict["passed"] = verdict["passed"] and not failed and not no_shots
         if no_shots:
             verdict["feedback"] = (
@@ -1370,9 +1387,10 @@ def build_graph(team: Team, checkpointer):
         return out
 
     def e2e_gate(cs: TaskState, clean: str, paths: list[str]) -> list[dict]:
-        """Playwright e2e for a change under gates.e2e.when_paths (web/): the tester runs it on
-        the clean checkout with a fresh server on a free port, killed with the step after. A
-        Codex sandbox cannot open a port (listen EPERM): a developer never runs it (A5-fix)."""
+        """Playwright e2e for a change under gates.e2e.when_paths (web/): Kerege runs it first
+        after the round, on the clean checkout with a fresh server on a free port, killed with
+        the step after. A Codex sandbox cannot open a port (listen EPERM): a developer never
+        runs it (A5-fix), and the sandbox stays as it is."""
         e = cfg["gates"].get("e2e")
         if not e or not any(p.startswith(tuple(e["when_paths"])) for p in paths):
             return []

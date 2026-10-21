@@ -42,10 +42,11 @@ gates:
     quick_only: [notre-dame, room]
     # A task may set its own `quick_only` in the backlog (e.g. videos its screenshots need).
     quick_min: 11
-  # Playwright e2e, run by the tester on its clean checkout for tasks that change web/: a fresh
-  # Vite on a free port ({port} -> QARAU_E2E_PORT; web/playwright.config.ts never reuses a server),
-  # stopped after with everything the step started. A Codex sandbox cannot open a port (listen
-  # EPERM), so developers never run e2e themselves (A5-fix, 2026-10-18).
+  # Playwright e2e, run by Kerege right after a round on a clean checkout, for tasks that change
+  # web/: a fresh Vite on a free port ({port} -> QARAU_E2E_PORT; web/playwright.config.ts never
+  # reuses a server), stopped after with everything the step started. A failure goes back to the
+  # developer without an LLM tester call. A Codex sandbox cannot open a port (listen EPERM), so
+  # developers never run e2e themselves (A5-fix, 2026-10-18).
   e2e:
     when_paths: [web/]
     command: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_E2E_PORT={port} QARAU_RUNS_DIR={runs_dir} pnpm exec playwright test --reporter=list

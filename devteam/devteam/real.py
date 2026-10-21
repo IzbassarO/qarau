@@ -694,10 +694,11 @@ def e2e_rule(team, dev: dict) -> str:
     if not e or not any(o.startswith(w) for o in dev["owns"] for w in e["when_paths"]):
         return ""
     return (
-        "\n- Playwright e2e tests (web/e2e) are run by the tester, not inside your sandbox: it "
-        "cannot open a port. Write or update them and run the checks below; the tester runs "
-        "every e2e test from a clean checkout with its own fresh server and shows the judge "
-        "which ones passed, failed or skipped."
+        "\n- Playwright e2e tests (web/e2e) are run by Kerege, not inside your sandbox: it "
+        "cannot open a port. Write or update them and run the checks below; right after your "
+        "round Kerege runs every e2e test from a clean checkout with its own fresh server. If "
+        "one fails, the round comes straight back to you with the failures, before the tester "
+        "looks at it; otherwise the tester sees which ones passed, failed or skipped."
     )
 
 
