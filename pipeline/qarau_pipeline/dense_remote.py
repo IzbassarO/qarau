@@ -4,7 +4,7 @@ The executor guarantees: a worker that was started is always stopped (finally, r
 failed stop is a loud error naming the worker); one wall-clock deadline for the whole job;
 no worker is started when the day's GPU-hour budget cannot cover the job's estimate.
 Providers: the fake one (dense_fake.py) and Modal (dense_modal.py, ADR 0019), which is not
-called until the owner approves a paid account (P4a-2).
+called until the owner approves a paid account (P4a-2a-run).
 """
 
 from __future__ import annotations

@@ -39,7 +39,9 @@ and the owner has not approved a paid account.
    owner approves a paid GPU account. The default `run` / `benchmark` path does not import
    the executor; `python -m qarau_pipeline dense-remote --provider fake` shows the round trip.
    Update (P4a-1b): a Modal provider exists (`dense_modal.py`, ADR 0019), selected by
-   `dense_remote.provider: modal`; nothing calls it before the owner starts P4a-2.
+   `dense_remote.provider: modal`; nothing calls it before the owner starts P4a-2a-run.
+   Update (P4a-2a-code): the CLI runs it only as `dense-remote --provider modal
+   --allow-paid-gpu` (ADR 0019, Running); `--provider` defaults to `fake`.
 
 ## Consequences
 

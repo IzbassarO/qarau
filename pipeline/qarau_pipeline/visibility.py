@@ -302,7 +302,7 @@ def workspace_frame_map(rec: Any, frames: list[dict[str, Any]]) -> np.ndarray:
     image_undistorter keeps the sparse model's image ids and names, and COLMAP's mvs::Model
     lists the registered images in ascending image id, which is the .vis index."""
     # ponytail: order taken from COLMAP 4.x (RegImageIds is an ordered set); verify on the
-    # first real GPU run (P4a-2) by checking a fused point reprojects into its linked frames.
+    # first real GPU run (P4a-2a-run) by checking a fused point reprojects into its linked frames.
     by_name = {f["name"]: f["i"] for f in frames}
     names = [rec.images[i].name for i in sorted(rec.reg_image_ids())]
     return np.array([by_name.get(n, -1) for n in names], np.int64)

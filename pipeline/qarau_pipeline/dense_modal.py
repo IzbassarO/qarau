@@ -5,7 +5,7 @@ every call is bounded by its timeout_s (a hung call raises ModalTimeoutError, a 
 a start that answers too late is stopped, and error text never carries the Modal token.
 The executor owns the order and the always-stop. `modal` (Apache-2.0) is imported only inside
 _RealModalClient and to_modal_image, so this module loads and is tested without it; nothing
-calls Modal until the owner approves P4a-2 (a paid service).
+calls Modal until the owner approves P4a-2a-run (a paid service).
 """
 
 from __future__ import annotations
@@ -199,8 +199,8 @@ class ModalGpuProvider:
 
 
 class _RealModalClient:
-    """Modal Sandboxes through the `modal` client. Never exercised before P4a-2: no token and
-    no call in tests (ADR 0019 lists what P4a-2 must check against a real account)."""
+    """Modal Sandboxes through the `modal` client. Never exercised before P4a-2a-run: no token
+    and no call in tests (ADR 0019 lists what P4a-2a-run must check against a real account)."""
 
     def __init__(self, token_id: Secret, token_secret: Secret) -> None:
         self._token_id, self._token_secret = token_id, token_secret
