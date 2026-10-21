@@ -63,10 +63,22 @@ def test_success_downloads_results_and_stops_once(env: dict[str, Path]) -> None:
                                        "download", "download", "stop"]  # fmt: skip
     # uploaded files really reached the worker
     assert (env["root"] / "remote/fake-1/work/images/000000.jpg").is_file()
-    # actual hours (8 fake 1 s calls; stop takes none) replace the 1 h estimate
+    # actual hours from the worker's start (7 fake 1 s calls after start_worker; stop takes
+    # none) replace the 1 h estimate
     assert GpuLedger(env["root"] / "ledger.json").used(FakeClock()().date()) == pytest.approx(
-        8 / 3600, abs=1e-6
+        7 / 3600, abs=1e-6
     )
+
+
+def test_time_queued_for_a_gpu_is_not_booked(env: dict[str, Path]) -> None:
+    """2026-10-21: Modal held an L4 request 28 min (not billed); the ledger booked it all."""
+    ex, p = make(env, hang={"start_worker": 1500.0})
+    go(ex, env)
+    assert ex.ledger.used(FakeClock()().date()) == pytest.approx(7 / 3600, abs=1e-6)
+    ex, p = make(env, fail={"start_worker": RuntimeError("Insufficient capacity")})
+    with pytest.raises(RuntimeError):
+        go(ex, env)
+    assert ex.ledger.used(FakeClock()().date()) == pytest.approx(7 / 3600, abs=1e-6)  # + 0
 
 
 def test_start_failure_needs_no_stop_and_leaks_nothing(env: dict[str, Path]) -> None:

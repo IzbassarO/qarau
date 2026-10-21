@@ -521,6 +521,37 @@ tasks:
   status: blocked
   blocked_reason: 'waits for the owner: P4a-2a-code merged, then the owner runs it with Claude Code on
     the Modal account. Owner-only: never `devteam resume` this task'
+- id: P4a-3
+  area: core
+  title: 'Dense speed: COLMAP PatchMatch knobs in config'
+  goal: 'pipeline/ only; no paid call: Kerege never runs Modal, the timing run on Modal is the owner''s
+    (like P4a-2a-run). Measured 2026-10-21 (P4a-2a-run, notre-dame-p3e, 121 views at 640x480 on an L4):
+    PatchMatch photometric 11.6 min + geometric 15.0 min (~5.8 s per view per pass), fusion 12 s, 1681
+    s of the 1800 s timeout_s. At that pace orono-p3e (151 frames at 1920x1080) needs 2-3 h, so it was
+    not run.
+
+
+    1. `dense_remote.patch_match` in pipeline/config.yaml, read by load_dense_remote_config and passed
+    by dense_commands() (pipeline/qarau_pipeline/dense_remote.py) to COLMAP: max_image_size (image_undistorter
+    and PatchMatchStereo), num_iterations, window_step (with window_radius), and the number of source
+    frames per view. Every key is validated with an error naming it; absent keys keep today''s argv exactly.
+
+
+    2. Tests: dense_commands argv for given knobs and for none (unchanged); the fake provider''s `dense-remote`
+    run prints them.
+
+
+    3. docs/notes/dense-speed.md: per-view time scaled from the measured numbers above (pixels, iterations,
+    sources), and proposed values for a 3-min 1080p video, which the pipeline caps at 300 frames; target
+    < 30 min for the whole job (owner, 2026-10-21). The benchmark has no 3-min 1080p video: the owner
+    measures it on Modal on aegviidu (1920x1080, 71 s) and orono, scaled to 300 frames, after this task
+    merges.
+
+    '
+  licence: 'COLMAP (BSD-3-Clause) options only; nothing new.
+
+    '
+  status: todo
 - id: P4a-2b
   area: core
   title: Depth Anything V2 Small depth prior (estimated points)
@@ -695,6 +726,40 @@ tasks:
     and lie inside 0..390 px; the existing viewer e2e stay as they are (never loosened). Tester screenshots:
     "/viewer/notre-dame"; Kerege shoots it at 1440x900 and 390x844, in ru, kk and en, with dev-* before
     shots to compare the desktop.
+
+    '
+  status: todo
+- id: UX-dense
+  area: app
+  title: Viewer shows the COLMAP dense layer with frame links
+  goal: 'web/ only; no backend or pipeline change. `export --dense` writes a dense layer into the bundle
+    (web/manifest.json key `dense`, ADR 0017: count, position f32, color u8, frame_offsets / frame_ids
+    u32, densifier, frame_links_source), but the viewer never reads it: web/src/lib/bundle.ts only knows
+    the older `dense` metadata ({method, frames_used, points}) of depth-prior runs such as orono-dense,
+    which put their points into `points`. First real data (P4a-2a-run, 2026-10-21): data/runs/notre-dame-p3e-modal,
+    730069 COLMAP dense points, every one linked to the frames that saw it.
+
+
+    1. When manifest.dense has `position`, the dense points load with the bundle (typed arrays straight
+    into the geometry, no per-point objects) and draw with the same height colouring as the sparse points;
+    a layer toggle "Dense" (i18n en/ru/kk), on when the layer exists. Bundles without it (and the old
+    metadata-only `dense`) behave as today.
+
+
+    2. Clicking a dense point opens the same evidence panel as a sparse point, listing the frames from
+    dense.frame_offsets / dense.frame_ids.
+
+
+    Tests: Vitest for the bundle reader on a small fixture bundle with a dense layer (fixed expected counts
+    and frame ids); a Playwright e2e on that fixture: the toggle hides and shows the layer, clicking a
+    dense point lists the fixture''s frames. Tester screenshots: "/viewer/notre-dame-p3e-modal".
+
+
+
+    Owner additions (2026-10-21):
+
+
+    - The viewer shows the dense layer from manifest.dense (with frame↔point links).
 
     '
   status: todo

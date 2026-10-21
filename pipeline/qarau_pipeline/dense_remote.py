@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -33,6 +34,8 @@ REMOTE_SPARSE = "/work/sparse"
 REMOTE_DENSE = "/work/dense"
 RESULTS = ("fused.ply", "fused.ply.vis")
 PROVIDERS = ("fake", "modal")  # dense_remote.provider; absent means fake
+# CUDA arch each GPU type needs in dense_remote.cuda_architectures (Modal GPU names).
+GPU_ARCH = {"T4": "75", "A100": "80", "A10": "86", "L4": "89", "L40S": "89", "H100": "90"}
 
 Clock = Callable[[], datetime]
 T = TypeVar("T")
@@ -100,15 +103,23 @@ class DenseRemoteConfig:
     image: str
     gpu_type: str
     provider: str = "fake"
+    cuda_architectures: str = "89"  # the image's CUDA_ARCHITECTURES build arg, e.g. "75;86;90"
+    gpu_fallback: tuple[str, ...] = ()  # tried after gpu_type when the provider has no capacity
+    start_timeout_s: float = 300.0  # per GPU type: how long to wait for capacity
 
 
 def make_provider(cfg: DenseRemoteConfig) -> GpuProvider:
     """The real provider named by dense_remote.provider (the fake is built by tests and the
     demo CLI, with its own directory and clock)."""
     if cfg.provider == "modal":
-        from .dense_modal import ModalGpuProvider  # no vendor code until a real job asks for it
+        # no vendor code until a real job asks for it
+        from .dense_modal import ModalGpuProvider, ModalImageSpec
 
-        return ModalGpuProvider.from_env()
+        return ModalGpuProvider.from_env(
+            ModalImageSpec(cuda_architectures=cfg.cuda_architectures),
+            fallback_gpus=cfg.gpu_fallback,
+            start_timeout_s=cfg.start_timeout_s,
+        )
     raise DenseConfigError(f"dense_remote.provider {cfg.provider!r} is not a real GPU provider")
 
 
@@ -153,7 +164,27 @@ def load_dense_remote_config(path: Path = DEFAULT_CONFIG) -> DenseRemoteConfig:
         image=text("image"),
         gpu_type=text("gpu_type"),
         provider=provider,
+        cuda_architectures=str(sec.get("cuda_architectures", "89")),
+        gpu_fallback=tuple(sec.get("gpu_fallback") or ()),
+        start_timeout_s=number("start_timeout_s") if "start_timeout_s" in sec else 300.0,
     )
+    if cfg.start_timeout_s > cfg.timeout_s:
+        raise DenseConfigError(
+            f"{path}: dense_remote.start_timeout_s ({cfg.start_timeout_s:g} s) is longer than "
+            f"dense_remote.timeout_s ({cfg.timeout_s:g} s)"
+        )
+    if not re.fullmatch(r"\d{2,3}(;\d{2,3})*", cfg.cuda_architectures):
+        raise DenseConfigError(
+            f'{path}: dense_remote.cuda_architectures must be like "89" or "75;86;90", '
+            f"got {cfg.cuda_architectures!r}"
+        )
+    # A GPU whose arch is not in the image fails only in patch_match_stereo, after paying.
+    for key, gpu in [("gpu_type", cfg.gpu_type), *(("gpu_fallback", g) for g in cfg.gpu_fallback)]:
+        if (arch := GPU_ARCH.get(gpu)) and arch not in cfg.cuda_architectures.split(";"):
+            raise DenseConfigError(
+                f"{path}: dense_remote.{key} {gpu} needs CUDA arch {arch} in "
+                f"dense_remote.cuda_architectures ({cfg.cuda_architectures!r})"
+            )
     # The estimate is what the budget check books, so it must cover the longest a job can run.
     if cfg.timeout_s > cfg.est_hours_per_job * 3600:
         raise DenseConfigError(
@@ -231,17 +262,19 @@ class RemoteDenseExecutor:
         # Book the estimate up front so a crash mid-job never under-counts; settled below.
         self.ledger.add(day, spec.est_hours)
         deadline = t0 + timedelta(seconds=cfg.timeout_s)
+        started: datetime | None = None
         try:
             handle = self._call(
                 deadline, "start_worker", lambda t: self.provider.start_worker(spec, t), False
             )
+            started = self.clock()  # time queued for a GPU is not GPU time (2026-10-21: 28 min)
             try:
                 self._remaining(deadline, "start_worker")  # returned past the deadline
                 self._job(handle, deadline, frames_dir, sparse_dir, out_dir)
             finally:
                 self._stop(handle)
         finally:
-            hours = (self.clock() - t0).total_seconds() / 3600
+            hours = (self.clock() - started).total_seconds() / 3600 if started else 0.0
             self.ledger.add(day, hours - spec.est_hours)
         return out_dir / RESULTS[0]
 

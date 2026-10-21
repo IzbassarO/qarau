@@ -13,11 +13,15 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import threading
+import time
+import uuid
 from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
@@ -28,6 +32,8 @@ log = logging.getLogger(__name__)
 TOKEN_VARS = ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET")
 APP_NAME = "qarau-dense"
 STOP_TIMEOUT_S = 120.0
+# Modal's answer when it has no GPU of the asked type (2026-10-21: a 28 min wait for an L4).
+NO_CAPACITY = re.compile(r"ResourceExhausted|Insufficient capacity", re.I)
 DOCKERFILE = Path(__file__).resolve().parents[2] / "infra" / "colmap-cuda" / "Dockerfile"
 
 T = TypeVar("T")
@@ -69,9 +75,12 @@ def _scrub(text: str) -> str:
 @dataclass(frozen=True)
 class ModalImageSpec:
     """The worker image: COLMAP + CUDA from infra/colmap-cuda (ADR 0016). A description only;
-    Modal builds it inside the account on the first start, nothing is pushed to a registry."""
+    Modal builds it inside the account on the first start, nothing is pushed to a registry.
+    cuda_architectures: the Dockerfile's CUDA_ARCHITECTURES build arg (dense_remote config);
+    another value is another image, built once."""
 
     dockerfile: Path = DOCKERFILE
+    cuda_architectures: str = "89"
     push: bool = field(default=False, init=False)
     public: bool = field(default=False, init=False)
 
@@ -81,13 +90,17 @@ def to_modal_image(spec: ModalImageSpec) -> Any:
 
     # Lazy: from_dockerfile only describes the image. Empty entrypoint: the Dockerfile's
     # `colmap` entrypoint would otherwise wrap the sandbox's keep-alive command.
-    return modal.Image.from_dockerfile(str(spec.dockerfile)).entrypoint([])
+    return modal.Image.from_dockerfile(
+        str(spec.dockerfile), build_args={"CUDA_ARCHITECTURES": spec.cuda_architectures}
+    ).entrypoint([])
 
 
 class ModalClient(Protocol):
     """The only Modal operations the provider needs. A worker is a Modal Sandbox, by id."""
 
-    def start(self, image: ModalImageSpec, gpu: str, timeout_s: float) -> str: ...
+    def start(
+        self, image: ModalImageSpec, gpu: str, timeout_s: float, tags: dict[str, str]
+    ) -> str: ...
 
     def upload(self, worker_id: str, local_dir: Path, remote_dir: str) -> None: ...
 
@@ -96,6 +109,10 @@ class ModalClient(Protocol):
     def download(self, worker_id: str, remote_path: str, local_dir: Path) -> None: ...
 
     def stop(self, worker_id: str) -> None: ...
+
+    def stop_tagged(self, tags: dict[str, str]) -> None:
+        """Terminate every sandbox with these tags: one still queued for a GPU has no id yet."""
+        ...
 
 
 def _utc_now() -> datetime:
@@ -110,11 +127,20 @@ class ModalGpuProvider:
         client: ModalClient,
         image: ModalImageSpec | None = None,
         clock: Callable[[], datetime] = _utc_now,
+        fallback_gpus: tuple[str, ...] = (),
+        start_timeout_s: float | None = None,
     ) -> None:
         self.client, self.image, self.clock = client, image or ModalImageSpec(), clock
+        # Tried in order after spec.gpu_type when Modal has no capacity within start_timeout_s.
+        self.fallback_gpus, self.start_timeout_s = fallback_gpus, start_timeout_s
 
     @classmethod
-    def from_env(cls) -> ModalGpuProvider:
+    def from_env(
+        cls,
+        image: ModalImageSpec | None = None,
+        fallback_gpus: tuple[str, ...] = (),
+        start_timeout_s: float | None = None,
+    ) -> ModalGpuProvider:
         """The real client; the token comes only from the environment, read now."""
         missing = [v for v in TOKEN_VARS if not os.environ.get(v)]
         if missing:
@@ -122,7 +148,8 @@ class ModalGpuProvider:
                 f"Modal token not set: export {' and '.join(missing)} in the environment "
                 "(never in a file in the repository)"
             )
-        return cls(_RealModalClient(*(Secret(os.environ[v]) for v in TOKEN_VARS)))
+        client = _RealModalClient(*(Secret(os.environ[v]) for v in TOKEN_VARS))
+        return cls(client, image, fallback_gpus=fallback_gpus, start_timeout_s=start_timeout_s)
 
     def _bounded(
         self,
@@ -164,16 +191,47 @@ class ModalGpuProvider:
             log.error("modal worker %s may still be running until its sandbox timeout: %s",
                       worker_id, _scrub(str(err)))  # fmt: skip
 
+    def _stop_tagged(self, tags: dict[str, str]) -> None:
+        try:
+            self._bounded("stop", STOP_TIMEOUT_S, lambda: self.client.stop_tagged(tags))
+        except (ModalError, ModalTimeoutError) as err:  # its sandbox timeout still ends it
+            log.error("modal: a queued sandbox %s may start later: %s", tags, err)
+
     def start_worker(self, spec: WorkerSpec, timeout_s: float) -> WorkerHandle:
-        # The sandbox's own lifetime is the job deadline: Modal ends it even if this process dies.
-        wid = self._bounded(
-            "start_worker",
-            timeout_s,
-            lambda: self.client.start(self.image, spec.gpu_type, timeout_s),
-            on_late=self._stop_late,
-        )
-        log.info("modal worker %s started (gpu %s)", wid, spec.gpu_type)
-        return WorkerHandle(wid, self.name, self.clock())
+        """spec.gpu_type, then each fallback GPU, each given start_timeout_s to get capacity.
+        Every attempt is tagged, and a failed one is terminated by its tag: a sandbox still
+        queued for a GPU has no id, and would otherwise start later and bill until its timeout."""
+        gpus, end = (spec.gpu_type, *self.fallback_gpus), time.monotonic() + timeout_s
+        for i, gpu in enumerate(gpus):
+            left = end - time.monotonic()
+            wait = left if self.start_timeout_s is None else min(left, self.start_timeout_s)
+            tags = {"qarau-job": uuid.uuid4().hex}
+            try:
+                # The sandbox's own lifetime is the job deadline: Modal ends it even if this
+                # process dies.
+                wid = self._bounded(
+                    "start_worker",
+                    wait,
+                    partial(self.client.start, self.image, gpu, left, tags),
+                    on_late=self._stop_late,
+                )
+            except (ModalError, ModalTimeoutError) as err:
+                self._stop_tagged(tags)
+                no_gpu = NO_CAPACITY.search(str(err)) or (
+                    isinstance(err, ModalTimeoutError) and wait < left
+                )
+                if not no_gpu:
+                    raise
+                if i + 1 == len(gpus):
+                    raise ModalError(
+                        f"modal: no GPU capacity for {', '.join(gpus)} "
+                        f"(start_timeout_s {self.start_timeout_s:g} s each); try later"
+                    ) from None
+                log.warning("modal: no %s capacity (%s); trying %s", gpu, err, gpus[i + 1])
+                continue
+            log.warning("modal worker %s started on %s", wid, gpu)
+            return WorkerHandle(wid, self.name, self.clock())
+        raise AssertionError("unreachable")
 
     def upload(
         self, handle: WorkerHandle, local_dir: Path, remote_dir: str, timeout_s: float
@@ -220,34 +278,39 @@ class _RealModalClient:
             )
         return self._client
 
-    def start(self, image: ModalImageSpec, gpu: str, timeout_s: float) -> str:
+    def _app(self) -> Any:
         import modal
 
-        client = self._modal_client()
-        app = modal.App.lookup(APP_NAME, create_if_missing=True, client=client)
+        return modal.App.lookup(APP_NAME, create_if_missing=True, client=self._modal_client())
+
+    def start(self, image: ModalImageSpec, gpu: str, timeout_s: float, tags: dict[str, str]) -> str:
+        import modal
+
         sb = modal.Sandbox.create(
-            "sleep", "infinity", app=app, image=to_modal_image(image), gpu=gpu,
-            timeout=math.ceil(timeout_s), client=client,
+            "sleep", "infinity", app=self._app(), image=to_modal_image(image), gpu=gpu,
+            timeout=math.ceil(timeout_s), tags=tags, client=self._modal_client(),
         )  # fmt: skip
         self._sandboxes[sb.object_id] = sb
         return str(sb.object_id)
 
     def upload(self, worker_id: str, local_dir: Path, remote_dir: str) -> None:
-        sb = self._sandboxes[worker_id]
+        fs = self._sandboxes[worker_id].filesystem  # copy_from_local creates parent dirs
         for path in sorted(p for p in local_dir.rglob("*") if p.is_file()):
-            remote = f"{remote_dir}/{path.relative_to(local_dir).as_posix()}"
-            sb.mkdir(remote.rsplit("/", 1)[0], parents=True)
-            with sb.open(remote, "wb") as f:
-                f.write(path.read_bytes())
+            fs.copy_from_local(path, f"{remote_dir}/{path.relative_to(local_dir).as_posix()}")
 
     def run(self, worker_id: str, argv: list[str], timeout_s: float) -> int:
-        proc = self._sandboxes[worker_id].exec(*argv, timeout=math.ceil(timeout_s))
+        from modal.stream_type import StreamType
+
+        # COLMAP's log goes straight to our stdout: an unread PIPE would only pile up.
+        proc = self._sandboxes[worker_id].exec(
+            *argv, timeout=math.ceil(timeout_s), stdout=StreamType.STDOUT, stderr=StreamType.STDOUT
+        )
         proc.wait()
         return int(proc.returncode)
 
     def download(self, worker_id: str, remote_path: str, local_dir: Path) -> None:
-        with self._sandboxes[worker_id].open(remote_path, "rb") as f:
-            (local_dir / remote_path.rsplit("/", 1)[-1]).write_bytes(f.read())
+        local = local_dir / remote_path.rsplit("/", 1)[-1]
+        self._sandboxes[worker_id].filesystem.copy_to_local(remote_path, local)
 
     def stop(self, worker_id: str) -> None:
         import modal
@@ -258,3 +321,10 @@ class _RealModalClient:
             worker_id, client=self._modal_client()
         )
         sb.terminate()
+
+    def stop_tagged(self, tags: dict[str, str]) -> None:
+        import modal
+
+        app_id, client = self._app().app_id, self._modal_client()
+        for sb in modal.Sandbox.list(app_id=app_id, tags=tags, client=client):
+            sb.terminate()
