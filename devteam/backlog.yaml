@@ -328,7 +328,7 @@ tasks:
   phase: server
   title: Server job queue with per-stage progress
   goal: 'The pipeline runs as jobs from a durable queue: Valkey + RQ (ADR 0012; not Redis). The queue
-    runs the current sparse pipeline now; the dense stage (P4a-2) is plugged in later as one more stage.
+    runs the current sparse pipeline now; the dense stage (P4a-2a) is plugged in later as one more stage.
     Each stage reports progress 0-100 to the API (backend/), which U2 shows in the web app. A 30-minute
     video is processed on a single worker without blocking the API.
 
@@ -434,26 +434,110 @@ tasks:
 
     '
   status: todo
-- id: P4a-2
+- id: P4a-2a-code
   area: core
-  title: 'Dense reconstruction: first real GPU run (commercial licence)'
-  goal: 'A dense stage behind the Densifier interface, starting from branch wip/dense-stage (ADR 0008).
-    Model: Depth Anything V2 **Small only** (depth-anything/Depth-Anything-V2-Small-hf, Apache-2.0); Base
-    and Large are CC-BY-NC (non-commercial) and must never be loaded: the code refuses any other model
-    id, with a test. Exported to the viewer bundle.
+  title: Wire the real Modal provider into the dense-remote CLI (no real call)
+  goal: 'Split from P4a-2 on 2026-10-21 (owner). Code only, so the owner''s first paid run (P4a-2a-run)
+    needs nothing but a token and one command.
 
 
-    Runs through the P4a-1 executor on a real GPU provider: the first paid run. No depends_on on purpose,
-    so finishing P4a-1 never moves it to todo: only the owner does, once a provider is funded.
+    1. Add `modal` to the pipeline dependencies as the optional extra ADR 0019 names (`uv add --optional
+    modal modal`, pinned, uv.lock updated). `qarau_pipeline` still imports, and every test still passes,
+    without the extra installed.
+
+    2. `python -m qarau_pipeline dense-remote`: `--provider` is no longer required and takes `fake` or
+    `modal`. Without the flag the provider is `fake` (the default), whatever dense_remote.provider in
+    config.yaml says. `--provider modal` builds the provider with the existing `make_provider(cfg)` (dense_remote.py,
+    ADR 0016/0019) and uses the real ledger (dense_remote.ledger_path) and the real budget and timeout.
+
+    3. The real provider is enabled only by an explicit flag on the command line, e.g. `--provider modal
+    --allow-paid-gpu`; dense_remote.enabled stays false in pipeline/config.yaml and the CLI never sets
+    it to true for modal without that flag. `--provider modal` without the flag exits non-zero before
+    any Modal code runs, with a plain message saying which flag starts a paid run. The fake keeps working
+    while dense_remote is disabled, as now.
+
+    4. Update the references to P4a-2 in docs/decisions/0016, 0019, docs/architecture.md and the pipeline/config.yaml
+    comment to P4a-2a-run (the first real run), and document the command in ADR 0019.
+
+
+    Acceptance:
+
+    - No real Modal call, no account, no token, no spending. No MODAL_* variable in the developer or tester
+    environment: tests delete MODAL_TOKEN_ID / MODAL_TOKEN_SECRET from the environment (monkeypatch) and
+    use a fake ModalClient and a fake `modal` module only; none touches the network.
+
+    - Tests: default provider is fake; `--provider modal` without the flag refuses before `make_provider`
+    is called; `--provider modal --allow-paid-gpu` builds the provider through `make_provider` (patched
+    with a fake) and runs the executor with the real ledger path, budget and timeout from config.yaml;
+    a missing token gives the existing error naming the variables, never values; a budget that is already
+    spent refuses before start.
+
+    - RemoteDenseExecutor and the existing dense_remote / dense_modal tests pass unchanged.
+
+    - ruff, mypy and pytest pass.
+
+    '
+  licence: 'modal Python client: Apache-2.0 (ADR 0019). Modal itself is a paid service: no real call in
+    this task.
+
+    '
+  status: todo
+- id: P4a-2a-run
+  area: core
+  title: 'First real COLMAP dense run on Modal (owner only, not Kerege)'
+  goal: 'Owner-only task (2026-10-21): done interactively by a Claude Code session with the owner present,
+    never planned or run by Kerege. It has no depends_on on purpose: Kerege moves a blocked task with
+    done dependencies back to todo, so the dependency on P4a-2a-code is written here instead. Starts only
+    after P4a-2a-code is merged into dev and the owner gives the command and the token in his shell.
+
+
+    The first real COLMAP PatchMatch dense run (P4a-1 executor, Modal provider, `dense-remote --provider
+    modal` with the explicit flag from P4a-2a-code). GPU L4, timeout_s 1800, daily_gpu_hours_budget 1.0
+    (pipeline/config.yaml; raise only with the owner).
+
+    1. notre-dame-p3e first (data/runs/notre-dame-p3e frames + colmap sparse).
+
+    2. Then orono-p3e; compare with the local data/runs/orono-dense (points, coverage, look in the viewer
+    from the same camera).
+
+
+    Check against the real account what no fake could (ADR 0019, Consequences): image build from infra/colmap-cuda,
+    upload/download through the Sandbox filesystem, exec exit codes, terminate on an ended sandbox. After
+    each job: the sandbox is gone in the Modal dashboard, the ledger shows the hours, the token is not
+    in any log or output. Outputs go under data/ only, never committed. Results and the real cost go in
+    docs/notes/progress.md and ADR 0019.
+
+    '
+  licence: 'COLMAP (BSD-3-Clause) in the infra/colmap-cuda image; modal client Apache-2.0. Paid service:
+    only our own test footage goes to Modal, never customer footage (Kazakh data stays in Kazakhstan).
+
+    '
+  status: blocked
+  blocked_reason: 'waits for the owner: P4a-2a-code merged, then the owner runs it with Claude Code on
+    the Modal account. Owner-only: never `devteam resume` this task'
+- id: P4a-2b
+  area: core
+  title: Depth Anything V2 Small depth prior (estimated points)
+  goal: 'Split from P4a-2 on 2026-10-21 (owner); later, after the first real COLMAP dense run. A depth-prior
+    stage behind the Densifier interface, starting from branch wip/dense-stage (its ADR 0008, unverified
+    WIP). Model: Depth Anything V2 **Small only** (depth-anything/Depth-Anything-V2-Small-hf, Apache-2.0);
+    Base and Large are CC-BY-NC (non-commercial) and must never be loaded: the code refuses any other
+    model id, with a test.
+
+
+    Its points are estimated, not measured: every one is marked `estimated` in the viewer bundle (own
+    arrays or a per-point flag, ADR 0003), is visually distinct from COLMAP points in the viewer, and
+    is excluded from every measurement (area, extent, scale) and from coverage counted as seen. Tests
+    check the flag in the bundle and that measurement ignores flagged points.
 
     '
   licence: 'Depth Anything V2 Small code and weights: Apache-2.0 (owner confirmed 2026-10-15). Base/Large:
     CC-BY-NC-4.0, forbidden.
 
     '
-  status: blocked
-  blocked_reason: 'waits for the owner: P4a-1b (Modal provider) merged, then the owner''s explicit command
-    to start the first paid run on the Modal account'
+  status: todo
+  depends_on:
+  - P4a-2a-run
 - id: P4c
   area: core
   title: Dense only inside the region of interest
@@ -468,7 +552,7 @@ tasks:
     '
   status: todo
   depends_on:
-  - P4a-2
+  - P4a-2a-run
   - A7
 - id: D2
   area: core
@@ -529,6 +613,21 @@ tasks:
     colours keep their meaning. i18n en/ru/kk; Vitest and e2e green (update only markup-dependent assertions,
     never loosen them). Tester screenshots, before (dev-*) and after: "/" (the run list) and "/viewer/notre-dame"
     (viewer chrome).
+
+
+    Owner additions (2026-10-21):
+
+    - The side panel shows at least 12 inspections at 1440x900 without scrolling it (when that many exist;
+    data/runs has more), dense rows as in DESIGN.md "Density and layout" (about 32 px), name and date
+    still readable and not clipped in ru/kk.
+
+    - The "Select an inspection..." hint appears once on the empty control centre: today shell.emptyDescription
+    and shell.emptyNote both say it (web/src/shell/AppShell.tsx); keep one, drop the other key from en/ru/kk.
+
+    - No "Example" badge (shell.demo) next to the "Example inspection" link (shell.openDemo) in the sidebar
+    footer (web/src/shell/Sidebar.tsx): the link text already says it. The badges elsewhere stay (the
+    demo inspection''s own title, "Tank farm survey", does not say it is an example), and so does demo.notice:
+    the demo stays clearly marked as not real results.
 
     '
   status: todo
