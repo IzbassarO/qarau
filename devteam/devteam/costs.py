@@ -4,7 +4,8 @@ midnight cannot spend the cap twice in one night.
 Every billed call first *reserves* its worst-case cost in one SQLite transaction
 (BEGIN IMMEDIATE = one writer at a time, across threads and processes), then the
 reservation is settled to the real cost. A reservation that is never settled (crash,
-network error with unknown billing) keeps counting at its worst case.
+network error with unknown billing) keeps counting at its worst case; after STALE_H it is
+marked `stale` (owner, 2026-10-21: billing unknown, still counted at max, no longer open).
 Subscription runs (Claude Code, Codex) are logged with billed=0, for information only.
 """
 
@@ -16,6 +17,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from rich.table import Table
+
+STALE_H = 2  # no call stays open this long: 4 tries, 255 s of waits between them, the stream
 
 
 class BudgetExceeded(RuntimeError):
@@ -138,6 +141,19 @@ def reserve(home: Path, cap: float, agent: str, model: str, task: str, max_usd: 
         db.close()
 
 
+def mark_stale(home: Path, now: float | None = None) -> int:
+    """Reservations still open after STALE_H: their call was cut (crash, Ctrl+C) and what the
+    API billed is unknown. They become `stale`, kept at the worst case (money is never
+    under-counted), so they no longer show as calls in flight. Returns how many."""
+    t = (time.time() if now is None else now) - STALE_H * 3600
+    cutoff = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t))
+    with _db(home) as db:
+        return db.execute(
+            "update usage set state='stale' where state='reserved' and day || 'T' || ts < ?",
+            (cutoff,),
+        ).rowcount
+
+
 def settle(
     home: Path,
     rid: int,
@@ -205,25 +221,32 @@ def report(home: Path, console):
     t = Table("day", "agent", "model", "calls", "tokens in", "tokens out", "$", "billed")
     db = _db(home)
     rows = db.execute("""select day, agent, model, count(*), sum(tokens_in), sum(tokens_out),
-        sum(usd), billed, sum(state = 'reserved') from usage
+        sum(usd), billed, sum(state = 'reserved'), sum(state = 'stale') from usage
         group by day, agent, model, billed order by day desc, agent""").fetchall()
     db.close()
-    for day, agent, model, n, ti, to, usd, billed, open_ in rows:
+    for day, agent, model, n, ti, to, usd, billed, open_, stale in rows:
         kind = "API" if billed else "subscription"
         if open_:
             kind += f" ({open_} unsettled, counted at max)"
+        if stale:
+            kind += f" ({stale_note(stale)})"
         t.add_row(day, agent, model, str(n), f"{ti:,}", f"{to:,}", f"{usd:.3f}", kind)
     console.print(t)
     console.print(f"API spend, last 24 h (incl. reservations): ${spent_24h(home):.2f}")
 
 
+def stale_note(n: int) -> str:
+    return f"{n} stale: billing unknown, counted at max"
+
+
 def day_rows(home: Path, day: str) -> list[tuple]:
-    """(agent, model, calls, usd, billed, tokens_in, cache_read, cache_write) per agent/model."""
+    """(agent, model, calls, usd, billed, tokens_in, cache_read, cache_write, stale) per
+    agent/model."""
     db = _db(home)
     try:
         return db.execute(
             """select agent, model, count(*), sum(usd), billed, sum(tokens_in),
-            sum(cache_read), sum(cache_write) from usage
+            sum(cache_read), sum(cache_write), sum(state = 'stale') from usage
             where day = ? group by agent, model, billed order by agent""",
             (day,),
         ).fetchall()

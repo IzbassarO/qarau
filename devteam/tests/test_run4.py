@@ -118,8 +118,8 @@ def test_config_shoots_dev_app_in_both_themes_at_the_default_viewports():
     cfg = yaml.safe_load((HERE / "config.yaml").read_text())
     app, pipe = (cfg["developers"][d]["screenshots"] for d in ("dev_app", "dev_pipeline"))
     assert app["themes"] == ["light", "dark"] and "{size}" in app["shoot"]
-    assert app["shoot"].endswith(" {theme}") and "{size}" in pipe["shoot"]
-    assert G.variants(pipe) == [("1440x900", ""), ("390x844", "")]
+    assert app["shoot"].endswith(" {theme} {lang}") and "{size}" in pipe["shoot"]
+    assert G.variants(pipe) == [("1440x900", "", ""), ("390x844", "", "")]
     text = G.SHOOT.read_text()
     assert "colorScheme: theme" in text and "theme = ''" in text
 

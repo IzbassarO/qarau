@@ -206,6 +206,26 @@ def route_errors(p: dict, task: dict, cfg: dict) -> list[str]:
     return errors
 
 
+OWNER_ADDITIONS = re.compile(r"^Owner additions\b[^\n]*:[ \t]*$", re.M)
+
+
+def owner_additions(goal: str) -> list[str]:
+    """The `- ` lines under "Owner additions (<date>):" in a task's goal: each must reach the
+    plan as a criterion, word for word (2026-10-21: the owner's lines are the spec)."""
+    out = []
+    for m in OWNER_ADDITIONS.finditer(goal or ""):
+        for line in goal[m.end() :].splitlines():
+            if (line := line.strip()).startswith("- "):
+                out.append(line[2:].strip())
+            elif line:
+                break
+    return out
+
+
+def _norm(text: str) -> str:
+    return " ".join(str(text).lower().split())
+
+
 def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
     """The whole plan is valid or nothing happens. Returns assignments."""
     by_id = {t["id"]: t for t in todo}
@@ -237,6 +257,18 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
             )
         if not str(p.get("plan", "")).strip() or not p.get("criteria"):
             errors.append(f"{tid}: plan and acceptance criteria must not be empty")
+        crit = [_norm(c) for c in p.get("criteria") or []]
+        if tid in by_id and (
+            missing := [
+                a
+                for a in owner_additions(by_id[tid].get("goal", ""))
+                if not any(_norm(a) in c for c in crit)
+            ]
+        ):
+            errors.append(
+                f"{tid}: the criteria drop {len(missing)} of the task's Owner additions; copy "
+                f"each word for word as its own criterion: {missing}"
+            )
         if VISUAL.search(" ".join(map(str, p.get("criteria") or []))) and not p.get("routes"):
             errors.append(f"{tid}: criteria mention the viewer or screenshots but list no routes")
         if p.get("routes") and dev in devs and not devs[dev].get("screenshots"):
@@ -276,6 +308,7 @@ class TaskState(TypedDict, total=False):
     tokens: int  # subscription tokens the developer used on this task in this run
     last_sendback: str  # the tester's last reason (unmet criteria, failing checks); "" = passed
     bench_sendback: str  # HEAD the benchmark gate last sent back
+    tested_head: str  # HEAD the tester last judged: the next round's test files are diffed to it
     after_dev: str  # "develop" after a resolve-conflicts step, else "test"
     verdict: dict
     gate: dict  # gate["blocked"]: the task ends blocked with gate["reason"]
@@ -1282,6 +1315,17 @@ def build_graph(team: Team, checkpointer):
         if bad["out_of_scope"]:
             return refuse(s, "out_of_scope", bad["out_of_scope"])
         findings = SC.bypass(team.git("diff", "-U0", span, cwd=wt), paths)
+        # After a send-back: what this round did to the branch's own test files. Base -> HEAD
+        # cannot show it (UX1b round 2 swapped its new e2e's fixed date for one computed in the
+        # browser: all additions vs dev). ponytail: dev merged in between rounds shows here too
+        # when it touched the same test files; rare, and the judge sees the diff.
+        head = team.git("rev-parse", "HEAD", cwd=wt).strip()
+        prev, test_changes, weakened = s.get("tested_head"), "", []
+        if prev and prev != head and (tests := [p for p in paths if SC.TEST_FILE.search(p)]):
+            test_changes = team.git("diff", f"{prev}..HEAD", "--", *tests, cwd=wt)
+            round_diff = team.git("diff", "-U0", f"{prev}..HEAD", "--", *tests, cwd=wt)
+            weakened = [f"since the last round: {f}" for f in SC.bypass(round_diff, [])]
+            findings += weakened
         checks, shots, problems, dev_shots, e2e_failed = [], [], [], [], False
         if findings:  # no checks or judge: the change itself is refused
             team.violation(tid, dev, "bypass", "; ".join(findings))
@@ -1328,7 +1372,12 @@ def build_graph(team: Team, checkpointer):
             else:
                 verdict = team.agents.judge(
                     team,
-                    {**s, "screenshots": shots + dev_shots, "screenshot_problems": problems},
+                    {
+                        **s,
+                        "screenshots": shots + dev_shots,
+                        "screenshot_problems": problems,
+                        "test_changes": test_changes,
+                    },
                     checks,
                 )
         verdict["bypass"] = findings
@@ -1382,7 +1431,18 @@ def build_graph(team: Team, checkpointer):
             )
         else:
             team.emit("tester", "out of fix loops", task=tid, status="idle")
-        out = {"verdict": verdict, "fixes": fixes, "snap": snap, "gate": {}, "last_sendback": key}
+        out = {
+            "verdict": verdict,
+            "fixes": fixes,
+            "snap": snap,
+            "gate": {},
+            "last_sendback": key,
+            # weakened: the next round is compared with the same tests again, so resubmitting
+            # them unchanged is the same reason twice in a row (blocked), never a pass
+            "tested_head": (
+                prev if weakened or (test_changes and verdict.get("tests_weakened")) else head
+            ),
+        }
         if not verdict["passed"]:
             out["feedback"] = verdict["feedback"]
             out["gate"] = {"reason": "tester: " + verdict["feedback"].strip()[:500]}
@@ -1674,6 +1734,9 @@ def build_graph(team: Team, checkpointer):
             for t in team.load_backlog()
             if t["status"] == "todo" or (t["status"] == "in_progress" and t.get("run") == run)
         ]
+        if owner := sorted(t["id"] for t in todo if t.get("owner_only")):  # e.g. P4a-2a-run
+            team.emit("brain", f"skipping owner-only tasks, the owner runs them: {owner}")
+            todo = [t for t in todo if not t.get("owner_only")]
         # Never redo landed work, even if the backlog lost its status (2026-10-16: P0, A2a).
         if again := sorted(t["id"] for t in todo if t["id"] in team.merged_tasks()):
             team.emit("brain", f"skipping tasks already merged into dev, mark them done: {again}")

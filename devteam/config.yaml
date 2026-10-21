@@ -137,8 +137,11 @@ developers:
     screenshots:           # pages from the plan's `routes`; the tester sees them
       serve: cd web && QARAU_RUNS_DIR={runs_dir} pnpm exec vite --port 5198 --strictPort
       url: http://localhost:5198
-      shoot: cd web && node {shoot} {url} {png} {size} 2500 {theme}
+      shoot: cd web && node {shoot} {url} {png} {size} 2500 {theme} {lang}
       themes: [light, dark]  # {theme}: prefers-color-scheme, each viewport in both
+      # {lang}: the app locale. Every viewport x theme in the first; the others at every viewport
+      # in the first theme (kk dates broke in Chrome unseen: shots were ru only, 2026-10-21)
+      locales: [ru, kk, en]
     checks:
       - cd web && pnpm lint && pnpm typecheck
       - cd web && pnpm test && pnpm build

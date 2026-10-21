@@ -490,6 +490,7 @@ tasks:
 - id: P4a-2a-run
   area: core
   title: First real COLMAP dense run on Modal (owner only, not Kerege)
+  owner_only: true
   goal: 'Owner-only task (2026-10-21): done interactively by a Claude Code session with the owner present,
     never planned or run by Kerege. It has no depends_on on purpose: Kerege moves a blocked task with
     done dependencies back to todo, so the dependency on P4a-2a-code is written here instead. Starts only
