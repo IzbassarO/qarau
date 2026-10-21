@@ -481,9 +481,12 @@ tasks:
     this task.
 
     '
-  status: in_progress
+  status: done
   owner: dev_pipeline
   run: cont-20261021-021001-dev_pipeline-1
+  branch: devteam/P4a-2a-code
+  pr: https://github.com/IzbassarO/qarau/pull/54
+  done_at: '2026-10-21'
 - id: P4a-2a-run
   area: core
   title: First real COLMAP dense run on Modal (owner only, not Kerege)
