@@ -632,11 +632,14 @@ tasks:
     the demo stays clearly marked as not real results.
 
     '
-  status: in_progress
+  status: done
   depends_on:
   - UX1a
   owner: dev_app
   run: cont-20261021-021001-dev_app-1
+  branch: devteam/UX1b
+  pr: https://github.com/IzbassarO/qarau/pull/53
+  done_at: '2026-10-21'
 - id: A1a
   area: app
   title: Control center layout with sites and inspections
