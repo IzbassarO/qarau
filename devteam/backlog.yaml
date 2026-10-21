@@ -441,14 +441,14 @@ tasks:
     needs nothing but a token and one command.
 
 
-    1. Add `modal` to the pipeline dependencies as the optional extra ADR 0018 names (`uv add --optional
+    1. Add `modal` to the pipeline dependencies as the optional extra ADR 0019 names (`uv add --optional
     modal modal`, pinned, uv.lock updated). `qarau_pipeline` still imports, and every test still passes,
     without the extra installed.
 
     2. `python -m qarau_pipeline dense-remote`: `--provider` is no longer required and takes `fake` or
     `modal`. Without the flag the provider is `fake` (the default), whatever dense_remote.provider in
     config.yaml says. `--provider modal` builds the provider with the existing `make_provider(cfg)` (dense_remote.py,
-    ADR 0016/0018) and uses the real ledger (dense_remote.ledger_path) and the real budget and timeout.
+    ADR 0016/0019) and uses the real ledger (dense_remote.ledger_path) and the real budget and timeout.
 
     3. The real provider is enabled only by an explicit flag on the command line, e.g. `--provider modal
     --allow-paid-gpu`; dense_remote.enabled stays false in pipeline/config.yaml and the CLI never sets
@@ -456,8 +456,8 @@ tasks:
     any Modal code runs, with a plain message saying which flag starts a paid run. The fake keeps working
     while dense_remote is disabled, as now.
 
-    4. Update the references to P4a-2 in docs/decisions/0016, 0018, docs/architecture.md and the pipeline/config.yaml
-    comment to P4a-2a-run (the first real run), and document the command in ADR 0018.
+    4. Update the references to P4a-2 in docs/decisions/0016, 0019, docs/architecture.md and the pipeline/config.yaml
+    comment to P4a-2a-run (the first real run), and document the command in ADR 0019.
 
 
     Acceptance:
@@ -477,7 +477,7 @@ tasks:
     - ruff, mypy and pytest pass.
 
     '
-  licence: 'modal Python client: Apache-2.0 (ADR 0018). Modal itself is a paid service: no real call in
+  licence: 'modal Python client: Apache-2.0 (ADR 0019). Modal itself is a paid service: no real call in
     this task.
 
     '
@@ -501,11 +501,11 @@ tasks:
     from the same camera).
 
 
-    Check against the real account what no fake could (ADR 0018, Consequences): image build from infra/colmap-cuda,
+    Check against the real account what no fake could (ADR 0019, Consequences): image build from infra/colmap-cuda,
     upload/download through the Sandbox filesystem, exec exit codes, terminate on an ended sandbox. After
     each job: the sandbox is gone in the Modal dashboard, the ledger shows the hours, the token is not
     in any log or output. Outputs go under data/ only, never committed. Results and the real cost go in
-    docs/notes/progress.md and ADR 0018.
+    docs/notes/progress.md and ADR 0019.
 
     '
   licence: 'COLMAP (BSD-3-Clause) in the infra/colmap-cuda image; modal client Apache-2.0. Paid service:

@@ -529,6 +529,9 @@ def test_real_backlog_split_a7_p3e_and_order():
     assert "P4a-2a-code" in run["goal"] and "P4a-2a-code" in run["blocked_reason"]
     assert prior["depends_on"] == ["P4a-2a-run"] and "Small only" in prior["goal"]
     assert by["P4c"]["depends_on"] == ["P4a-2a-run", "A7"]
+    for t in (code, run):  # Modal's ADR is 0019 (0018 is the design tokens, #52)
+        text = t["goal"] + t["licence"]
+        assert "ADR 0019" in text and "0018" not in text, t["id"]
     sheet = by["P5a-2"]["goal"]
     assert "letter = 215.9 x 279.4 mm (the default" in sheet and "a4 = 210 x 297 mm" in sheet
     assert "1440x900" in by["UX1a"]["goal"] and "tokens.json" in by["UX1a"]["goal"]
