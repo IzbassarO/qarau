@@ -1,4 +1,4 @@
-"""Modal (modal.com) GpuProvider for the remote dense executor (ADR 0018, ADR 0016).
+"""Modal (modal.com) GpuProvider for the remote dense executor (ADR 0019, ADR 0016).
 
 ModalGpuProvider adds what the executor expects of a provider on top of a narrow ModalClient:
 every call is bounded by its timeout_s (a hung call raises ModalTimeoutError, a TimeoutError),
@@ -200,7 +200,7 @@ class ModalGpuProvider:
 
 class _RealModalClient:
     """Modal Sandboxes through the `modal` client. Never exercised before P4a-2: no token and
-    no call in tests (ADR 0018 lists what P4a-2 must check against a real account)."""
+    no call in tests (ADR 0019 lists what P4a-2 must check against a real account)."""
 
     def __init__(self, token_id: Secret, token_secret: Secret) -> None:
         self._token_id, self._token_secret = token_id, token_secret

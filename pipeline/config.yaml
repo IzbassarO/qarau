@@ -7,7 +7,7 @@ dense:
 
 dense_remote:
   # COLMAP dense stage on a rented GPU worker (ADR 0016). Stays false until the owner approves
-  # a paid GPU account (P4a-2); the Modal provider (ADR 0018) is never called before that.
+  # a paid GPU account (P4a-2); the Modal provider (ADR 0019) is never called before that.
   enabled: false
   provider: modal # fake | modal; the token only from MODAL_TOKEN_ID / MODAL_TOKEN_SECRET
   timeout_s: 1800 # one wall-clock deadline for the whole job (start, upload, dense, download)

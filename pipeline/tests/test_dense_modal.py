@@ -1,5 +1,5 @@
 """Modal provider behind the unchanged RemoteDenseExecutor: fake Modal client and a fake
-`modal` module only. No network, no token, nothing paid (ADR 0018)."""
+`modal` module only. No network, no token, nothing paid (ADR 0019)."""
 
 from __future__ import annotations
 
