@@ -262,17 +262,19 @@ class RemoteDenseExecutor:
         # Book the estimate up front so a crash mid-job never under-counts; settled below.
         self.ledger.add(day, spec.est_hours)
         deadline = t0 + timedelta(seconds=cfg.timeout_s)
+        started: datetime | None = None
         try:
             handle = self._call(
                 deadline, "start_worker", lambda t: self.provider.start_worker(spec, t), False
             )
+            started = self.clock()  # time queued for a GPU is not GPU time (2026-10-21: 28 min)
             try:
                 self._remaining(deadline, "start_worker")  # returned past the deadline
                 self._job(handle, deadline, frames_dir, sparse_dir, out_dir)
             finally:
                 self._stop(handle)
         finally:
-            hours = (self.clock() - t0).total_seconds() / 3600
+            hours = (self.clock() - started).total_seconds() / 3600 if started else 0.0
             self.ledger.add(day, hours - spec.est_hours)
         return out_dir / RESULTS[0]
 

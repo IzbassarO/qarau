@@ -86,12 +86,30 @@ uv run python -m qarau_pipeline export --sparse ../data/runs/<run>/colmap/sparse
   the fake runs locally, also while `enabled: false`, and books into `<out>/gpu_ledger.fake.json`.
 - **Ledger:** `dense_remote.ledger_path` in `pipeline/config.yaml`, relative to that file
   (`data/dense_remote/gpu_ledger.json`, gitignored): GPU hours per UTC day. The estimate is
-  booked before the start and settled to the real time after the stop.
+  booked before the start and settled after the stop to the GPU time: from the worker's start, so
+  time queued for a GPU (or a start that failed) is not booked.
 - **Budget and timeout:** `daily_gpu_hours_budget`, `est_hours_per_job` and `timeout_s` in the
   same section (`--config` picks another file). A job whose estimate does not fit today's
   budget is refused before any worker starts; raise the budget only with the owner.
 - A missing `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` stops the run before any Modal call with
   an error naming the variables (exit code 1).
+
+## First real run (P4a-2a-run, 2026-10-21)
+
+Checked against the real account, as the Consequences below asked:
+
+- **Image:** `from_dockerfile` builds the multi-stage Dockerfile (ARG before FROM works) on
+  Modal's builder in ~7 min for sm_89; no Python needed in the image for Sandboxes. Two
+  Dockerfile bugs fixed (OpenCV headers for OpenImageIO's CMake config, UID 1000 clash).
+- **Filesystem:** modal 1.6.2 has `sandbox.filesystem.copy_from_local / copy_to_local` (5 GB
+  read limit), not `open` / `mkdir`; upload of 183 frames + sparse took 43 s.
+- **exec:** exit codes and COLMAP's log through `StreamType.STDOUT` work; the container runs
+  as `colmap` with a writable `/work`.
+- **Capacity:** `Sandbox.create` can block for a long time when no GPU of the type is free
+  (28 min, then `ResourceExhaustedError`); hence `start_timeout_s` and `gpu_fallback` above.
+- **Numbers (notre-dame-p3e, L4):** 1681 s per job, 837 928 points, ≈ $0.44 per job
+  (L4 $0.368, CPU $0.070, memory $0.005). No sandbox left after either run; the token was in
+  no log or output.
 
 ## Licences
 
