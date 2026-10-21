@@ -1334,7 +1334,7 @@ def build_graph(team: Team, checkpointer):
         failed = [c for c in checks if not c["ok"]]
         verdict["judge_passed"] = verdict["passed"]
         # a visual criterion passes only on the tester's own screenshots, one per route
-        no_shots = not e2e_failed and len(shots) < len(s.get("routes") or [])
+        no_shots = not e2e_failed and len(shots) < G.expected_shots(cfg, s)
         verdict["passed"] = verdict["passed"] and not failed and not no_shots
         if no_shots:
             verdict["feedback"] = (

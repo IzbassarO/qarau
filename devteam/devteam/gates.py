@@ -7,6 +7,7 @@ deletes branches or bypasses branch protection.
 """
 
 import hashlib
+import itertools
 import json
 import os
 import re
@@ -238,14 +239,28 @@ def bench_table(res: dict) -> str:
 # --- screenshots (web and pipeline tasks) ---------------------------------------------------
 SHOOT = Path(__file__).with_name("shoot.mjs")  # {shoot}: signs in, then screenshots one page
 TEST_LOGIN = ("QARAU_TEST_USER", "QARAU_TEST_PASSWORD")  # devteam/.env: the tester's test user
+VIEWPORTS = ["1440x900", "390x844"]  # screenshots.viewports when not set: desktop and phone
+
+
+def variants(sc: dict) -> list[tuple[str, str]]:
+    """(viewport, theme) per screenshot of one route: screenshots.viewports x themes (light /
+    dark; none set = the page's default)."""
+    return [(v, t) for v in sc.get("viewports") or VIEWPORTS for t in sc.get("themes") or [""]]
+
+
+def expected_shots(cfg: dict, s) -> int:
+    sc = cfg["developers"][s["assignee"]].get("screenshots") or {}
+    return len(s.get("routes") or []) * len(variants(sc))
 
 
 def screenshots(
     team, s, routes: list[str], runs: Path | None = None, prefix: str = ""
 ) -> tuple[list[str], list[str]]:
-    """One PNG per route of the dev server in the task's worktree, for the tester (it sees
-    them) and the packet. Returns (paths, problems); a route that fails is a problem, never
-    silently dropped. `runs`: serve these runs instead of the developer's quick benchmark."""
+    """One PNG per route and variant (viewport, theme) of the dev server in the task's
+    worktree, for the tester (it sees them) and the packet, named <route>-<viewport>[-<theme>]
+    (just <route> when there is one variant). Returns (paths, problems); a shot that fails is
+    a problem, never silently dropped. `runs`: serve these runs instead of the developer's
+    quick benchmark."""
     sc = team.cfg["developers"][s["assignee"]].get("screenshots")
     if not sc or not routes:
         return [], []
@@ -296,14 +311,19 @@ def screenshots(
             time.sleep(1)
         else:
             return [], [f"dev server did not start: {sc['serve']}"]
-        for route in routes:
+        vs = variants(sc)
+        for route, (size, theme) in itertools.product(routes, vs):
             name = prefix + (re.sub(r"[^A-Za-z0-9]+", "-", route).strip("-") or "root")
+            if len(vs) > 1:
+                name += f"-{size}" + (f"-{theme}" if theme else "")
             png = out / f"{name}.png"
             r = team.run_proc(
                 sc["shoot"].format(
                     url=shlex.quote(sc["url"] + route),
                     png=shlex.quote(str(png)),
                     shoot=shlex.quote(str(SHOOT)),
+                    size=shlex.quote(size.replace("x", ",")),
+                    theme=shlex.quote(theme),
                 ),
                 cwd=s["worktree"],
                 timeout=120,
@@ -312,7 +332,8 @@ def screenshots(
             if r["ok"] and png.exists():
                 paths.append(str(png))
             else:
-                problems.append(f"{route}: {team.redact(r['output'][-300:])}")
+                what = f"{route} ({size}{' ' + theme if theme else ''})"
+                problems.append(f"{what}: {team.redact(r['output'][-300:])}")
     finally:
         procs.reap(srv.pid, marker)  # the server and anything it started; the port is free
         srv.wait()

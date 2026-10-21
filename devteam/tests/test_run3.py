@@ -139,6 +139,7 @@ def test_a_task_that_writes_runs_is_screenshot_on_runs_dir(repo, tmp_path):
         "serve": f"echo {{runs}} > {seen} && exec python3 -m http.server {port} --bind 127.0.0.1",
         "url": f"http://127.0.0.1:{port}",
         "shoot": "touch {png}",
+        "viewports": ["1440x900"],  # one shot per route
     }
     team, _ = make(repo, Fast(), developers=devs)
     assert team.runs_dir == repo / "data" / "runs"

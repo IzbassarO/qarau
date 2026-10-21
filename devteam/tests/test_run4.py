@@ -47,6 +47,7 @@ def web_shots(tmp_path, shoot):
         "serve": f"exec python3 -m http.server {port} --bind 127.0.0.1",
         "url": f"http://127.0.0.1:{port}",
         "shoot": shoot,
+        "viewports": ["1440x900"],  # one shot per route
     }
     return devs
 
@@ -87,6 +88,40 @@ def test_config_shoots_through_the_sign_in_script():
     text = G.SHOOT.read_text()
     assert "QARAU_TEST_PASSWORD" in text and "console.log" not in text  # never printed
     assert "signed-out" in text  # the login page itself stays reachable
+
+
+def test_each_route_is_shot_per_viewport_and_theme(repo, tmp_path):
+    """Owner, 2026-10-21: dev_app pages in light and dark, at 1440x900 and 390x844."""
+    args = tmp_path / "args.txt"
+    devs = web_shots(tmp_path, f"echo {{size}} {{theme}} >> {args}; touch {{png}}")
+    del devs["dev_app"]["screenshots"]["viewports"]  # the default
+    devs["dev_app"]["screenshots"]["themes"] = ["light", "dark"]
+    team, _ = make(repo, developers=devs)
+    s = {"task": {"id": "T-002"}, "assignee": "dev_app", "worktree": str(repo), "routes": ["/"]}
+    shots, problems = G.screenshots(team, s, s["routes"])
+    assert problems == [] and G.expected_shots(team.cfg, s) == 4
+    assert [Path(p).name for p in shots] == [
+        "root-1440x900-light.png",
+        "root-1440x900-dark.png",
+        "root-390x844-light.png",
+        "root-390x844-dark.png",
+    ]
+    assert args.read_text().split("\n")[:4] == [
+        "1440,900 light",
+        "1440,900 dark",
+        "390,844 light",
+        "390,844 dark",
+    ]
+
+
+def test_config_shoots_dev_app_in_both_themes_at_the_default_viewports():
+    cfg = yaml.safe_load((HERE / "config.yaml").read_text())
+    app, pipe = (cfg["developers"][d]["screenshots"] for d in ("dev_app", "dev_pipeline"))
+    assert app["themes"] == ["light", "dark"] and "{size}" in app["shoot"]
+    assert app["shoot"].endswith(" {theme}") and "{size}" in pipe["shoot"]
+    assert G.variants(pipe) == [("1440x900", ""), ("390x844", "")]
+    text = G.SHOOT.read_text()
+    assert "colorScheme: theme" in text and "theme = ''" in text
 
 
 def test_web_tasks_get_before_screenshots_from_dev(repo, tmp_path):

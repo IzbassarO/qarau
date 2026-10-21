@@ -143,6 +143,7 @@ def test_screenshots_stop_the_server_and_report_failures(repo, tmp_path):
         "serve": f"python3 -m http.server {n} --bind 127.0.0.1",
         "url": f"http://127.0.0.1:{n}",
         "shoot": "case {url} in *broken*) exit 1;; esac; echo png > {png}",
+        "viewports": ["1440x900"],  # one shot per route
     }
     s = {"task": {"id": "A1a"}, "assignee": "dev_app", "worktree": str(repo)}
     paths, problems = G.screenshots(team, s, ["/", "/viewer/broken"])
