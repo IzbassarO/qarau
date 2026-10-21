@@ -1196,6 +1196,8 @@ def build_graph(team: Team, checkpointer):
                 if not r["ok"]:
                     raise RuntimeError(f"setup `{cmd}` failed: {team.redact(r['output'][-800:])}")
         data_before = team.data_at_start(s["task"]) if s["task"].get("writable") else {}
+        # this round's screenshots only: an older round's PNG is never taken for a new one
+        shutil.rmtree(team.home / "packets" / tid, ignore_errors=True)
         try:
             out = team.agents.develop(team, s)
         except TaskHalted as e:

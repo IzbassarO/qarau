@@ -260,3 +260,24 @@ def test_skills_are_protected_and_never_downloaded_by_agents():
         assert SC.is_protected(path, CFG)
     assert "DESIGN.md" in R.design_rule(CFG["developers"]["dev_app"])
     assert R.design_rule(CFG["developers"]["dev_pipeline"]) == ""
+
+
+def test_each_round_starts_with_an_empty_packet_screenshot_folder(repo):
+    seen = []
+
+    class Look(Fast):
+        def develop(self, team, s):
+            folder = team.home / "packets" / s["task"]["id"]
+            if s["task"]["id"] == "T-001":
+                seen.append(sorted(p.name for p in folder.glob("*")))
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"root-round-{s.get('rounds', 0) + 1}.png").write_text("png")
+            return super().develop(team, s)
+
+    team, graph = make(repo, Look())
+    stale = team.home / "packets" / "T-001"
+    stale.mkdir(parents=True)
+    (stale / "root.png").write_text("from an earlier run")
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})
+    assert seen == [[], []]  # the fake tester sends round 1 back: two rounds
+    assert (team.home / "packets" / "T-001.md").exists()  # the packet itself stays
