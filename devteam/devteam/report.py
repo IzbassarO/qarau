@@ -44,9 +44,10 @@ def write_report(team, day: str | None = None) -> Path:
     ]
     rows = costs.day_rows(team.home, day)
     lines += [
-        f"| {a} | {m} | {n} | {usd:.3f} | {'API' if billed else 'subscription'} | "
+        f"| {a} | {m} | {n} | {usd:.3f} | {'API' if billed else 'subscription'}"
+        f"{f' ({costs.stale_note(stale)})' if stale else ''} | "
         f"{costs.cache_hits(ti, cr) if billed else '—'} |"
-        for a, m, n, usd, billed, ti, cr, _cw in rows
+        for a, m, n, usd, billed, ti, cr, _cw, stale in rows
     ] or ["| — | — | 0 | 0 | — | — |"]
     lines += [
         "",
