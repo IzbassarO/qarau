@@ -18,7 +18,7 @@ from devteam import gates as G
 from devteam.agents import FakeAgents
 from devteam.gates import FakeGitHub, GitHub, regressions, release, tag_release
 from devteam.graph import Team, build_graph
-from devteam.report import write_report
+from devteam.report import write_report, write_reports
 
 BENCH = """import json, pathlib, sys
 out = pathlib.Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
@@ -518,3 +518,48 @@ def test_daily_report(repo):
     assert "| brain | claude-opus-5-5 | 1 | 0.120 | API |" in text
     assert "## Blocked" in text and "## Benchmark" in text
     json.dumps(text)  # plain text, no secrets objects
+
+
+def billed_at(home, when: float, usd: float, agent="tester"):
+    """A settled API call at `when` (epoch), as costs.record would have written it then."""
+    db = costs._db(home)
+    day, ts = (
+        time.strftime("%Y-%m-%d", time.localtime(when)),
+        time.strftime("%H:%M:%S", time.localtime(when)),
+    )
+    db.execute(
+        "insert into usage (day, ts, agent, model, task, tokens_in, tokens_out, usd, billed) "
+        "values (?,?,?,'m','T-001',1,1,?,1)",
+        (day, ts, agent, usd),
+    )
+    db.close()
+
+
+def test_budget_counts_the_last_24_hours_not_the_calendar_day(tmp_path):
+    """Owner, 2026-10-21: the cap reset at midnight, so a night run could spend it twice."""
+    now = time.time()
+    billed_at(tmp_path, now - 23 * 3600, 2.0)  # yesterday evening, still inside the window
+    billed_at(tmp_path, now - 25 * 3600, 5.0)  # outside
+    assert costs.spent_24h(tmp_path) == pytest.approx(2.0)
+    with pytest.raises(costs.BudgetExceeded, match="last 24 h"):
+        costs.reserve(tmp_path, 3.0, "tester", "m", "T-001", 1.5)
+    costs.reserve(tmp_path, 3.6, "tester", "m", "T-001", 1.5)
+    assert costs.spent_24h(tmp_path, now=now + 25 * 3600) == 0  # a day later all left it
+
+
+def test_a_run_past_midnight_writes_the_report_of_both_days(repo):
+    team, _ = make(repo, Dev())
+    now = time.time()
+    yesterday = time.strftime("%Y-%m-%d", time.localtime(now - 86400))
+    billed_at(team.home, now - 86400, 0.25, agent="brain")
+    run = {"run": "cont-x", "started": f"{yesterday}T23:00:00", "stop_reason": "max_hours",
+           "ended": time.strftime("%Y-%m-%dT%H:%M:%S"), "tasks": [], "spend": []}  # fmt: skip
+    (team.home / "runs").mkdir()
+    (team.home / "runs" / "cont-x.json").write_text(json.dumps(run))
+    today = write_reports(team, now - 86400)
+    old = today.with_name(f"{yesterday}.md")
+    assert today.name == time.strftime("%Y-%m-%d.md") and old.exists()
+    assert "| brain | m | 1 | 0.250 | API |" in old.read_text()
+    assert "| brain |" not in today.read_text()  # each day's own costs
+    for path in (old, today):  # the run itself is in both
+        assert "Kerege continuous run cont-x" in path.read_text()

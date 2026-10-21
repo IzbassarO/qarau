@@ -33,8 +33,8 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
 - Continuous mode (`run --continuous`, limits in `config.yaml` → `continuous`): one loop per
   developer. When a developer's task ends (merged or blocked), the brain plans the next task
   for that developer only; the others keep working. Stops when no developer can take a task
-  (nothing plannable, or paused after 2 blocked in a row, see below); the daily API budget is
-  reached; `max_hours` (clean stop) or `max_tasks` (no new tasks, running ones finish); Ctrl+C. The first Ctrl+C
+  (nothing plannable, or paused after 2 blocked in a row, see below); the API budget
+  (`daily_budget_usd`, counted over the last 24 h, not reset at midnight) is reached; `max_hours` (clean stop) or `max_tasks` (no new tasks, running ones finish); Ctrl+C. The first Ctrl+C
   finishes the current steps cleanly (a running developer or check is not killed); a second
   one kills everything now. A Claude Code / Codex plan limit is logged with its reset time
   (when the tool prints one), the developer waits until the reset (every 30 min when unknown,
@@ -43,12 +43,13 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   not plan paid steps), edits to `devteam/` (no developer owns it; checked at start). Rounds
   that did not finish are kept in `.state/continuous.json` and resumed first by the next
   `run --continuous`. At the end it prints, and the daily report lists, every task, its
-  result, the spend and why the run stopped (`.state/runs/<run>.json`). Plain `devteam run`
+  result, the spend and why the run stopped (`.state/runs/<run>.json`); a run past midnight
+  rewrites the report of every day it touched. Plain `devteam run`
   is unchanged: one round, then the weekly release check.
 - Dashboard (`devteam dashboard`, v2): one local read-only page (127.0.0.1 only, GET only,
   refreshes every 20 s keeping the open tab), real data only, no model calls, no network
   assets (system fonts, inline CSS/JS: works offline). Summary row: run state and stop reason,
-  tasks done today, API spend vs budget, subscription tokens today, time running. "Needs your
+  tasks done today, API spend of the last 24 h vs budget, subscription tokens today, time running. "Needs your
   attention" comes first and says what to do for each item (red CI, blocked tasks except those
   only waiting for dependencies, PRs waiting for you, spend above 80 %, scope/bypass
   violations). Agents as cards (status colour, task, time, last message, tool, tokens today),

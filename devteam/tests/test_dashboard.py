@@ -59,7 +59,7 @@ def test_collect_shows_agents_spend_limits_queue_and_attention(team, monkeypatch
         ],
     )
     monkeypatch.setattr(costs, "_today", lambda: "2026-10-17")
-    monkeypatch.setattr(costs, "spent_today", lambda home: 2.5)
+    monkeypatch.setattr(costs, "spent_24h", lambda home: 2.5)
     costs.record(team.home, "tester", "m", "T-001", 10, 5, 2.5, billed=True)
     costs.record(team.home, "dev_app", "codex (subscription)", "T-002", 900, 40, 0, False, 600)
     costs.record_limit(team.home, "dev_app", "T-004", now + 3600, 3660, "usage limit reached")

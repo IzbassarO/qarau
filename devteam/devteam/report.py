@@ -1,5 +1,6 @@
 """Daily report for the owner: devteam/reports/YYYY-MM-DD.md (rewritten on every run)."""
 
+import datetime as dt
 import json
 import time
 from pathlib import Path
@@ -49,8 +50,8 @@ def write_report(team, day: str | None = None) -> Path:
     ] or ["| — | — | 0 | 0 | — | — |"]
     lines += [
         "",
-        f"API spend: **${sum(r[3] for r in rows if r[4]):.2f}** of "
-        f"${team.cfg['daily_budget_usd']:.2f} per day",
+        f"API spend this day: **${sum(r[3] for r in rows if r[4]):.2f}**; the cap is "
+        f"${team.cfg['daily_budget_usd']:.2f} over any 24 h",
     ]
 
     lines += [
@@ -121,3 +122,13 @@ def write_report(team, day: str | None = None) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(team.redact("\n".join(lines)))
     return out
+
+
+def write_reports(team, since: float) -> Path:
+    """The report of every calendar day from `since` (the run's start, epoch) to today, so a
+    run past midnight is in both days. Returns today's."""
+    day, today = dt.date.fromtimestamp(since), dt.date.today()
+    while day < today:
+        write_report(team, day.isoformat())
+        day += dt.timedelta(days=1)
+    return write_report(team, today.isoformat())

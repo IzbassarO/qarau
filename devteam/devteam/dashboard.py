@@ -187,7 +187,7 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
     active = started is not None
     tasks = team.load_backlog()
     by_id = {t["id"]: t for t in tasks}
-    spent, cap = costs.spent_today(team.home), team.cfg["daily_budget_usd"]
+    spent, cap = costs.spent_24h(team.home), team.cfg["daily_budget_usd"]
     base = team.cfg["base_branch"]
     if team.fake:
         prs, ci = {"error": "fake mode: no GitHub"}, {"error": "fake mode: no GitHub"}
@@ -246,7 +246,7 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
     if cap and spent > 0.8 * cap:
         need(
             "spend",
-            f"API spend ${spent:.2f} is above 80% of ${cap:.2f}",
+            f"API spend ${spent:.2f} in the last 24 h is above 80% of ${cap:.2f}",
             "Raise daily_budget_usd in devteam/config.yaml, or let Kerege stop at the cap.",
         )
 
@@ -617,7 +617,7 @@ def _summary(d: dict) -> str:
         f"{_e(r['state'])}</div><div class='s'>{_e(reason)}</div></div>"
         f"<div><div class='k'>Tasks done today</div><div class='v'>{len(d['done_today'])}</div>"
         f"<div class='s'>{_e(', '.join(d['done_today']) or 'none yet')}</div></div>"
-        f"<div><div class='k'>API spend</div><div class='v'>${d['spent']:.2f}</div>"
+        f"<div><div class='k'>API spend, 24 h</div><div class='v'>${d['spent']:.2f}</div>"
         f"<div class='s'>of ${d['budget']:.2f} per day ({pct:.0f} %)</div>"
         f"<div class='meter'><i class='{'hot' if pct > 80 else ''}' "
         f"style='width:{min(pct, 100):.0f}%'></i></div></div>"

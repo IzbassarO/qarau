@@ -22,7 +22,7 @@ from devteam.agents import FakeAgents
 from devteam.continuous import Continuous, summary_lines
 from devteam.gates import EMPTY_BENCH, release
 from devteam.graph import AGENTS, Team, build_graph
-from devteam.report import write_report
+from devteam.report import write_report, write_reports
 
 ROOT = Path(__file__).resolve().parents[2]
 COLORS = {
@@ -55,8 +55,8 @@ def status_table(team: Team, working: dict) -> Table:
         tasks = working.get(a)
         state = f"[bold]working[/] on {', '.join(sorted(tasks))}" if tasks else "[dim]idle[/]"
         t.add_row(f"[{COLORS[a]}]{a}[/]", state)
-    spent = costs.spent_today(team.home)
-    t.add_row("[dim]API today[/]", f"${spent:.2f} / ${team.cfg['daily_budget_usd']:.2f}")
+    spent = costs.spent_24h(team.home)
+    t.add_row("[dim]API 24 h[/]", f"${spent:.2f} / ${team.cfg['daily_budget_usd']:.2f}")
     return t
 
 
@@ -123,7 +123,7 @@ def run_continuous(team: Team):
         console.print()
         for line in summary_lines(summary):
             console.print(line, markup=False, highlight=False)
-        console.print(f"report: {write_report(team)}")
+        console.print(f"report: {write_reports(team, cont.t0)}")
 
     signal.signal(signal.SIGINT, on_int)
     signal.signal(signal.SIGTERM, lambda *_: hard_stop("devteam stop"))
@@ -165,6 +165,7 @@ def run_graph(team: Team, resume: bool):
         inp = {}
     pid_file = team.home / "run.pid"
     pid_file.write_text(str(os.getpid()))
+    since = time.mktime(time.strptime(config["configurable"]["thread_id"], "run-%Y%m%d-%H%M%S"))
 
     def on_stop(signum, frame):  # Ctrl-C or `devteam stop`: kill agents, checks, benchmark
         team.kill_all()
@@ -176,12 +177,12 @@ def run_graph(team: Team, resume: bool):
         watch(team, graph, inp, config)
     except KeyboardInterrupt:
         team.kill_all()
-        print(f"\nstopped. Report: {write_report(team)}. Continue with `devteam resume`.")
+        print(f"\nstopped. Report: {write_reports(team, since)}. Continue with `devteam resume`.")
         sys.stdout.flush()
         os._exit(130)  # don't wait for worker threads; every finished step is checkpointed
     except Exception as e:  # usage limit, budget cap, crash: the checkpoint keeps the progress
         console.print(f"[red]stopped:[/] {team.redact(str(e))}")
-        write_report(team)
+        write_reports(team, since)
         sys.exit("Fix the cause, then `devteam resume` continues where it stopped.")
     finally:
         pid_file.unlink(missing_ok=True)
@@ -192,7 +193,7 @@ def run_graph(team: Team, resume: bool):
         console.print("nothing to do: no todo tasks in the backlog")
     if release_due(team):
         console.print(release(team))
-    console.print(f"report: {write_report(team)}")
+    console.print(f"report: {write_reports(team, since)}")
 
 
 def release_due(team: Team) -> bool:
