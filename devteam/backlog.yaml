@@ -481,7 +481,9 @@ tasks:
     this task.
 
     '
-  status: todo
+  status: in_progress
+  owner: dev_pipeline
+  run: cont-20261021-021001-dev_pipeline-1
 - id: P4a-2a-run
   area: core
   title: First real COLMAP dense run on Modal (owner only, not Kerege)
