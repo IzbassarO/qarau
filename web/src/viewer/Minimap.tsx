@@ -1,9 +1,10 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import type { Vector3 } from 'three';
 import type { Bundle } from '../lib/bundle';
+import tokens from '../design/tokens.json';
 import { computeMinimapTransform, viewConePolygon } from './minimap';
 
-const SIZE = 180;
+const SIZE = tokens.shared.layout.minimap;
 const MAX_POINTS = 20_000;
 
 export interface MinimapState {
@@ -49,9 +50,9 @@ export const Minimap = forwardRef<MinimapHandle, { bundle: Bundle; label: string
       poseContext.current = context(pose.current);
       if (!ctx) return;
       ctx.clearRect(0, 0, SIZE, SIZE);
-      ctx.fillStyle = '#05080b';
+      ctx.fillStyle = tokens.shared.color['viewer-canvas'];
       ctx.fillRect(0, 0, SIZE, SIZE);
-      ctx.fillStyle = '#7eb2d9';
+      ctx.fillStyle = tokens.shared.color['finding-inspected'];
       ctx.globalAlpha = 0.6;
       const count = Math.floor(bundle.position.length / 3);
       const stride = Math.max(1, Math.ceil(count / MAX_POINTS));
@@ -87,16 +88,18 @@ export const Minimap = forwardRef<MinimapHandle, { bundle: Bundle; label: string
           ctx.lineTo(polygon[1].x, polygon[1].y);
           ctx.lineTo(polygon[2].x, polygon[2].y);
           ctx.closePath();
-          ctx.fillStyle = 'rgba(108, 181, 255, 0.2)';
+          ctx.fillStyle = tokens.shared.color['viewer-text'];
+          ctx.globalAlpha = 0.2;
           ctx.fill();
-          ctx.strokeStyle = '#78baff';
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = tokens.shared.color['viewer-text'];
           ctx.lineWidth = 1;
           ctx.stroke();
           ctx.beginPath();
           ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-          ctx.fillStyle = '#080d13';
+          ctx.fillStyle = tokens.shared.color['viewer-canvas'];
           ctx.fill();
-          ctx.strokeStyle = '#f2f7ff';
+          ctx.strokeStyle = tokens.shared.color['viewer-current'];
           ctx.lineWidth = 1.5;
           ctx.stroke();
         },
@@ -109,7 +112,7 @@ export const Minimap = forwardRef<MinimapHandle, { bundle: Bundle; label: string
         role="img"
         aria-label={label}
         data-testid="observer-minimap"
-        className="pointer-events-none absolute bottom-3 right-3 overflow-hidden border border-[#586c80] bg-[#05080b]"
+        className="viewer-minimap"
         style={{ width: SIZE, height: SIZE }}
       >
         <canvas ref={cloud} width={SIZE} height={SIZE} aria-hidden="true" />
@@ -120,9 +123,7 @@ export const Minimap = forwardRef<MinimapHandle, { bundle: Bundle; label: string
           aria-hidden="true"
           className="absolute inset-0"
         />
-        <span className="absolute left-1.5 top-1 bg-[#05080b]/80 px-1 font-mono text-[10px] text-[#b9d5ee]">
-          {label}
-        </span>
+        <span className="viewer-minimap-label">{label}</span>
       </div>
     );
   },

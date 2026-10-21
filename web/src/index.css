@@ -1,4 +1,8 @@
 @import 'tailwindcss';
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-mono/400.css';
 
 /* Dimensions are unitless pixels, shared with native clients. */
 :root {
@@ -27,6 +31,7 @@
   --size-text: calc(var(--layout-text) * 1px);
   --size-control: calc(var(--layout-control) * 1px);
   --size-control-small: calc(var(--layout-control-small) * 1px);
+  --size-inspection-row: calc(var(--layout-inspection-row) * 1px);
   --size-icon: calc(var(--layout-icon) * 1px);
   --size-step-icon: calc(var(--layout-step-icon) * 1px);
   --size-status-marker: calc(var(--layout-status-marker) * 1px);
@@ -36,6 +41,8 @@
   --size-upload-picker: calc(var(--layout-upload-picker) * 1px);
   --size-viewer-tools: calc(var(--layout-viewer-tools) * 1px);
   --size-viewer-panel: calc(var(--layout-viewer-panel) * 1px);
+  --size-minimap: calc(var(--layout-minimap) * 1px);
+  --size-frame-thumbnail: calc(var(--layout-frame-thumbnail) * 1px);
   --size-focus-width: calc(var(--layout-focus-width) * 1px);
   --color-finding-critical: #f0565c;
   --color-finding-watch: #f2a33a;
@@ -43,8 +50,10 @@
   --color-finding-inspected: #5b9bff;
   --color-viewer-canvas: #000000;
   --color-viewer-text: #b0b7c1;
-  --font-family: system-ui, sans-serif;
-  --font-mono: ui-monospace, monospace;
+  --color-viewer-current: #eaf2ff;
+  --color-viewer-later: #2a3240;
+  --font-family: 'IBM Plex Sans', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
   --font-size-xs: 12;
   --font-size-sm: 13;
   --font-size-md: 14;
@@ -75,6 +84,7 @@
   --layout-text: 560;
   --layout-control: 40;
   --layout-control-small: 32;
+  --layout-inspection-row: 32;
   --layout-icon: 20;
   --layout-step-icon: 28;
   --layout-status-marker: 8;
@@ -84,6 +94,8 @@
   --layout-upload-picker: 160;
   --layout-viewer-tools: 52;
   --layout-viewer-panel: 360;
+  --layout-minimap: 180;
+  --layout-frame-thumbnail: 112;
   --layout-focus-width: 2;
   --color-bg: #f3f4f5;
   --color-surface: #ffffff;

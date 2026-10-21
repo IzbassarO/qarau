@@ -82,7 +82,14 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
                   >
                     <span className={`status-dot ${inspection.status}`} aria-hidden="true" />
                     <span className="inspection-link-title">
-                      <span className="inspection-link-name">{inspection.title}</span>
+                      <span className="inspection-link-label">
+                        <span className="inspection-link-name" title={inspection.title}>
+                          {inspection.title}
+                        </span>
+                        {demo && inspection.id === 'demo' && (
+                          <span className="demo-badge">{t('shell.demo')}</span>
+                        )}
+                      </span>
                       {inspection.createdAt && (
                         <time className="inspection-link-date" dateTime={inspection.createdAt}>
                           {shortDate(inspection.createdAt, lang)}
@@ -99,7 +106,7 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
       </div>
       <footer className="sidebar-footer">
         <Link to="/inspections/demo" onClick={onNavigate} className="demo-link">
-          {t('shell.openDemo')} <span className="demo-badge">{t('shell.demo')}</span>
+          {t('shell.openDemo')}
         </Link>
         <LanguageSwitch />
         <button type="button" className="shell-button" onClick={signOut}>

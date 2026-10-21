@@ -147,7 +147,6 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
               <button className="shell-button primary" onClick={() => setDialogOpen(true)}>
                 <span aria-hidden="true">+</span> {t('inspection.new')}
               </button>
-              <span className="empty-note">{t('shell.emptyNote')}</span>
             </div>
           )}
         </main>

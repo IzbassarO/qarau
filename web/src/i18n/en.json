@@ -101,7 +101,6 @@
   "shell.skip": "Skip to inspection",
   "shell.emptyTitle": "Inspections",
   "shell.emptyDescription": "Select an inspection from the sidebar to view its 3D map and video, or create a new inspection.",
-  "shell.emptyNote": "Select an inspection to view its results.",
   "site.unassigned": "Unassigned",
   "site.unnamed": "Unnamed site",
   "inspection.new": "New inspection",
