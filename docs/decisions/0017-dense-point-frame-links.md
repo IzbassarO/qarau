@@ -47,7 +47,7 @@ storing all of them would make the links larger than the points.
 ## Consequences
 
 - The `.vis` index order is an assumption about COLMAP's workspace; it must be checked on
-  the first real GPU run (P4a-2): a fused point must reproject into its linked frames.
+  the first real GPU run (P4a-2a-run): a fused point must reproject into its linked frames.
 - The fallback misses frames whose sparse neighbours were not tracked there, and may keep
   a frame where the point is occluded. Good enough to find candidate frames; the panel shows
   the frame so the engineer judges.

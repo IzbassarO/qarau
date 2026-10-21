@@ -6,8 +6,9 @@ dense:
   max_frames_per_point: 8
 
 dense_remote:
-  # COLMAP dense stage on a rented GPU worker (ADR 0016). Stays false until the owner approves
-  # a paid GPU account (P4a-2); the Modal provider (ADR 0019) is never called before that.
+  # COLMAP dense stage on a rented GPU worker (ADR 0016). Stays false: the first real run
+  # (P4a-2a-run) is `dense-remote --provider modal --allow-paid-gpu`, which enables it in
+  # memory only (ADR 0019); the CLI's default provider is fake, whatever provider says here.
   enabled: false
   provider: modal # fake | modal; the token only from MODAL_TOKEN_ID / MODAL_TOKEN_SECRET
   timeout_s: 1800 # one wall-clock deadline for the whole job (start, upload, dense, download)

@@ -1,13 +1,14 @@
 # 0019 — Modal as the first real GPU provider for the dense executor
 
-- Status: accepted (dev team, P4a-1b); no Modal call until the owner starts P4a-2
-- Date: 2026-10-20
+- Status: accepted (dev team, P4a-1b; CLI wired in P4a-2a-code); no Modal call until the
+  owner starts P4a-2a-run
+- Date: 2026-10-20 (updated 2026-10-21)
 
 ## Context
 
 ADR 0016 put COLMAP dense behind `GpuProvider` and shipped only a fake. P4a-1b adds the first
-real provider so P4a-2 (the first real GPU run, the owner's call) needs only a token and a
-go. Modal (modal.com) runs a container from a Dockerfile on a rented GPU per second, with no
+real provider so P4a-2a-run (the first real GPU run, the owner's call) needs only a token and
+a go. Modal (modal.com) runs a container from a Dockerfile on a rented GPU per second, with no
 VM to manage, and its Sandboxes give exactly what the interface needs: start a container,
 put files, exec argv, get files, terminate. Modal is a **paid service**: no account, no
 token and no call exist in this task; developers have no Modal token.
@@ -23,8 +24,9 @@ token and no call exist in this task; developers have no Modal token.
    `upload`, `run`, `download`, `stop`; a worker is a Sandbox id). `_RealModalClient` is the
    only code that touches the `modal` package, imported inside its methods, so
    `qarau_pipeline` imports and tests without `modal` installed. Tests use a fake client and
-   a fake `modal` module; none touches the network. `modal` is **not** a dependency yet:
-   P4a-2 adds it as an optional extra (`uv add --optional modal modal`).
+   a fake `modal` module; none touches the network. `modal` is only an optional extra
+   (`[project.optional-dependencies] modal = ["modal==1.6.2"]`, P4a-2a-code): the default
+   `uv sync`, CI and every test run without it.
 3. **Image from `infra/colmap-cuda`.** `ModalImageSpec` is a frozen description: the
    Dockerfile path, `push` and `public` fixed to `false` (not settable). `to_modal_image()`
    turns it into `modal.Image.from_dockerfile(...)` (empty entrypoint, the sandbox runs
@@ -49,22 +51,53 @@ token and no call exist in this task; developers have no Modal token.
    `from None`, so neither logs, nor exception text and tracebacks, nor anything the job
    writes (ledger, outputs) carry it; a test with a fake token checks success, error, stop
    error and timeout paths.
+7. **A paid run needs an explicit flag.** `dense-remote --provider` defaults to `fake`,
+   whatever `dense_remote.provider` says. `--provider modal` without `--allow-paid-gpu` exits
+   with code 2 and a message naming the flag, before any Modal code is loaded. With the flag
+   the CLI sets `enabled: true` in memory only (`config.yaml` is never written) and builds
+   the provider through `make_provider(cfg)`.
+
+## Running
+
+The first real run (P4a-2a-run), from the repository root, with the token only in the shell:
+
+```sh
+cd pipeline
+uv sync --extra modal
+MODAL_TOKEN_ID=... MODAL_TOKEN_SECRET=... uv run python -m qarau_pipeline dense-remote \
+  --provider modal --allow-paid-gpu \
+  --frames ../data/runs/<run>/frames --sparse ../data/runs/<run>/colmap/sparse/0 \
+  --out ../data/runs/<run>/dense
+uv run python -m qarau_pipeline export --sparse ../data/runs/<run>/colmap/sparse/0 \
+  --out ../data/runs/<run> --dense ../data/runs/<run>/dense   # dense layer in the viewer
+```
+
+- **Default is the fake.** Without `--provider` (or with `--provider fake`) nothing is paid:
+  the fake runs locally, also while `enabled: false`, and books into `<out>/gpu_ledger.fake.json`.
+- **Ledger:** `dense_remote.ledger_path` in `pipeline/config.yaml`, relative to that file
+  (`data/dense_remote/gpu_ledger.json`, gitignored): GPU hours per UTC day. The estimate is
+  booked before the start and settled to the real time after the stop.
+- **Budget and timeout:** `daily_gpu_hours_budget`, `est_hours_per_job` and `timeout_s` in the
+  same section (`--config` picks another file). A job whose estimate does not fit today's
+  budget is refused before any worker starts; raise the budget only with the owner.
+- A missing `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` stops the run before any Modal call with
+  an error naming the variables (exit code 1).
 
 ## Licences
 
 Modal Python client (`modal`): Apache-2.0, commercial use allowed. Modal the service: paid,
-per-second GPU billing; terms and current prices are checked by the owner before P4a-2.
+per-second GPU billing; terms and current prices are checked by the owner before P4a-2a-run.
 COLMAP in the image: BSD-3-Clause (full list in `infra/colmap-cuda/README.md`).
 
 ## Consequences
 
-- **Owner decisions before P4a-2:** the Modal account and its spending limit; that Modal
+- **Owner decisions before P4a-2a-run:** the Modal account and its spending limit; that Modal
   builds and stores the CUDA image inside our Modal workspace (the image is not pushed to
   any registry, but it does live on Modal's side, which `infra/colmap-cuda/README.md` makes
   an owner decision); and whether customer footage may go to Modal's US/EU regions (Kazakh
   customer data stays in Kazakhstan, so Modal is for our own test footage only, and on-prem
   uses the customer's GPU through another `GpuProvider`).
-- **P4a-2 must check against a real account** what no fake can: `from_dockerfile` builds the
+- **P4a-2a-run must check against a real account** what no fake can: `from_dockerfile` builds the
   image (CUDA build time on Modal's builder); the container runs as root or as `colmap`
   with a writable `/work`; the Sandbox filesystem API (`mkdir`, `open`) for upload and
   download; `exec(...).wait()` and its exit code; COLMAP's stdout/stderr volume through

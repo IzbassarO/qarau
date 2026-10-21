@@ -125,8 +125,10 @@ day, JSON ledger under `data/`) raises `BudgetExceededError`. Config: `pipeline/
 → `dense_remote` (`enabled: false`, `provider: fake | modal`). Providers: a fake one for tests
 and the Modal one (`dense_modal.py`, ADR 0019: injected client, lazy `modal` import, image
 from `infra/colmap-cuda`, token only from `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`), which
-nothing calls until the owner approves the paid account (P4a-2); the default
-`run`/`benchmark` path does not use either.
+nothing calls until the owner approves the paid account (P4a-2a-run); the default
+`run`/`benchmark` path does not use either. `python -m qarau_pipeline dense-remote` runs the
+fake by default; `--provider modal --allow-paid-gpu` is the only way to start a paid Modal run
+(without the flag it exits before any Modal code), with the real ledger, budget and timeout.
 
 **Dense points and their frame links (`visibility.py`, ADR 0017).** `python -m
 qarau_pipeline export --sparse S --out O --dense D` reads `D/fused.ply` and adds the bundle

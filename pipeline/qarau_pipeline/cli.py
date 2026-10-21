@@ -166,9 +166,22 @@ def cmd_dense_remote(a: argparse.Namespace) -> None:
     from .dense_remote import GpuLedger, RemoteDenseExecutor, load_dense_remote_config
 
     out = Path(a.out).resolve()
+    cfg = load_dense_remote_config(Path(a.config))
+    if a.provider == "modal":
+        # Paid (ADR 0019): enabled only in memory, only behind --allow-paid-gpu (checked in
+        # main); the real ledger, budget and timeout from config.yaml apply.
+        from . import dense_remote
+
+        cfg = dataclasses.replace(cfg, enabled=True, provider="modal")
+        provider = dense_remote.make_provider(cfg)
+        ply = RemoteDenseExecutor(provider, cfg, GpuLedger(cfg.ledger_path)).run(
+            Path(a.frames), Path(a.sparse), out
+        )
+        print("dense-remote:", ply)
+        return
     # The fake spends nothing: it may run while dense_remote is disabled, and books its hours
     # in a ledger next to its output instead of the real one.
-    cfg = dataclasses.replace(load_dense_remote_config(Path(a.config)), enabled=True)
+    cfg = dataclasses.replace(cfg, enabled=True)
     with tempfile.TemporaryDirectory() as remote:
         p = FakeGpuProvider(Path(remote), FakeClock(datetime.now(UTC)))
         ply = RemoteDenseExecutor(p, cfg, GpuLedger(out / "gpu_ledger.fake.json"), p.clock).run(
@@ -249,7 +262,11 @@ def main(argv: list[str] | None = None) -> None:
     pj.add_argument("--scale", type=float, help="metres per world unit (area in m2 only with it)")
     pj.set_defaults(fn=cmd_project)
     dr = sub.add_parser("dense-remote", help="COLMAP dense on a remote GPU worker (ADR 0016)")
-    dr.add_argument("--provider", choices=["fake"], required=True, help="only fake exists yet")
+    dr.add_argument("--provider", choices=["fake", "modal"], default="fake",
+                    help="fake (default, free) or modal (paid, needs --allow-paid-gpu); "
+                    "dense_remote.provider in config.yaml does not change the default")  # fmt: skip
+    dr.add_argument("--allow-paid-gpu", action="store_true",
+                    help="confirm that --provider modal starts a paid Modal GPU run")  # fmt: skip
     dr.add_argument("--frames", required=True)
     dr.add_argument("--sparse", required=True)
     dr.add_argument("--out", required=True)
@@ -275,6 +292,8 @@ def main(argv: list[str] | None = None) -> None:
     rf.add_argument("--timeout-s", type=float, default=1800, help="per video (default 1800)")
     rf.set_defaults(fn=cmd_refresh)
     a = p.parse_args(argv)
+    if a.cmd == "dense-remote" and a.provider == "modal" and not a.allow_paid_gpu:
+        dr.error("--provider modal starts a paid Modal GPU run; add --allow-paid-gpu to confirm")
     try:
         a.fn(a)
     except StageError as err:
