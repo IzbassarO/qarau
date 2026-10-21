@@ -205,6 +205,7 @@ def test_ux1_is_the_first_dev_app_task_and_split_in_two():
         assert "supervisor" not in t  # the 8 M limit stays
     assert "login page" in a["goal"] and "control centre" in a["goal"]
     assert "newest first" in b["goal"] and "viewer chrome" in b["goal"]
+    assert "at least 12 inspections" in b["goal"] and "shell.emptyNote" in b["goal"]  # owner 10-21
 
 
 # --- 7. the frontend-design skill: pinned, licensed, protected, seen by Codex -------------------
