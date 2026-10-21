@@ -7,11 +7,13 @@ dense:
 
 dense_remote:
   # COLMAP dense stage on a rented GPU worker (ADR 0016). Stays false until the owner approves
-  # a paid GPU account; no real provider exists yet, only the fake one used in tests.
+  # a paid GPU account (P4a-2); the Modal provider (ADR 0018) is never called before that.
   enabled: false
-  timeout_s: 7200 # one wall-clock deadline for the whole job (start, upload, dense, download)
-  est_hours_per_job: 2.0 # booked against the budget per job; must cover timeout_s
-  daily_gpu_hours_budget: 4.0 # per UTC day; a job that would go over is refused before start
-  gpu_type: any-24gb
-  image: qarau/colmap-cuda:4.2.1 # infra/colmap-cuda, built locally, never pushed publicly
+  provider: modal # fake | modal; the token only from MODAL_TOKEN_ID / MODAL_TOKEN_SECRET
+  timeout_s: 1800 # one wall-clock deadline for the whole job (start, upload, dense, download)
+  est_hours_per_job: 0.5 # booked against the budget per job; must cover timeout_s
+  daily_gpu_hours_budget: 1.0 # per UTC day; a job that would go over is refused before start
+  gpu_type: L4 # Modal GPU name (24 GB, CUDA arch 89 is in the image's build list)
+  # infra/colmap-cuda; Modal builds it from the Dockerfile in our workspace, never pushed
+  image: qarau/colmap-cuda:4.2.1
   ledger_path: ../data/dense_remote/gpu_ledger.json # GPU hours per UTC day (data/ is gitignored)
