@@ -36,6 +36,13 @@ token and no call exist in this task; developers have no Modal token.
    2026-10-21: `"89"` only, one arch instead of five, a much shorter build); the config refuses
    a `gpu_type` whose arch is not in it, so a mismatch never reaches a paid start. Another GPU
    (e.g. `"75;86;90"`) is a config change and one new image build, no code change.
+   **GPU capacity (2026-10-21, first real run):** Modal held an L4 sandbox request for 28 min,
+   then refused it (`ResourceExhaustedError: Insufficient capacity`); queued time is not billed,
+   but it ate the job's deadline. Now each GPU type gets `dense_remote.start_timeout_s` (300 s);
+   on no capacity the queued sandbox is terminated by its job tag (it has no id yet) and the
+   next of `dense_remote.gpu_fallback` is tried (owner: `[L40S]`, same arch 89, $1.95/h vs
+   $0.80/h). Other start errors do not fall back. Modal 1.6.2 refuses a GPU list for sandboxes,
+   so the fallback is ours.
 4. **Always stop, also from Modal's side.** The executor's `finally` stop (ADR 0016) holds.
    On top: every client call runs in a daemon thread bounded by the remaining `timeout_s`,
    so a hung call raises `ModalTimeoutError` (a `TimeoutError`, mapped to

@@ -104,6 +104,8 @@ class DenseRemoteConfig:
     gpu_type: str
     provider: str = "fake"
     cuda_architectures: str = "89"  # the image's CUDA_ARCHITECTURES build arg, e.g. "75;86;90"
+    gpu_fallback: tuple[str, ...] = ()  # tried after gpu_type when the provider has no capacity
+    start_timeout_s: float = 300.0  # per GPU type: how long to wait for capacity
 
 
 def make_provider(cfg: DenseRemoteConfig) -> GpuProvider:
@@ -113,7 +115,11 @@ def make_provider(cfg: DenseRemoteConfig) -> GpuProvider:
         # no vendor code until a real job asks for it
         from .dense_modal import ModalGpuProvider, ModalImageSpec
 
-        return ModalGpuProvider.from_env(ModalImageSpec(cuda_architectures=cfg.cuda_architectures))
+        return ModalGpuProvider.from_env(
+            ModalImageSpec(cuda_architectures=cfg.cuda_architectures),
+            fallback_gpus=cfg.gpu_fallback,
+            start_timeout_s=cfg.start_timeout_s,
+        )
     raise DenseConfigError(f"dense_remote.provider {cfg.provider!r} is not a real GPU provider")
 
 
@@ -159,18 +165,26 @@ def load_dense_remote_config(path: Path = DEFAULT_CONFIG) -> DenseRemoteConfig:
         gpu_type=text("gpu_type"),
         provider=provider,
         cuda_architectures=str(sec.get("cuda_architectures", "89")),
+        gpu_fallback=tuple(sec.get("gpu_fallback") or ()),
+        start_timeout_s=number("start_timeout_s") if "start_timeout_s" in sec else 300.0,
     )
+    if cfg.start_timeout_s > cfg.timeout_s:
+        raise DenseConfigError(
+            f"{path}: dense_remote.start_timeout_s ({cfg.start_timeout_s:g} s) is longer than "
+            f"dense_remote.timeout_s ({cfg.timeout_s:g} s)"
+        )
     if not re.fullmatch(r"\d{2,3}(;\d{2,3})*", cfg.cuda_architectures):
         raise DenseConfigError(
             f'{path}: dense_remote.cuda_architectures must be like "89" or "75;86;90", '
             f"got {cfg.cuda_architectures!r}"
         )
     # A GPU whose arch is not in the image fails only in patch_match_stereo, after paying.
-    if (arch := GPU_ARCH.get(cfg.gpu_type)) and arch not in cfg.cuda_architectures.split(";"):
-        raise DenseConfigError(
-            f"{path}: dense_remote.gpu_type {cfg.gpu_type} needs CUDA arch {arch} in "
-            f"dense_remote.cuda_architectures ({cfg.cuda_architectures!r})"
-        )
+    for key, gpu in [("gpu_type", cfg.gpu_type), *(("gpu_fallback", g) for g in cfg.gpu_fallback)]:
+        if (arch := GPU_ARCH.get(gpu)) and arch not in cfg.cuda_architectures.split(";"):
+            raise DenseConfigError(
+                f"{path}: dense_remote.{key} {gpu} needs CUDA arch {arch} in "
+                f"dense_remote.cuda_architectures ({cfg.cuda_architectures!r})"
+            )
     # The estimate is what the budget check books, so it must cover the longest a job can run.
     if cfg.timeout_s > cfg.est_hours_per_job * 3600:
         raise DenseConfigError(

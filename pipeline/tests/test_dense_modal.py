@@ -43,12 +43,18 @@ TOKEN_ID, TOKEN_SECRET = "fake-id-ABC987", "fake-secret-XYZ123"
 REPO = Path(__file__).resolve().parents[2]
 
 
+class ResourceExhaustedError(Exception):
+    """Named like modal.exception.ResourceExhaustedError."""
+
+
 @dataclass
 class FakeModalClient:
     fail: dict[str, BaseException] = field(default_factory=dict)  # step -> raised
     delay: dict[str, float] = field(default_factory=dict)  # step -> seconds it takes
     calls: list[tuple[str, ...]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    no_capacity: set[str] = field(default_factory=set)  # GPU types Modal refuses
+    queued: set[str] = field(default_factory=set)  # GPU types whose start never answers
 
     def _step(self, step: str, *args: str) -> None:
         with self.lock:
@@ -57,9 +63,17 @@ class FakeModalClient:
         if step in self.fail:
             raise self.fail[step]
 
-    def start(self, image: ModalImageSpec, gpu: str, timeout_s: float) -> str:
+    def start(self, image: ModalImageSpec, gpu: str, timeout_s: float, tags: dict[str, str]) -> str:
+        assert set(tags) == {"qarau-job"}
         self._step("start", gpu)
+        if gpu in self.no_capacity:
+            raise ResourceExhaustedError("Insufficient capacity to create sandbox.")
+        if gpu in self.queued:
+            time.sleep(5)
         return "sb-fake-1"
+
+    def stop_tagged(self, tags: dict[str, str]) -> None:
+        self._step("stop_tagged")
 
     def upload(self, worker_id: str, local_dir: Path, remote_dir: str) -> None:
         self._step("upload", remote_dir)
@@ -142,7 +156,7 @@ def test_error_at_start_starts_nothing_to_stop(env: dict[str, Path]) -> None:
     client = FakeModalClient(fail={"start": RuntimeError("no GPU")})
     with pytest.raises(ModalError, match="modal start_worker failed"):
         go(executor(env, ModalGpuProvider(client)), env)
-    assert client.steps() == ["start"]
+    assert client.steps() == ["start", "stop_tagged"]  # a sandbox queued for a GPU too
 
 
 @pytest.mark.usefixtures("no_build")
@@ -173,7 +187,40 @@ def test_start_answering_late_is_stopped(env: dict[str, Path]) -> None:
         if "stop" in client.steps():
             break
         time.sleep(0.02)
-    assert client.calls == [("start", "L4"), ("stop", "sb-fake-1")]
+    assert client.calls == [("start", "L4"), ("stop_tagged",), ("stop", "sb-fake-1")]
+
+
+@pytest.mark.usefixtures("no_build")
+@pytest.mark.parametrize("why", ["no_capacity", "queued"])
+def test_no_l4_capacity_falls_back_to_l40s(env: dict[str, Path], why: str) -> None:
+    """2026-10-21: Modal held an L4 request 28 min, then refused. Each GPU type gets
+    start_timeout_s; the queued sandbox is terminated by its tag before the next type."""
+    client = FakeModalClient(**{why: {"L4"}})  # type: ignore[arg-type]
+    p = ModalGpuProvider(client, fallback_gpus=("L40S",), start_timeout_s=0.2)
+    t0 = time.monotonic()
+    go(executor(env, p), env)
+    assert time.monotonic() - t0 < 2.0
+    assert client.calls[:4] == [("start", "L4"), ("stop_tagged",), ("start", "L40S"),
+                                ("upload", "/work/images")]  # fmt: skip
+    assert client.steps().count("stop") == 1
+
+
+@pytest.mark.usefixtures("no_build")
+def test_no_capacity_anywhere_fails_fast_and_names_the_gpus(env: dict[str, Path]) -> None:
+    client = FakeModalClient(queued={"L4", "L40S"})
+    p = ModalGpuProvider(client, fallback_gpus=("L40S",), start_timeout_s=0.1)
+    with pytest.raises(ModalError, match="no GPU capacity for L4, L40S"):
+        go(executor(env, p), env)
+    assert client.steps() == ["start", "stop_tagged", "start", "stop_tagged"]
+
+
+@pytest.mark.usefixtures("no_build")
+def test_other_start_errors_do_not_fall_back(env: dict[str, Path]) -> None:
+    client = FakeModalClient(fail={"start": RuntimeError("bad image")})
+    p = ModalGpuProvider(client, fallback_gpus=("L40S",), start_timeout_s=0.2)
+    with pytest.raises(ModalError, match="bad image"):
+        go(executor(env, p), env)
+    assert client.steps() == ["start", "stop_tagged"]
 
 
 @pytest.mark.usefixtures("no_build")
@@ -308,8 +355,14 @@ def fake_modal_module(root: Path, log: list[tuple[str, ...]]) -> types.SimpleNam
         @staticmethod
         def create(*cmd: str, **kw: Any) -> Sandbox:
             log.append(("create", *cmd, f"gpu={kw['gpu']}", f"timeout={kw['timeout']}"))
+            assert set(kw["tags"]) == {"qarau-job"}
             assert kw["client"] == "client" and isinstance(kw["image"], _FakeImage)
             return Sandbox()
+
+        @staticmethod
+        def list(app_id: str, tags: dict[str, str], client: Any) -> list[Sandbox]:
+            log.append(("list", app_id, *sorted(tags)))
+            return [Sandbox()]
 
         @staticmethod
         def from_id(sid: str, client: Any) -> Sandbox:
@@ -332,8 +385,8 @@ def fake_modal_module(root: Path, log: list[tuple[str, ...]]) -> types.SimpleNam
         log.append(("credentials",))
         return "client"
 
-    def lookup(name: str, create_if_missing: bool, client: Any) -> str:
-        return "app"
+    def lookup(name: str, create_if_missing: bool, client: Any) -> Any:
+        return types.SimpleNamespace(app_id="ap-1")
 
     _FakeImage.described = []
     return types.SimpleNamespace(
@@ -374,6 +427,8 @@ def test_real_client_round_trip_on_fake_modal(
     assert TOKEN_SECRET not in caplog.text
     ex.provider.stop(WorkerHandle("sb-other", "modal", datetime.now(UTC)))  # not started here
     assert log[-2:] == [("from_id", "sb-other"), ("terminate",)]
+    ex.provider.client.stop_tagged({"qarau-job": "j1"})  # type: ignore[attr-defined]
+    assert log[-2:] == [("list", "ap-1", "qarau-job"), ("terminate",)]
 
 
 def test_repo_config_selects_modal_disabled_within_budget() -> None:
@@ -388,18 +443,24 @@ def test_repo_config_selects_modal_disabled_within_budget() -> None:
     [
         ('cuda_architectures: "75;86"', "gpu_type L4 needs CUDA arch 89"),
         ('cuda_architectures: "sm_89"', "must be like"),
+        ("gpu_fallback: [L40S]", "gpu_fallback A10 needs CUDA arch 86"),
+        ("start_timeout_s: 300", "start_timeout_s .* is longer than"),
     ],
 )
 def test_cuda_architectures_must_fit_the_gpu(tmp_path: Path, line: str, error: str) -> None:
     text = DEFAULT_CONFIG.read_text()
     assert 'cuda_architectures: "89"' in text  # the repo builds sm_89 only, for L4
-    (tmp_path / "config.yaml").write_text(text.replace('cuda_architectures: "89"', line))
+    bad = {
+        "gpu_fallback: [L40S]": text.replace("gpu_fallback: [L40S]", "gpu_fallback: [L40S, A10]"),
+        "start_timeout_s: 300": text.replace("start_timeout_s: 300", "start_timeout_s: 3600"),
+    }.get(line, text.replace('cuda_architectures: "89"', line))
+    (tmp_path / "config.yaml").write_text(bad)
     with pytest.raises(DenseConfigError, match=error):
         load_dense_remote_config(tmp_path / "config.yaml")
     (tmp_path / "config.yaml").write_text(
-        text.replace('cuda_architectures: "89"', 'cuda_architectures: "75;86;90"').replace(
-            "gpu_type: L4", "gpu_type: T4"
-        )
+        text.replace('cuda_architectures: "89"', 'cuda_architectures: "75;86;90"')
+        .replace("gpu_type: L4", "gpu_type: T4")
+        .replace("gpu_fallback: [L40S]", "gpu_fallback: []")
     )
     assert load_dense_remote_config(tmp_path / "config.yaml").cuda_architectures == "75;86;90"
 
@@ -418,6 +479,7 @@ def test_make_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = make_provider(cfg)
     assert isinstance(provider, ModalGpuProvider)
     assert provider.image == ModalImageSpec(cuda_architectures="89")
+    assert provider.fallback_gpus == ("L40S",) and provider.start_timeout_s == 300
     other = make_provider(replace(cfg, cuda_architectures="75;86;90"))
     assert isinstance(other, ModalGpuProvider) and other.image.cuda_architectures == "75;86;90"
     with pytest.raises(DenseConfigError, match="not a real GPU provider"):

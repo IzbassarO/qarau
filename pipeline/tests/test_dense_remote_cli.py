@@ -25,7 +25,7 @@ class FakeModalClient:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def start(self, image: ModalImageSpec, gpu: str, timeout_s: float) -> str:
+    def start(self, image: ModalImageSpec, gpu: str, timeout_s: float, tags: dict[str, str]) -> str:
         self.calls.append("start")
         return "sb-fake-1"
 
@@ -42,6 +42,9 @@ class FakeModalClient:
 
     def stop(self, worker_id: str) -> None:
         self.calls.append("stop")
+
+    def stop_tagged(self, tags: dict[str, str]) -> None:
+        self.calls.append("stop_tagged")
 
 
 @pytest.fixture(autouse=True)

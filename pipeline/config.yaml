@@ -18,6 +18,11 @@ dense_remote:
   # The image's CUDA_ARCHITECTURES build arg (owner, 2026-10-21: sm_89 only for L4; a short
   # build). Another GPU type needs its arch here, e.g. "75;86;90"; another value = a new image.
   cuda_architectures: "89"
+  # No capacity for gpu_type within start_timeout_s: the queued sandbox is terminated and each
+  # gpu_fallback is tried the same way (2026-10-21: Modal held an L4 request 28 min, then
+  # refused). L40S: same arch 89, $1.95/h vs L4 $0.80/h (owner, 2026-10-21).
+  gpu_fallback: [L40S]
+  start_timeout_s: 300
   # infra/colmap-cuda; Modal builds it from the Dockerfile in our workspace, never pushed
   image: qarau/colmap-cuda:4.2.1
   ledger_path: ../data/dense_remote/gpu_ledger.json # GPU hours per UTC day (data/ is gitignored)
