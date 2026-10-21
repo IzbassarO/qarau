@@ -56,7 +56,7 @@ gates:
   # Run on the backlog every status commit would push to dev, before it is pushed: a failure
   # keeps the status local and warns (778e072 `backlog: A9-fix done (#41)` turned dev CI red).
   backlog_check: uv run --quiet pytest -q -m backlog -p no:cacheprovider tests
-daily_budget_usd: 3.0     # API spend cap (brain + tester); subscriptions are not counted
+daily_budget_usd: 15.0
 
 # `devteam run --continuous` (Kerege): per developer, plan the next task when one ends.
 # A developer with 2 tasks in a row blocked pauses; the run stops when no developer can take a
