@@ -275,6 +275,7 @@ class TaskState(TypedDict, total=False):
     fixes: int  # times the work was sent back (by tester or gates)
     tokens: int  # subscription tokens the developer used on this task in this run
     last_sendback: str  # the tester's last reason (unmet criteria, failing checks); "" = passed
+    bench_sendback: str  # HEAD the benchmark gate last sent back
     after_dev: str  # "develop" after a resolve-conflicts step, else "test"
     verdict: dict
     gate: dict  # gate["blocked"]: the task ends blocked with gate["reason"]
@@ -1417,7 +1418,7 @@ def build_graph(team: Team, checkpointer):
             "tester", "gates: merge dev, secrets, benchmark, PR, CI", task=tid, status="working"
         )
 
-        def stop(reason: str, *, block: bool = False, head: str | None = None):
+        def stop(reason: str, *, block: bool = False, head: str | None = None, bench=False):
             fixes = s["fixes"] + (0 if block else 1)
             blocked = block or fixes > max_fixes
             team.emit(
@@ -1434,6 +1435,8 @@ def build_graph(team: Team, checkpointer):
             }
             if head:
                 out["head"] = head
+            if bench:  # the next gate checks what the developer changed since
+                out["bench_sendback"] = head
             return out
 
         done = team.gh.find_pr(s["branch"], base)
@@ -1477,6 +1480,16 @@ def build_graph(team: Team, checkpointer):
         lines.append("secret scan (gitleaks): clean")
         # 3. Benchmark, when the change can affect it.
         bcfg = g["benchmark"]
+        if prev := s.get("bench_sendback"):
+            diff = team.git("diff", "-U0", prev, "HEAD", "--", *bcfg["when_paths"], cwd=wt)
+            if G.cosmetic_only(diff):
+                warn = (
+                    "WARNING: since the benchmark sent this task back, "
+                    f"{', '.join(bcfg['when_paths'])} changed only in comments or whitespace (or "
+                    "not at all): a pass now is another roll of run-to-run noise, not a fix"
+                )
+                lines.append(warn)
+                team.emit("tester", warn, task=tid)
         changed = team.git("diff", "--name-only", f"{base_ref}...HEAD", cwd=wt).split("\n")
         if any(p.startswith(tuple(bcfg["when_paths"])) for p in changed if p):
             team.emit("tester", "benchmark: dev baseline vs this branch", task=tid)
@@ -1495,8 +1508,13 @@ def build_graph(team: Team, checkpointer):
                 log = team.home / "bench" / G.bench_key(team, head) / "log.txt"
                 log = log.read_text()[-1500:]
                 return stop(f"benchmark failed to run on this branch:\n{log}", head=head)
-            if reg := G.regressions(before, after, bcfg):
-                return stop("benchmark regression vs dev:\n- " + "\n- ".join(reg), head=head)
+            if G.regressions(before, after, bcfg):  # must repeat on a second run to count
+                team.emit("tester", "benchmark regression: measuring those videos again", task=tid)
+                after, reg, tries = G.recheck(team, head, before, after, bcfg)
+                lines += tries
+                if reg:
+                    why = "benchmark regression vs dev, repeated on a second run:\n- "
+                    return stop(why + "\n- ".join(reg), head=head, bench=True)
             skipped = G.not_compared(before, bcfg)
             lines.append(
                 "benchmark: no regression"

@@ -75,26 +75,49 @@ def bench_key(team, sha: str) -> str:
     return hashlib.sha1(" ".join(trees).encode()).hexdigest()
 
 
+NOT_FINAL = "not-final"  # in a cache dir: the gate found these numbers regressed
+
+
+def gated(cfg: dict, name: str) -> bool:
+    return cfg.get("per_video", {}).get(name, {}).get("gated", True)
+
+
 def cached_benchmark(team, sha: str) -> dict | None:
-    f = team.home / "bench" / bench_key(team, sha) / "results.json"
-    return json.loads(f.read_text()) if f.exists() else None
+    """The final result for the pipeline tree at `sha`. A run where a gated video failed, or
+    one the gate found regressed, is never final: the next call measures again, so one noisy
+    run cannot decide every later gate on the same tree."""
+    out = team.home / "bench" / bench_key(team, sha)
+    f = out / "results.json"
+    if not f.exists() or (out / NOT_FINAL).exists():
+        return None
+    res = json.loads(f.read_text())
+    bcfg = team.cfg["gates"]["benchmark"]
+    return None if any(gated(bcfg, n) for n in res.get("errors", {})) else res
 
 
 def benchmark(team, sha: str) -> dict | None:
-    """Full benchmark results for commit `sha`, run in a throwaway detached worktree (so
-    nothing it writes can end up in a task branch) and cached per pipeline tree. Videos that
-    failed are in results["errors"] (the command exits 1 then, but the others still count).
-    None only if the command wrote no results at all."""
-    bcfg = team.cfg["gates"]["benchmark"]
-    out = team.home / "bench" / bench_key(team, sha)
+    """Full benchmark results for commit `sha`, cached per pipeline tree (see
+    cached_benchmark). Videos that failed are in results["errors"] (the command exits 1 then,
+    but the others still count). None only if the command wrote no results at all."""
     if (res := cached_benchmark(team, sha)) is not None:
         return res
+    return run_benchmark(team, sha, team.home / "bench" / bench_key(team, sha))
+
+
+def run_benchmark(team, sha: str, out: Path, only: list[str] | None = None) -> dict | None:
+    """Measures `sha` into `out` (only these videos, if given) in a throwaway detached worktree,
+    so nothing it writes can end up in a task branch."""
+    bcfg = team.cfg["gates"]["benchmark"]
     out.mkdir(parents=True, exist_ok=True)
+    for old in ("results.json", NOT_FINAL):  # a run that writes nothing must not read as old
+        (out / old).unlink(missing_ok=True)
     tmp = team.home / "bench-wt" / sha
     if not tmp.exists():
         team.git("worktree", "add", "--detach", str(tmp), sha)
     try:
         cmd = bcfg["command"].format(data=team.root / "data" / "samples", out=out)
+        if only:
+            cmd += " --only " + shlex.quote(",".join(only))
         r = team.run_proc(cmd, cwd=str(tmp), timeout=bcfg["timeout_min"] * 60)
         (out / "log.txt").write_text(team.redact(r["output"]))
         if (out / "results.json").exists():
@@ -104,34 +127,86 @@ def benchmark(team, sha: str) -> dict | None:
         team.git("worktree", "remove", "--force", str(tmp))
 
 
-def regressions(base: dict, new: dict, cfg: dict) -> list[str]:
-    """Per video that ran in the base run and is gated. Contract (task P1): results.json =
-    {"videos": {name: {registered_pct, models, reproj_px, points, scale_err_cm, time_s}},
-    "errors": {name: reason}}."""
-    out = []
+def recheck(team, sha: str, base: dict, first: dict, cfg: dict) -> tuple[dict, list[str], list]:
+    """A regression must repeat to count: the regressed videos only are measured once more
+    (run-to-run noise, docs/notes/benchmark-method.md). Returns (results with the second
+    numbers for those videos, regressions left, packet lines showing both attempts). The
+    tree's cache stays not final while a regression is left."""
+    out = team.home / "bench" / bench_key(team, sha)
+    worse = regressed(base, first, cfg)
+    names = sorted(worse)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / NOT_FINAL).write_text(", ".join(names))
+    (out / "results.attempt-1.json").write_text(json.dumps(first))
+    second = run_benchmark(team, sha, out / "retry", only=names) or {}
+    videos = {n: v for n, v in first.get("videos", {}).items() if n not in worse}
+    errors = {n: e for n, e in first.get("errors", {}).items() if n not in worse}
+    videos.update({n: v for n, v in second.get("videos", {}).items() if n in worse})
+    errors.update({n: e for n, e in second.get("errors", {}).items() if n in worse})
+    final = {**first, "videos": videos, "errors": errors}
+    left = regressions(base, final, cfg)
+    (out / "results.json").write_text(json.dumps(final))
+    if not left:
+        (out / NOT_FINAL).unlink()
+    found = "\n".join(f"  - {x}" for x in regressions(base, first, cfg))
+    lines = [
+        f"benchmark attempt 1: regression vs dev\n{found}\n\n{bench_table(first)}",
+        f"benchmark attempt 2, only {', '.join(names)}: "
+        + ("the regression repeated" if left else "no regression, so attempt 1 was noise")
+        + "\n\n"
+        + (bench_table(second) if second else "(the re-run wrote no results)"),
+    ]
+    return final, left, lines
+
+
+def cosmetic_only(diff: str) -> bool:
+    """`git diff -U0` changes nothing but whole-line comments (# or //), blank lines or spaces
+    inside a line; an empty diff counts too. Indentation and line order still count as code."""
+
+    def code(lines):
+        return [
+            x[: len(x) - len(x.lstrip())] + " ".join(x.split())
+            for x in lines
+            if x.strip() and not x.strip().startswith(("#", "//"))
+        ]
+
+    rows = [x for x in diff.splitlines() if not x.startswith(("+++", "---"))]
+    return code(x[1:] for x in rows if x[:1] == "-") == code(x[1:] for x in rows if x[:1] == "+")
+
+
+def regressed(base: dict, new: dict, cfg: dict) -> dict[str, list[str]]:
+    """Per video that ran in the base run and is gated: what got worse. Contract (task P1):
+    results.json = {"videos": {name: {registered_pct, models, reproj_px, points, scale_err_cm,
+    time_s}}, "errors": {name: reason}}."""
+    out: dict[str, list[str]] = {}
     for name, b in base.get("videos", {}).items():
         c = {**cfg, **cfg.get("per_video", {}).get(name, {})}  # measured run-to-run noise
         if not c.get("gated", True):
             continue
+        found = out.setdefault(name, [])
         n = new.get("videos", {}).get(name)
         if n is None:
             why = new.get("errors", {}).get(name, "missing from the new run")
-            out.append(f"{name}: {why}")
+            found.append(f"{name}: {why}")
             continue
         if n["registered_pct"] < b["registered_pct"] - c["max_drop_registered_pct"]:
-            out.append(
+            found.append(
                 f"{name}: registered {b['registered_pct']:.1f}% -> {n['registered_pct']:.1f}%"
             )
         if n["models"] > b["models"]:
-            out.append(f"{name}: models {b['models']} -> {n['models']}")
+            found.append(f"{name}: models {b['models']} -> {n['models']}")
         if n["reproj_px"] > b["reproj_px"] * (1 + c["max_rise_reproj_pct"] / 100):
-            out.append(f"{name}: reprojection {b['reproj_px']:.2f} -> {n['reproj_px']:.2f} px")
+            found.append(f"{name}: reprojection {b['reproj_px']:.2f} -> {n['reproj_px']:.2f} px")
         if n["points"] < b["points"] * (1 - c["max_drop_points_pct"] / 100):
-            out.append(f"{name}: points {b['points']} -> {n['points']}")
+            found.append(f"{name}: points {b['points']} -> {n['points']}")
         bs, ns = b.get("scale_err_cm"), n.get("scale_err_cm")
         if bs is not None and (ns is None or ns > bs + c["max_rise_scale_err_cm"]):
-            out.append(f"{name}: scale error {bs} -> {ns} cm")
-    return out
+            found.append(f"{name}: scale error {bs} -> {ns} cm")
+    return {k: v for k, v in out.items() if v}
+
+
+def regressions(base: dict, new: dict, cfg: dict) -> list[str]:
+    return [x for found in regressed(base, new, cfg).values() for x in found]
 
 
 def not_compared(base: dict, cfg: dict) -> list[str]:
@@ -140,7 +215,7 @@ def not_compared(base: dict, cfg: dict) -> list[str]:
     out += [
         f"{n}: not gated ({c.get('why', 'see config')})"
         for n, c in cfg.get("per_video", {}).items()
-        if not c.get("gated", True)
+        if not gated(cfg, n)
     ]
     return out
 

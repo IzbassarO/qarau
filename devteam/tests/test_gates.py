@@ -14,6 +14,7 @@ from conftest import CFG, git, remote_of
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from devteam import costs
+from devteam import gates as G
 from devteam.agents import FakeAgents
 from devteam.gates import FakeGitHub, GitHub, regressions, release, tag_release
 from devteam.graph import Team, build_graph
@@ -203,6 +204,122 @@ def test_benchmark_regression_sends_back(repo):
     run(graph)
     t = task(team)
     assert t["status"] == "blocked" and "registered 90.0% -> 80.0%" in t["blocked_reason"]
+
+
+NOISY = """import json, pathlib, sys
+out = pathlib.Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
+calls = pathlib.Path(sys.argv[2]); k = int(calls.read_text()) if calls.exists() else 0
+calls.write_text(str(k + 1))
+with open(sys.argv[2] + ".argv", "a") as f: f.write(" ".join(sys.argv[3:]) + "\\n")
+vals = pathlib.Path("pipeline/score.txt").read_text().split()  # one per call, the last repeats
+v = {"registered_pct": float(vals[min(k, len(vals) - 1)]), "models": 1, "reproj_px": 0.5,
+     "points": 1000, "scale_err_cm": None, "time_s": 1}
+(out / "results.json").write_text(json.dumps({"videos": {"room": v}}))
+"""
+
+
+def noisy_repo(repo, tmp_path):
+    """Call 1 measures dev (score 90); call k takes the k-th value of the branch's score.txt,
+    so "x 80 91" is one noisy run on the branch, then a good one."""
+    gates = bench_repo(repo, "90")
+    (repo / "pipeline" / "bench.py").write_text(NOISY)
+    git(repo, "commit", "-qam", "noisy bench")
+    git(repo, "push", "-q", remote_of(repo), "dev")
+    gates["benchmark"]["command"] = f"python3 pipeline/bench.py {{out}} {tmp_path / 'calls'}"
+    return gates
+
+
+def head_of(team, ref="devteam-fake/T-001"):
+    return team.git("rev-parse", ref).strip()
+
+
+def test_benchmark_regression_that_does_not_repeat_merges_showing_both_attempts(repo, tmp_path):
+    gates = noisy_repo(repo, tmp_path)
+    team, graph = make(
+        repo, Dev(lambda wt, s: (wt / "pipeline/score.txt").write_text("x 80 91")), gates=gates
+    )
+    run(graph)
+    assert task(team)["status"] == "done"
+    body = team.gh.prs[1]["body"]
+    assert "benchmark attempt 1: regression vs dev" in body and "| room | 80.0 |" in body
+    assert "benchmark attempt 2, only room: no regression" in body and "| room | 91.0 |" in body
+    assert (tmp_path / "calls.argv").read_text().splitlines() == ["", "", "--only room"]
+    cached = G.cached_benchmark(team, head_of(team))  # final: with the second numbers
+    assert cached["videos"]["room"]["registered_pct"] == 91
+
+
+def test_benchmark_regression_that_repeats_sends_back_and_is_never_final(repo, tmp_path):
+    gates = noisy_repo(repo, tmp_path)
+    team, graph = make(
+        repo,
+        Dev(lambda wt, s: (wt / "pipeline/score.txt").write_text("x 80 80")),
+        gates=gates,
+        max_fix_loops=0,
+    )
+    run(graph)
+    t = task(team)
+    assert t["status"] == "blocked" and "repeated on a second run" in t["blocked_reason"]
+    assert "registered 90.0% -> 80.0%" in t["blocked_reason"]
+    packet = (team.home / "packets" / "T-001.md").read_text()
+    assert "benchmark attempt 1" in packet and "the regression repeated" in packet
+    head = head_of(team)
+    assert (team.home / "bench" / G.bench_key(team, head) / G.NOT_FINAL).exists()
+    assert G.cached_benchmark(team, head) is None  # the next gate on this tree measures again
+
+
+def test_a_failed_gated_video_is_never_the_final_result(repo):
+    team, _ = make(repo, Dev(), gates=bench_repo(repo, "90"))
+    sha = git(repo, "rev-parse", "HEAD").strip()
+    out = team.home / "bench" / G.bench_key(team, sha)
+    out.mkdir(parents=True)
+    ok = {"registered_pct": 90, "models": 1, "reproj_px": 0.5, "points": 1, "time_s": 1}
+    res = {"videos": {"room": ok}, "errors": {"notre-dame": "COLMAP crashed"}}
+    (out / "results.json").write_text(json.dumps(res))
+    assert G.cached_benchmark(team, sha) is None
+    res["errors"] = {"mykolaiv": "COLMAP crashed"}  # not gated (config per_video)
+    (out / "results.json").write_text(json.dumps(res))
+    assert G.cached_benchmark(team, sha)["videos"]["room"] == ok
+    team.cfg["gates"]["benchmark"]["command"] = "true"  # a run that writes nothing
+    (out / G.NOT_FINAL).write_text("room")
+    assert G.benchmark(team, sha) is None  # never the stale results.json
+    assert not (out / G.NOT_FINAL).exists() and not (out / "results.json").exists()
+
+
+def test_cosmetic_only_diffs():
+    def d(minus, plus):
+        return "\n".join(["--- a/x.py", "+++ b/x.py", "@@ -1 +1 @@", *minus, *plus])
+
+    assert G.cosmetic_only("")
+    assert G.cosmetic_only(d(["-# old note"], ["+# new note", "+", "+// js note"]))
+    assert G.cosmetic_only(d(["-x = f(a,  b)"], ["+x = f(a, b)  "]))
+    assert not G.cosmetic_only(d(["-x = 1"], ["+x = 2"]))
+    assert not G.cosmetic_only(d(["-    y()"], ["+y()"]))  # indentation is code in Python
+    assert not G.cosmetic_only(d(["-a()", "-b()"], ["+b()", "+a()"]))  # so is the order
+
+
+def test_packet_warns_when_only_comments_changed_after_a_benchmark_sendback(repo):
+    def change(wt, s):
+        if not s.get("rounds"):
+            (wt / "pipeline/score.txt").write_text("80")
+        else:  # round 2: a comment, nothing else
+            (wt / "pipeline/a.py").write_text("a = 1\n# measured again\n")
+
+    team, graph = make(repo, Dev(change), gates=bench_repo(repo, "90"), max_fix_loops=1)
+    run(graph)
+    assert task(team)["status"] == "blocked"
+    packet = (team.home / "packets" / "T-001.md").read_text()
+    assert "WARNING: since the benchmark sent this task back, pipeline/ changed only" in packet
+    assert "since the benchmark sent this task back" in (team.home / "events.log").read_text()
+
+
+def test_no_warning_when_the_code_changed_after_a_benchmark_sendback(repo):
+    def change(wt, s):
+        (wt / "pipeline/score.txt").write_text("80" if not s.get("rounds") else "91")
+
+    team, graph = make(repo, Dev(change), gates=bench_repo(repo, "90"), max_fix_loops=1)
+    run(graph)
+    assert task(team)["status"] == "done"
+    assert "WARNING" not in team.gh.prs[1]["body"]
 
 
 def test_benchmark_no_regression_merges_and_records_table(repo):
