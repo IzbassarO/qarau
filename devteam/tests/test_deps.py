@@ -145,6 +145,7 @@ def test_dev_screenshots_use_devs_cached_benchmark(repo, tmp_path):
         "serve": f"echo {{runs}} > {tmp_path}/runs; exec python3 -m http.server {n}",
         "url": f"http://127.0.0.1:{n}",
         "shoot": "echo png > {png}",
+        "viewports": ["1440x900"],  # one shot per route
     }
     s = {"task": {"id": "P3b"}, "assignee": "dev_pipeline", "worktree": str(repo)}
     shots, problems = G.dev_screenshots(team, s, ["/viewer/notre-dame"])

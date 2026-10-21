@@ -110,6 +110,7 @@ def shots_cfg(team, scripts, port: int):
         "--bind 127.0.0.1",
         "url": f"http://127.0.0.1:{port}",
         "shoot": "touch {png}",
+        "viewports": ["1440x900"],  # one shot per route
     }
 
 

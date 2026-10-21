@@ -275,6 +275,7 @@ class TaskState(TypedDict, total=False):
     fixes: int  # times the work was sent back (by tester or gates)
     tokens: int  # subscription tokens the developer used on this task in this run
     last_sendback: str  # the tester's last reason (unmet criteria, failing checks); "" = passed
+    bench_sendback: str  # HEAD the benchmark gate last sent back
     after_dev: str  # "develop" after a resolve-conflicts step, else "test"
     verdict: dict
     gate: dict  # gate["blocked"]: the task ends blocked with gate["reason"]
@@ -1195,6 +1196,8 @@ def build_graph(team: Team, checkpointer):
                 if not r["ok"]:
                     raise RuntimeError(f"setup `{cmd}` failed: {team.redact(r['output'][-800:])}")
         data_before = team.data_at_start(s["task"]) if s["task"].get("writable") else {}
+        # this round's screenshots only: an older round's PNG is never taken for a new one
+        shutil.rmtree(team.home / "packets" / tid, ignore_errors=True)
         try:
             out = team.agents.develop(team, s)
         except TaskHalted as e:
@@ -1279,7 +1282,7 @@ def build_graph(team: Team, checkpointer):
         if bad["out_of_scope"]:
             return refuse(s, "out_of_scope", bad["out_of_scope"])
         findings = SC.bypass(team.git("diff", "-U0", span, cwd=wt), paths)
-        checks, shots, problems, dev_shots = [], [], [], []
+        checks, shots, problems, dev_shots, e2e_failed = [], [], [], [], False
         if findings:  # no checks or judge: the change itself is refused
             team.violation(tid, dev, "bypass", "; ".join(findings))
             verdict = {
@@ -1295,28 +1298,45 @@ def build_graph(team: Team, checkpointer):
             if not team.fake:  # every check again, from a clean checkout of the committed HEAD
                 with team.clean_checkout(s) as clean:
                     cs = {**s, "worktree": clean}
-                    checks = team.run_checks(cs) + e2e_gate(cs, clean, paths)
+                    # e2e first, run by Kerege outside the developer's sandbox: when it fails,
+                    # the round goes back with the failures and no LLM tester call
+                    e2e = e2e_gate(cs, clean, paths)
+                    e2e_failed = any(not c["ok"] for c in e2e)
+                    checks = team.run_checks(cs) + e2e
                     for c in checks:
                         team.emit("tester", f"{'ok  ' if c['ok'] else 'FAIL'} {c['cmd']}", task=tid)
-                    runs, problems = tester_benchmark(cs, clean)
-                    shots, more = G.screenshots(team, cs, s.get("routes") or [], runs=runs)
-                    dev_shots, dev_problems = G.dev_screenshots(team, cs, s.get("routes") or [])
-                    problems += more + dev_problems
+                    if not e2e_failed:
+                        runs, problems = tester_benchmark(cs, clean)
+                        shots, more = G.screenshots(team, cs, s.get("routes") or [], runs=runs)
+                        routes = s.get("routes") or []
+                        dev_shots, dev_problems = G.dev_screenshots(team, cs, routes)
+                        problems += more + dev_problems
                 if shots or problems:
                     team.emit(
                         "tester", f"screenshots: {len(shots)} ok, {len(problems)} failed", task=tid
                     )
-            verdict = team.agents.judge(
-                team,
-                {**s, "screenshots": shots + dev_shots, "screenshot_problems": problems},
-                checks,
-            )
+            if e2e_failed:
+                team.emit("tester", "e2e failed: sent back without the LLM tester", task=tid)
+                verdict = {
+                    "passed": False,
+                    "criteria": [],
+                    "summary": "",
+                    "how_to_try": "",
+                    "feedback": "Kerege ran the e2e tests (Playwright) right after your round and "
+                    "they fail, so the tester did not review this round. Fix them first.",
+                }
+            else:
+                verdict = team.agents.judge(
+                    team,
+                    {**s, "screenshots": shots + dev_shots, "screenshot_problems": problems},
+                    checks,
+                )
         verdict["bypass"] = findings
         verdict["screenshots"], verdict["screenshot_problems"] = shots + dev_shots, problems
         failed = [c for c in checks if not c["ok"]]
         verdict["judge_passed"] = verdict["passed"]
         # a visual criterion passes only on the tester's own screenshots, one per route
-        no_shots = len(shots) < len(s.get("routes") or [])
+        no_shots = not e2e_failed and len(shots) < G.expected_shots(cfg, s)
         verdict["passed"] = verdict["passed"] and not failed and not no_shots
         if no_shots:
             verdict["feedback"] = (
@@ -1369,9 +1389,10 @@ def build_graph(team: Team, checkpointer):
         return out
 
     def e2e_gate(cs: TaskState, clean: str, paths: list[str]) -> list[dict]:
-        """Playwright e2e for a change under gates.e2e.when_paths (web/): the tester runs it on
-        the clean checkout with a fresh server on a free port, killed with the step after. A
-        Codex sandbox cannot open a port (listen EPERM): a developer never runs it (A5-fix)."""
+        """Playwright e2e for a change under gates.e2e.when_paths (web/): Kerege runs it first
+        after the round, on the clean checkout with a fresh server on a free port, killed with
+        the step after. A Codex sandbox cannot open a port (listen EPERM): a developer never
+        runs it (A5-fix), and the sandbox stays as it is."""
         e = cfg["gates"].get("e2e")
         if not e or not any(p.startswith(tuple(e["when_paths"])) for p in paths):
             return []
@@ -1417,7 +1438,7 @@ def build_graph(team: Team, checkpointer):
             "tester", "gates: merge dev, secrets, benchmark, PR, CI", task=tid, status="working"
         )
 
-        def stop(reason: str, *, block: bool = False, head: str | None = None):
+        def stop(reason: str, *, block: bool = False, head: str | None = None, bench=False):
             fixes = s["fixes"] + (0 if block else 1)
             blocked = block or fixes > max_fixes
             team.emit(
@@ -1434,6 +1455,8 @@ def build_graph(team: Team, checkpointer):
             }
             if head:
                 out["head"] = head
+            if bench:  # the next gate checks what the developer changed since
+                out["bench_sendback"] = head
             return out
 
         done = team.gh.find_pr(s["branch"], base)
@@ -1477,6 +1500,16 @@ def build_graph(team: Team, checkpointer):
         lines.append("secret scan (gitleaks): clean")
         # 3. Benchmark, when the change can affect it.
         bcfg = g["benchmark"]
+        if prev := s.get("bench_sendback"):
+            diff = team.git("diff", "-U0", prev, "HEAD", "--", *bcfg["when_paths"], cwd=wt)
+            if G.cosmetic_only(diff):
+                warn = (
+                    "WARNING: since the benchmark sent this task back, "
+                    f"{', '.join(bcfg['when_paths'])} changed only in comments or whitespace (or "
+                    "not at all): a pass now is another roll of run-to-run noise, not a fix"
+                )
+                lines.append(warn)
+                team.emit("tester", warn, task=tid)
         changed = team.git("diff", "--name-only", f"{base_ref}...HEAD", cwd=wt).split("\n")
         if any(p.startswith(tuple(bcfg["when_paths"])) for p in changed if p):
             team.emit("tester", "benchmark: dev baseline vs this branch", task=tid)
@@ -1495,8 +1528,13 @@ def build_graph(team: Team, checkpointer):
                 log = team.home / "bench" / G.bench_key(team, head) / "log.txt"
                 log = log.read_text()[-1500:]
                 return stop(f"benchmark failed to run on this branch:\n{log}", head=head)
-            if reg := G.regressions(before, after, bcfg):
-                return stop("benchmark regression vs dev:\n- " + "\n- ".join(reg), head=head)
+            if G.regressions(before, after, bcfg):  # must repeat on a second run to count
+                team.emit("tester", "benchmark regression: measuring those videos again", task=tid)
+                after, reg, tries = G.recheck(team, head, before, after, bcfg)
+                lines += tries
+                if reg:
+                    why = "benchmark regression vs dev, repeated on a second run:\n- "
+                    return stop(why + "\n- ".join(reg), head=head, bench=True)
             skipped = G.not_compared(before, bcfg)
             lines.append(
                 "benchmark: no regression"

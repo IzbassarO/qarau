@@ -101,9 +101,9 @@ class Continuous:
             return f"max_hours reached ({self.max_s / 3600:g} h)"
         if self.started >= self.max_tasks:
             return f"max_tasks reached ({self.max_tasks})"
-        spent, cap = costs.spent_today(self.team.home), self.team.cfg["daily_budget_usd"]
+        spent, cap = costs.spent_24h(self.team.home), self.team.cfg["daily_budget_usd"]
         if spent >= cap:
-            return f"daily API budget reached (${spent:.2f} of ${cap:.2f})"
+            return f"daily API budget reached (${spent:.2f} of ${cap:.2f} in the last 24 h)"
         return ""
 
     def _timer(self):
@@ -333,6 +333,6 @@ def runs_of_day(home: Path, day: str) -> list[dict]:
             s = json.loads(p.read_text())
         except json.JSONDecodeError:
             continue
-        if s.get("started", "").startswith(day):
-            out.append(s)
+        if s.get("started", "")[:10] <= day <= s.get("ended", s.get("started", ""))[:10]:
+            out.append(s)  # every day the run touched
     return out

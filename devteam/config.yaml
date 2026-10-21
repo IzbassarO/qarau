@@ -42,10 +42,11 @@ gates:
     quick_only: [notre-dame, room]
     # A task may set its own `quick_only` in the backlog (e.g. videos its screenshots need).
     quick_min: 11
-  # Playwright e2e, run by the tester on its clean checkout for tasks that change web/: a fresh
-  # Vite on a free port ({port} -> QARAU_E2E_PORT; web/playwright.config.ts never reuses a server),
-  # stopped after with everything the step started. A Codex sandbox cannot open a port (listen
-  # EPERM), so developers never run e2e themselves (A5-fix, 2026-10-18).
+  # Playwright e2e, run by Kerege right after a round on a clean checkout, for tasks that change
+  # web/: a fresh Vite on a free port ({port} -> QARAU_E2E_PORT; web/playwright.config.ts never
+  # reuses a server), stopped after with everything the step started. A failure goes back to the
+  # developer without an LLM tester call. A Codex sandbox cannot open a port (listen EPERM), so
+  # developers never run e2e themselves (A5-fix, 2026-10-18).
   e2e:
     when_paths: [web/]
     command: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_E2E_PORT={port} QARAU_RUNS_DIR={runs_dir} pnpm exec playwright test --reporter=list
@@ -119,7 +120,8 @@ developers:
                            # A task that writes runs_dir (writable) is shown runs_dir instead.
       serve: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_RUNS_DIR={runs} pnpm exec vite --port 5197 --strictPort
       url: http://localhost:5197
-      shoot: cd web && node {shoot} {url} {png} 1440,900 4000   # signs in first (devteam/.env test user)
+      shoot: cd web && node {shoot} {url} {png} {size} 4000   # signs in first (devteam/.env test user)
+      # viewports: [1440x900, 390x844]   # the default; {size} is each one, as 1440,900
     checks:                # same as GitHub CI, so CI rarely surprises
       - cd pipeline && uv run ruff check . && uv run ruff format --check . && uv run mypy .
       - cd pipeline && uv run pytest -q
@@ -135,7 +137,8 @@ developers:
     screenshots:           # pages from the plan's `routes`; the tester sees them
       serve: cd web && QARAU_RUNS_DIR={runs_dir} pnpm exec vite --port 5198 --strictPort
       url: http://localhost:5198
-      shoot: cd web && node {shoot} {url} {png} 1440,900 2500
+      shoot: cd web && node {shoot} {url} {png} {size} 2500 {theme}
+      themes: [light, dark]  # {theme}: prefers-color-scheme, each viewport in both
     checks:
       - cd web && pnpm lint && pnpm typecheck
       - cd web && pnpm test && pnpm build
