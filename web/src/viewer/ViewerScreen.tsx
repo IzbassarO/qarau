@@ -11,6 +11,7 @@ import { Link } from 'react-router';
 import { useI18n } from '../i18n';
 import { hasRgb, runUrl, type Bundle, type Finding } from '../lib/bundle';
 import { heightRamp, RAMP } from '../lib/geometry';
+import './viewer.css';
 import { ViewerEngine, type ColorMode, type Options } from './engine';
 import { defaultViewState } from './defaults';
 import { AxisGizmo, type AxisGizmoHandle } from './AxisGizmo';
@@ -49,7 +50,7 @@ declare global {
   }
 }
 
-const mono = 'font-mono';
+const mono = 'viewer-mono';
 const colorModeStorageKey = 'qarau.viewer.colorMode.v2';
 function savedColorMode(): ColorMode | undefined {
   try {
@@ -71,7 +72,7 @@ const icon = (d: ReactNode) => (
     height="18"
     viewBox="0 0 18 18"
     fill="none"
-    stroke="#C9CED6"
+    stroke="currentColor"
     strokeWidth="1.5"
     strokeLinecap="round"
     strokeLinejoin="round"
@@ -147,7 +148,8 @@ export function ViewerScreen({
   const f = frames[frame];
   const findings = useMemo(() => bundle.findings ?? [], [bundle]);
   const selected = findings.find((x) => x.id === sel) ?? null;
-  const sevColor = (x: Finding) => (x.severity === 'critical' ? '#F0565C' : '#F2A33A');
+  const sevColor = (x: Finding) =>
+    x.severity === 'critical' ? 'var(--color-finding-critical)' : 'var(--color-finding-watch)';
   // a finding exists on the map once its first frame has played (always, with build-up off)
   const seen = (x: Finding) => !opts.buildUp || !x.frames.length || x.frames[0] <= frame;
   const tc = (i: number) => {
@@ -301,34 +303,23 @@ export function ViewerScreen({
   const rampSwatches = [0, 1 / 3, 2 / 3, 1].map((v) => heightRamp(v));
 
   return (
-    <div className="flex h-full min-h-[640px] flex-col overflow-hidden bg-bg">
+    <div className="viewer-screen">
       {!embedded && (
-        <header className="flex flex-wrap items-center gap-4 border-b border-line bg-surface px-4 py-2.5">
+        <header className="viewer-header">
           <Link to="/" aria-label="Qarau">
             <Logo />
           </Link>
-          <span className="text-ink-2">{bundle.runId}</span>
-          <div
-            role="tablist"
-            className="flex gap-0.5 rounded-[9px] border border-line-strong p-[3px]"
-          >
-            <span
-              role="tab"
-              aria-selected="false"
-              className="inline-flex h-7 items-center rounded-md px-3 text-[13px] text-ink-2"
-            >
+          <span className="viewer-run-id">{bundle.runId}</span>
+          <div role="tablist" className="viewer-tabs">
+            <span role="tab" aria-selected="false" className="viewer-tab">
               {t('nav.overview')}
             </span>
-            <span
-              role="tab"
-              aria-selected="true"
-              className="inline-flex h-7 items-center rounded-md bg-line px-3 text-[13px]"
-            >
+            <span role="tab" aria-selected="true" className="viewer-tab">
               {t('nav.viewer')}
             </span>
           </div>
           <div className="grow" />
-          <span className={`${mono} text-xs text-ink-2`}>
+          <span className={`${mono} viewer-caption viewer-muted`}>
             {stats.points.toLocaleString()}
             {import.meta.env.DEV && fps > 0 && ` · ${fps} fps`}
           </span>
@@ -337,22 +328,22 @@ export function ViewerScreen({
       )}
 
       {bundle.farError && (
-        <p role="alert" className="m-0 border-b border-line bg-surface px-4 py-2 text-watch">
+        <p role="alert" className="viewer-notice viewer-error">
           {t(bundle.farError === 'missing' ? 'viewer.far.errorMissing' : 'viewer.far.errorBroken')}
         </p>
       )}
       {invalidPoint && (
-        <p role="note" className="m-0 border-b border-line bg-surface px-4 py-2 text-xs text-ink-2">
+        <p role="note" className="viewer-notice viewer-caption viewer-muted">
           {t('pointInfo.invalidPoint')}
         </p>
       )}
 
-      <div className="flex min-h-0 grow">
+      <div className="viewer-workspace">
         <div
           role="toolbar"
           aria-label={t('toolbar.label')}
           aria-orientation="vertical"
-          className="flex w-[52px] shrink-0 flex-col items-center gap-1.5 border-r border-line bg-surface py-2.5"
+          className="viewer-toolbar"
         >
           <ToolButton label={t('toolbar.reset')} onClick={() => eng()?.resetView()}>
             {icon(<path d="M3 9a6 6 0 1 0 2-4.5M3 3v3h3" />)}
@@ -361,7 +352,7 @@ export function ViewerScreen({
             {icon(
               <>
                 <rect x="3" y="3" width="12" height="12" rx="2" />
-                <circle cx="9" cy="9" r="2" fill="#C9CED6" />
+                <circle cx="9" cy="9" r="2" fill="currentColor" />
               </>,
             )}
           </ToolButton>
@@ -396,7 +387,7 @@ export function ViewerScreen({
               else setPointInfoMode(true);
             }}
           />
-          <span className="my-1 h-px w-6 bg-line" />
+          <span className="viewer-toolbar-divider" />
           <ToolButton
             label={t('toolbar.zoomIn')}
             onClick={(event) => eng()?.zoom(0.8, event.altKey)}
@@ -411,15 +402,15 @@ export function ViewerScreen({
           </ToolButton>
         </div>
 
-        <main className="flex min-w-0 flex-1 flex-col">
-          <div className="relative z-20 flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-3 py-2">
+        <main className="viewer-main">
+          <div className="viewer-modebar">
             <ModeSwitch
               orbitActive={!flyMode}
               onOrbit={() => eng()?.setOrbitMode()}
               onObserver={() => eng()?.setObserverMode()}
             />
             {flyMode && (
-              <div className="flex items-center gap-2">
+              <div className="viewer-inline">
                 <button
                   type="button"
                   aria-pressed={thirdPerson}
@@ -427,7 +418,7 @@ export function ViewerScreen({
                     eng()?.toggleThirdPerson();
                     canvasRef.current?.focus({ preventScroll: true });
                   }}
-                  className={`border border-line-strong px-2 py-1.5 text-xs ${thirdPerson ? 'bg-line text-ink' : 'text-ink-2'}`}
+                  className="viewer-control"
                 >
                   {t('viewer.observer.thirdPerson')}
                 </button>
@@ -439,7 +430,7 @@ export function ViewerScreen({
                       setHumanFigure((visible) => !visible);
                       canvasRef.current?.focus({ preventScroll: true });
                     }}
-                    className={`border border-line-strong px-2 py-1.5 text-xs ${humanFigure ? 'bg-line text-ink' : 'text-ink-2'}`}
+                    className="viewer-control"
                   >
                     {t('viewer.observer.humanFigure')}
                   </button>
@@ -459,17 +450,13 @@ export function ViewerScreen({
               }}
             />
           </div>
-          <div className="relative min-h-0 grow bg-black">
+          <div className="viewer-canvas">
             <canvas
               ref={canvasRef}
               aria-label={t('canvas.label')}
-              className="absolute inset-0 size-full outline-none"
+              className="viewer-point-canvas"
             />
-            {glError && (
-              <p className="absolute inset-0 grid place-items-center text-watch">
-                {t('error.webgl')}
-              </p>
-            )}
+            {glError && <p className="viewer-canvas-error">{t('error.webgl')}</p>}
             {opts.findings && (
               <div className="pointer-events-none absolute inset-0 overflow-hidden">
                 {findings.filter(seen).map((x) => (
@@ -483,7 +470,7 @@ export function ViewerScreen({
                     data-testid="finding-marker"
                     aria-label={`${t('findings.marker')} ${x.id}`}
                     onClick={() => select(x)}
-                    className={`pointer-events-auto absolute left-0 top-0 flex size-6 cursor-pointer items-center justify-center rounded-full border-2 p-0 font-mono text-xs font-semibold text-bg ${x.id === sel ? 'border-white' : 'border-bg'} ${x.status === 'low_evidence' ? 'opacity-80 outline-dashed outline-1 outline-offset-2 outline-ink-2' : ''}`}
+                    className={`viewer-finding-marker ${x.id === sel ? 'selected' : ''} ${x.status === 'low_evidence' ? 'low-evidence' : ''}`}
                     style={{ background: sevColor(x) }}
                   >
                     {x.id}
@@ -491,15 +478,15 @@ export function ViewerScreen({
                 ))}
               </div>
             )}
-            <div className="absolute right-3 top-3 flex flex-col gap-1.5 rounded-lg bg-bg/85 px-3 py-2.5 text-xs leading-4">
+            <div className="viewer-legend">
               {[
-                ['#EAF2FF', 'legend.now'],
+                ['var(--color-viewer-current)', 'legend.now'],
                 [`rgb(${rampSwatches[1].join(',')})`, 'legend.seen'],
-                ['#2A3240', 'legend.later'],
-                ['#6B727D', 'legend.never'],
+                ['var(--color-viewer-later)', 'legend.later'],
+                ['var(--color-finding-not-seen)', 'legend.never'],
               ].map(([c, k]) => (
-                <span key={k} className="flex items-center gap-2">
-                  <span className="size-2 rounded-full" style={{ background: c }} />
+                <span key={k} className="viewer-inline">
+                  <span className="viewer-legend-swatch" style={{ background: c }} />
                   {t(k as 'legend.now')}
                 </span>
               ))}
@@ -514,10 +501,7 @@ export function ViewerScreen({
             {flyMode && (
               <Minimap ref={minimapRef} bundle={bundle} label={t('viewer.observer.minimap')} />
             )}
-            <div
-              role="status"
-              className={`pointer-events-none absolute bottom-3 bg-bg/80 px-2.5 py-1.5 text-xs leading-5 text-ink-2 ${flyMode ? 'left-3 right-[204px] max-w-xl' : 'left-1/2 w-max max-w-[calc(100%-15rem)] -translate-x-1/2 rounded-md text-center'}`}
-            >
+            <div role="status" className={`viewer-hint ${flyMode ? 'observer' : 'orbit'}`}>
               {alignMode
                 ? t('canvas.alignHint')
                 : flyMode
@@ -528,8 +512,8 @@ export function ViewerScreen({
             </div>
           </div>
 
-          <div className="flex flex-col gap-2 border-t border-line bg-surface px-4 pb-3.5 pt-2.5">
-            <div className="flex items-center gap-3">
+          <div className="viewer-timeline">
+            <div className="viewer-timeline-row">
               <button
                 type="button"
                 disabled={!canPlay}
@@ -537,9 +521,15 @@ export function ViewerScreen({
                   setPlaying((p) => (!p && frame >= frames.length - 1 ? (setFrame(0), true) : !p))
                 }
                 aria-label={playing ? t('timeline.pause') : t('timeline.play')}
-                className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-ink"
+                className="viewer-play"
               >
-                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" fill="#0B0C0E">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  aria-hidden="true"
+                  fill="currentColor"
+                >
                   {playing ? (
                     <>
                       <rect x="2" y="1" width="3.5" height="12" rx="1" />
@@ -550,15 +540,15 @@ export function ViewerScreen({
                   )}
                 </svg>
               </button>
-              <span className={`${mono} min-w-24 text-[13px]`}>{tc(frame)}</span>
-              <div className="relative flex h-9 grow items-center">
-                <div aria-hidden="true" className="absolute inset-x-0 top-0.5 h-2">
+              <span className={`${mono} viewer-timecode`}>{tc(frame)}</span>
+              <div className="viewer-timeline-track">
+                <div aria-hidden="true" className="viewer-timeline-ticks">
                   {/* gray marks = frames not used; coloured = frames where a finding is visible */}
                   {ticks.map((x) => (
                     <span
                       key={x.i}
                       title={t('timeline.notUsed')}
-                      className="absolute top-0 h-2 w-0.5 rounded-sm bg-notseen"
+                      className="viewer-timeline-tick unused"
                       style={{ left: `${(x.i / Math.max(1, frames.length - 1)) * 100}%` }}
                     />
                   ))}
@@ -568,7 +558,7 @@ export function ViewerScreen({
                         key={`${x.id}-${i}`}
                         data-testid="finding-tick"
                         title={`${t('timeline.findingTick')}: ${t('findings.marker')} ${x.id}`}
-                        className="absolute top-0 h-2 w-0.5 rounded-sm"
+                        className="viewer-timeline-tick"
                         style={{
                           left: `${(i / Math.max(1, frames.length - 1)) * 100}%`,
                           background: sevColor(x),
@@ -585,46 +575,46 @@ export function ViewerScreen({
                   step={1}
                   value={frame}
                   onChange={(e) => setFrame(Number(e.target.value))}
-                  className="mt-3.5 w-full"
+                  className="viewer-timeline-range"
                 />
               </div>
-              <span className={`${mono} text-xs text-ink-2`}>
+              <span className={`${mono} viewer-caption viewer-muted`}>
                 {frame + 1} / {frames.length}
               </span>
             </div>
-            <span className="text-xs text-ink-2">{t('timeline.hint')}</span>
+            <span className="viewer-caption viewer-muted">{t('timeline.hint')}</span>
           </div>
         </main>
 
-        <aside className="flex w-[340px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-line bg-surface p-4">
+        <aside className="viewer-panel">
           {pointInfoMode && pointInfo && (
             <PointInfoPanel info={pointInfo} onSeek={seekPointFrame} onClose={closePointInfo} />
           )}
           {pointInfoMode && !pointInfo && (
-            <p className="m-0 text-[13px] text-ink-2">{t('pointInfo.hint')}</p>
+            <p className="viewer-small viewer-muted">{t('pointInfo.hint')}</p>
           )}
-          <section className="flex flex-col gap-2">
-            <div className="flex items-baseline justify-between">
-              <h2 className="m-0 text-sm font-semibold">{t('panel.frame')}</h2>
-              <span className={`${mono} text-xs text-ink-2`}>{tc(frame)}</span>
+          <section className="viewer-section">
+            <div className="viewer-section-heading">
+              <h2 className="viewer-heading">{t('panel.frame')}</h2>
+              <span className={`${mono} viewer-caption viewer-muted`}>{tc(frame)}</span>
             </div>
-            <div className="relative aspect-video overflow-hidden rounded-lg border border-line bg-[#0d1014]">
+            <div className="viewer-frame">
               <SessionImage
                 src={bundle.assetUrl?.(f.thumb) ?? runUrl(bundle.runId, f.thumb)}
                 alt={t('panel.frame')}
                 className="size-full object-contain"
               />
             </div>
-            <p className={`${mono} m-0 truncate text-xs text-ink-2`}>
+            <p className={`${mono} viewer-caption viewer-muted truncate`}>
               {f.image.split('/').pop()} · {t('panel.blur')}{' '}
               {f.blur === null ? '—' : f.blur.toFixed(1)}
               {f.drop_reason === 'blur' && ` · ${t('panel.droppedBlur')}`}
               {f.drop_reason === 'exposure' && ` · ${t('panel.droppedExposure')}`}
             </p>
             {!f.registered && (
-              <p className="m-0 text-[13px] text-watch">{t('panel.notRegistered')}</p>
+              <p className="viewer-small viewer-error">{t('panel.notRegistered')}</p>
             )}
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[13px]">
+            <div className="viewer-data">
               <Row k={t('panel.cameraHeight')} v={f.center ? f.center[2].toFixed(2) : '—'} />
               <Row
                 k={t('panel.visible')}
@@ -635,15 +625,15 @@ export function ViewerScreen({
                 v={`${Math.round((bundle.assembled[frame] / m.points.count) * 100)}%`}
               />
             </div>
-            <p className="m-0 text-xs text-ink-2">{t('panel.cameraHeightNote')}</p>
+            <p className="viewer-caption viewer-muted">{t('panel.cameraHeightNote')}</p>
           </section>
 
-          <section className="flex flex-col gap-2" aria-label={t('findings.title')}>
+          <section className="viewer-section" aria-label={t('findings.title')}>
             <H2>{t('findings.title')}</H2>
             {!m.findings ? (
-              <p className="m-0 text-[13px] text-ink-2">{t('findings.notRun')}</p>
+              <p className="viewer-small viewer-muted">{t('findings.notRun')}</p>
             ) : bundle.findingsError ? (
-              <p role="alert" className="m-0 text-[13px] text-watch">
+              <p role="alert" className="viewer-small viewer-error">
                 {t(
                   bundle.findingsError === 'missing'
                     ? 'findings.errorMissing'
@@ -651,9 +641,9 @@ export function ViewerScreen({
                 )}
               </p>
             ) : findings.length === 0 ? (
-              <p className="m-0 text-[13px] text-ink-2">{t('findings.empty')}</p>
+              <p className="viewer-small viewer-muted">{t('findings.empty')}</p>
             ) : (
-              <ul className="m-0 flex list-none flex-col gap-1 p-0">
+              <ul className="viewer-findings">
                 {findings.map((x) => (
                   <li key={x.id}>
                     <button
@@ -661,21 +651,18 @@ export function ViewerScreen({
                       data-testid="finding-item"
                       aria-pressed={x.id === sel}
                       onClick={() => select(x)}
-                      className={`flex w-full cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-1.5 text-left text-[13px] text-ink ${x.id === sel ? 'border-line-strong bg-raised' : 'border-transparent bg-transparent'}`}
+                      className="viewer-finding-item"
                     >
-                      <span
-                        className="flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-xs font-semibold text-bg"
-                        style={{ background: sevColor(x) }}
-                      >
+                      <span className="viewer-finding-id" style={{ background: sevColor(x) }}>
                         {x.id}
                       </span>
-                      <span className="flex min-w-0 grow flex-col">
+                      <span className="viewer-finding-label">
                         <span className="truncate">
                           {x.class} ·{' '}
                           {t(x.severity === 'critical' ? 'findings.critical' : 'findings.watch')}
                         </span>
                         <span
-                          className={`text-xs ${x.status === 'low_evidence' ? 'text-watch' : 'text-ink-2'}`}
+                          className={`viewer-caption ${x.status === 'low_evidence' ? 'viewer-error' : 'viewer-muted'}`}
                         >
                           {t(
                             x.status === 'low_evidence'
@@ -684,7 +671,7 @@ export function ViewerScreen({
                           )}
                         </span>
                       </span>
-                      <span className={`${mono} shrink-0 text-xs text-ink-2`}>
+                      <span className={`${mono} shrink-0 viewer-caption viewer-muted`}>
                         {x.frames.length} {t('findings.frames')}
                       </span>
                     </button>
@@ -693,22 +680,19 @@ export function ViewerScreen({
               </ul>
             )}
             {selected && (
-              <div
-                data-testid="finding-detail"
-                className="flex flex-col gap-2 rounded-[10px] border border-line-strong p-3"
-              >
+              <div data-testid="finding-detail" className="viewer-finding-detail">
                 {selected.status === 'low_evidence' && (
-                  <p className="m-0 text-xs text-watch">{t('findings.lowEvidenceNote')}</p>
+                  <p className="viewer-caption viewer-error">{t('findings.lowEvidenceNote')}</p>
                 )}
-                <span className="text-[13px]">{t('findings.seenAt')}</span>
-                <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
+                <span className="viewer-small">{t('findings.seenAt')}</span>
+                <div className="viewer-finding-times">
                   {selected.frames.map((i) => (
                     <button
                       key={i}
                       type="button"
                       data-testid="finding-timecode"
                       onClick={() => jump(i)}
-                      className={`${mono} h-7 cursor-pointer rounded-md border border-line-strong bg-transparent px-2 text-xs text-ink ${i === frame ? 'bg-raised' : ''}`}
+                      className={`${mono} viewer-control viewer-caption ${i === frame ? 'selected' : ''}`}
                     >
                       {tc(i)}
                     </button>
@@ -718,7 +702,7 @@ export function ViewerScreen({
             )}
           </section>
 
-          <section className="flex flex-col gap-1.5">
+          <section className="viewer-section">
             <H2>{t('show.title')}</H2>
             <Toggle on={opts.buildUp} onChange={(v) => setOpts({ ...opts, buildUp: v })}>
               {t('show.buildUp')}
@@ -748,9 +732,9 @@ export function ViewerScreen({
                 title={!rgbAvailable ? t('show.rgbUnavailable') : undefined}
                 describedBy={!rgbAvailable ? colorModeHintId : undefined}
               >
-                <span className="flex flex-col gap-0.5">
+                <span className="viewer-label-stack">
                   <span>{t('show.colorMode')}</span>
-                  <span className="text-xs text-ink-2">
+                  <span className="viewer-caption viewer-muted">
                     {t(activeColorMode === 'rgb' ? 'show.rgb' : 'show.heightBlue')}
                   </span>
                 </span>
@@ -761,7 +745,7 @@ export function ViewerScreen({
                 </span>
               )}
             </div>
-            <label className="flex items-center gap-3 px-2.5 text-[13px]">
+            <label className="viewer-slider-row">
               <span className="shrink-0">{t('show.pointSize')}</span>
               <input
                 type="range"
@@ -775,18 +759,18 @@ export function ViewerScreen({
             </label>
           </section>
 
-          <section className="flex flex-col gap-1.5">
+          <section className="viewer-section">
             <H2>{t('run.title')}</H2>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[13px]">
+            <div className="viewer-data">
               <Row k={t('run.used')} v={stats.frames_extracted - stats.frames_dropped} />
               <Row k={t('run.dropped')} v={stats.frames_dropped} />
               <Row k={t('run.registered')} v={stats.frames_registered} />
               <Row k={t('run.points')} v={stats.points.toLocaleString()} />
               {totalS > 0 && <Row k={t('run.time')} v={`${totalS.toFixed(1)} ${t('unit.s')}`} />}
             </div>
-            <div className="mt-1 flex gap-1" aria-hidden="true">
+            <div className="viewer-height-ramp" aria-hidden="true">
               {RAMP.map((c) => (
-                <span key={c} className="h-1.5 flex-1 rounded-full" style={{ background: c }} />
+                <span key={c} className="viewer-height-swatch" style={{ background: c }} />
               ))}
             </div>
           </section>

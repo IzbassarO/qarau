@@ -61,29 +61,29 @@ export function ViewerPage() {
     );
   }
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 bg-bg p-6 text-center">
+    <div className="viewer-page-message">
       {st.s === 'loading' ? (
         <>
           <p>
-            {t('viewer.loading')} · <span className="font-mono">{Math.round(st.p * 100)}%</span>
+            {t('viewer.loading')} · <span className="viewer-mono">{Math.round(st.p * 100)}%</span>
           </p>
           <div
-            className="h-1 w-64 rounded-full bg-line"
+            className="viewer-loading-track"
             role="progressbar"
             aria-valuenow={Math.round(st.p * 100)}
           >
-            <div className="h-1 rounded-full bg-inspected" style={{ width: `${st.p * 100}%` }} />
+            <div className="viewer-loading-progress" style={{ width: `${st.p * 100}%` }} />
           </div>
         </>
       ) : st.s === 'error' ? (
         <>
-          <p className="max-w-md text-watch" role="alert">
+          <p className="viewer-page-error" role="alert">
             {t(`error.${st.code}` as Key)}
           </p>
-          <p className="font-mono text-xs text-ink-2">
+          <p className="viewer-mono viewer-caption viewer-muted">
             {runId}: {st.msg}
           </p>
-          <Link className="text-link hover:underline" to="/">
+          <Link className="viewer-page-link" to="/">
             {t('error.back')}
           </Link>
         </>

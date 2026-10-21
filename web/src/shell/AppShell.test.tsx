@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { setLang } from '../i18n';
+import { LANGS, setLang, type Lang } from '../i18n';
 import { createDemo } from '../fixtures/demo';
 import * as bundleApi from '../lib/bundle';
 import { AppShell } from './AppShell';
@@ -48,6 +48,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+it.each<Lang>(['en', 'ru', 'kk'])(
+  'shows the empty inspection hint exactly once (%s)',
+  async (lang) => {
+    setLang(lang);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([])));
+    renderRoute('/');
+    await screen.findByText(LANGS[lang]['shell.noSites']);
+    const main = within(screen.getByRole('main'));
+    expect(main.getAllByText(LANGS[lang]['shell.emptyDescription'])).toHaveLength(1);
+    const hint =
+      lang === 'en'
+        ? /Select an inspection/
+        : lang === 'ru'
+          ? /Выберите инспекцию/
+          : /тексеруді таңдаңыз/;
+    expect(main.getAllByText(hint)).toHaveLength(1);
+  },
+);
 
 it('shows a server error and retries without substituting demo inspections', async () => {
   const fetch = vi
