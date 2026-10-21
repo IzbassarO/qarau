@@ -39,7 +39,7 @@ runtime redistribution under the EULA's terms). Publishing it anywhere, even to 
 registry of a GPU provider, is an owner decision (see ADR 0016).
 
 Licences of what is inside: COLMAP BSD-3-Clause; Ceres BSD-3; Eigen MPL-2.0; Boost BSL-1.0;
-OpenImageIO Apache-2.0; SQLite public domain; glog/gflags BSD-3; METIS Apache-2.0;
+OpenImageIO Apache-2.0; OpenCV core (build-time headers) Apache-2.0; SQLite public domain; glog/gflags BSD-3; METIS Apache-2.0;
 SuiteSparse (CHOLMOD, LGPL-2.1+, dynamically linked). Built with `CGAL_ENABLED=OFF`: CGAL's
 triangulation is GPL-3 and only serves COLMAP's Delaunay mesher, which we do not use. Not
 built with FreeImage (COLMAP 4.x uses OpenImageIO). Whatever COLMAP's CMake fetches at build

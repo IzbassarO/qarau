@@ -2,6 +2,8 @@
 # public registry. Same COLMAP version as the pipeline's pycolmap (4.2.1).
 # COLMAP 4.x reads images with OpenImageIO, so FreeImage (GPL/FIPL) is not needed.
 # CGAL (GPL-3 triangulation) is off: it only serves the Delaunay mesher, which we do not use.
+# libopencv-core-dev: Ubuntu 24.04's OpenImageIO CMake config names /usr/include/opencv4
+# without depending on it (first Modal build, 2026-10-21); headers only, OpenCV is Apache-2.0.
 
 ARG CUDA_VERSION=12.6.3
 ARG UBUNTU=ubuntu24.04
@@ -15,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git cmake ninja-build build-essential ca-certificates \
         libboost-program-options-dev libboost-graph-dev libboost-system-dev \
         libeigen3-dev libopenimageio-dev openimageio-tools libmetis-dev \
+        libopencv-core-dev \
         libgoogle-glog-dev libgflags-dev libgtest-dev libgmock-dev libsqlite3-dev \
         libglew-dev libceres-dev libsuitesparse-dev \
         libcurl4-openssl-dev libssl-dev \
@@ -39,9 +42,11 @@ RUN mkdir /opt/colmap-libs \
        | xargs -I{} cp -L {} /opt/colmap-libs/
 
 FROM nvidia/cuda:${CUDA_VERSION}-runtime-${UBUNTU}
+# Ubuntu 24.04 ships user `ubuntu` with UID 1000: removed so `colmap` keeps 1000 (host mounts).
 COPY --from=builder /opt/colmap /opt/colmap
 COPY --from=builder /opt/colmap-libs /opt/colmap-libs
 RUN echo /opt/colmap-libs > /etc/ld.so.conf.d/colmap.conf && ldconfig \
+    && userdel --remove ubuntu \
     && useradd --create-home --uid 1000 colmap \
     && mkdir /work && chown colmap:colmap /work
 ENV PATH=/opt/colmap/bin:${PATH}
