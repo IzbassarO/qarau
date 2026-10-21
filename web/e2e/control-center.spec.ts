@@ -47,11 +47,16 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(name).toHaveCSS('text-overflow', 'ellipsis');
         const date = row.getByRole('time');
         await expect(date).toHaveAttribute('datetime', run.created_at);
+        // Browser ICU data and timezone can differ from Node's, especially for kk.
         await expect(date).toHaveText(
-          new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : lang, {
-            day: 'numeric',
-            month: 'short',
-          }).format(new Date(run.created_at)),
+          await page.evaluate(
+            ({ locale, iso }) =>
+              new Intl.DateTimeFormat(locale === 'en' ? 'en-GB' : locale, {
+                day: 'numeric',
+                month: 'short',
+              }).format(new Date(iso)),
+            { locale: lang, iso: run.created_at },
+          ),
         );
         const dimensions = await date.evaluate((element) => ({
           width: element.clientWidth,

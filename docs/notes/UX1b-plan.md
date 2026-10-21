@@ -33,3 +33,9 @@ files, and the production build passed. Playwright discovered 70 tests with
 --list; execution and before/after screenshots remain with Kerege. No server was
 started. The protected design/i18n gate tests, navigation and engine files, and
 dependency manifests were left unchanged.
+
+E2e follow-up: Kerege passed 68 tests and found two kk date assertions comparing
+Node's ICU output with Chromium's. Compute the exact expected Intl date in the
+browser, using the explicit requested locale and fixture timestamp. Keep the
+text equality, twelve-row threshold, ordering and clipping assertions intact;
+application formatting is unchanged. Kerege will rerun the browser suite.
