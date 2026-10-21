@@ -2,6 +2,26 @@
 
 Newest first. Keep it short.
 
+## 2026-10-21 — P4a-2a-run: first real COLMAP dense on Modal (notre-dame-p3e)
+
+- **Done on notre-dame-p3e:** L4, 121 views at 640x480. PatchMatch photometric 11.6 min +
+  geometric 15.0 min (~5.8 s per view per pass), fusion 12 s; whole job 1681 s of the 1800 s
+  timeout. 837 928 fused points; bundle `data/runs/notre-dame-p3e-modal` keeps 730 069 (107 859
+  far ones dropped, ADR 0017), all linked to frames (`colmap_fusion`), reproj check 0.47 px.
+  A few hundred sky points float above the church. Cost: L4 $0.368 + sandbox CPU $0.070 +
+  memory $0.005 ≈ **$0.44**. Image build (sm_89 only, 7 min, three tries) ≈ $0.23.
+- **First try failed on capacity:** Modal queued the L4 sandbox 28 min, then
+  `ResourceExhaustedError` (≈ $0, queue time is not billed). Now: `start_timeout_s` 300 s per
+  GPU type, queued sandbox terminated by job tag, then `gpu_fallback: [L40S]` (owner); the
+  ledger books GPU hours from the worker's start, never the queue.
+- **Fixed on the way:** modal 1.6.2 has no `Sandbox.open/mkdir` (now `sandbox.filesystem`);
+  the Dockerfile had never been built (`libopencv-core-dev` for OpenImageIO's CMake config on
+  Ubuntu 24.04; base image user `ubuntu` held UID 1000); CUDA arch is a config build arg
+  (`dense_remote.cuda_architectures: "89"`, owner).
+- **Not run: orono-p3e** (151 frames at 1920x1080 ≈ 2–3 h at this pace, over the timeout).
+  Next: P4a-3 (PatchMatch speed knobs, target < 30 min for a 3-min 1080p video), then the owner
+  runs orono. The viewer does not draw the dense layer yet: UX-dense.
+
 ## 2026-10-19 — Backlog: Modal, reference sheet size, thin clients, UX brief
 
 - Modal GPU smoke test passed (T4, CUDA in PyTorch, ~$0.003, nothing left running). The $30
