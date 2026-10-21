@@ -284,8 +284,19 @@ def fake_modal_module(root: Path, log: list[tuple[str, ...]]) -> types.SimpleNam
         def wait(self) -> None:
             pass
 
+    class Filesystem:
+        def copy_from_local(self, local: Path, remote: str) -> None:
+            log.append(("write", remote))
+            (root / remote.lstrip("/")).parent.mkdir(parents=True, exist_ok=True)
+            (root / remote.lstrip("/")).write_bytes(Path(local).read_bytes())
+
+        def copy_to_local(self, remote: str, local: Path) -> None:
+            log.append(("read", remote))
+            Path(local).write_bytes((root / remote.lstrip("/")).read_bytes())
+
     class Sandbox:
         object_id = "sb-1"
+        filesystem = Filesystem()
 
         @staticmethod
         def create(*cmd: str, **kw: Any) -> Sandbox:
@@ -298,18 +309,11 @@ def fake_modal_module(root: Path, log: list[tuple[str, ...]]) -> types.SimpleNam
             log.append(("from_id", sid))
             return Sandbox()
 
-        def mkdir(self, path: str, parents: bool) -> None:
-            (root / path.lstrip("/")).mkdir(parents=parents, exist_ok=True)
-
-        def open(self, path: str, mode: str) -> Any:
-            log.append(("write" if mode == "wb" else "read", path))
-            return (root / path.lstrip("/")).open(mode)
-
-        def exec(self, *argv: str, timeout: int) -> Proc:
-            log.append(("exec", argv[1], f"timeout={timeout}"))
+        def exec(self, *argv: str, timeout: int, stdout: str, stderr: str) -> Proc:
+            log.append(("exec", argv[1], f"timeout={timeout}", stdout, stderr))
             if argv[1] == "stereo_fusion":
                 for name in RESULTS:
-                    self.mkdir(REMOTE_DENSE, parents=True)
+                    (root / REMOTE_DENSE.lstrip("/")).mkdir(parents=True, exist_ok=True)
                     (root / REMOTE_DENSE.lstrip("/") / name).write_bytes(b"fused")
             return Proc()
 
@@ -343,6 +347,8 @@ def test_real_client_round_trip_on_fake_modal(
     caplog.set_level(logging.DEBUG)
     log: list[tuple[str, ...]] = []
     monkeypatch.setitem(sys.modules, "modal", fake_modal_module(env["root"] / "sandbox", log))
+    stream = types.SimpleNamespace(StreamType=types.SimpleNamespace(STDOUT="STDOUT"))
+    monkeypatch.setitem(sys.modules, "modal.stream_type", stream)
     cfg = replace(load_dense_remote_config(DEFAULT_CONFIG), enabled=True)
     ex = executor(env, make_provider(cfg))
     ply = go(ex, env)
@@ -352,9 +358,9 @@ def test_real_client_round_trip_on_fake_modal(
         ("create", "sleep", "infinity", "gpu=L4", "timeout=60"),
         ("write", "/work/images/000000.jpg"),
         ("write", "/work/sparse/cameras.bin"),
-        ("exec", "image_undistorter", "timeout=60"),
-        ("exec", "patch_match_stereo", "timeout=60"),
-        ("exec", "stereo_fusion", "timeout=60"),
+        ("exec", "image_undistorter", "timeout=60", "STDOUT", "STDOUT"),
+        ("exec", "patch_match_stereo", "timeout=60", "STDOUT", "STDOUT"),
+        ("exec", "stereo_fusion", "timeout=60", "STDOUT", "STDOUT"),
         *[("read", f"{REMOTE_DENSE}/{name}") for name in RESULTS],
         ("terminate",),
     ]

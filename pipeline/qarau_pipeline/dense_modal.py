@@ -233,21 +233,23 @@ class _RealModalClient:
         return str(sb.object_id)
 
     def upload(self, worker_id: str, local_dir: Path, remote_dir: str) -> None:
-        sb = self._sandboxes[worker_id]
+        fs = self._sandboxes[worker_id].filesystem  # copy_from_local creates parent dirs
         for path in sorted(p for p in local_dir.rglob("*") if p.is_file()):
-            remote = f"{remote_dir}/{path.relative_to(local_dir).as_posix()}"
-            sb.mkdir(remote.rsplit("/", 1)[0], parents=True)
-            with sb.open(remote, "wb") as f:
-                f.write(path.read_bytes())
+            fs.copy_from_local(path, f"{remote_dir}/{path.relative_to(local_dir).as_posix()}")
 
     def run(self, worker_id: str, argv: list[str], timeout_s: float) -> int:
-        proc = self._sandboxes[worker_id].exec(*argv, timeout=math.ceil(timeout_s))
+        from modal.stream_type import StreamType
+
+        # COLMAP's log goes straight to our stdout: an unread PIPE would only pile up.
+        proc = self._sandboxes[worker_id].exec(
+            *argv, timeout=math.ceil(timeout_s), stdout=StreamType.STDOUT, stderr=StreamType.STDOUT
+        )
         proc.wait()
         return int(proc.returncode)
 
     def download(self, worker_id: str, remote_path: str, local_dir: Path) -> None:
-        with self._sandboxes[worker_id].open(remote_path, "rb") as f:
-            (local_dir / remote_path.rsplit("/", 1)[-1]).write_bytes(f.read())
+        local = local_dir / remote_path.rsplit("/", 1)[-1]
+        self._sandboxes[worker_id].filesystem.copy_to_local(remote_path, local)
 
     def stop(self, worker_id: str) -> None:
         import modal
