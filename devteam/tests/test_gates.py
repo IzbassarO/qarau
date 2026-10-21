@@ -357,7 +357,10 @@ def test_video_failing_on_dev_is_named_and_others_still_gate(repo):
     run(graph)
     assert task(team)["status"] == "done"
     body = team.gh.prs[1]["body"]
-    assert "| room | 91.0 |" in body and "not gated (COLMAP noise" in body
+    assert (
+        "| room | 91.0 |" in body
+        and "not gated (edited news clip, no one honest model (P3c)" in body
+    )
 
 
 def test_regression_rules():

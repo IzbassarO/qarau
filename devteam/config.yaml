@@ -34,9 +34,11 @@ gates:
     max_rise_scale_err_cm: 0.5
     # Measured run-to-run noise (docs/notes/benchmark-method.md, Variance). Mykolaiv on the
     # same 300 frames: 178/210 -> 81/210 registered, 3 -> 5 models, 10 k -> 3 k points. No
-    # threshold separates that from a real change: shown in the packet, not gated, until P3.
+    # threshold separates that from a real change: shown in the packet, not gated. P3c
+    # (2026-10-16, "Mykolaiv (P3c)" there) found why: an edited night news clip (~18 shots,
+    # title cards, burned-in logo), no one honest model. Owner, 2026-10-21: stays ungated.
     per_video:
-      mykolaiv: {gated: false, why: "COLMAP noise 39-85 % registered on identical frames; gate again after P3"}
+      mykolaiv: {gated: false, why: "edited news clip, no one honest model (P3c); owner 2026-10-21: not gated"}
     # Developer rounds run only these (~11 min, low run-to-run noise); the full set runs only at the
     # merge gate and at release. Saves subscription limits and round time.
     quick_only: [notre-dame, room]
