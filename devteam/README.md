@@ -100,9 +100,11 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   detached checkout of the committed HEAD (pipeline tasks: the tester runs the quick benchmark
   there itself and screenshots that); only the orchestrator sets a task to done, after every
   gate passed (backlog.yaml is protected). A branch that changes web/ also gets the Playwright
-  e2e run there (`gates.e2e`): a fresh Vite on a free port (`QARAU_E2E_PORT`, never a reused
-  server), killed with the step after; the judge sees every test line (passed / failed /
-  skipped). Developers never run e2e: a Codex sandbox cannot open a port.
+  e2e run there (`gates.e2e`), by Kerege first, right after the round: a fresh Vite on a free
+  port (`QARAU_E2E_PORT`, never a reused server), killed with the step after. A failing e2e
+  sends the round back with the failures and no LLM tester call; otherwise the judge sees every
+  test line (passed / failed / skipped). Developers never run e2e: a Codex sandbox cannot open
+  a port (the sandbox is not loosened for it).
 - Plans stay inside the developer's folders: criteria that name another developer's folder
   (or devteam/) are rejected; the brain lists such tasks in `needs_split` and the orchestrator
   blocks them with the proposed split (A7 asked dev_app for backend/ and looped).
@@ -138,10 +140,18 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   `.env`), `dev_app` = Codex (`codex exec`, your saved ChatGPT login; `codex login` once; no
   API key is ever passed). Codex has no network in its sandbox: `setup` installs first.
 - Benchmark: developers run only the quick set (`quick_only`); the full set runs at the merge
-  gate and at release, cached per `pipeline/` tree; a task may set its own `quick_only`.
+  gate and at release, cached per `pipeline/` tree; a task may set its own `quick_only`. Only
+  a clean result is cached as final: a run where a gated video failed, or one the gate found
+  regressed, is measured again next time. A regression is re-measured once on the regressed
+  videos only (`--only`); the task goes back only if it repeats, and the packet shows both
+  attempts. After a benchmark send-back the packet warns when `pipeline/` then changed only in
+  comments or whitespace.
 - Screenshots: any task whose criteria mention the viewer lists `routes`; the tester
-  screenshots them (pipeline tasks: the viewer on the quick benchmark output). A missing
-  screenshot fails the task even if the judge passed. `dev-*.png` are the "before": pipeline
+  screenshots them (pipeline tasks: the viewer on the quick benchmark output) at every
+  `screenshots.viewports` (default 1440x900 and 390x844) and, for dev_app, in both
+  `themes` (light, dark: emulated `prefers-color-scheme`), as `<route>-<viewport>[-<theme>].png`
+  in `.state/packets/<task>/`, emptied at the start of each round. A missing screenshot fails
+  the task even if the judge passed. `dev-*.png` are the "before": pipeline
   tasks, the same routes on dev's cached gate benchmark; web tasks, the same routes built from a
   fresh checkout of dev. The tester signs in first (`devteam/shoot.mjs`, A1b login) with
   `QARAU_TEST_USER` / `QARAU_TEST_PASSWORD` from `.env` (passed in the environment, never
