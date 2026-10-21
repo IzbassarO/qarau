@@ -31,8 +31,11 @@ token and no call exist in this task; developers have no Modal token.
    Dockerfile path, `push` and `public` fixed to `false` (not settable). `to_modal_image()`
    turns it into `modal.Image.from_dockerfile(...)` (empty entrypoint, the sandbox runs
    `sleep infinity` and each COLMAP step is an `exec`). Nothing is built or pushed here.
-   GPU type comes from `dense_remote.gpu_type` (`L4`, 24 GB, CUDA arch 89 is in the image's
-   build list).
+   GPU type comes from `dense_remote.gpu_type` (`L4`, 24 GB, CUDA arch 89). The image's
+   `CUDA_ARCHITECTURES` build arg comes from `dense_remote.cuda_architectures` (owner,
+   2026-10-21: `"89"` only, one arch instead of five, a much shorter build); the config refuses
+   a `gpu_type` whose arch is not in it, so a mismatch never reaches a paid start. Another GPU
+   (e.g. `"75;86;90"`) is a config change and one new image build, no code change.
 4. **Always stop, also from Modal's side.** The executor's `finally` stop (ADR 0016) holds.
    On top: every client call runs in a daemon thread bounded by the remaining `timeout_s`,
    so a hung call raises `ModalTimeoutError` (a `TimeoutError`, mapped to

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -33,6 +34,8 @@ REMOTE_SPARSE = "/work/sparse"
 REMOTE_DENSE = "/work/dense"
 RESULTS = ("fused.ply", "fused.ply.vis")
 PROVIDERS = ("fake", "modal")  # dense_remote.provider; absent means fake
+# CUDA arch each GPU type needs in dense_remote.cuda_architectures (Modal GPU names).
+GPU_ARCH = {"T4": "75", "A100": "80", "A10": "86", "L4": "89", "L40S": "89", "H100": "90"}
 
 Clock = Callable[[], datetime]
 T = TypeVar("T")
@@ -100,15 +103,17 @@ class DenseRemoteConfig:
     image: str
     gpu_type: str
     provider: str = "fake"
+    cuda_architectures: str = "89"  # the image's CUDA_ARCHITECTURES build arg, e.g. "75;86;90"
 
 
 def make_provider(cfg: DenseRemoteConfig) -> GpuProvider:
     """The real provider named by dense_remote.provider (the fake is built by tests and the
     demo CLI, with its own directory and clock)."""
     if cfg.provider == "modal":
-        from .dense_modal import ModalGpuProvider  # no vendor code until a real job asks for it
+        # no vendor code until a real job asks for it
+        from .dense_modal import ModalGpuProvider, ModalImageSpec
 
-        return ModalGpuProvider.from_env()
+        return ModalGpuProvider.from_env(ModalImageSpec(cuda_architectures=cfg.cuda_architectures))
     raise DenseConfigError(f"dense_remote.provider {cfg.provider!r} is not a real GPU provider")
 
 
@@ -153,7 +158,19 @@ def load_dense_remote_config(path: Path = DEFAULT_CONFIG) -> DenseRemoteConfig:
         image=text("image"),
         gpu_type=text("gpu_type"),
         provider=provider,
+        cuda_architectures=str(sec.get("cuda_architectures", "89")),
     )
+    if not re.fullmatch(r"\d{2,3}(;\d{2,3})*", cfg.cuda_architectures):
+        raise DenseConfigError(
+            f'{path}: dense_remote.cuda_architectures must be like "89" or "75;86;90", '
+            f"got {cfg.cuda_architectures!r}"
+        )
+    # A GPU whose arch is not in the image fails only in patch_match_stereo, after paying.
+    if (arch := GPU_ARCH.get(cfg.gpu_type)) and arch not in cfg.cuda_architectures.split(";"):
+        raise DenseConfigError(
+            f"{path}: dense_remote.gpu_type {cfg.gpu_type} needs CUDA arch {arch} in "
+            f"dense_remote.cuda_architectures ({cfg.cuda_architectures!r})"
+        )
     # The estimate is what the budget check books, so it must cover the longest a job can run.
     if cfg.timeout_s > cfg.est_hours_per_job * 3600:
         raise DenseConfigError(

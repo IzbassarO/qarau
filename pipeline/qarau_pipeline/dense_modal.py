@@ -69,9 +69,12 @@ def _scrub(text: str) -> str:
 @dataclass(frozen=True)
 class ModalImageSpec:
     """The worker image: COLMAP + CUDA from infra/colmap-cuda (ADR 0016). A description only;
-    Modal builds it inside the account on the first start, nothing is pushed to a registry."""
+    Modal builds it inside the account on the first start, nothing is pushed to a registry.
+    cuda_architectures: the Dockerfile's CUDA_ARCHITECTURES build arg (dense_remote config);
+    another value is another image, built once."""
 
     dockerfile: Path = DOCKERFILE
+    cuda_architectures: str = "89"
     push: bool = field(default=False, init=False)
     public: bool = field(default=False, init=False)
 
@@ -81,7 +84,9 @@ def to_modal_image(spec: ModalImageSpec) -> Any:
 
     # Lazy: from_dockerfile only describes the image. Empty entrypoint: the Dockerfile's
     # `colmap` entrypoint would otherwise wrap the sandbox's keep-alive command.
-    return modal.Image.from_dockerfile(str(spec.dockerfile)).entrypoint([])
+    return modal.Image.from_dockerfile(
+        str(spec.dockerfile), build_args={"CUDA_ARCHITECTURES": spec.cuda_architectures}
+    ).entrypoint([])
 
 
 class ModalClient(Protocol):
@@ -114,7 +119,7 @@ class ModalGpuProvider:
         self.client, self.image, self.clock = client, image or ModalImageSpec(), clock
 
     @classmethod
-    def from_env(cls) -> ModalGpuProvider:
+    def from_env(cls, image: ModalImageSpec | None = None) -> ModalGpuProvider:
         """The real client; the token comes only from the environment, read now."""
         missing = [v for v in TOKEN_VARS if not os.environ.get(v)]
         if missing:
@@ -122,7 +127,7 @@ class ModalGpuProvider:
                 f"Modal token not set: export {' and '.join(missing)} in the environment "
                 "(never in a file in the repository)"
             )
-        return cls(_RealModalClient(*(Secret(os.environ[v]) for v in TOKEN_VARS)))
+        return cls(_RealModalClient(*(Secret(os.environ[v]) for v in TOKEN_VARS)), image)
 
     def _bounded(
         self,

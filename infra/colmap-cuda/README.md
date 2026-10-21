@@ -17,6 +17,7 @@ the image a GPU worker runs. The pipeline's own sparse path stays on pycolmap (C
 ```bash
 docker build -t qarau/colmap-cuda:4.2.1 infra/colmap-cuda
 # other GPUs: --build-arg CUDA_ARCHITECTURES="86"   (smaller, faster build)
+# Modal builds it with CUDA_ARCHITECTURES from pipeline/config.yaml dense_remote.cuda_architectures ("89")
 ```
 
 ## Smoke test

@@ -14,7 +14,10 @@ dense_remote:
   timeout_s: 1800 # one wall-clock deadline for the whole job (start, upload, dense, download)
   est_hours_per_job: 0.5 # booked against the budget per job; must cover timeout_s
   daily_gpu_hours_budget: 1.0 # per UTC day; a job that would go over is refused before start
-  gpu_type: L4 # Modal GPU name (24 GB, CUDA arch 89 is in the image's build list)
+  gpu_type: L4 # Modal GPU name (24 GB, CUDA arch 89)
+  # The image's CUDA_ARCHITECTURES build arg (owner, 2026-10-21: sm_89 only for L4; a short
+  # build). Another GPU type needs its arch here, e.g. "75;86;90"; another value = a new image.
+  cuda_architectures: "89"
   # infra/colmap-cuda; Modal builds it from the Dockerfile in our workspace, never pushed
   image: qarau/colmap-cuda:4.2.1
   ledger_path: ../data/dense_remote/gpu_ledger.json # GPU hours per UTC day (data/ is gitignored)

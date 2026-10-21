@@ -254,10 +254,12 @@ def test_image_spec_is_the_colmap_cuda_dockerfile_never_pushed() -> None:
 
 class _FakeImage:
     described: list[str] = []
+    build_args: list[dict[str, str]] = []
 
     @classmethod
-    def from_dockerfile(cls, path: str, **_: Any) -> _FakeImage:
+    def from_dockerfile(cls, path: str, build_args: dict[str, str]) -> _FakeImage:
         cls.described.append(path)
+        cls.build_args.append(build_args)
         return cls()
 
     def entrypoint(self, cmd: list[str]) -> _FakeImage:
@@ -269,10 +271,15 @@ class _FakeImage:
 
 
 def test_to_modal_image_describes_without_building(monkeypatch: pytest.MonkeyPatch) -> None:
-    _FakeImage.described = []
+    _FakeImage.described, _FakeImage.build_args = [], []
     monkeypatch.setitem(sys.modules, "modal", types.SimpleNamespace(Image=_FakeImage))
     assert isinstance(dense_modal.to_modal_image(ModalImageSpec()), _FakeImage)
-    assert _FakeImage.described == [str(REPO / "infra/colmap-cuda/Dockerfile")]
+    dense_modal.to_modal_image(ModalImageSpec(cuda_architectures="75;86;90"))
+    assert _FakeImage.described == [str(REPO / "infra/colmap-cuda/Dockerfile")] * 2
+    assert _FakeImage.build_args == [  # sm_89 (L4) by default; others without code changes
+        {"CUDA_ARCHITECTURES": "89"},
+        {"CUDA_ARCHITECTURES": "75;86;90"},
+    ]
 
 
 def fake_modal_module(root: Path, log: list[tuple[str, ...]]) -> types.SimpleNamespace:
@@ -376,6 +383,27 @@ def test_repo_config_selects_modal_disabled_within_budget() -> None:
     assert cfg.timeout_s <= 1800
 
 
+@pytest.mark.parametrize(
+    ("line", "error"),
+    [
+        ('cuda_architectures: "75;86"', "gpu_type L4 needs CUDA arch 89"),
+        ('cuda_architectures: "sm_89"', "must be like"),
+    ],
+)
+def test_cuda_architectures_must_fit_the_gpu(tmp_path: Path, line: str, error: str) -> None:
+    text = DEFAULT_CONFIG.read_text()
+    assert 'cuda_architectures: "89"' in text  # the repo builds sm_89 only, for L4
+    (tmp_path / "config.yaml").write_text(text.replace('cuda_architectures: "89"', line))
+    with pytest.raises(DenseConfigError, match=error):
+        load_dense_remote_config(tmp_path / "config.yaml")
+    (tmp_path / "config.yaml").write_text(
+        text.replace('cuda_architectures: "89"', 'cuda_architectures: "75;86;90"').replace(
+            "gpu_type: L4", "gpu_type: T4"
+        )
+    )
+    assert load_dense_remote_config(tmp_path / "config.yaml").cuda_architectures == "75;86;90"
+
+
 def test_unknown_provider_is_refused(tmp_path: Path) -> None:
     text = DEFAULT_CONFIG.read_text().replace("provider: modal", "provider: runpod")
     (tmp_path / "config.yaml").write_text(text)
@@ -387,6 +415,10 @@ def test_make_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MODAL_TOKEN_ID", TOKEN_ID)
     monkeypatch.setenv("MODAL_TOKEN_SECRET", TOKEN_SECRET)
     cfg = load_dense_remote_config(DEFAULT_CONFIG)
-    assert isinstance(make_provider(cfg), ModalGpuProvider)
+    provider = make_provider(cfg)
+    assert isinstance(provider, ModalGpuProvider)
+    assert provider.image == ModalImageSpec(cuda_architectures="89")
+    other = make_provider(replace(cfg, cuda_architectures="75;86;90"))
+    assert isinstance(other, ModalGpuProvider) and other.image.cuda_architectures == "75;86;90"
     with pytest.raises(DenseConfigError, match="not a real GPU provider"):
         make_provider(replace(cfg, provider="fake"))
