@@ -490,6 +490,7 @@ tasks:
 - id: P4a-2a-run
   area: core
   title: First real COLMAP dense run on Modal (owner only, not Kerege)
+  owner_only: true
   goal: 'Owner-only task (2026-10-21): done interactively by a Claude Code session with the owner present,
     never planned or run by Kerege. It has no depends_on on purpose: Kerege moves a blocked task with
     done dependencies back to todo, so the dependency on P4a-2a-code is written here instead. Starts only
@@ -643,6 +644,60 @@ tasks:
   branch: devteam/UX1b
   pr: https://github.com/IzbassarO/qarau/pull/53
   done_at: '2026-10-21'
+- id: UX-kk
+  area: app
+  title: Kazakh dates readable in Chrome; date tests with fixed expected strings
+  goal: 'web/ only; no new features. Owner, 2026-10-21 (Kerege rehearsal cont-20261021-021001): Chrome''s
+    ICU has no Kazakh month names, so the run list (web/src/shell/Sidebar.tsx `shortDate`) shows "M10
+    16" in kk where Node prints "16 қаз."; the inspection header date (web/src/shell/InspectionView.tsx,
+    Intl `dateStyle: ''long''`) has the same problem. UX1b round 2 then made its e2e compute the expected
+    date with the browser''s own Intl, a test that passes whatever the browser prints, and the Vitest
+    in web/src/shell/Sidebar.test.tsx does the same with Node''s Intl.
+
+
+    1. kk dates come from our own month table, never from Intl: short months қаң., ақп., нау., сәу., мам.,
+    мау., шіл., там., қыр., қаз., қар., жел.; long months қаңтар, ақпан, наурыз, сәуір, мамыр, маусым,
+    шілде, тамыз, қыркүйек, қазан, қараша, желтоқсан (CLDR kk, what Node''s full ICU prints). One date
+    helper, used by the run list and the inspection header. ru and en may keep Intl (Chrome has them)
+    as long as the strings below hold.
+
+
+    2. Expected values are fixed strings from fixtures, never computed with Intl or with the helper under
+    test. For 2026-10-16T12:00:00Z the run list shows en "16 Oct", ru "16 окт.", kk "16 қаз."; the kk
+    inspection header contains "16 қазан" and 2026. Vitest checks all 12 kk months (short and long) against
+    literal strings; the e2e (web/e2e/control-center.spec.ts) checks the fixed run-list strings in en,
+    ru and kk in Chrome, replacing its page.evaluate(Intl...) expectation, with every other assertion
+    of that test kept.
+
+
+    Tester screenshots: "/" (the run list); Kerege shoots it in ru, kk and en. No raw month number ("M10")
+    anywhere in kk.
+
+    '
+  status: todo
+- id: UX-390
+  area: app
+  title: 'Viewer layout at 390 px: hints, axis gizmo and timeline never overlap'
+  goal: 'web/ only; no new features, desktop layout unchanged. Measured 2026-10-21 on /viewer/notre-dame-p3e
+    at 390x844 (kk): the orbit hint (`.viewer-hint.orbit`) is squeezed into an 18 px wide column, one
+    word per line, over the language switch and the side panels; the axis gizmo (`.viewer-gizmo`, web/src/viewer/AxisGizmo.tsx)
+    sits on the camera stats panel; the timeline (`.viewer-timeline`) is 32 px wide; a side panel is cut
+    off at the left edge of the screen.
+
+
+    At 390x844 in en, ru and kk: the header, the hints, the gizmo, the timeline and the side panels do
+    not overlap each other (their bounding boxes do not intersect), none of them is clipped by the screen
+    edge, and hint text reads in lines of several words. The video stays visible and the canvas stays
+    black. At 1440x900 nothing moves.
+
+
+    Tests: a Playwright e2e at 390x844 for en, ru and kk asserts the boxes above pairwise do not intersect
+    and lie inside 0..390 px; the existing viewer e2e stay as they are (never loosened). Tester screenshots:
+    "/viewer/notre-dame"; Kerege shoots it at 1440x900 and 390x844, in ru, kk and en, with dev-* before
+    shots to compare the desktop.
+
+    '
+  status: todo
 - id: A1a
   area: app
   title: Control center layout with sites and inspections

@@ -242,10 +242,16 @@ TEST_LOGIN = ("QARAU_TEST_USER", "QARAU_TEST_PASSWORD")  # devteam/.env: the tes
 VIEWPORTS = ["1440x900", "390x844"]  # screenshots.viewports when not set: desktop and phone
 
 
-def variants(sc: dict) -> list[tuple[str, str]]:
-    """(viewport, theme) per screenshot of one route: screenshots.viewports x themes (light /
-    dark; none set = the page's default)."""
-    return [(v, t) for v in sc.get("viewports") or VIEWPORTS for t in sc.get("themes") or [""]]
+def variants(sc: dict, before: bool = False) -> list[tuple[str, str, str]]:
+    """(viewport, theme, locale) per screenshot of one route: screenshots.viewports x themes
+    (light / dark; none set = the page's default) in the first of screenshots.locales, then
+    every viewport in each other locale with the first theme: kk/en text breaks layouts, not
+    themes, and every image counts against the tester's request limit (real.MAX_IMAGES).
+    `before` (dev-* shots, for comparison): the first locale only."""
+    vs, ts = sc.get("viewports") or VIEWPORTS, sc.get("themes") or [""]
+    ls = sc.get("locales") or [""]
+    out = [(v, t, ls[0]) for v in vs for t in ts]
+    return out if before else out + [(v, ts[0], lang) for lang in ls[1:] for v in vs]
 
 
 def expected_shots(cfg: dict, s) -> int:
@@ -254,13 +260,18 @@ def expected_shots(cfg: dict, s) -> int:
 
 
 def screenshots(
-    team, s, routes: list[str], runs: Path | None = None, prefix: str = ""
+    team,
+    s,
+    routes: list[str],
+    runs: Path | None = None,
+    prefix: str = "",
+    before: bool = False,
 ) -> tuple[list[str], list[str]]:
-    """One PNG per route and variant (viewport, theme) of the dev server in the task's
-    worktree, for the tester (it sees them) and the packet, named <route>-<viewport>[-<theme>]
-    (just <route> when there is one variant). Returns (paths, problems); a shot that fails is
-    a problem, never silently dropped. `runs`: serve these runs instead of the developer's
-    quick benchmark."""
+    """One PNG per route and variant (viewport, theme, locale) of the dev server in the task's
+    worktree, for the tester (it sees them) and the packet, named
+    <route>-<viewport>[-<theme>][-<locale>] (just <route> when there is one variant). Returns
+    (paths, problems); a shot that fails is a problem, never silently dropped. `runs`: serve
+    these runs instead of the developer's quick benchmark. `before`: dev-* shots (variants)."""
     sc = team.cfg["developers"][s["assignee"]].get("screenshots")
     if not sc or not routes:
         return [], []
@@ -311,11 +322,11 @@ def screenshots(
             time.sleep(1)
         else:
             return [], [f"dev server did not start: {sc['serve']}"]
-        vs = variants(sc)
-        for route, (size, theme) in itertools.product(routes, vs):
+        vs = variants(sc, before)
+        for route, (size, theme, lang) in itertools.product(routes, vs):
             name = prefix + (re.sub(r"[^A-Za-z0-9]+", "-", route).strip("-") or "root")
             if len(vs) > 1:
-                name += f"-{size}" + (f"-{theme}" if theme else "")
+                name += f"-{size}" + "".join(f"-{x}" for x in (theme, lang) if x)
             png = out / f"{name}.png"
             r = team.run_proc(
                 sc["shoot"].format(
@@ -324,6 +335,7 @@ def screenshots(
                     shoot=shlex.quote(str(SHOOT)),
                     size=shlex.quote(size.replace("x", ",")),
                     theme=shlex.quote(theme),
+                    lang=shlex.quote(lang),
                 ),
                 cwd=s["worktree"],
                 timeout=120,
@@ -332,7 +344,7 @@ def screenshots(
             if r["ok"] and png.exists():
                 paths.append(str(png))
             else:
-                what = f"{route} ({size}{' ' + theme if theme else ''})"
+                what = f"{route} ({' '.join(x for x in (size, theme, lang) if x)})"
                 problems.append(f"{what}: {team.redact(r['output'][-300:])}")
     finally:
         procs.reap(srv.pid, marker)  # the server and anything it started; the port is free
@@ -370,11 +382,11 @@ def dev_screenshots(team, s, routes: list[str]) -> tuple[list[str], list[str]]:
                 r = team.run_proc(cmd, cwd=wt, timeout=1800)
                 if not r["ok"]:
                     return [], [f"dev screenshots skipped: `{cmd}` failed on {dev}"]
-            return screenshots(team, {**s, "worktree": wt}, routes, prefix="dev-")
+            return screenshots(team, {**s, "worktree": wt}, routes, prefix="dev-", before=True)
     runs = team.home / "bench" / bench_key(team, dev)
     if not (runs / "results.json").exists():
         return [], [f"no cached benchmark of {dev} to compare with: dev screenshots skipped"]
-    return screenshots(team, s, routes, runs=runs, prefix="dev-")
+    return screenshots(team, s, routes, runs=runs, prefix="dev-", before=True)
 
 
 # --- GitHub ----------------------------------------------------------------------------------

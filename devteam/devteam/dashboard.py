@@ -138,6 +138,11 @@ def blocked_action(t: dict, by_id: dict) -> str | None:
     tid, reason = t["id"], t.get("blocked_reason") or ""
     if [d for d in t.get("depends_on") or [] if by_id.get(d, {}).get("status") != "done"]:
         return None  # back to todo by itself when its dependencies merge
+    if t.get("owner_only"):  # P4a-2a-run: never `devteam resume` it
+        return (
+            "Owner-only: you do it yourself in an interactive Claude Code session; Kerege never "
+            "plans or resumes it."
+        )
     if reason.startswith("supervisor"):
         return (
             "Raise the limit in devteam/config.yaml (supervisor) or split the task, then run "
@@ -811,7 +816,9 @@ def _costs(d: dict) -> str:
         "".join(
             f"<tr><td>{_e(a)}</td><td>{_e(m)}</td><td>{n}</td>"
             + (
-                f"<td>${usd:.3f}</td>"
+                f"<td>${usd:.3f}"
+                + (f" <span class='muted'>({_e(costs.stale_note(stale))})</span>" if stale else "")
+                + "</td>"
                 if billed
                 else f"<td class='muted'>≈ ${usd:.2f}, not billed</td>"
             )
@@ -822,7 +829,7 @@ def _costs(d: dict) -> str:
                 else "<td class='faint'>—</td><td class='faint'>—</td>"
             )
             + "</tr>"
-            for a, m, n, usd, billed, ti, cr, cw in d["cost_rows"]
+            for a, m, n, usd, billed, ti, cr, cw, stale in d["cost_rows"]
         )
         or "<tr><td colspan='7' class='muted'>No calls today.</td></tr>"
     )

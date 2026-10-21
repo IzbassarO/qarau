@@ -278,6 +278,8 @@ def main():
     args = p.parse_args()
     team = make_team(args.fake)
     team.only = {t for t in args.only.split(",") if t}
+    if args.command in ("run", "resume", "costs", "report"):  # the dashboard only reads
+        costs.mark_stale(team.home)
     if args.task and args.command in ("stop", "resume"):
         return control_task(team, args.command, args.task)
     if args.task:

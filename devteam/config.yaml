@@ -34,9 +34,11 @@ gates:
     max_rise_scale_err_cm: 0.5
     # Measured run-to-run noise (docs/notes/benchmark-method.md, Variance). Mykolaiv on the
     # same 300 frames: 178/210 -> 81/210 registered, 3 -> 5 models, 10 k -> 3 k points. No
-    # threshold separates that from a real change: shown in the packet, not gated, until P3.
+    # threshold separates that from a real change: shown in the packet, not gated. P3c
+    # (2026-10-16, "Mykolaiv (P3c)" there) found why: an edited night news clip (~18 shots,
+    # title cards, burned-in logo), no one honest model. Owner, 2026-10-21: stays ungated.
     per_video:
-      mykolaiv: {gated: false, why: "COLMAP noise 39-85 % registered on identical frames; gate again after P3"}
+      mykolaiv: {gated: false, why: "edited news clip, no one honest model (P3c); owner 2026-10-21: not gated"}
     # Developer rounds run only these (~11 min, low run-to-run noise); the full set runs only at the
     # merge gate and at release. Saves subscription limits and round time.
     quick_only: [notre-dame, room]
@@ -137,8 +139,11 @@ developers:
     screenshots:           # pages from the plan's `routes`; the tester sees them
       serve: cd web && QARAU_RUNS_DIR={runs_dir} pnpm exec vite --port 5198 --strictPort
       url: http://localhost:5198
-      shoot: cd web && node {shoot} {url} {png} {size} 2500 {theme}
+      shoot: cd web && node {shoot} {url} {png} {size} 2500 {theme} {lang}
       themes: [light, dark]  # {theme}: prefers-color-scheme, each viewport in both
+      # {lang}: the app locale. Every viewport x theme in the first; the others at every viewport
+      # in the first theme (kk dates broke in Chrome unseen: shots were ru only, 2026-10-21)
+      locales: [ru, kk, en]
     checks:
       - cd web && pnpm lint && pnpm typecheck
       - cd web && pnpm test && pnpm build

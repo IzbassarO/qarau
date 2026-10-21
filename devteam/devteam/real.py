@@ -22,6 +22,8 @@ RETRY_WAITS = (15, 60, 180)  # seconds before each retry of a transient API fail
 # 1-hour TTL (writes cost 2x input, reads ~0.05-0.1x: config `price_cache_read`).
 CACHE = {"type": "ephemeral", "ttl": "1h"}
 CACHE_WRITE_X = 2.0
+# Messages API limits per request: 100 images, 32 MB; kept under both with room for the text.
+MAX_IMAGES, MAX_IMAGE_BYTES = 90, 24e6
 
 
 def transient(e: Exception) -> bool:
@@ -137,7 +139,11 @@ For each task you pick, write:
 - plan: concrete steps for a senior engineer (Claude Code) working alone in a git worktree:
   which modules to touch, data formats, tests to add, how to verify on real data. Name files.
 - acceptance_criteria: 3-7 short, objectively checkable statements the tester can verify from
-  the diff and check output (no "works well"). Include the tests that must exist.
+  the diff and check output (no "works well"). Include the tests that must exist. A goal with
+  an "Owner additions (<date>):" list: each of its lines (without the leading "- ") is also its
+  own criterion, copied word for word, on top of the 3-7; a plan that drops one is rejected.
+  Tests check fixed expected values (literals or fixtures), never values computed by the code
+  under test.
 - licence_notes: every model or library the plan may use and its licence; it must allow
   commercial use (VGGT weights are CC-BY-NC: never). If unclear, say so and avoid it.
 Developers cannot commit, push or create branches: the orchestrator commits after each round,
@@ -206,6 +212,16 @@ The developer cannot commit (the orchestrator commits after each round), so resu
 developer's own runs tagged "<hash>+dirty" or with an earlier commit hash are expected: never
 fail a criterion for that. Judge whether the mechanism records the commit correctly (code and
 tests), not whether the developer's run was made on a clean commit.
+Expected values come from fixtures, never from the code under test: a fixed literal or a
+fixture file, not a value the test computes with the function, page or library it checks
+(e.g. expecting the date the browser's own Intl formats, when the test is about that date).
+Such an assertion is a tautology and fails its criterion.
+<test_changes_since_last_round>, when given, is what the developer changed in the branch's
+test files since your last verdict (after a send-back). Set `tests_weakened` to true if it
+removes or weakens an assertion (looser threshold, fewer cases, an exact value made vague)
+or replaces a fixed expected value with one computed by the code under test; that fails the
+task whatever else passes. Updating an expected value to a new fixed literal that the
+criteria require is not weakening.
 Write `feedback` for the developer in English: concrete, actionable, empty if passed.
 Write `summary` and `how_to_try` for the owner in simple Russian: what changed in plain
 words (no jargon), and exact commands to try it."""
@@ -410,6 +426,8 @@ Rules:
   agent instructions): use only what the repository already has.{design_rule(dev)}
 - Never skip, focus (.only) or weaken tests, assertions or thresholds, never ship work as a
   .patch / .diff file or as code under docs/: the scope gate refuses the change.
+- Expected values come from fixtures, never from the code under test: a fixed literal or a
+  fixture file, never a value computed with the function, page or library being tested.
 - Do not commit, push, merge or create branches; the orchestrator commits your changes.
 - Never write keys or tokens into files. Never write under data/{writable_rule(team, t)}. Sample
   videos (read-only): {team.root / "data" / "samples"}
@@ -544,7 +562,10 @@ Rules:
         if s.get("session") and s.get("feedback"):
             return (
                 f"The tester or the merge gates sent your work back:\n\n{s['feedback']}"
-                "\n\nFix it, run the checks again, and finish with a short summary."
+                "\n\nFix it in the code, run the checks again, and finish with a short summary. "
+                "The tester compares your test files with the last round: a removed or weakened "
+                "assertion, or an expected value now computed by the code under test instead "
+                "of a fixture, fails the task."
             )
         return self._brief(team, s, dev)
 
@@ -595,14 +616,28 @@ Rules:
             f"{s['task'].get('goal', '')}\n</task>\n\n<plan>\n{s['plan']}\n</plan>\n\n"
             f"<acceptance_criteria>\n{crit}\n</acceptance_criteria>"
         )
+        # The API takes at most 100 images and 32 MB per request: what does not fit (the dev-*
+        # "before" shots come last, so they go first) is named as failed, never silently cut.
+        shots, problems, size = [], list(s.get("screenshot_problems") or []), 0.0
+        for p in s.get("screenshots") or []:
+            size += Path(p).stat().st_size * 4 / 3  # base64
+            if len(shots) < MAX_IMAGES and size <= MAX_IMAGE_BYTES:
+                shots.append(p)
+            else:
+                problems.append(f"{Path(p).name}: not attached (API request size limit)")
         prompt = (
             f"<developer_summary>\n{s.get('dev_summary', '')}\n</developer_summary>\n\n"
             f"<checks>\n{check_text}\n</checks>\n\n"
             + (
-                "<screenshots_failed>\n"
-                + "\n".join(s["screenshot_problems"])
-                + "\n</screenshots_failed>\n\n"
-                if s.get("screenshot_problems")
+                "<screenshots_failed>\n" + "\n".join(problems) + "\n</screenshots_failed>\n\n"
+                if problems
+                else ""
+            )
+            + (
+                "<test_changes_since_last_round>\n"
+                + s["test_changes"]
+                + "\n</test_changes_since_last_round>\n\n"
+                if s.get("test_changes")
                 else ""
             )
             + f"<diffstat>\n{stat}</diffstat>\n\n"
@@ -626,14 +661,21 @@ Rules:
                         "additionalProperties": False,
                     },
                 },
+                "tests_weakened": {"type": "boolean"},
                 "feedback": {"type": "string"},
                 "summary": {"type": "string"},
                 "how_to_try": {"type": "string"},
             },
-            "required": ["passed", "criteria", "feedback", "summary", "how_to_try"],
+            "required": [
+                "passed",
+                "criteria",
+                "tests_weakened",
+                "feedback",
+                "summary",
+                "how_to_try",
+            ],
             "additionalProperties": False,
         }
-        shots = s.get("screenshots") or []
         if shots:
             prompt = (
                 "Screenshots above (after the task; dev-* = before), in order: "
@@ -652,6 +694,13 @@ Rules:
             context=team.redact(context),
         )
         v["passed"] = v["passed"] and all(c["met"] for c in v["criteria"])
+        if v.get("tests_weakened") and s.get("test_changes"):
+            v["passed"] = False
+            v["feedback"] = (
+                "Your test changes since the last round weaken the tests (an assertion removed "
+                "or loosened, or an expected value now computed by the code under test instead "
+                "of a fixture). Restore them and fix the code.\n\n" + v.get("feedback", "")
+            )
         return v
 
 

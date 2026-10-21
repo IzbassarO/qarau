@@ -34,7 +34,9 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   developer. When a developer's task ends (merged or blocked), the brain plans the next task
   for that developer only; the others keep working. Stops when no developer can take a task
   (nothing plannable, or paused after 2 blocked in a row, see below); the API budget
-  (`daily_budget_usd`, counted over the last 24 h, not reset at midnight) is reached; `max_hours` (clean stop) or `max_tasks` (no new tasks, running ones finish); Ctrl+C. The first Ctrl+C
+  (`daily_budget_usd`, counted over the last 24 h, not reset at midnight) is reached (a
+  reservation left open over 2 h, e.g. by a killed run, is marked `stale` on the next
+  run / resume / costs / report: still counted at its worst case, shown as "billing unknown"); `max_hours` (clean stop) or `max_tasks` (no new tasks, running ones finish); Ctrl+C. The first Ctrl+C
   finishes the current steps cleanly (a running developer or check is not killed); a second
   one kills everything now. A Claude Code / Codex plan limit is logged with its reset time
   (when the tool prints one), the developer waits until the reset (every 30 min when unknown,
@@ -96,6 +98,13 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   missing is allowed), fewer assertions or tests, looser thresholds in tests, `.patch` /
   `.diff` files, code under docs/ → sent back with the reason (twice → blocked). Every
   violation goes to `.state/violations.jsonl`, "Needs your attention" and the daily report.
+- Test files between rounds (owner 2026-10-21; UX1b round 2 swapped its new e2e's fixed date
+  for one the browser computed): after a send-back, the branch's test files are diffed against
+  the HEAD the tester last judged. Fewer assertions there is a bypass finding; the judge also
+  gets that diff and answers `tests_weakened` (an assertion removed or loosened, or an expected
+  value now computed by the code under test), which fails the round. A weakened round keeps
+  the old base, so resubmitting it unchanged is the same reason twice: blocked. The dev, tester
+  and brain prompts say: expected values come from fixtures, never from the code under test.
 - The tester never trusts the developer: setup, checks and screenshots run again on a fresh
   detached checkout of the committed HEAD (pipeline tasks: the tester runs the quick benchmark
   there itself and screenshots that); only the orchestrator sets a task to done, after every
@@ -105,6 +114,11 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   sends the round back with the failures and no LLM tester call; otherwise the judge sees every
   test line (passed / failed / skipped). Developers never run e2e: a Codex sandbox cannot open
   a port (the sandbox is not loosened for it).
+- Owner additions: every `- ` line under "Owner additions (<date>):" in a task's goal must be
+  one of the plan's criteria, word for word (case and line breaks aside), or the plan is
+  rejected and re-planned once.
+- `owner_only: true` (P4a-2a-run): the brain never plans the task and the dashboard never
+  suggests `devteam resume` for it; the owner does it in an interactive Claude Code session.
 - Plans stay inside the developer's folders: criteria that name another developer's folder
   (or devteam/) are rejected; the brain lists such tasks in `needs_split` and the orchestrator
   blocks them with the proposed split (A7 asked dev_app for backend/ and looped).
@@ -149,8 +163,12 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
 - Screenshots: any task whose criteria mention the viewer lists `routes`; the tester
   screenshots them (pipeline tasks: the viewer on the quick benchmark output) at every
   `screenshots.viewports` (default 1440x900 and 390x844) and, for dev_app, in both
-  `themes` (light, dark: emulated `prefers-color-scheme`), as `<route>-<viewport>[-<theme>].png`
-  in `.state/packets/<task>/`, emptied at the start of each round. A missing screenshot fails
+  `themes` (light, dark: emulated `prefers-color-scheme`) and `locales` (ru, kk, en: the app's
+  `qarau.lang` set before any page script; every viewport x theme in ru, every viewport in the
+  first theme in kk and en; `dev-*` in ru only), as
+  `<route>-<viewport>[-<theme>][-<locale>].png` in `.state/packets/<task>/`, emptied at the
+  start of each round. Screenshots over the API request limit (90 images, 24 MB; `dev-*` go
+  first) are named to the tester as not attached, never silently cut. A missing screenshot fails
   the task even if the judge passed. `dev-*.png` are the "before": pipeline
   tasks, the same routes on dev's cached gate benchmark; web tasks, the same routes built from a
   fresh checkout of dev. The tester signs in first (`devteam/shoot.mjs`, A1b login) with
