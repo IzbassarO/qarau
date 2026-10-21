@@ -247,9 +247,12 @@ tasks:
   licence: 'modal Python client: Apache-2.0. Modal itself is a paid service: no real call in this task.
 
     '
-  status: in_progress
+  status: done
   owner: dev_pipeline
   run: cont-20261020-180854-dev_pipeline-1
+  branch: devteam/P4a-1b
+  pr: https://github.com/IzbassarO/qarau/pull/50
+  done_at: '2026-10-20'
 - id: P5a
   area: core
   title: Metric scale and gravity from an A4 sheet or a measured distance
