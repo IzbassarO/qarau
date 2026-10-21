@@ -33,8 +33,8 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
 - Continuous mode (`run --continuous`, limits in `config.yaml` → `continuous`): one loop per
   developer. When a developer's task ends (merged or blocked), the brain plans the next task
   for that developer only; the others keep working. Stops when no developer can take a task
-  (nothing plannable, or paused after 2 blocked in a row, see below); the daily API budget is
-  reached; `max_hours` (clean stop) or `max_tasks` (no new tasks, running ones finish); Ctrl+C. The first Ctrl+C
+  (nothing plannable, or paused after 2 blocked in a row, see below); the API budget
+  (`daily_budget_usd`, counted over the last 24 h, not reset at midnight) is reached; `max_hours` (clean stop) or `max_tasks` (no new tasks, running ones finish); Ctrl+C. The first Ctrl+C
   finishes the current steps cleanly (a running developer or check is not killed); a second
   one kills everything now. A Claude Code / Codex plan limit is logged with its reset time
   (when the tool prints one), the developer waits until the reset (every 30 min when unknown,
@@ -43,12 +43,13 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   not plan paid steps), edits to `devteam/` (no developer owns it; checked at start). Rounds
   that did not finish are kept in `.state/continuous.json` and resumed first by the next
   `run --continuous`. At the end it prints, and the daily report lists, every task, its
-  result, the spend and why the run stopped (`.state/runs/<run>.json`). Plain `devteam run`
+  result, the spend and why the run stopped (`.state/runs/<run>.json`); a run past midnight
+  rewrites the report of every day it touched. Plain `devteam run`
   is unchanged: one round, then the weekly release check.
 - Dashboard (`devteam dashboard`, v2): one local read-only page (127.0.0.1 only, GET only,
   refreshes every 20 s keeping the open tab), real data only, no model calls, no network
   assets (system fonts, inline CSS/JS: works offline). Summary row: run state and stop reason,
-  tasks done today, API spend vs budget, subscription tokens today, time running. "Needs your
+  tasks done today, API spend of the last 24 h vs budget, subscription tokens today, time running. "Needs your
   attention" comes first and says what to do for each item (red CI, blocked tasks except those
   only waiting for dependencies, PRs waiting for you, spend above 80 %, scope/bypass
   violations). Agents as cards (status colour, task, time, last message, tool, tokens today),
@@ -99,9 +100,11 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   detached checkout of the committed HEAD (pipeline tasks: the tester runs the quick benchmark
   there itself and screenshots that); only the orchestrator sets a task to done, after every
   gate passed (backlog.yaml is protected). A branch that changes web/ also gets the Playwright
-  e2e run there (`gates.e2e`): a fresh Vite on a free port (`QARAU_E2E_PORT`, never a reused
-  server), killed with the step after; the judge sees every test line (passed / failed /
-  skipped). Developers never run e2e: a Codex sandbox cannot open a port.
+  e2e run there (`gates.e2e`), by Kerege first, right after the round: a fresh Vite on a free
+  port (`QARAU_E2E_PORT`, never a reused server), killed with the step after. A failing e2e
+  sends the round back with the failures and no LLM tester call; otherwise the judge sees every
+  test line (passed / failed / skipped). Developers never run e2e: a Codex sandbox cannot open
+  a port (the sandbox is not loosened for it).
 - Plans stay inside the developer's folders: criteria that name another developer's folder
   (or devteam/) are rejected; the brain lists such tasks in `needs_split` and the orchestrator
   blocks them with the proposed split (A7 asked dev_app for backend/ and looped).
@@ -137,10 +140,18 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   `.env`), `dev_app` = Codex (`codex exec`, your saved ChatGPT login; `codex login` once; no
   API key is ever passed). Codex has no network in its sandbox: `setup` installs first.
 - Benchmark: developers run only the quick set (`quick_only`); the full set runs at the merge
-  gate and at release, cached per `pipeline/` tree; a task may set its own `quick_only`.
+  gate and at release, cached per `pipeline/` tree; a task may set its own `quick_only`. Only
+  a clean result is cached as final: a run where a gated video failed, or one the gate found
+  regressed, is measured again next time. A regression is re-measured once on the regressed
+  videos only (`--only`); the task goes back only if it repeats, and the packet shows both
+  attempts. After a benchmark send-back the packet warns when `pipeline/` then changed only in
+  comments or whitespace.
 - Screenshots: any task whose criteria mention the viewer lists `routes`; the tester
-  screenshots them (pipeline tasks: the viewer on the quick benchmark output). A missing
-  screenshot fails the task even if the judge passed. `dev-*.png` are the "before": pipeline
+  screenshots them (pipeline tasks: the viewer on the quick benchmark output) at every
+  `screenshots.viewports` (default 1440x900 and 390x844) and, for dev_app, in both
+  `themes` (light, dark: emulated `prefers-color-scheme`), as `<route>-<viewport>[-<theme>].png`
+  in `.state/packets/<task>/`, emptied at the start of each round. A missing screenshot fails
+  the task even if the judge passed. `dev-*.png` are the "before": pipeline
   tasks, the same routes on dev's cached gate benchmark; web tasks, the same routes built from a
   fresh checkout of dev. The tester signs in first (`devteam/shoot.mjs`, A1b login) with
   `QARAU_TEST_USER` / `QARAU_TEST_PASSWORD` from `.env` (passed in the environment, never

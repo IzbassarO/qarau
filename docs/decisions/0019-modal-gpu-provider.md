@@ -1,4 +1,4 @@
-# 0018 — Modal as the first real GPU provider for the dense executor
+# 0019 — Modal as the first real GPU provider for the dense executor
 
 - Status: accepted (dev team, P4a-1b); no Modal call until the owner starts P4a-2
 - Date: 2026-10-20

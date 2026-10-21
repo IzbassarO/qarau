@@ -1,4 +1,5 @@
-"""Spend log and the daily API budget.
+"""Spend log and the API budget: daily_budget_usd over any rolling 24 h, so a run past
+midnight cannot spend the cap twice in one night.
 
 Every billed call first *reserves* its worst-case cost in one SQLite transaction
 (BEGIN IMMEDIATE = one writer at a time, across threads and processes), then the
@@ -99,9 +100,17 @@ def _today() -> str:
     return time.strftime("%Y-%m-%d")
 
 
-def _spent(db, day: str) -> float:
+def _since_24h(now: float | None = None) -> str:
+    """Local time 24 h ago, comparable with day || 'T' || ts.
+    ponytail: local wall clock, so a DST change shifts the window by an hour once."""
+    t = (time.time() if now is None else now) - 24 * 3600
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t))
+
+
+def _spent(db, since: str) -> float:
     return db.execute(
-        "select coalesce(sum(usd), 0) from usage where billed and day = ?", (day,)
+        "select coalesce(sum(usd), 0) from usage where billed and day || 'T' || ts >= ?",
+        (since,),
     ).fetchone()[0]
 
 
@@ -110,13 +119,13 @@ def reserve(home: Path, cap: float, agent: str, model: str, task: str, max_usd: 
     db = _db(home)
     try:
         db.execute("begin immediate")
-        spent = _spent(db, _today())
+        spent = _spent(db, _since_24h())
         if spent + max_usd > cap:
             db.execute("rollback")
             raise BudgetExceeded(
-                f"daily API budget: ${spent:.2f} spent or reserved of ${cap:.2f}, this call may "
-                f"cost up to ${max_usd:.2f}. `devteam resume` tomorrow, or raise "
-                "daily_budget_usd in config.yaml"
+                f"API budget: ${spent:.2f} spent or reserved in the last 24 h of ${cap:.2f}, this "
+                f"call may cost up to ${max_usd:.2f}. `devteam resume` once older calls leave the "
+                "24 h window, or raise daily_budget_usd in config.yaml"
             )
         cur = db.execute(
             "insert into usage (day, ts, agent, model, task, tokens_in, tokens_out, usd, billed, "
@@ -183,10 +192,11 @@ def record(
         )
 
 
-def spent_today(home: Path) -> float:
+def spent_24h(home: Path, now: float | None = None) -> float:
+    """What the budget counts: billed spend and open reservations of the last 24 h."""
     db = _db(home)
     try:
-        return _spent(db, _today())
+        return _spent(db, _since_24h(now))
     finally:
         db.close()
 
@@ -204,7 +214,7 @@ def report(home: Path, console):
             kind += f" ({open_} unsettled, counted at max)"
         t.add_row(day, agent, model, str(n), f"{ti:,}", f"{to:,}", f"{usd:.3f}", kind)
     console.print(t)
-    console.print(f"API spend today (incl. reservations): ${spent_today(home):.2f}")
+    console.print(f"API spend, last 24 h (incl. reservations): ${spent_24h(home):.2f}")
 
 
 def day_rows(home: Path, day: str) -> list[tuple]:

@@ -124,7 +124,7 @@ Round 3 quick benchmark (`4d121b5+dirty`):
   `advice` + `advice_key` (was `advice_en`), `frames` = every flagged frame index.
   `run` and `quality` print `quality.text(report)`.
 - Keyframes: `max_gap_s` 2 s adds a keyframe after a long gap if the image moved ≥ 1 % of
-  the diagonal (a still camera still gives first + last only). ADR 0015.
+  the diagonal (a still camera still gives first + last only). ADR 0020.
 - Synthetic keyframe/quality tests moved into `tests/test_frames.py`.
 
 Quick benchmark, before (round-3 code, `d02a466`) → after (round 4, `d02a466+dirty`):

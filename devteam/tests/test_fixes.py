@@ -59,7 +59,7 @@ def test_reservations_are_atomic_across_threads(tmp_path):
     for t in threads:
         t.join()
     assert len(ok) == 3 and len(refused) == 7
-    assert costs.spent_today(tmp_path) == pytest.approx(0.9)
+    assert costs.spent_24h(tmp_path) == pytest.approx(0.9)
 
 
 def test_unsettled_reservation_survives_a_crash_and_settle_reconciles(tmp_path):
@@ -67,7 +67,7 @@ def test_unsettled_reservation_survives_a_crash_and_settle_reconciles(tmp_path):
     with pytest.raises(costs.BudgetExceeded):
         costs.reserve(tmp_path, 3.0, "tester", "m", "T", 1.0)
     costs.settle(tmp_path, rid, 1000, 100, 0.05)
-    assert costs.spent_today(tmp_path) == pytest.approx(0.05)
+    assert costs.spent_24h(tmp_path) == pytest.approx(0.05)
     costs.reserve(tmp_path, 3.0, "tester", "m", "T", 1.0)
 
 
@@ -117,7 +117,7 @@ def test_llm_call_reserves_settles_and_refuses_over_budget(repo):
     assert llm_call(team, "brain", "T-001", "sys", "hi", {"type": "object"}, client=client) == {
         "ok": True
     }
-    assert costs.spent_today(team.home) == pytest.approx((1000 * 4 + 500 * 20) / 1e6)
+    assert costs.spent_24h(team.home) == pytest.approx((1000 * 4 + 500 * 20) / 1e6)
     team.cfg["daily_budget_usd"] = 0.01
     with pytest.raises(costs.BudgetExceeded):
         llm_call(team, "brain", "T-001", "sys", "hi", {"type": "object"}, client=client)
@@ -130,7 +130,7 @@ def test_llm_call_releases_on_4xx_and_keeps_on_unknown_billing(repo):
     bad = anthropic.BadRequestError("bad", response=httpx.Response(400, request=req), body=None)
     with pytest.raises(anthropic.BadRequestError):
         llm_call(team, "tester", "T", "s", "p", {}, client=StubClient(bad))
-    assert costs.spent_today(team.home) == 0
+    assert costs.spent_24h(team.home) == 0
     with pytest.raises(anthropic.APIConnectionError):
         llm_call(
             team,
@@ -141,7 +141,7 @@ def test_llm_call_releases_on_4xx_and_keeps_on_unknown_billing(repo):
             {},
             client=StubClient(anthropic.APIConnectionError(request=req)),
         )
-    assert costs.spent_today(team.home) > 0.1  # held at the worst case
+    assert costs.spent_24h(team.home) > 0.1  # held at the worst case
 
 
 def test_llm_call_retries_transient_errors_not_rejections(repo):
@@ -419,7 +419,7 @@ def test_v0_cost_database_is_migrated(tmp_path):
     db.commit()
     db.close()
     costs.reserve(tmp_path, 3.0, "brain", "m", "T", 1.0)
-    assert costs.spent_today(tmp_path) == pytest.approx(1.5)
+    assert costs.spent_24h(tmp_path) == pytest.approx(1.5)
 
 
 def test_carriage_return_file_names_survive(repo):

@@ -79,7 +79,7 @@ align" rather than guessing.
 increase above noise threshold), shrank (usually a measurement artefact — flag it), and
 stable. Noise thresholds are calibrated per asset type from repeated scans.
 
-**Parallax keyframes (frames stage, `keyframes.py`, ADR 0015).** Keyframes are chosen by
+**Parallax keyframes (frames stage, `keyframes.py`, ADR 0020).** Keyframes are chosen by
 measured camera motion, not a fixed rate (`run --keyframes parallax`, default). ffmpeg
 decodes `oversample` (1.5) × the frame budget as candidates (at most the source fps; same
 HDR→SDR, rotation and VFR handling), the blur/exposure drops run, then KLT tracks
@@ -123,7 +123,7 @@ download `fused.ply` + `fused.ply.vis`, stop). Guarantees: a started worker is a
 past it; before any start, `used today + est_hours_per_job > daily_gpu_hours_budget` (UTC
 day, JSON ledger under `data/`) raises `BudgetExceededError`. Config: `pipeline/config.yaml`
 → `dense_remote` (`enabled: false`, `provider: fake | modal`). Providers: a fake one for tests
-and the Modal one (`dense_modal.py`, ADR 0018: injected client, lazy `modal` import, image
+and the Modal one (`dense_modal.py`, ADR 0019: injected client, lazy `modal` import, image
 from `infra/colmap-cuda`, token only from `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`), which
 nothing calls until the owner approves the paid account (P4a-2); the default
 `run`/`benchmark` path does not use either.

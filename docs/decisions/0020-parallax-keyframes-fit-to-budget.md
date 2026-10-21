@@ -1,4 +1,4 @@
-# 0015 — Parallax keyframes: residual after a homography, threshold fitted to the frame budget
+# 0020 — Parallax keyframes: residual after a homography, threshold fitted to the frame budget
 
 - Status: accepted (dev team, P2b)
 - Date: 2026-10-17
