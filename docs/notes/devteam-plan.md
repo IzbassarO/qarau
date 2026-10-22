@@ -56,6 +56,9 @@ Dev tooling in `devteam/`, not product code. Owner's brief: 2026-10-14.
   developer's `setup` (`pnpm install`) before every round and commits. Web tasks: the brain
   lists `routes`, the tester gets screenshots of them (Playwright CLI on the worktree's Vite
   server with the main checkout's runs) and they are listed in the packet (local files).
+  Developers never take screenshots (Codex has no network or browser); the tester judges
+  visual criteria from its own. Transient API failures (connection, timeout, 429, 5xx,
+  overload) are retried 3 times with backoff before the node crashes.
 - v2 limits savers (owner, 2026-10-15): developers run only the quick benchmark
   (`gates.benchmark.quick_only`: notre-dame + room, ~11 min) with the cached dev numbers in the
   brief; the full set runs only at the merge gate and at release, cached per `pipeline/` tree

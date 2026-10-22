@@ -13,8 +13,10 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
   const { t, lang } = useI18n();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const runs = useRuns(!demo);
-  const demoData = useMemo(() => (demo ? createDemo(lang) : null), [demo, lang]);
+  // Home lists the real runs; the demo lives only at /inspections/demo (never mixed in).
+  const showDemo = demo;
+  const runs = useRuns(!showDemo);
+  const demoData = useMemo(() => (showDemo ? createDemo(lang) : null), [showDemo, lang]);
   const sites = useMemo(
     () => demoData?.sites ?? groupRunsIntoSites(runs.data ?? []),
     [demoData, runs.data],
@@ -47,8 +49,8 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
       <div className="sidebar-container" id="inspection-sidebar">
         <Sidebar
           sites={sites}
-          demo={demo}
-          loading={!demo && runs.isPending}
+          demo={showDemo}
+          loading={!showDemo && runs.isPending}
           onNavigate={closeNavigation}
           onNewInspection={() => {
             closeNavigation();
@@ -75,8 +77,6 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
             <svg
               aria-hidden="true"
               viewBox="0 0 20 20"
-              width="20"
-              height="20"
               fill="none"
               stroke="currentColor"
               strokeWidth="1.5"
@@ -93,10 +93,10 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
               </>
             )}
           </div>
-          {demo && <span className="demo-badge">{t('shell.demo')}</span>}
+          {showDemo && <span className="demo-badge">{t('shell.demo')}</span>}
         </header>
         <main id="inspection-main" tabIndex={-1} className="shell-main">
-          {!demo && runs.isError && (
+          {!showDemo && runs.isError && (
             <div className="api-error" role="alert">
               <div>
                 <strong>{t('shell.connectionError')}</strong>
@@ -136,14 +136,7 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
           ) : (
             <div className="empty-state">
               <div className="empty-symbol" aria-hidden="true">
-                <svg
-                  viewBox="0 0 48 48"
-                  width="48"
-                  height="48"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.25"
-                >
+                <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.25">
                   <path d="m24 6 16 9v18l-16 9-16-9V15zM8 15l16 9 16-9M24 24v18" />
                   <circle cx="24" cy="24" r="4" fill="currentColor" />
                 </svg>
@@ -154,7 +147,6 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
               <button className="shell-button primary" onClick={() => setDialogOpen(true)}>
                 <span aria-hidden="true">+</span> {t('inspection.new')}
               </button>
-              <span className="empty-note">{t('shell.emptyNote')}</span>
             </div>
           )}
         </main>

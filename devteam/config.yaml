@@ -4,12 +4,24 @@
 # when every gate is green. dev -> main: weekly release PR, merged only if CI and the full
 # benchmark are green on dev.
 base_branch: dev
+# Viewer runs (relative to the main checkout): the one place the pipeline writes runs to, the web
+# viewer and backend read them from, and the tester screenshots. Every step gets it as
+# QARAU_RUNS_DIR ({runs_dir} in commands). P3e wrote data/runs while the tester's viewer read the
+# quick benchmark output: "manifest.json not found" (2026-10-18).
+runs_dir: data/runs
 release_branch: main
 release_every_days: 7
 max_fix_loops: 3          # times a task is sent back (tester or gates), then "blocked"
 
 gates:
   ci_timeout_min: 40
+  # No agent may change these; devteam/, .github/, backlog.yaml, CLAUDE.md and AGENTS.md are
+  # always protected (devteam/scope.py). A change is a hard fail, the task is blocked.
+  protected:
+    - pipeline/qarau_pipeline/benchmark_set.toml   # the videos the benchmark gate measures
+    - web/eslint.config.*
+    - .gitleaks*
+    - .pre-commit-config.yaml
   benchmark:
     when_paths: [pipeline/]   # run only when the change touches these
     # Contract (task P1): writes {out}/results.json, reads videos from {data} (read-only);
@@ -20,15 +32,49 @@ gates:
     max_rise_reproj_pct: 10
     max_drop_points_pct: 10
     max_rise_scale_err_cm: 0.5
-    # Measured run-to-run noise (docs/notes/benchmark-method.md, Variance): mykolaiv swings
-    # +23 % points / +16 % reproj between identical runs, so the defaults flag it by chance.
+    # Measured run-to-run noise (docs/notes/benchmark-method.md, Variance). Mykolaiv on the
+    # same 300 frames: 178/210 -> 81/210 registered, 3 -> 5 models, 10 k -> 3 k points. No
+    # threshold separates that from a real change: shown in the packet, not gated. P3c
+    # (2026-10-16, "Mykolaiv (P3c)" there) found why: an edited night news clip (~18 shots,
+    # title cards, burned-in logo), no one honest model. Owner, 2026-10-21: stays ungated.
     per_video:
-      mykolaiv: {max_drop_points_pct: 30, max_rise_reproj_pct: 25}
+      mykolaiv: {gated: false, why: "edited news clip, no one honest model (P3c); owner 2026-10-21: not gated"}
     # Developer rounds run only these (~11 min, low run-to-run noise); the full set runs only at the
     # merge gate and at release. Saves subscription limits and round time.
     quick_only: [notre-dame, room]
+    # A task may set its own `quick_only` in the backlog (e.g. videos its screenshots need).
     quick_min: 11
-daily_budget_usd: 3.0     # API spend cap (brain + tester); subscriptions are not counted
+  # Playwright e2e, run by Kerege right after a round on a clean checkout, for tasks that change
+  # web/: a fresh Vite on a free port ({port} -> QARAU_E2E_PORT; web/playwright.config.ts never
+  # reuses a server), stopped after with everything the step started. A failure goes back to the
+  # developer without an LLM tester call. A Codex sandbox cannot open a port (listen EPERM), so
+  # developers never run e2e themselves (A5-fix, 2026-10-18).
+  e2e:
+    when_paths: [web/]
+    command: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_E2E_PORT={port} QARAU_RUNS_DIR={runs_dir} pnpm exec playwright test --reporter=list
+    timeout_min: 20
+  # Run on the backlog every status commit would push to dev, before it is pushed: a failure
+  # keeps the status local and warns (778e072 `backlog: A9-fix done (#41)` turned dev CI red).
+  backlog_check: uv run --quiet pytest -q -m backlog -p no:cacheprovider tests
+daily_budget_usd: 15.0
+
+# `devteam run --continuous` (Kerege): per developer, plan the next task when one ends.
+# A developer with 2 tasks in a row blocked pauses; the run stops when no developer can take a
+# task, at the daily budget, these limits, Ctrl+C.
+continuous:
+  max_hours: 10              # then a clean stop (current steps finish, the next run resumes)
+  max_tasks: 8               # tasks taken per run; then no new ones, running ones finish
+  limit_wait_max_hours: 5    # subscription limit: wait for the reset, at most this long
+
+# Supervisor (owner, 2026-10-17): per task, so one task going wrong never burns the plan or
+# stops the others (A7 used 42.6 M tokens while blocked, P2b 17 M). Tokens = subscription tokens
+# of the developer (in + cached + out, as the dashboard shows them), counted live. Over a limit:
+# that step is killed, the task is blocked with the reason, the other developers keep going.
+supervisor:
+  max_tokens_per_round: 8000000   # one developer round
+  max_tokens_per_task: 12000000   # all rounds of the task in this run (resume starts again)
+  max_round_min: 60               # longest round; a task may set its own (backlog `supervisor:`)
+  max_idle_min: 20                # no output from the developer and no CPU work in its processes
 
 # provider: anthropic for now. Prices are $ per 1M tokens, used for the cost report.
 models:
@@ -38,18 +84,20 @@ models:
     effort: high
     price_in: 4.0
     price_out: 20.0
+    price_cache_read: 0.2   # prompt cache hits; 1 h cache writes cost 2x price_in
   tester:
     provider: anthropic
     model: claude-sonnet-5-5
     effort: medium
     price_in: 2.0
     price_out: 10.0
+    price_cache_read: 0.2
 
 developers:
   dev_pipeline:
     tool: claude           # Claude Code headless, your subscription (CLAUDE_CODE_OAUTH_TOKEN)
     areas: [core]          # backlog tasks with this area may go to this developer
-    owns: [pipeline/, backend/, infra/]
+    owns: [pipeline/, backend/, infra/, docs/]   # enforced on the diff (scope gate)
     timeout_min: 90
     allowed_tools:
       - Read
@@ -70,6 +118,12 @@ developers:
       - "Bash(git branch:*)"
       - "Bash(gh:*)"
     setup: []
+    screenshots:           # viewer on the quick benchmark output ({runs}); routes /viewer/<video>.
+                           # A task that writes runs_dir (writable) is shown runs_dir instead.
+      serve: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_RUNS_DIR={runs} pnpm exec vite --port 5197 --strictPort
+      url: http://localhost:5197
+      shoot: cd web && node {shoot} {url} {png} {size} 4000   # signs in first (devteam/.env test user)
+      # viewports: [1440x900, 390x844]   # the default; {size} is each one, as 1440,900
     checks:                # same as GitHub CI, so CI rarely surprises
       - cd pipeline && uv run ruff check . && uv run ruff format --check . && uv run mypy .
       - cd pipeline && uv run pytest -q
@@ -78,14 +132,18 @@ developers:
   dev_app:
     tool: codex            # Codex CLI, your saved ChatGPT login
     areas: [app]
-    owns: [web/]
+    owns: [web/, docs/decisions/*.md, docs/notes/*.md]   # web/ + markdown plans and ADRs
     timeout_min: 60
     setup:                 # runs before every round: the Codex sandbox has no network
       - cd web && pnpm install --frozen-lockfile
     screenshots:           # pages from the plan's `routes`; the tester sees them
-      serve: cd web && QARAU_RUNS_DIR={data}/runs pnpm exec vite --port 5198 --strictPort
+      serve: cd web && QARAU_RUNS_DIR={runs_dir} pnpm exec vite --port 5198 --strictPort
       url: http://localhost:5198
-      shoot: cd web && pnpm exec playwright screenshot --viewport-size=1440,900 --wait-for-timeout=2500 {url} {png}
+      shoot: cd web && node {shoot} {url} {png} {size} 2500 {theme} {lang}
+      themes: [light, dark]  # {theme}: prefers-color-scheme, each viewport in both
+      # {lang}: the app locale. Every viewport x theme in the first; the others at every viewport
+      # in the first theme (kk dates broke in Chrome unseen: shots were ru only, 2026-10-21)
+      locales: [ru, kk, en]
     checks:
       - cd web && pnpm lint && pnpm typecheck
       - cd web && pnpm test && pnpm build

@@ -1,63 +1,234 @@
-import type { ReactNode } from 'react';
-import { LANGS, setLang, useI18n, type Lang } from '../i18n';
+import { useId, type MouseEvent, type ReactNode } from 'react';
+import { useI18n } from '../i18n';
+import { LanguageSwitch, Wordmark } from '../shell/ShellIdentity';
+import { MAX_SENSITIVITY, MIN_SENSITIVITY, type ObserverBoostKey } from './settings';
 
-export function Logo() {
-  return (
-    <span className="flex items-center gap-2.5 text-ink">
-      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-        <circle cx="11" cy="11" r="9" fill="none" stroke="currentColor" strokeWidth="1.6" />
-        <circle cx="11" cy="11" r="3.2" fill="currentColor" />
-      </svg>
-      <span className="text-base font-semibold tracking-tight">qarau</span>
-    </span>
-  );
-}
-
-export function LangSwitch() {
-  const { lang, t } = useI18n();
-  return (
-    <div
-      className="flex gap-0.5 rounded-lg border border-line-strong p-0.5"
-      role="group"
-      aria-label={t('language.label')}
-    >
-      {(Object.keys(LANGS) as Lang[]).map((l) => (
-        <button
-          key={l}
-          type="button"
-          aria-pressed={l === lang}
-          onClick={() => setLang(l)}
-          className={`h-6 cursor-pointer rounded-md px-2 text-xs uppercase ${l === lang ? 'bg-line text-ink' : 'text-ink-2'}`}
-        >
-          {t(`language.${l}`)}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-export function Toggle({
+export function DenseToggle({
   on,
   onChange,
-  children,
 }: {
   on: boolean;
-  onChange: (v: boolean) => void;
+  onChange: (visible: boolean) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <Toggle on={on} onChange={onChange}>
+      {t('viewer.show.densePoints')}
+    </Toggle>
+  );
+}
+
+export function ToolButton({
+  label,
+  onClick,
+  pressed,
+  children,
+}: {
+  label: string;
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+  pressed?: boolean;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
-      aria-pressed={on}
-      onClick={() => onChange(!on)}
-      className={`flex min-h-9 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink ${on ? 'bg-raised' : 'bg-transparent'}`}
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      aria-pressed={pressed}
+      className="viewer-tool"
     >
-      <span
-        className={`relative h-4 w-7 shrink-0 rounded-full ${on ? 'bg-inspected' : 'bg-line-strong'}`}
+      {children}
+    </button>
+  );
+}
+
+export function PointInfoTool({ active, onClick }: { active: boolean; onClick: () => void }) {
+  const { t } = useI18n();
+  return (
+    <ToolButton label={t('pointInfo.tool')} pressed={active} onClick={onClick}>
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 18 18"
+        aria-hidden="true"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
       >
-        <span
-          className={`absolute top-0.5 h-3 w-3 rounded-full bg-ink ${on ? 'left-3.5' : 'left-0.5'}`}
-        />
+        <circle cx="9" cy="9" r="7" />
+        <path d="M9 8v5M8 13h2" />
+        <circle cx="9" cy="5" r="0.7" fill="currentColor" />
+      </svg>
+    </ToolButton>
+  );
+}
+
+export function ModeSwitch({
+  orbitActive = true,
+  onOrbit,
+  onObserver,
+}: {
+  orbitActive?: boolean;
+  onOrbit: () => void;
+  onObserver: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div
+      role="group"
+      aria-label={t('viewer.mode.label')}
+      className="viewer-segments"
+      onKeyDown={(event) => {
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
+        if (event.key.toLowerCase() === 'f' || event.code === 'KeyF') {
+          if (!event.repeat) (orbitActive ? onObserver : onOrbit)();
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        if (!['1', '2', '3'].includes(event.key)) return;
+        if (event.key === '1' && !event.repeat) onOrbit();
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+    >
+      <button
+        type="button"
+        aria-pressed={orbitActive}
+        title={t('viewer.mode.orbitHint')}
+        onClick={onOrbit}
+        className="viewer-segment"
+      >
+        {t('viewer.mode.orbit')}
+      </button>
+      <span title={t('viewer.mode.comingSoon')}>
+        <button
+          type="button"
+          disabled
+          aria-pressed={false}
+          title={t('viewer.mode.comingSoon')}
+          className="viewer-segment"
+        >
+          {t('viewer.mode.walk')}
+        </button>
+      </span>
+      <button
+        type="button"
+        aria-pressed={!orbitActive}
+        title={t('viewer.mode.observerHint')}
+        onClick={onObserver}
+        className="viewer-segment"
+      >
+        {t('viewer.mode.observer')}
+      </button>
+    </div>
+  );
+}
+
+export function NavigationSettings({
+  sensitivity,
+  onSensitivityChange,
+  boostKey,
+  onBoostKeyChange,
+}: {
+  sensitivity: number;
+  onSensitivityChange: (value: number) => void;
+  boostKey?: ObserverBoostKey;
+  onBoostKeyChange?: (value: ObserverBoostKey) => void;
+}) {
+  const { t } = useI18n();
+  const sensitivityId = useId();
+  return (
+    <details className="relative">
+      <summary className="viewer-settings-trigger">
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 18 18"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          aria-hidden="true"
+        >
+          <path d="M3 4h12M3 9h12M3 14h12M6 2v4M12 7v4M7 12v4" />
+        </svg>
+        {t('viewer.settings.title')}
+      </summary>
+      <div className="viewer-settings-panel">
+        <div className="viewer-settings-field">
+          <div className="viewer-settings-label">
+            <label htmlFor={sensitivityId}>{t('viewer.settings.sensitivity')}</label>
+            <span className="viewer-mono viewer-caption">{sensitivity.toFixed(2)}×</span>
+          </div>
+          <input
+            id={sensitivityId}
+            type="range"
+            min={MIN_SENSITIVITY}
+            max={MAX_SENSITIVITY}
+            step={0.05}
+            value={sensitivity}
+            onChange={(event) => onSensitivityChange(Number(event.target.value))}
+            className="w-full"
+          />
+        </div>
+        <p className="viewer-caption viewer-muted">{t('viewer.settings.precision')}</p>
+        {boostKey && onBoostKeyChange && (
+          <label className="viewer-label-stack viewer-caption viewer-muted">
+            {t('viewer.settings.observerBoost')}
+            <select
+              value={boostKey}
+              onChange={(event) => onBoostKeyChange(event.target.value as ObserverBoostKey)}
+              className="viewer-select"
+            >
+              <option value="control">{t('viewer.settings.control')}</option>
+              <option value="alt">{t('viewer.settings.alt')}</option>
+            </select>
+          </label>
+        )}
+      </div>
+    </details>
+  );
+}
+
+export function Logo() {
+  return <Wordmark />;
+}
+
+export function LangSwitch() {
+  return <LanguageSwitch />;
+}
+
+export function Toggle({
+  on,
+  onChange,
+  disabled = false,
+  label,
+  title,
+  describedBy,
+  children,
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  label?: string;
+  title?: string;
+  describedBy?: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-label={label}
+      aria-describedby={describedBy}
+      aria-pressed={on}
+      title={title}
+      onClick={() => onChange(!on)}
+      className="viewer-toggle"
+    >
+      <span className="viewer-toggle-track">
+        <span className="viewer-toggle-thumb" />
       </span>
       <span>{children}</span>
     </button>
@@ -65,14 +236,12 @@ export function Toggle({
 }
 
 export const H2 = ({ children }: { children: ReactNode }) => (
-  <h2 className="m-0 mb-0.5 text-xs font-medium uppercase tracking-[0.06em] text-ink-2">
-    {children}
-  </h2>
+  <h2 className="viewer-heading">{children}</h2>
 );
 
 export const Row = ({ k, v }: { k: ReactNode; v: ReactNode }) => (
   <>
-    <span className="text-ink-2">{k}</span>
-    <span className="text-right font-mono">{v}</span>
+    <span className="viewer-muted">{k}</span>
+    <span className="viewer-value">{v}</span>
   </>
 );

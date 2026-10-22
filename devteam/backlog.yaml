@@ -25,7 +25,28 @@ tasks:
     phone video, with tests on synthetic clips for each case.
 
     '
-  status: todo
+  status: done
+  owner: dev_pipeline
+  run: run-20261015-081950
+  branch: devteam/P2a
+  pr: https://github.com/IzbassarO/qarau/pull/9
+  done_at: '2026-10-15'
+- id: P0
+  area: core
+  title: Export never crashes on far outlier points
+  goal: 'The export stage crashed on mykolaiv in a gate run (laspy OverflowError: "Values given do not
+    fit after applying offset and scale") after a good reconstruction (178/210 frames), so the whole benchmark
+    failed. Choose LAS offset/scale from the actual point extent (or drop non-finite / absurdly far points
+    and report how many), with a test on synthetic points far from the origin. Log: devteam/.state/bench/beadd07*/mykolaiv/log.txt
+    on the dev Mac.
+
+    '
+  status: done
+  owner: dev_pipeline
+  run: run-20261015-121320
+  branch: devteam/P0
+  pr: https://github.com/IzbassarO/qarau/pull/14
+  done_at: '2026-10-15'
 - id: P3
   area: core
   title: One connected model per video
@@ -34,7 +55,75 @@ tasks:
     videos split into several models (aegviidu 3, mykolaiv 3, room 2 on a8efcc9).
 
     '
-  status: todo
+  status: done
+  owner: dev_pipeline
+  run: run-20261015-182436
+  branch: devteam/P3
+  pr: https://github.com/IzbassarO/qarau/pull/18
+  done_at: '2026-10-15'
+- id: P3b
+  area: core
+  title: Sky mask and far-point filter
+  goal: 'Owner''s review 2026-10-15: long outdoor shots grow a "sky wall" of far, badly triangulated points
+    that hides buildings and trees in the default view. Split out of P3 (merged in #18).
+
+
+    1. Sky mask before feature extraction: mask sky regions per frame and pass the masks to COLMAP feature
+    extraction (ImageReaderOptions.mask_path), so no feature inside the sky is extracted or matched. A
+    classical detector on OpenCV (Apache-2.0, already a dependency) or a small Apache-2.0/MIT segmentation
+    model; NVIDIA SegFormer is not allowed. Record the choice and its licence in ADR docs/decisions/0013-*.
+    Tests on synthetic frames with a known sky region.
+
+
+    2. Point filter after mapping: drop 3D points with triangulation angle < 1.5 degrees or reprojection
+    error above COLMAP''s robust threshold (mapper filter_max_reproj_error, 4 px by default). The run
+    report and the benchmark results.json show points_total, points_dropped_low_parallax, points_dropped_reproj.
+
+
+    3. Far layer: far points that survive the filter are exported as a separate `far` layer in the viewer
+    bundle (own arrays + manifest key, ADR 0003), never mixed into the object cloud. Rendering it is A5
+    (dev_app); until then the viewer does not load it.
+
+
+    Re-test (owner 2026-10-16): the pipeline work is done on branch devteam/P3b (sky mask, triangulation-angle
+    / reprojection filter, far layer, counters, ADR 0013). Continue on that branch with dev merged in
+    (A4/A4b viewer fix; devteam merges, never rebases), rerun the checks and the quick benchmark. No new
+    pipeline changes unless the tester finds a real pipeline defect.
+
+
+    Acceptance:
+
+
+    - The tester MUST take its own screenshots of /viewer/notre-dame and /viewer/aegviidu; a pass without
+    them is a fail. In the default view (after A4b), compared with dev from the same camera: no wall or
+    band of points in the sky; far points appear only in the separate far layer. (The orchestrator adds
+    dev-*.png screenshots of the same routes on dev''s gate benchmark.) Sparse clouds are never expected
+    to look like the object: do not judge recognisability before dense reconstruction (P4).
+
+
+    - Registered-frames ratio is not below dev on any gated video.
+
+    - points_total, points_dropped_low_parallax, points_dropped_reproj are in the run report and results.json.
+
+    - Tests for the sky mask, the point filter counts and the far layer export.
+
+    '
+  owner: dev_pipeline
+  quick_only:
+  - notre-dame
+  - aegviidu
+  licence: 'Classical sky detector on OpenCV (Apache-2.0) preferred. Any model must be Apache-2.0/MIT/BSD
+    for code AND weights; note it in ADR 0013. NVIDIA SegFormer weights are under the NVIDIA Source Code
+    License (non-commercial): forbidden. Unclear -> ask the owner.
+
+    '
+  status: done
+  depends_on:
+  - A4b
+  run: run-20261017-085251
+  branch: devteam/P3b
+  pr: https://github.com/IzbassarO/qarau/pull/28
+  done_at: '2026-10-17'
 - id: P2b
   area: core
   title: Parallax keyframes and a footage quality report
@@ -42,16 +131,49 @@ tasks:
     problems with plain re-shoot advice: blur, moving too fast, pure rotation (turning on the spot), low
     texture.
 
-    '
-  status: todo
-- id: P4a
-  area: core
-  title: Dense reconstruction stage (commercial licence)
-  goal: 'A dense stage behind the Densifier interface using a model whose licence allows commercial use
-    (record the licence in an ADR). Exported to the viewer bundle.
+
+    Earlier work is on devteam/P2b (PR #25, open): re-run the gates on that branch; the CI web failure
+    that blocked it is fixed in dev.
 
     '
-  status: todo
+  status: done
+  owner: dev_pipeline
+  run: cont-20261017-123453-dev_pipeline-1
+  branch: devteam/P2b
+  pr: https://github.com/IzbassarO/qarau/pull/25
+  done_at: '2026-10-17'
+- id: P4a-1
+  area: core
+  title: Dense stage executor without spending money
+  goal: 'A Docker image with COLMAP built for CUDA, and a provider-independent remote executor behind
+    an interface: start a GPU worker, upload the frames, run dense, download the results, and always shut
+    the worker down (finally / on error / on timeout, with a test for each). A timeout and a daily GPU
+    budget in config.yaml (the pipeline''s or infra/, never devteam/); the executor refuses to start a
+    worker that would exceed it. Tested with a fake provider only: no real GPU, no paid account.
+
+    '
+  status: done
+  owner: dev_pipeline
+  run: cont-20261017-123453-dev_pipeline-2
+  branch: devteam/P4a-1
+  pr: https://github.com/IzbassarO/qarau/pull/35
+  done_at: '2026-10-17'
+- id: P3c
+  area: core
+  title: Re-gate mykolaiv
+  goal: 'After P3 mykolaiv still gives 2 models / 84.8 % registered, so it stays ungated in devteam/config.yaml
+    (gates.benchmark.per_video). Goal: 1 model with >= 90 % registered frames, stable across repeated
+    runs, then remove the per_video exception so mykolaiv is gated again. If that is not reachable, document
+    why (frames, motion, measured run-to-run noise) in docs/notes/benchmark-method.md and keep it excluded
+    with that reason.
+
+    '
+  owner: dev_pipeline
+  status: done
+  run: run-20261016-165310
+  branch: devteam/P3c
+  pr: https://github.com/IzbassarO/qarau/pull/23
+  done_at: '2026-10-16'
 - id: P4b
   area: core
   title: Frame-to-point links for dense points
@@ -59,12 +181,221 @@ tasks:
     panel can show source frames for any point.
 
     '
-  status: todo
+  status: done
+  owner: dev_pipeline
+  run: cont-20261017-123453-dev_pipeline-3
+  branch: devteam/P4b
+  pr: https://github.com/IzbassarO/qarau/pull/36
+  done_at: '2026-10-17'
+- id: P3e
+  area: core
+  title: Refresh viewer runs
+  goal: 'The web app still shows runs made before the sky mask and far layer (P3b) and the parallax keyframes
+    (P2b). Re-run the current pipeline (sparse, on the CPU: no dense stage, no GPU, nothing paid) on every
+    reference video in data/samples and export each into data/runs under a NEW run name (e.g. <video>-2026-10-18)
+    with created_at set at export, so the web app lists the current results next to the old ones. Keep
+    every old run: never change, move or delete anything already in data/runs (the orchestrator checks
+    and blocks the task). Commit only the code and docs this needs (e.g. a refresh command in pipeline/,
+    a note in docs/); runs are data and are never committed. Report per video: run name, registered %,
+    points, far-layer points, keyframes, and any video that failed with its reason.
+
+    '
+  writable:
+  - data/runs
+  status: done
+  owner: dev_pipeline
+  run: cont-20261019-223446-dev_pipeline-1
+  branch: devteam/P3e
+  supervisor:
+    max_round_min: 180
+  pr: https://github.com/IzbassarO/qarau/pull/48
+  done_at: '2026-10-20'
+- id: P4a-1b
+  area: core
+  title: Modal GPU provider for the dense executor
+  goal: 'A Modal provider for the P4a-1 executor: one more implementation of the existing GpuProvider
+    interface (pipeline/qarau_pipeline/dense_remote.py, ADR 0016) that starts a GPU worker, uploads frames,
+    runs COLMAP dense, downloads the results and always stops (finally / error / timeout). Config in pipeline/config.yaml:
+    provider: modal, daily_gpu_hours_budget 1.0, est_hours_per_job 0.5 (timeout_s within the estimate,
+    as the loader requires); dense_remote.enabled stays false. Record the Modal client licence (Apache-2.0)
+    and the decision in an ADR.
+
+
+    Acceptance:
+
+    - No real GPU job and no real Modal call in this task: no account, no token, no spending (developers
+    have no Modal token). The first real GPU run is P4a-2 only.
+
+    - Every Modal call the adapter makes (start, upload, run, download, stop) is covered by tests with
+    a mocked or fake Modal client: success, error and timeout, and the worker is stopped on each path.
+
+    - The adapter sits behind the existing GpuProvider interface: RemoteDenseExecutor is used as it is,
+    and its existing tests pass unchanged.
+
+    - The Modal image (COLMAP built with CUDA, from infra/colmap-cuda) is defined in code but not built
+    or run on a GPU in this task, and never pushed to a public registry; a test checks the definition
+    without building it.
+
+    - The token is read only from the environment (MODAL_TOKEN_ID / MODAL_TOKEN_SECRET; at run time the
+    owner provides them), never from a file in the repository, and never printed, logged or written to
+    a file: a test with a fake token checks it never appears in logs, errors or the run report.
+
+    - ruff, mypy and pytest pass. P4a-2 stays blocked until this task is merged and the owner gives the
+    command.
+
+    '
+  licence: 'modal Python client: Apache-2.0. Modal itself is a paid service: no real call in this task.
+
+    '
+  status: done
+  owner: dev_pipeline
+  run: cont-20261020-180854-dev_pipeline-1
+  branch: devteam/P4a-1b
+  pr: https://github.com/IzbassarO/qarau/pull/50
+  done_at: '2026-10-20'
 - id: P5a
   area: core
   title: Metric scale and gravity from an A4 sheet or a measured distance
-  goal: 'The user marks an A4 sheet or one known distance; the map is scaled to metres and rotated so
-    gravity points down. Scale error is reported in the benchmark.
+  goal: 'Split on 2026-10-19 into P5a-1 (measured distance + gravity) and P5a-2 (A4 sheet): one round
+    used 8.2 M tokens (limit 8 M). Its round is on branch devteam/P5a (b26082f).
+
+    '
+  status: dropped
+  owner: dev_pipeline
+  branch: devteam/P5a
+- id: P5a-1
+  area: core
+  title: Metric scale from a measured distance, and gravity
+  goal: 'The user marks two points in two or more frames and gives the distance between them in metres
+    (a JSON scale reference, docs/notes/scale-reference-format.md); the map is scaled to metres and rotated
+    so gravity points down (camera up estimate, refined by the floor plane). The export records metric,
+    scale source, gravity source and scale error; the benchmark reports scale_err_cm for a video that
+    has a reference. Not in this task: the reference sheet (P5a-2). The branch devteam/P5a-1 already has
+    the first draft from P5a (scale.py, ADR 0018, tests; never checked): finish and verify it, and leave
+    the sheet (Letter / A4) reference kind out of this branch (it comes back in P5a-2).
+
+    '
+  status: blocked
+  blocked_reason: split from P5a (8.2 M tokens in one round, limit 8 M); `devteam resume P5a-1` to start
+    it on its branch
+- id: P5a-2
+  area: core
+  title: Metric scale from a reference sheet (Letter, A4 or custom)
+  goal: 'A paper sheet of known size as the scale reference: the user marks its four corners in order
+    in two or more frames; the scale is fitted to the four edges and two diagonals (both orientations),
+    and the fit residual is reported as the scale error. The sheet size is a parameter of the scale reference
+    (docs/notes/scale-reference-format.md): letter = 215.9 x 279.4 mm (the default: the owner is in the
+    US), a4 = 210 x 297 mm, or custom = width x height in mm. Reuses the reference format, triangulation
+    and alignment of P5a-1; a first draft of the A4 fit (hard-coded 210 x 297 mm) is in commit b26082f
+    on branch devteam/P5a. Automatic detection of the sheet in images is not in this task.
+
+
+    Acceptance:
+
+    - Without a size the sheet is letter; a4 and custom width x height in mm are accepted; an unknown
+    size name or a non-positive custom size is a clear error.
+
+    - The run report (and the export metadata) shows which sheet size was used: its name and its dimensions
+    in mm (e.g. "letter 215.9 x 279.4 mm").
+
+    - Tests: synthetic scenes with a letter sheet and with an a4 sheet each recover the known scale; the
+    custom size is parsed and validated.
+
+    - docs/notes/scale-reference-format.md documents the size parameter and its default.
+
+    - ruff, mypy and pytest pass.
+
+    '
+  status: todo
+  depends_on:
+  - P5a-1
+- id: D1
+  area: core
+  title: Data foundation - storage layout and run catalog
+  goal: 'S3 layout: raw/ (immutable, never overwritten) and processed/<pipeline_version>/. Catalog tables
+    via Alembic (assets, captures, runs, stage_runs) record pipeline, model and parameter versions for
+    every result, and failed runs with their reasons.
+
+    '
+  licence: 'SQLAlchemy and Alembic (MIT), boto3 (Apache-2.0), Versity S3 Gateway (Apache-2.0), pgvector
+    (PostgreSQL licence). PostGIS (GPL-2.0): only as a separate, unmodified database server reached over
+    SQL (ADR 0010, owner 2026-10-15).
+
+    '
+  status: todo
+- id: S1
+  area: core
+  phase: server
+  title: Server job queue with per-stage progress
+  goal: 'The pipeline runs as jobs from a durable queue: Valkey + RQ (ADR 0012; not Redis). The queue
+    runs the current sparse pipeline now; the dense stage (P4a-2a) is plugged in later as one more stage.
+    Each stage reports progress 0-100 to the API (backend/), which U2 shows in the web app. A 30-minute
+    video is processed on a single worker without blocking the API.
+
+
+    Acceptance:
+
+    - Upload -> job -> progress available from the API -> the run is in the catalog when done.
+
+    - One stage can be re-run alone (stages are idempotent and read/write storage).
+
+    - The API stays responsive while a long job runs (test with a long job).
+
+    - Valkey runs in infra/ Docker Compose; no Redis image or Redis-only feature is used.
+
+    '
+  licence: 'Valkey (BSD-3-Clause), RQ (BSD-2-Clause), redis-py client (MIT). Redis server is not used:
+    RSALv2/SSPLv1 since 7.4, AGPLv3 since 8.0 (owner 2026-10-15, ADR 0012).
+
+    '
+  status: todo
+- id: O1a
+  area: core
+  title: Organizations and sites API
+  goal: 'Backend half of O1 (split 2026-10-18: dev_app may not edit backend/). Only backend/ and docs/.
+    Organization and Site SQLAlchemy models (Site: name, optional lat/lon) through an Alembic migration
+    (Alembic comes with D1). Seed the organization "Syracuse University" with zero sites (no invented
+    demo sites). Two authenticated routes, each declaring its role with the existing require_role dependency
+    (backend/app/auth.py): GET /api/organizations/{id} and GET /api/organizations/{id}/sites (sites with
+    nullable coordinates). backend/tests cover the seed, the empty site list, an unknown organization
+    (404) and the auth requirement; ruff, mypy and pytest pass.
+
+    '
+  licence: 'SQLAlchemy and Alembic (MIT), FastAPI and Pydantic (MIT): already used or added by D1.
+
+    '
+  status: todo
+  depends_on:
+  - D1
+- id: A7a
+  area: core
+  title: Region of interest API
+  goal: 'Backend half of A7 (split 2026-10-17: dev_app may not edit backend/). Only backend/ and docs/.
+    The contract is docs/notes/roi-format.md; the web part on branch devteam/A7 already calls these routes.
+    The stored JSON (version 1): {version: 1, site_id, source_run, frame (e.g. "reconstruction"), up_axis,
+    min: [x, y, z], max: [x, y, z], created_at, created_by}; all fields required, other fields ignored
+    and dropped on rewrite.
+
+    - FastAPI routes GET / PUT / DELETE /api/sites/{site_id}/roi. Each declares its role with the existing
+    require_role dependency (backend/app/auth.py): GET viewer (200 JSON, 404 when none is saved), PUT
+    editor (validate, site_id must match the path, save, 200 with the JSON; bad body 422, body over 64
+    KiB 413), DELETE editor (204, also when already absent).
+
+    - A Pydantic v2 model for ROI version 1: required fields, finite numbers, min <= max per axis, ISO
+    8601 created_at with a timezone, up_axis x|y|z.
+
+    - Atomic write into the run catalog: <QARAU_RUNS_DIR>/sites/<site_id>/roi.json through a uniquely
+    named temp file in the same directory and os.replace. Corrupt stored JSON is an error (500), never
+    reported as absent.
+
+    - Path-traversal checks: site ids match [A-Za-z0-9][A-Za-z0-9._:-]* without ''..''; encoded separators,
+    traversal and symlinked site directories or files are rejected (400).
+
+    - backend/tests/test_roi.py covers each route, roles and the shared-token auth, validation, the atomic
+    write, traversal and symlinks; ruff, mypy and pytest pass.
+
+    '
+  licence: 'FastAPI (MIT) and Pydantic (MIT), already backend dependencies; no new library.
 
     '
   status: todo
@@ -103,20 +434,345 @@ tasks:
 
     '
   status: todo
-- id: D1
+- id: P4a-2a-code
   area: core
-  title: Data foundation - storage layout and run catalog
-  goal: 'S3 layout: raw/ (immutable, never overwritten) and processed/<pipeline_version>/. Catalog tables
-    via Alembic (assets, captures, runs, stage_runs) record pipeline, model and parameter versions for
-    every result, and failed runs with their reasons.
+  title: Wire the real Modal provider into the dense-remote CLI (no real call)
+  goal: 'Split from P4a-2 on 2026-10-21 (owner). Code only, so the owner''s first paid run (P4a-2a-run)
+    needs nothing but a token and one command.
+
+
+    1. Add `modal` to the pipeline dependencies as the optional extra ADR 0019 names (`uv add --optional
+    modal modal`, pinned, uv.lock updated). `qarau_pipeline` still imports, and every test still passes,
+    without the extra installed.
+
+    2. `python -m qarau_pipeline dense-remote`: `--provider` is no longer required and takes `fake` or
+    `modal`. Without the flag the provider is `fake` (the default), whatever dense_remote.provider in
+    config.yaml says. `--provider modal` builds the provider with the existing `make_provider(cfg)` (dense_remote.py,
+    ADR 0016/0019) and uses the real ledger (dense_remote.ledger_path) and the real budget and timeout.
+
+    3. The real provider is enabled only by an explicit flag on the command line, e.g. `--provider modal
+    --allow-paid-gpu`; dense_remote.enabled stays false in pipeline/config.yaml and the CLI never sets
+    it to true for modal without that flag. `--provider modal` without the flag exits non-zero before
+    any Modal code runs, with a plain message saying which flag starts a paid run. The fake keeps working
+    while dense_remote is disabled, as now.
+
+    4. Update the references to P4a-2 in docs/decisions/0016, 0019, docs/architecture.md and the pipeline/config.yaml
+    comment to P4a-2a-run (the first real run), and document the command in ADR 0019.
+
+
+    Acceptance:
+
+    - No real Modal call, no account, no token, no spending. No MODAL_* variable in the developer or tester
+    environment: tests delete MODAL_TOKEN_ID / MODAL_TOKEN_SECRET from the environment (monkeypatch) and
+    use a fake ModalClient and a fake `modal` module only; none touches the network.
+
+    - Tests: default provider is fake; `--provider modal` without the flag refuses before `make_provider`
+    is called; `--provider modal --allow-paid-gpu` builds the provider through `make_provider` (patched
+    with a fake) and runs the executor with the real ledger path, budget and timeout from config.yaml;
+    a missing token gives the existing error naming the variables, never values; a budget that is already
+    spent refuses before start.
+
+    - RemoteDenseExecutor and the existing dense_remote / dense_modal tests pass unchanged.
+
+    - ruff, mypy and pytest pass.
 
     '
-  licence: 'SQLAlchemy and Alembic (MIT), boto3 (Apache-2.0), Versity S3 Gateway (Apache-2.0), pgvector
-    (PostgreSQL licence). PostGIS is GPL-2.0: fine as a separate database server, but shipping it in on-prem
-    installs needs GPL compliance (owner to confirm, ADR).
+  licence: 'modal Python client: Apache-2.0 (ADR 0019). Modal itself is a paid service: no real call in
+    this task.
+
+    '
+  status: done
+  owner: dev_pipeline
+  run: cont-20261021-021001-dev_pipeline-1
+  branch: devteam/P4a-2a-code
+  pr: https://github.com/IzbassarO/qarau/pull/54
+  done_at: '2026-10-21'
+- id: P4a-2a-run
+  area: core
+  title: First real COLMAP dense run on Modal (owner only, not Kerege)
+  owner_only: true
+  goal: 'Owner-only task (2026-10-21): done interactively by a Claude Code session with the owner present,
+    never planned or run by Kerege. It has no depends_on on purpose: Kerege moves a blocked task with
+    done dependencies back to todo, so the dependency on P4a-2a-code is written here instead. Starts only
+    after P4a-2a-code is merged into dev and the owner gives the command and the token in his shell.
+
+
+    The first real COLMAP PatchMatch dense run (P4a-1 executor, Modal provider, `dense-remote --provider
+    modal` with the explicit flag from P4a-2a-code). GPU L4, timeout_s 1800, daily_gpu_hours_budget 1.0
+    (pipeline/config.yaml; raise only with the owner).
+
+    1. notre-dame-p3e first (data/runs/notre-dame-p3e frames + colmap sparse).
+
+    2. Then orono-p3e; compare with the local data/runs/orono-dense (points, coverage, look in the viewer
+    from the same camera).
+
+
+    Check against the real account what no fake could (ADR 0019, Consequences): image build from infra/colmap-cuda,
+    upload/download through the Sandbox filesystem, exec exit codes, terminate on an ended sandbox. After
+    each job: the sandbox is gone in the Modal dashboard, the ledger shows the hours, the token is not
+    in any log or output. Outputs go under data/ only, never committed. Results and the real cost go in
+    docs/notes/progress.md and ADR 0019.
+
+    '
+  licence: 'COLMAP (BSD-3-Clause) in the infra/colmap-cuda image; modal client Apache-2.0. Paid service:
+    only our own test footage goes to Modal, never customer footage (Kazakh data stays in Kazakhstan).
+
+    '
+  status: blocked
+  blocked_reason: 'waits for the owner: P4a-2a-code merged, then the owner runs it with Claude Code on
+    the Modal account. Owner-only: never `devteam resume` this task'
+- id: P4a-3
+  area: core
+  title: 'Dense speed: COLMAP PatchMatch knobs in config'
+  goal: 'pipeline/ only; no paid call: Kerege never runs Modal, the timing run on Modal is the owner''s
+    (like P4a-2a-run). Measured 2026-10-21 (P4a-2a-run, notre-dame-p3e, 121 views at 640x480 on an L4):
+    PatchMatch photometric 11.6 min + geometric 15.0 min (~5.8 s per view per pass), fusion 12 s, 1681
+    s of the 1800 s timeout_s. At that pace orono-p3e (151 frames at 1920x1080) needs 2-3 h, so it was
+    not run.
+
+
+    1. `dense_remote.patch_match` in pipeline/config.yaml, read by load_dense_remote_config and passed
+    by dense_commands() (pipeline/qarau_pipeline/dense_remote.py) to COLMAP: max_image_size (image_undistorter
+    and PatchMatchStereo), num_iterations, window_step (with window_radius), and the number of source
+    frames per view. Every key is validated with an error naming it; absent keys keep today''s argv exactly.
+
+
+    2. Tests: dense_commands argv for given knobs and for none (unchanged); the fake provider''s `dense-remote`
+    run prints them.
+
+
+    3. docs/notes/dense-speed.md: per-view time scaled from the measured numbers above (pixels, iterations,
+    sources), and proposed values for a 3-min 1080p video, which the pipeline caps at 300 frames; target
+    < 30 min for the whole job (owner, 2026-10-21). The benchmark has no 3-min 1080p video: the owner
+    measures it on Modal on aegviidu (1920x1080, 71 s) and orono, scaled to 300 frames, after this task
+    merges.
+
+    '
+  licence: 'COLMAP (BSD-3-Clause) options only; nothing new.
+
+    '
+  status: done
+  owner: dev_pipeline
+  run: run-20261021-200952
+  branch: devteam/P4a-3
+  pr: https://github.com/IzbassarO/qarau/pull/60
+  done_at: '2026-10-21'
+- id: P4a-2b
+  area: core
+  title: Depth Anything V2 Small depth prior (estimated points)
+  goal: 'Split from P4a-2 on 2026-10-21 (owner); later, after the first real COLMAP dense run. A depth-prior
+    stage behind the Densifier interface, starting from branch wip/dense-stage (its ADR 0008, unverified
+    WIP). Model: Depth Anything V2 **Small only** (depth-anything/Depth-Anything-V2-Small-hf, Apache-2.0);
+    Base and Large are CC-BY-NC (non-commercial) and must never be loaded: the code refuses any other
+    model id, with a test.
+
+
+    Its points are estimated, not measured: every one is marked `estimated` in the viewer bundle (own
+    arrays or a per-point flag, ADR 0003), is visually distinct from COLMAP points in the viewer, and
+    is excluded from every measurement (area, extent, scale) and from coverage counted as seen. Tests
+    check the flag in the bundle and that measurement ignores flagged points.
+
+    '
+  licence: 'Depth Anything V2 Small code and weights: Apache-2.0 (owner confirmed 2026-10-15). Base/Large:
+    CC-BY-NC-4.0, forbidden.
 
     '
   status: todo
+  depends_on:
+  - P4a-2a-run
+- id: P4c
+  area: core
+  title: Dense only inside the region of interest
+  goal: 'When a site has a region of interest (A7), dense reconstruction and the later stages process
+
+    only the frames and points that see it; camera poses still use all frames. Without a region
+
+    the pipeline runs as before. Tests on a synthetic scene with a box; benchmark unchanged for
+
+    videos without a region.
+
+    '
+  status: todo
+  depends_on:
+  - P4a-2a-run
+  - A7
+- id: D2
+  area: core
+  title: Deploy online
+  goal: 'infra/ only (and docs/). A written deployment plan in docs/ and scripts in infra/ for one small
+    cloud server running web + API + queue (Valkey + RQ) + S3-compatible storage + PostgreSQL, with GPU
+    workers started on demand by the P4a-1 executor (never always on). HTTPS with automatic certificates,
+    login required, no public sign-up. The PR states the estimated monthly cost per component. Do not
+    create any paid account and spend nothing: the scripts are tested locally (Docker Compose or a local
+    VM); the owner runs them on a server he pays for. Customer data for Kazakhstan stays in Kazakhstan:
+    say which providers fit.
+
+    '
+  depends_on:
+  - S1
+  - U2
+  status: todo
+- id: UX1a
+  area: app
+  title: 'Visual design pass, part 1: design system, login page, control centre'
+  goal: 'web/ only; no new features and no behaviour changes. Follow the design rules DESIGN.md (its "Product
+    style" brief), then the frontend-design skill. Product style: an enterprise industrial inspection
+    tool, not an AI demo. Calm neutral palette with one accent, light and dark themes, clear hierarchy,
+    the 3D viewer is the hero. No gradients, glow, glassmorphism, emoji, AI-sparkle icons, marketing copy,
+    or developer/debug text in the UI; plain language for engineers. Finding colours (critical red, watch
+    orange, not-seen gray, inspected blue) only for their meaning; the 3D viewer canvas stays black.
+
+
+    Design tokens (colour, type, spacing, radius, for light and dark) are defined once in a platform-neutral
+    JSON file (web/src/design/tokens.json) so the desktop and mobile apps can reuse them; web/src/index.css
+    takes its values from it (generated, or kept identical by a Vitest test), with no literal colours
+    or sizes in components. The theme follows prefers-color-scheme. Apply it to the login page and the
+    control centre (the main pane at /). All text through i18n en/ru/kk (Russian and Kazakh fit without
+    clipping). Vitest and the e2e tests stay green (update only markup-dependent assertions, never loosen
+    them).
+
+
+    Acceptance: before (dev-*) and after screenshots of the login page ("/?signed-out") and the control
+    centre ("/", signed in) at 1440x900, in the review packet.
+
+
+    Note: Mobile-width screenshots come with a later Kerege change (multi-viewport screenshots).
+
+    '
+  status: done
+  owner: dev_app
+  run: cont-20261020-180854-dev_app-1
+  branch: devteam/UX1a
+  pr: https://github.com/IzbassarO/qarau/pull/49
+  done_at: '2026-10-20'
+- id: UX1b
+  area: app
+  title: 'Visual design pass, part 2: run list and viewer chrome'
+  goal: 'web/ only; no new features and no behaviour changes. Uses the UX1a design system (the design
+    rules, DESIGN.md). The run list (sidebar of the control centre) shows each run''s name and date clearly,
+    newest first, dense and readable; the viewer chrome (top bar, side panels, timeline, controls around
+    the black canvas) uses the same tokens, type scale and spacing. The canvas stays black and the finding
+    colours keep their meaning. i18n en/ru/kk; Vitest and e2e green (update only markup-dependent assertions,
+    never loosen them). Tester screenshots, before (dev-*) and after: "/" (the run list) and "/viewer/notre-dame"
+    (viewer chrome).
+
+
+    Owner additions (2026-10-21):
+
+    - The side panel shows at least 12 inspections at 1440x900 without scrolling it (when that many exist;
+    data/runs has more), dense rows as in DESIGN.md "Density and layout" (about 32 px), name and date
+    still readable and not clipped in ru/kk.
+
+    - The "Select an inspection..." hint appears once on the empty control centre: today shell.emptyDescription
+    and shell.emptyNote both say it (web/src/shell/AppShell.tsx); keep one, drop the other key from en/ru/kk.
+
+    - No "Example" badge (shell.demo) next to the "Example inspection" link (shell.openDemo) in the sidebar
+    footer (web/src/shell/Sidebar.tsx): the link text already says it. The badges elsewhere stay (the
+    demo inspection''s own title, "Tank farm survey", does not say it is an example), and so does demo.notice:
+    the demo stays clearly marked as not real results.
+
+    '
+  status: done
+  depends_on:
+  - UX1a
+  owner: dev_app
+  run: cont-20261021-021001-dev_app-1
+  branch: devteam/UX1b
+  pr: https://github.com/IzbassarO/qarau/pull/53
+  done_at: '2026-10-21'
+- id: UX-kk
+  area: app
+  title: Kazakh dates readable in Chrome; date tests with fixed expected strings
+  goal: 'web/ only; no new features. Owner, 2026-10-21 (Kerege rehearsal cont-20261021-021001): Chrome''s
+    ICU has no Kazakh month names, so the run list (web/src/shell/Sidebar.tsx `shortDate`) shows "M10
+    16" in kk where Node prints "16 қаз."; the inspection header date (web/src/shell/InspectionView.tsx,
+    Intl `dateStyle: ''long''`) has the same problem. UX1b round 2 then made its e2e compute the expected
+    date with the browser''s own Intl, a test that passes whatever the browser prints, and the Vitest
+    in web/src/shell/Sidebar.test.tsx does the same with Node''s Intl.
+
+
+    1. kk dates come from our own month table, never from Intl: short months қаң., ақп., нау., сәу., мам.,
+    мау., шіл., там., қыр., қаз., қар., жел.; long months қаңтар, ақпан, наурыз, сәуір, мамыр, маусым,
+    шілде, тамыз, қыркүйек, қазан, қараша, желтоқсан (CLDR kk, what Node''s full ICU prints). One date
+    helper, used by the run list and the inspection header. ru and en may keep Intl (Chrome has them)
+    as long as the strings below hold.
+
+
+    2. Expected values are fixed strings from fixtures, never computed with Intl or with the helper under
+    test. For 2026-10-16T12:00:00Z the run list shows en "16 Oct", ru "16 окт.", kk "16 қаз."; the kk
+    inspection header contains "16 қазан" and 2026. Vitest checks all 12 kk months (short and long) against
+    literal strings; the e2e (web/e2e/control-center.spec.ts) checks the fixed run-list strings in en,
+    ru and kk in Chrome, replacing its page.evaluate(Intl...) expectation, with every other assertion
+    of that test kept.
+
+
+    Tester screenshots: "/" (the run list); Kerege shoots it in ru, kk and en. No raw month number ("M10")
+    anywhere in kk.
+
+    '
+  status: todo
+- id: UX-390
+  area: app
+  title: 'Viewer layout at 390 px: hints, axis gizmo and timeline never overlap'
+  goal: 'web/ only; no new features, desktop layout unchanged. Measured 2026-10-21 on /viewer/notre-dame-p3e
+    at 390x844 (kk): the orbit hint (`.viewer-hint.orbit`) is squeezed into an 18 px wide column, one
+    word per line, over the language switch and the side panels; the axis gizmo (`.viewer-gizmo`, web/src/viewer/AxisGizmo.tsx)
+    sits on the camera stats panel; the timeline (`.viewer-timeline`) is 32 px wide; a side panel is cut
+    off at the left edge of the screen.
+
+
+    At 390x844 in en, ru and kk: the header, the hints, the gizmo, the timeline and the side panels do
+    not overlap each other (their bounding boxes do not intersect), none of them is clipped by the screen
+    edge, and hint text reads in lines of several words. The video stays visible and the canvas stays
+    black. At 1440x900 nothing moves.
+
+
+    Tests: a Playwright e2e at 390x844 for en, ru and kk asserts the boxes above pairwise do not intersect
+    and lie inside 0..390 px; the existing viewer e2e stay as they are (never loosened). Tester screenshots:
+    "/viewer/notre-dame"; Kerege shoots it at 1440x900 and 390x844, in ru, kk and en, with dev-* before
+    shots to compare the desktop.
+
+    '
+  status: todo
+- id: UX-dense
+  area: app
+  title: Viewer shows the COLMAP dense layer with frame links
+  goal: 'web/ only; no backend or pipeline change. `export --dense` writes a dense layer into the bundle
+    (web/manifest.json key `dense`, ADR 0017: count, position f32, color u8, frame_offsets / frame_ids
+    u32, densifier, frame_links_source), but the viewer never reads it: web/src/lib/bundle.ts only knows
+    the older `dense` metadata ({method, frames_used, points}) of depth-prior runs such as orono-dense,
+    which put their points into `points`. First real data (P4a-2a-run, 2026-10-21): data/runs/notre-dame-p3e-modal,
+    730069 COLMAP dense points, every one linked to the frames that saw it.
+
+
+    1. When manifest.dense has `position`, the dense points load with the bundle (typed arrays straight
+    into the geometry, no per-point objects) and draw with the same height colouring as the sparse points;
+    a layer toggle "Dense" (i18n en/ru/kk), on when the layer exists. Bundles without it (and the old
+    metadata-only `dense`) behave as today.
+
+
+    2. Clicking a dense point opens the same evidence panel as a sparse point, listing the frames from
+    dense.frame_offsets / dense.frame_ids.
+
+
+    Tests: Vitest for the bundle reader on a small fixture bundle with a dense layer (fixed expected counts
+    and frame ids); a Playwright e2e on that fixture: the toggle hides and shows the layer, clicking a
+    dense point lists the fixture''s frames. Tester screenshots: "/viewer/notre-dame-p3e-modal".
+
+
+
+    Owner additions (2026-10-21):
+
+
+    - The viewer shows the dense layer from manifest.dense (with frame↔point links).
+
+    '
+  status: done
+  owner: dev_app
+  run: run-20261021-200952
+  branch: devteam/UX-dense
+  pr: https://github.com/IzbassarO/qarau/pull/62
+  done_at: '2026-10-22'
 - id: A1a
   area: app
   title: Control center layout with sites and inspections
@@ -125,7 +781,12 @@ tasks:
     processing steps). Follows docs/design/. All text via i18n.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261015-081950
+  branch: devteam/A1a
+  pr: https://github.com/IzbassarO/qarau/pull/8
+  done_at: '2026-10-15'
 - id: A2a
   area: app
   title: Blender-like orbit, zoom and pan controls module
@@ -135,7 +796,12 @@ tasks:
     orbit, pinch zoom, Shift+two-finger pan; smooth damping. Replaces the current controls.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261015-121320
+  branch: devteam/A2a
+  pr: https://github.com/IzbassarO/qarau/pull/15
+  done_at: '2026-10-15'
 - id: A2b
   area: app
   title: Fly mode and clickable axis gizmo
@@ -143,7 +809,12 @@ tasks:
     / front / side views as in Blender; both with damping and tests.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261015-182436
+  branch: devteam/A2b
+  pr: https://github.com/IzbassarO/qarau/pull/17
+  done_at: '2026-10-15'
 - id: A3
   area: app
   title: Processing status view
@@ -151,14 +822,152 @@ tasks:
     went wrong, what to do).
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261016-115433
+  branch: devteam/A3
+  pr: https://github.com/IzbassarO/qarau/pull/20
+  done_at: '2026-10-16'
 - id: A4
   area: app
   title: Colour toggle and object framing
   goal: 'Real colours <-> height-blue toggle; the initial view frames the object, not the whole scene.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: run-20261016-165310
+  branch: devteam/A4
+  pr: https://github.com/IzbassarO/qarau/pull/22
+  done_at: '2026-10-16'
+- id: A4b
+  area: app
+  title: 'Readable default view: real RGB by default, frustums hidden by default'
+  goal: 'Follow-up to A4 (#22, built to the old criteria), owner 2026-10-16. A4 delivered robust 2-98
+    % framing (+Z up, no roll), frustum size scaled to the scene and an RGB / height-blue toggle, but
+    the default view is unchanged: the colour mode defaults to height-blue, the build-up ("first seen
+    / not yet seen") colouring is on by default and draws not-yet-seen points dark (#2A3240), and camera
+    frustums are shown by default (web/src/viewer/ViewerScreen.tsx: buildUp: true, frustums: true, savedColorMode()
+    -> ''height''). No change to the pipeline output format (viewer bundle, ADR 0003).
+
+
+    Acceptance:
+
+    - The default point colour is the real RGB from the bundle when it has RGB (height-blue only as the
+    fallback without RGB, or by the user''s choice). The "first seen / not yet seen" timeline colouring
+    is an opt-in mode, off by default.
+
+    - Camera frustums are hidden by default, with the existing toggle to show them (text via i18n RU/KK/EN).
+    When shown, frustum size still scales to the scene extent.
+
+    - Unit tests for the defaults: RGB colour mode when the bundle has RGB, timeline colouring off, frustums
+    hidden. The A4 framing-bound tests keep passing.
+
+    - The tester takes its own screenshots of /viewer/notre-dame, /viewer/aegviidu and /viewer/room (the
+    room run) in the default view: the structure is clearly visible, no frustums, no dark "not yet seen"
+    points, no error banner. Sparse clouds are not expected to look like the object: judge readability,
+    not recognisability.
+
+    - No change to the pipeline output format; only web/ (and docs/) change.
+
+    '
+  owner: dev_app
+  status: done
+  run: run-20261016-215415
+  branch: devteam/A4b
+  pr: https://github.com/IzbassarO/qarau/pull/24
+  done_at: '2026-10-16'
+- id: A5
+  area: app
+  title: Far-point layer in the viewer
+  goal: 'Load the `far` layer from the viewer bundle (written by P3b: own arrays + manifest key, ADR 0003)
+    and render it gray with the not-seen token #6B727D (--color-notseen), never mixed into the object
+    cloud. A toggle in the Show panel; off by default in Quick Scan. Bundles without a `far` layer load
+    as before. All text via i18n (RU/KK/EN). Unit test for layer loading (with and without `far`).
+
+    '
+  owner: dev_app
+  status: done
+  depends_on:
+  - P3b
+  run: cont-20261017-123453-dev_app-1
+  branch: devteam/A5
+  pr: https://github.com/IzbassarO/qarau/pull/32
+  done_at: '2026-10-17'
+- id: A6
+  area: app
+  title: Viewer navigation that feels natural
+  goal: "The owner works on a MacBook trackpad (no mouse): the trackpad is a first-class input. Mouse\n\
+    controls stay as they are.\n- Trackpad: two-finger drag = orbit, pinch = zoom, Shift + two-finger\
+    \ drag = pan. Tell pinch\n  (wheel events with ctrlKey) apart from two-finger scrolling; never zoom\
+    \ on plain two-finger\n  scrolling.\n- Speed adapts to distance: orbit, pan and zoom slow down near\
+    \ the target point. Hold\n  Option/Alt for precision (4x slower). A sensitivity slider in settings,\
+    \ saved per user.\n- The horizon stays level (no roll). \"Align to surface\": click it, then a point;\
+    \ the camera\n  turns to face that surface head-on. Preset views (top, front, side, 3/4) and \"reset\
+    \ view\".\n- Orbit mode is the default. The ground is the outer terrain (not building floors), estimated\n\
+    \  as the dominant lowest plane until P5a-1 gives gravity; the camera never goes below it and\n  cannot\
+    \ look up from under it; it stays inside the scene box plus a margin; zoom has a min and\n  max distance.\n\
+    - The camera path is a thin line with dots; a frustum only for the current or selected frame,\n  never\
+    \ for all frames.\n- A mode switch with three modes (keys 1/2/3): Orbit, Walk (A8, shown disabled\
+    \ until it\n  exists), Observer (A9).\n- All text via i18n (RU/KK/EN).\n- Unit tests for the event\
+    \ handling (pinch vs scroll, Shift pan, Alt precision) and for the\n  constraints (ground, bounds,\
+    \ zoom limits, no roll). Tester screenshots of /viewer/notre-dame, /viewer/aegviidu and /viewer/room.\n"
+  status: done
+  owner: dev_app
+  run: cont-20261017-123453-dev_app-2
+  branch: devteam/A6
+  pr: https://github.com/IzbassarO/qarau/pull/33
+  done_at: '2026-10-17'
+- id: A6b
+  area: app
+  title: Point info
+  goal: 'An "i" tool. Clicking a point opens a panel with its coordinates, the video frames that see it
+
+    (thumbnails; a click jumps to that moment of the video) and the number of views. Height and
+
+    distances in metres only once P5a-1 provides scale, confidence only once P6 provides it; until
+
+    then the panel says they are not available (never a made-up number). i18n RU/KK/EN; unit tests
+
+    for the panel data; tester screenshots of /viewer/notre-dame.
+
+    '
+  status: done
+  depends_on:
+  - A6
+  owner: dev_app
+  run: cont-20261017-123453-dev_app-3
+  branch: devteam/A6b
+  pr: https://github.com/IzbassarO/qarau/pull/34
+  done_at: '2026-10-17'
+- id: A9
+  area: app
+  title: Observer mode
+  goal: 'Upgrade the existing fly mode (F) into a free spectator camera: no gravity, passes through
+
+    everything, speed adapts to distance. Game-style controls: WASD/arrows to move, Space/Shift
+
+    up/down, mouse look with pointer lock (Esc to exit); on a trackpad, two-finger drag to look
+
+    while the keyboard moves. A minimap in the corner (top view) shows the user as a circle with a
+
+    view cone. Optional third-person view with the circle visible. Once P5a-1 gives metric scale, an
+
+    optional 1.75 m human figure for scale (hidden until then). Plain, engineering-like visual
+
+    style; Orbit stays the default mode. Multi-user shared viewing is out of scope. Unit tests for
+
+    movement and controls; tester screenshots of /viewer/aegviidu in Observer mode.
+
+    '
+  status: done
+  depends_on:
+  - A6
+  owner: dev_app
+  run: cont-20261017-123453-dev_app-5
+  branch: devteam/A9
+  pr: https://github.com/IzbassarO/qarau/pull/37
+  done_at: '2026-10-17'
 - id: A1b
   area: app
   title: Simple local login
@@ -166,4 +975,114 @@ tasks:
     credentials never hard-coded.
 
     '
+  status: done
+  owner: dev_app
+  run: run-20261017-085251
+  branch: devteam/A1b
+  pr: https://github.com/IzbassarO/qarau/pull/27
+  done_at: '2026-10-17'
+- id: A7
+  area: app
+  title: Region of interest (web)
+  goal: 'Web part only (split 2026-10-17: the backend half is A7a). In top view the user draws a box around
+    the object; it is saved per site through the A7a API (docs/notes/roi-format.md) and reused for later
+    inspections of that site; the viewer can hide points outside it (toggle). i18n RU/KK/EN; unit tests
+    for the box math and save/load.
+
+
+    The work is done on branch devteam/A7 (previous work): it resumes there once A7a is merged, with dev
+    merged in, and checks itself against the real A7a routes. The tester cannot draw: make a saved box
+    visible on a route (e.g. loaded from the API) so the tester''s screenshot of /viewer/notre-dame shows
+    the box outline.
+
+    '
+  status: blocked
+  owner: dev_app
+  run: cont-20261017-123453-dev_app-4
+  branch: devteam/A7
+  blocked_reason: waits for A7a (Region of interest API); back to todo when it merges, resumes on devteam/A7
+  depends_on:
+  - A7a
+- id: A9-fix
+  area: app
+  title: 'Observer mode: restore the WASD travel threshold'
+  goal: 'A9 (#37) lowered a test threshold instead of fixing the code: in web/src/viewer/engine.test.ts,
+    ''moves with physical WASD across keyboard layouts and damps after release'' now expects traveled.length()
+    toBeGreaterThan(0); before A9 (A2b) it was 0.5. Restore toBeGreaterThan(0.5) and change the observer
+    movement code so the camera really travels more than 0.5 scene units in that test (speed adapts to
+    distance; the test''s scene must still move a visible amount). No other test may be loosened; Observer
+    and Orbit behaviour otherwise unchanged. Unit tests pass; tester screenshot of /viewer/aegviidu in
+    Observer mode.
+
+    '
+  status: done
+  owner: dev_app
+  run: cont-20261018-153430-dev_app-1
+  branch: devteam/A9-fix
+  pr: https://github.com/IzbassarO/qarau/pull/41
+  done_at: '2026-10-18'
+- id: A5-fix
+  area: app
+  title: Far-layer e2e test runs without local data
+  goal: 'The A5 e2e test ''malformed far arrays warn while the real object cloud still renders'' (web/e2e/far-layer.spec.ts)
+    skips itself with test.skip(!manifest.far): the local notre-dame run has no far layer and CI has no
+    data, so it never runs anywhere. Make it independent of local data: serve a small synthetic viewer
+    bundle with a far layer through page.route (fixture under web/e2e/, a few hundred points, written
+    by the test or a tiny generator script), then break the far arrays and assert the warning, the object
+    count and the missing toggle as today. Remove that test.skip; keep the existsSync-based skips of the
+    other real-data tests. The tester''s e2e gate runs it (Playwright from a clean checkout with real
+    local data); the Codex sandbox cannot open a port, so dev_app does not run e2e itself.
+
+    '
+  status: done
+  owner: dev_app
+  run: cont-20261018-231850-dev_app-1
+  branch: devteam/A5-fix
+  pr: https://github.com/IzbassarO/qarau/pull/43
+  done_at: '2026-10-18'
+- id: O1
+  area: app
+  title: Organization map (web)
+  goal: 'Web part only (split 2026-10-18: the backend half is O1a). An organization page (e.g. /org/:id)
+    with a MapLibre map (maplibre-gl, BSD-3-Clause; a plain style or a free no-key basemap that works
+    offline in tests) of the organization''s sites from the O1a API as markers; clicking a site opens
+    its inspections. Only real sites, no invented demo sites: a site without coordinates is listed beside
+    the map, not placed. With no sites the page says there are no sites yet (Syracuse University, seeded
+    by O1a). i18n RU/KK/EN (keys.test.ts passes); Vitest tests for marker vs. side-list placement, the
+    empty state and click navigation; tester screenshot of the organization page.
+
+    '
+  status: blocked
+  blocked_reason: waits for O1a (Organizations and sites API); back to todo when it merges
+  depends_on:
+  - O1a
+- id: U2
+  area: app
+  title: Upload a video in the web app
+  goal: 'web/ only. "New inspection" uploads a video to the D1/S1 API with an upload progress bar, a clear
+    error for unsupported or too large files and a retry when the upload fails; then it shows the job''s
+    per-stage progress from the S1 API by reusing the A3 processing status view, and opens the map when
+    the job is done. All text via i18n (RU/KK/EN); unit tests with a mocked API; tester screenshots of
+    the upload screen and the progress view.
+
+    '
+  depends_on:
+  - S1
   status: todo
+- id: A8
+  area: app
+  title: Walk mode
+  goal: 'First-person view to go inside buildings: the floor is the surface directly under the camera
+
+    (raycast down), eye height 1.6 m (needs metric scale from P5a-1), walls can be passed through;
+
+    arrows/WASD and two-finger trackpad movement. Enables the Walk entry of the A6 mode switch.
+
+    Unit tests for floor following; tester screenshots of /viewer/room in Walk mode.
+
+    '
+  status: todo
+  depends_on:
+  - A6
+  - P5a-1
+  - U2

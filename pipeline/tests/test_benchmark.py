@@ -34,7 +34,9 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         out.mkdir(parents=True, exist_ok=True)
         (out / "log.txt").write_text("ok")
         return {"images_in": 120, "registered_images": 90, "models": 2, "points": 5000,
-                "mean_reproj_error_px": 0.41}  # fmt: skip
+                "points_total": 5300, "points_dropped_low_parallax": 200,
+                "points_dropped_reproj": 100, "mean_reproj_error_px": 0.41,
+                "dropped_points": 3 if video.name == "IMG_8315.MOV" else 0}  # fmt: skip
 
     def fake_git(repo: Path, *args: str) -> str:
         return "abc1234" if args[0] == "rev-parse" else ""
@@ -86,8 +88,12 @@ def test_results_schema(env: dict[str, Any]) -> None:
     assert res["videos"]["room"]["max_frames"] is None
     for v in res["videos"].values():
         assert set(v) == {"registered_pct", "models", "reproj_px", "points", "scale_err_cm",
-                          "time_s", "frames_used", "registered", "max_frames"}  # fmt: skip
+                          "time_s", "frames_used", "registered", "max_frames",
+                          "dropped_points", "points_total", "points_dropped_low_parallax",
+                          "points_dropped_reproj"}  # fmt: skip
         assert v["scale_err_cm"] is None
+        assert (v["points_total"], v["points_dropped_low_parallax"]) == (5300, 200)
+        assert v["points_dropped_reproj"] == 100
         assert (v["registered_pct"], v["frames_used"], v["registered"]) == (75.0, 120, 90)
         assert (v["models"], v["points"], v["reproj_px"]) == (2, 5000, 0.41)
     assert res["errors"] == {} and res["skipped"] == []
@@ -96,8 +102,14 @@ def test_results_schema(env: dict[str, Any]) -> None:
 
 
 class FakeModel:
-    def __init__(self, reg: int, pts: int) -> None:
-        self.reg, self.pts = reg, pts
+    def __init__(self, reg: int, pts: int, first: int = 0) -> None:
+        self.reg, self.pts, self.first = reg, pts, first
+
+    def reg_image_ids(self) -> list[int]:
+        return list(range(self.first, self.first + self.reg))
+
+    def image(self, i: int) -> Any:
+        return type("Image", (), {"name": f"{i:06d}.jpg", "projection_center": staticmethod(list)})
 
     def num_reg_images(self) -> int:
         return self.reg
@@ -111,6 +123,11 @@ class FakeModel:
     def compute_mean_reprojection_error(self) -> float:
         return 0.5 + self.reg / 1000
 
+    points3D: dict[int, Any] = {}  # noqa: RUF012 - the point filter sees an empty model
+
+    def update_point_3d_errors(self) -> None:
+        pass
+
     def write_binary(self, path: str) -> None:
         (Path(path) / "points3D.bin").write_bytes(b"")
 
@@ -119,10 +136,13 @@ def test_largest_model_selected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     pc = reconstruction.pycolmap
     monkeypatch.setattr(pc, "extract_features", lambda *a, **k: None)
     monkeypatch.setattr(pc, "match_exhaustive", lambda *a, **k: None)
-    models = {0: FakeModel(10, 900), 1: FakeModel(80, 4000), 2: FakeModel(30, 9000)}
+    models = {0: FakeModel(10, 900, 80), 1: FakeModel(80, 4000), 2: FakeModel(30, 9000, 90)}
     monkeypatch.setattr(pc, "incremental_mapping", lambda *a, **k: models)
     names = [f"{i:06d}.jpg" for i in range(100)]
-    m = reconstruction.ColmapReconstructor().reconstruct(tmp_path, names, tmp_path / "colmap")
+    rc = reconstruction.ColmapReconstructor(merge=False, sky_mask=False)
+    m = rc.reconstruct(tmp_path, names, tmp_path / "colmap")
+    # the run report (run.json reconstruction metrics) carries the point filter counts
+    assert {"points_total", "points_dropped_low_parallax", "points_dropped_reproj"} <= set(m)
     row = benchmark.video_row(m, 12.34)
     assert (row["models"], row["registered"], row["points"]) == (3, 80, 4000)
     assert (row["frames_used"], row["registered_pct"], row["reproj_px"]) == (100, 80.0, 0.58)
@@ -141,7 +161,8 @@ def test_one_failure_others_still_run(env: dict[str, Any]) -> None:
     assert set(res["videos"]) == {"aegviidu", "notre-dame", "room"}
     assert len(env["calls"]) == 5
     md = (env["out"] / "results.md").read_text()
-    assert "| orono | abc1234 | — | — | — | — | — | — | — | FAILED: timeout after 5 s |" in md
+    dash = " | ".join(["—"] * 10)
+    assert f"| orono | abc1234 | {dash} | FAILED: timeout after 5 s |" in md
 
 
 def test_missing_required_fails(env: dict[str, Any]) -> None:
@@ -182,8 +203,22 @@ def test_record_appends_rows(env: dict[str, Any]) -> None:
     assert md.startswith(OLD_TABLE)
     assert md.count(benchmark.SECTION) == 1
     assert md.count("| abc1234 |") == 6 and md.count("| notre-dame | abc1234 |") == 2
-    assert "| room | abc1234 | 120 | 75.0 | 2 | 5000 | 0.41 |  | 0.0 |  |" in md
-    assert "| aegviidu | abc1234 | 120 | 75.0 | 2 | 5000 | 0.41 |  | 0.0 | max_frames 150 |" in md
+    row = "120 | 75.0 | 2 | 5000 | 5300 | 200 | 100 | 0.41 |  | 0.0"
+    assert f"| room | abc1234 | {row} | dropped 3 |" in md
+    assert f"| notre-dame | abc1234 | {row} |  |" in md
+    assert f"| aegviidu | abc1234 | {row} | max_frames 150 |" in md
+
+
+def test_record_new_columns_start_a_new_table(env: dict[str, Any]) -> None:
+    """A section with the pre-P3b header keeps its rows; new rows get the new header."""
+    old_head = "| Video | Commit | Frames used | Registered % |\n| --- | --- | --- | --- |"
+    old = f"{OLD_TABLE}\n{benchmark.SECTION}\n\nintro\n\n{old_head}\n| room | a1 | 1 | 2 |\n"
+    md_path = env["repo"] / "docs/notes/benchmark.md"
+    md_path.write_text(old)
+    run(env, record=True, only=["room"])
+    md = md_path.read_text()
+    assert md.startswith(old) and md.count(benchmark.SECTION) == 1
+    assert md[len(old) :].startswith("\n" + benchmark.HEAD + "\n| room | abc1234 |")
 
 
 def test_cli(env: dict[str, Any]) -> None:

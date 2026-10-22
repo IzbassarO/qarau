@@ -24,9 +24,11 @@ MANIFEST = PKG / "benchmark_set.toml"
 REPO = PKG.parents[1]
 SECTION = "## Automated benchmark (P1)"
 HEAD = (
-    "| Video | Commit | Frames used | Registered % | Models | Points | Reproj. px "
-    "| Scale err cm | Time s | Notes |\n" + "| --- " * 10 + "|"
-)
+    "| Video | Commit | Frames used | Registered % | Models | Points | Points total "
+    "| Low parallax | Reproj. drop | Reproj. px | Scale err cm | Time s | Notes |\n"
+    + "| --- " * 13
+    + "|"
+)  # points = kept by the point filter; points total = before it (P3b, ADR 0013)
 
 
 def load_manifest(path: Path = MANIFEST) -> list[dict[str, Any]]:
@@ -52,10 +54,9 @@ def run_video(
     if p.returncode != 0:
         lines = log.read_text().strip().splitlines()
         raise StageError(f"exit {p.returncode}: {lines[-1] if lines else 'no output'}")
-    metrics: dict[str, Any] = next(
-        s["metrics"] for s in read_run(out) if s["name"] == "reconstruction"
-    )
-    return metrics
+    stages = {s["name"]: s["metrics"] for s in read_run(out)}
+    dropped = stages.get("export", {}).get("dropped_points", {})
+    return {**stages["reconstruction"], "dropped_points": sum(dropped.values())}
 
 
 def video_row(m: dict[str, Any], time_s: float, max_frames: int | None = None) -> dict[str, Any]:
@@ -65,22 +66,31 @@ def video_row(m: dict[str, Any], time_s: float, max_frames: int | None = None) -
         "models": m["models"],
         "reproj_px": m["mean_reproj_error_px"],
         "points": m["points"],
+        "points_total": m["points_total"],
+        "points_dropped_low_parallax": m["points_dropped_low_parallax"],
+        "points_dropped_reproj": m["points_dropped_reproj"],
         "scale_err_cm": None,  # P5/P7: needs a reference scale
         "time_s": round(time_s, 1),
         "frames_used": used,
         "registered": reg,
         "max_frames": max_frames,  # benchmark profile from benchmark_set.toml; None = default
+        "dropped_points": m.get("dropped_points", 0),  # export: non-finite + far outliers
     }
 
 
 def md_rows(res: dict[str, Any]) -> list[str]:
     tag = res["commit"] + ("+dirty" if res["dirty"] else "")
-    keys = "frames_used registered_pct models points reproj_px scale_err_cm time_s".split()
+    keys = (
+        "frames_used registered_pct models points points_total points_dropped_low_parallax"
+        " points_dropped_reproj reproj_px scale_err_cm time_s"
+    ).split()
     rows = []
     for n, v in res["videos"].items():
         cells = ["" if v[k] is None else str(v[k]) for k in keys]
-        note = f"max_frames {v['max_frames']}" if v.get("max_frames") else ""
-        rows.append(f"| {n} | {tag} | " + " | ".join([*cells, note]) + " |")
+        notes = [f"max_frames {v['max_frames']}"] if v.get("max_frames") else []
+        if v.get("dropped_points"):
+            notes.append(f"dropped {v['dropped_points']}")
+        rows.append(f"| {n} | {tag} | " + " | ".join([*cells, "; ".join(notes)]) + " |")
     dash = " | ".join(["—"] * len(keys))
     return rows + [f"| {n} | {tag} | {dash} | FAILED: {r} |" for n, r in res["errors"].items()]
 
@@ -120,8 +130,10 @@ def _record(res: dict[str, Any], repo: Path) -> None:
         text += (
             f"\n{SECTION}\n\nRows appended by `python -m qarau_pipeline benchmark --record`"
             " (method: `docs/notes/benchmark-method.md`). `+dirty` = uncommitted changes on"
-            " top of the commit.\n\n" + HEAD + "\n"
+            " top of the commit.\n"
         )
+    if HEAD not in text:  # new columns: start a new table, the old rows keep their header
+        text += "\n" + HEAD + "\n"
     md.write_text(text + "".join(r + "\n" for r in md_rows(res)))
 
 

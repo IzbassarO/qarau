@@ -1,0 +1,37 @@
+# Pipeline settings. Relative paths are relative to this file.
+
+dense:
+  # Frame links kept per dense point, best first (ADR 0017). Bounds the bundle: links cost
+  # 4 bytes each, so 8 per point add at most 32 bytes per dense point (+ 4 for the offset).
+  max_frames_per_point: 8
+
+dense_remote:
+  # COLMAP dense stage on a rented GPU worker (ADR 0016). Stays false: the first real run
+  # (P4a-2a-run) is `dense-remote --provider modal --allow-paid-gpu`, which enables it in
+  # memory only (ADR 0019); the CLI's default provider is fake, whatever provider says here.
+  enabled: false
+  provider: modal # fake | modal; the token only from MODAL_TOKEN_ID / MODAL_TOKEN_SECRET
+  timeout_s: 1800 # one wall-clock deadline for the whole job (start, upload, dense, download)
+  est_hours_per_job: 0.5 # booked against the budget per job; must cover timeout_s
+  daily_gpu_hours_budget: 1.0 # per UTC day; a job that would go over is refused before start
+  gpu_type: L4 # Modal GPU name (24 GB, CUDA arch 89)
+  # The image's CUDA_ARCHITECTURES build arg (owner, 2026-10-21: sm_89 only for L4; a short
+  # build). Another GPU type needs its arch here, e.g. "75;86;90"; another value = a new image.
+  cuda_architectures: "89"
+  # No capacity for gpu_type within start_timeout_s: the queued sandbox is terminated and each
+  # gpu_fallback is tried the same way (2026-10-21: Modal held an L4 request 28 min, then
+  # refused). L40S: same arch 89, $1.95/h vs L4 $0.80/h (owner, 2026-10-21).
+  gpu_fallback: [L40S]
+  start_timeout_s: 300
+  # infra/colmap-cuda; Modal builds it from the Dockerfile in our workspace, never pushed
+  image: qarau/colmap-cuda:4.2.1
+  ledger_path: ../data/dense_remote/gpu_ledger.json # GPU hours per UTC day (data/ is gitignored)
+  # COLMAP PatchMatch speed knobs (P4a-3, docs/notes/dense-speed.md). Each one is optional; an
+  # absent key keeps COLMAP's default and today's commands exactly. Proposed for a 3-min 1080p
+  # video (300 frames), until the owner's Modal timing run confirms them:
+  # patch_match:
+  #   max_image_size: 960 # px, longest side (image_undistorter + PatchMatchStereo); default full
+  #   num_iterations: 3 # default 5
+  #   window_radius: 5 # default 5, at most 32; kept, so the window covers the same patch
+  #   window_step: 2 # 1 or 2; default 1
+  #   num_sources: 8 # source frames per view (stereo/patch-match.cfg); default 20

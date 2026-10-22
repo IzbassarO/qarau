@@ -59,7 +59,7 @@ def test_reservations_are_atomic_across_threads(tmp_path):
     for t in threads:
         t.join()
     assert len(ok) == 3 and len(refused) == 7
-    assert costs.spent_today(tmp_path) == pytest.approx(0.9)
+    assert costs.spent_24h(tmp_path) == pytest.approx(0.9)
 
 
 def test_unsettled_reservation_survives_a_crash_and_settle_reconciles(tmp_path):
@@ -67,7 +67,7 @@ def test_unsettled_reservation_survives_a_crash_and_settle_reconciles(tmp_path):
     with pytest.raises(costs.BudgetExceeded):
         costs.reserve(tmp_path, 3.0, "tester", "m", "T", 1.0)
     costs.settle(tmp_path, rid, 1000, 100, 0.05)
-    assert costs.spent_today(tmp_path) == pytest.approx(0.05)
+    assert costs.spent_24h(tmp_path) == pytest.approx(0.05)
     costs.reserve(tmp_path, 3.0, "tester", "m", "T", 1.0)
 
 
@@ -117,7 +117,7 @@ def test_llm_call_reserves_settles_and_refuses_over_budget(repo):
     assert llm_call(team, "brain", "T-001", "sys", "hi", {"type": "object"}, client=client) == {
         "ok": True
     }
-    assert costs.spent_today(team.home) == pytest.approx((1000 * 4 + 500 * 20) / 1e6)
+    assert costs.spent_24h(team.home) == pytest.approx((1000 * 4 + 500 * 20) / 1e6)
     team.cfg["daily_budget_usd"] = 0.01
     with pytest.raises(costs.BudgetExceeded):
         llm_call(team, "brain", "T-001", "sys", "hi", {"type": "object"}, client=client)
@@ -130,7 +130,7 @@ def test_llm_call_releases_on_4xx_and_keeps_on_unknown_billing(repo):
     bad = anthropic.BadRequestError("bad", response=httpx.Response(400, request=req), body=None)
     with pytest.raises(anthropic.BadRequestError):
         llm_call(team, "tester", "T", "s", "p", {}, client=StubClient(bad))
-    assert costs.spent_today(team.home) == 0
+    assert costs.spent_24h(team.home) == 0
     with pytest.raises(anthropic.APIConnectionError):
         llm_call(
             team,
@@ -141,7 +141,49 @@ def test_llm_call_releases_on_4xx_and_keeps_on_unknown_billing(repo):
             {},
             client=StubClient(anthropic.APIConnectionError(request=req)),
         )
-    assert costs.spent_today(team.home) > 0.1  # held at the worst case
+    assert costs.spent_24h(team.home) > 0.1  # held at the worst case
+
+
+def test_llm_call_retries_transient_errors_not_rejections(repo):
+    """Seen in a real run: the A2a tester crashed on one "Connection error"."""
+    team, _ = make(repo)
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+    def status(cls, code, body=None):
+        return cls("x", response=httpx.Response(code, request=req), body=body)
+
+    class Flaky(StubClient):
+        def __init__(self, errors):
+            super().__init__()
+            self.errors = errors
+
+        def stream(self, **kw):
+            if self.errors:
+                self.calls += 1
+                raise self.errors.pop(0)
+            return super().stream(**kw)
+
+    overloaded = {"type": "error", "error": {"type": "overloaded_error"}}  # mid-stream, HTTP 200
+    client = Flaky(
+        [
+            anthropic.APIConnectionError(request=req),
+            status(anthropic.RateLimitError, 429),
+            status(anthropic.APIStatusError, 200, overloaded),
+        ]
+    )
+    assert llm_call(team, "tester", "T", "s", "p", {}, client=client) == {"ok": True}
+    assert client.calls == 4
+    assert (team.home / "events.log").read_text().count("retrying in") == 3
+
+    client = Flaky([status(anthropic.BadRequestError, 400)] * 2)
+    with pytest.raises(anthropic.BadRequestError):
+        llm_call(team, "tester", "T", "s", "p", {}, client=client)
+    assert client.calls == 1  # a rejection is not retried
+
+    client = Flaky([status(anthropic.InternalServerError, 529)] * 4)
+    with pytest.raises(anthropic.InternalServerError):
+        llm_call(team, "tester", "T", "s", "p", {}, client=client)
+    assert client.calls == 4  # gives up after RETRY_WAITS, then the node crashes loudly
 
 
 # --- #2 branch guard -------------------------------------------------------------------------
@@ -209,9 +251,9 @@ def test_developer_commits_are_unwound_and_checked(repo):
 class CountingPlans(Quick):
     plans = 0
 
-    def plan(self, team, todo, feedback=None):
+    def plan(self, team, todo, feedback=None, devs=None):
         CountingPlans.plans += 1
-        return super().plan(team, todo, feedback)
+        return super().plan(team, todo, feedback, devs)
 
 
 def test_assignments_are_checkpointed_before_the_backlog_changes(repo, monkeypatch):
@@ -256,6 +298,7 @@ def p(tid, dev, criteria=("c",)):
         ([p("T-002", "dev_pipeline")], "area"),
         ([p("T-001", "dev_ghost")], "unknown developer"),
         ([p("T-001", "dev_pipeline", criteria=())], "must not be empty"),
+        ([p("T-001", "dev_pipeline", criteria=("/viewer/x shows no sky wall",))], "no routes"),
     ],
 )
 def test_invalid_plans_are_rejected(plans, why):
@@ -269,7 +312,7 @@ def test_valid_plan_passes():
 
 
 class BadPlanner(Quick):
-    def plan(self, team, todo, feedback=None):
+    def plan(self, team, todo, feedback=None, devs=None):
         return [p("T-002", "dev_pipeline")]
 
 
@@ -281,7 +324,7 @@ def test_bad_plan_twice_stops_without_touching_the_backlog(repo):
 
 
 # --- #7 checks gate --------------------------------------------------------------------------
-def only_core(team, todo, feedback=None):
+def only_core(team, todo, feedback=None, devs=None):
     return [p("T-001", "dev_pipeline")]
 
 
@@ -295,6 +338,38 @@ def test_judge_pass_is_not_enough_when_a_check_fails(repo):
     assert statuses(team)["T-001"] == "blocked"  # judge passed in round 2, `false` did not
     packet = (team.home / "packets" / "T-001.md").read_text()
     assert "judge: pass" in packet and "FAIL: `false`" in packet
+
+
+def test_visual_task_without_tester_screenshots_never_passes(repo):
+    cfg_devs = copy.deepcopy(CFG["developers"])
+    cfg_devs["dev_pipeline"].update(
+        setup=[],
+        checks=["true"],
+        # the server comes up, the screenshot fails: the tester sees nothing
+        screenshots={
+            "serve": "python3 -m http.server 8763 --bind 127.0.0.1",
+            "url": "http://127.0.0.1:8763",
+            "shoot": "exit 1",
+        },
+    )
+    agents = Quick()
+    agents.plan = lambda team, todo, feedback=None, devs=None: [
+        {
+            **p("T-001", "dev_pipeline", ("/viewer/room shows no sky wall",)),
+            "routes": ["/viewer/room"],
+        }
+    ]
+    team, graph = make(repo, agents, fake=False, developers=cfg_devs, max_fix_loops=1)
+    graph.invoke({}, {"configurable": {"thread_id": "r6"}})
+    assert statuses(team)["T-001"] == "blocked"  # judge passed in round 2, no screenshot
+    assert "judge: pass" in (team.home / "packets" / "T-001.md").read_text()
+
+
+def test_routes_need_a_screenshots_config():
+    devs = copy.deepcopy(CFG["developers"])
+    devs["dev_pipeline"].pop("screenshots", None)
+    with pytest.raises(ValueError, match="no screenshots config"):
+        validate_plan([{**p("T-001", "dev_pipeline"), "routes": ["/"]}], TODO, {"developers": devs})
 
 
 def test_failed_setup_blocks_success_and_skips_checks(repo):
@@ -344,7 +419,7 @@ def test_v0_cost_database_is_migrated(tmp_path):
     db.commit()
     db.close()
     costs.reserve(tmp_path, 3.0, "brain", "m", "T", 1.0)
-    assert costs.spent_today(tmp_path) == pytest.approx(1.5)
+    assert costs.spent_24h(tmp_path) == pytest.approx(1.5)
 
 
 def test_carriage_return_file_names_survive(repo):
@@ -389,14 +464,13 @@ class CommitThenCrash(Quick):
         return super().develop(team, s)
 
 
-def test_forbidden_commit_before_a_crash_is_unwound_on_resume(repo):
+def test_forbidden_commit_before_a_crash_is_unwound(repo):
     agents = CommitThenCrash()
     agents.plan = only_core
     team, graph = make(repo, agents)
     config = {"configurable": {"thread_id": "r6"}}
-    with pytest.raises(RuntimeError, match="crash"):
-        graph.invoke({}, config)
-    graph.invoke(None, config)
+    graph.invoke({}, config)  # the crash blocks the task, the run ends normally
+    assert statuses(team)["T-001"] == "blocked"
     branch = team.branch_for("T-001")
     assert git(repo, "show", f"{branch}:web/app.ts") == "export {}\n"
     assert "sneaky" not in git(repo, "log", "--format=%s", branch)
@@ -423,3 +497,172 @@ def test_tasks_without_area_are_reported_not_silently_skipped(repo):
     team.backlog_path.write_text(yaml.safe_dump(data))
     graph.invoke({}, {"configurable": {"thread_id": "r7"}})
     assert "skipping tasks without a known area" in (team.home / "events.log").read_text()
+
+
+# --- 2026-10-16: P0 and A2a re-planned after the backlog lost their status ------------------
+def test_brain_never_plans_done_or_already_merged_tasks(repo):
+    team, graph = make(repo)
+    graph.invoke({}, {"configurable": {"thread_id": "r1"}})  # T-001 and T-002 merge into dev
+    assert statuses(team)["T-001"] == "done"
+    team.update_task("T-001", status="todo")  # the status got lost, the branch is in dev
+    seen = []
+    agents = Quick()
+    agents.plan = lambda team, todo, feedback=None, devs=None: (
+        seen.extend(t["id"] for t in todo) or []
+    )
+    team.agents = agents
+    graph.invoke({}, {"configurable": {"thread_id": "r2"}})
+    assert "T-001" not in seen and "T-002" not in seen and "T-003" in seen
+
+
+def test_backlog_status_drift_from_dev_is_reported(repo):
+    team, _ = make(repo)
+    assert team.backlog_drift() == []
+    team.update_task("T-001", status="done", pr="fake://pr/1")  # only in the working tree
+    drift = team.backlog_drift()
+    assert any(d.startswith("T-001.status: 'todo' on dev -> 'done'") for d in drift)
+    assert any(d.startswith("T-001.pr:") for d in drift) and len(drift) == 2
+
+
+# --- devteam owns the statuses: pushed straight to dev; done only via this run's PR ---------
+def dev_backlog(repo):
+    out = git(repo, "--git-dir", remote_of(repo), "show", "dev:devteam/backlog.yaml")
+    return {t["id"]: t for t in yaml.safe_load(out)["tasks"]}
+
+
+def test_finished_task_status_is_committed_to_dev(repo):
+    team, graph = make(repo)
+    graph.invoke({}, {"configurable": {"thread_id": "r1"}})
+    t = dev_backlog(repo)["T-001"]
+    assert (t["status"], t["run"], t["branch"]) == ("done", "r1", "devteam-fake/T-001")
+    assert t["pr"].startswith("fake://pr/") and t["done_at"]
+    log = git(repo, "--git-dir", remote_of(repo), "log", "--format=%s", "dev")
+    assert f"backlog: T-001 done (#{t['pr'].rsplit('/', 1)[1]})" in log
+    assert team.backlog_drift() == []  # the next `devteam run` may start
+    sha = git(
+        repo, "--git-dir", remote_of(repo), "log", "-1", "--format=%H", "--grep=T-001 done", "dev"
+    )
+    assert git(
+        repo, "--git-dir", remote_of(repo), "diff", "--name-only", f"{sha.strip()}^", sha.strip()
+    ).split() == ["devteam/backlog.yaml"]
+
+
+def test_status_push_retries_when_dev_moves(repo, tmp_path):
+    team, _ = make(repo)
+    team.update_task("T-001", status="blocked", blocked_reason="x")
+    other = tmp_path / "other"
+    git(tmp_path, "clone", "-q", "-b", "dev", remote_of(repo), str(other))
+    real_git, raced = team.git, []
+
+    def racing_git(*args, **kw):
+        if args[0] == "push" and not raced:  # someone merges into dev right before our push
+            (other / "README.md").write_text("moved\n")
+            git(other, "commit", "-qam", "meanwhile")
+            git(other, "push", "-q", "origin", "dev")
+            raced.append(1)
+        return real_git(*args, **kw)
+
+    team.git = racing_git
+    assert team.push_status("T-001", "backlog: T-001 blocked")
+    assert dev_backlog(repo)["T-001"]["status"] == "blocked"
+    log = git(repo, "--git-dir", remote_of(repo), "log", "--format=%s", "-2", "dev").split("\n")
+    assert log[:2] == ["backlog: T-001 blocked", "meanwhile"]  # rebuilt on the new tip
+
+
+def test_only_the_status_commit_may_go_straight_to_dev(repo):
+    team, _ = make(repo)
+    url, sha = remote_of(repo), "a" * 40
+    for ref in (f"{sha}:refs/heads/dev", f"{sha}:refs/heads/main", "HEAD:refs/heads/dev"):
+        with pytest.raises(PermissionError):
+            team._guard(("push", "-q", url, ref))
+    team._status_commit = sha
+    team._guard(("push", "-q", url, f"{sha}:refs/heads/dev"))
+    with pytest.raises(PermissionError):
+        team._guard(("push", "-q", url, f"{sha}:refs/heads/main"))
+
+
+def test_pre_push_hook_lets_only_backlog_fast_forwards_into_dev(repo):
+    hook = Path(__file__).parents[1] / "hooks" / "pre-push"
+    base = git(repo, "rev-parse", "HEAD").strip()
+
+    def commit(path):
+        (repo / path).write_text(path + "\n")
+        git(repo, "add", path)
+        git(repo, "commit", "-qm", path)
+        return git(repo, "rev-parse", "HEAD").strip()
+
+    status = commit("devteam/backlog.yaml")
+    code = commit("pipeline/a.py")
+
+    def push(ref, local, remote=base):
+        line = f"refs/heads/x {local} {ref} {remote}\n"
+        return subprocess.run(
+            ["sh", str(hook), "origin", "https://github.com/x/y.git"],
+            cwd=repo,
+            input=line,
+            text=True,
+            capture_output=True,
+        ).returncode
+
+    assert push("refs/heads/dev", status) == 0  # backlog only, fast-forward
+    assert push("refs/heads/dev", code) == 1  # also changes code
+    assert push("refs/heads/dev", base, remote=status) == 1  # not a fast-forward
+    assert push("refs/heads/main", status) == 1  # main: never
+
+
+class Idle(Quick):
+    def develop(self, team, s):
+        return {"session": "idle", "summary": "nothing to do"}
+
+
+def rerun_merged_task(repo, agents):
+    """T-001 merged, then its status lost and the brain guard bypassed: the gate alone decides."""
+    team, graph = make(repo)
+    graph.invoke({}, {"configurable": {"thread_id": "r1"}})
+    first_pr = team.load_backlog()[0]["pr"]
+    team.update_task("T-001", status="todo")
+    team.agents, team.merged_tasks = agents, lambda: set()
+    agents.plan = lambda team, todo, feedback=None, devs=None: [p("T-001", "dev_pipeline")]
+    graph.invoke({}, {"configurable": {"thread_id": "r2"}})
+    return team, first_pr, next(t for t in team.load_backlog() if t["id"] == "T-001")
+
+
+def test_gate_never_marks_done_without_this_runs_merged_pr(repo):
+    team, first_pr, t = rerun_merged_task(repo, Idle())
+    assert t["status"] == "blocked" and "nothing to merge, already done" in t["blocked_reason"]
+    assert len(team.gh.prs) == 2  # T-001 and T-002 of the first run; no new PR
+    assert dev_backlog(repo)["T-001"]["status"] == "blocked"
+
+
+def test_new_commits_on_a_merged_branch_get_a_new_pr(repo):
+    team, first_pr, t = rerun_merged_task(repo, Quick())
+    assert t["status"] == "done" and t["pr"] != first_pr  # a new PR, CI'd and merged
+    assert team.gh.prs[int(t["pr"].rsplit("/", 1)[1])]["state"] == "MERGED"
+
+
+def test_old_cost_db_is_migrated_once_even_by_racing_threads(tmp_path):
+    """CI 2026-10-18: two threads both saw no cache_read column; the second ALTER failed."""
+    import sqlite3
+    import threading
+
+    db = sqlite3.connect(tmp_path / "costs.sqlite")
+    db.execute("create table usage (day text, ts text, agent text, model text, task text, "
+               "tokens_in int, tokens_out int, usd real, billed int)")  # fmt: skip
+    db.commit()
+    db.close()
+    errors = []
+
+    def open_it():
+        try:
+            costs._db(tmp_path).close()
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=open_it) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    cols = [r[1] for r in costs._db(tmp_path).execute("pragma table_info(usage)")]
+    assert cols[-4:] == ["state", "secs", "cache_read", "cache_write"]

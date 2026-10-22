@@ -3,7 +3,7 @@ import type { Bundle, FrameInfo } from '../lib/bundle';
 import type { RunSummary } from '../lib/inspections';
 import { groupRunsIntoSites } from '../lib/inspections';
 
-/** Deterministic, synthetic geometry; only rendered on /inspections/demo. */
+/** Deterministic, synthetic geometry shared by /inspections/demo and /viewer/demo. */
 function createBundle(): Bundle {
   const points: number[] = [];
   for (let x = -14; x <= 14; x += 0.4) for (let y = -9; y <= 9; y += 0.4) points.push(x, y, 0);
@@ -19,6 +19,13 @@ function createBundle(): Bundle {
     for (let angle = 0; angle < Math.PI * 2; angle += 0.15)
       points.push(x, -5 + 0.4 * Math.cos(angle), 1.5 + 0.4 * Math.sin(angle));
   const position = new Float32Array(points);
+  const farCount = 96;
+  const farPosition = new Float32Array(farCount * 3);
+  const farColor = new Uint8Array(farCount * 3).fill(160);
+  for (let i = 0; i < farCount; i++) {
+    const angle = (i / farCount) * Math.PI * 2;
+    farPosition.set([40 * Math.cos(angle), 40 * Math.sin(angle), 2], i * 3);
+  }
   const count = position.length / 3;
   const frameCount = 12;
   const offsets = new Uint32Array(frameCount + 1);
@@ -68,7 +75,13 @@ function createBundle(): Bundle {
         z_range: [0, 6],
         focus: { center: [0, 0, 2], radius: 16 },
       },
-      points: { count, position: '', color: '', first_seen: '', num_obs: '' },
+      points: { count, position: '', first_seen: '', num_obs: '' },
+      far: {
+        count: farCount,
+        position: 'web/far.position.f32',
+        color: 'web/far.color.u8',
+        rule: 'synthetic distant ring',
+      },
       tracks: { frame_offsets: '', frame_points: '', point_offsets: '', point_frames: '' },
       frames,
       stats: {
@@ -80,7 +93,7 @@ function createBundle(): Bundle {
       },
     },
     position,
-    color: new Uint8Array(count * 3).fill(180),
+    far: { position: farPosition, color: farColor },
     firstSeen: new Uint16Array(count),
     frameOffsets: offsets,
     frameInPoints: framePoints,
@@ -100,12 +113,32 @@ export function createDemo(lang: Lang) {
     site: { id: 'demo-site', name: t('demo.siteName') },
     title: t('demo.inspectionTitle'),
     created_at: '2026-10-14T10:30:00+05:00',
-    status: 'completed',
-    stats: bundle.manifest.stats,
+    status: 'failed',
+    stats: {
+      ...bundle.manifest.stats,
+      processing_s: { ingest: 1.2, frames: 4.2, reconstruction: 38.6 },
+    },
     stages: [
-      { name: 'frames', status: 'completed' },
-      { name: 'reconstruction', status: 'completed' },
-      { name: 'export', status: 'completed' },
+      {
+        name: 'ingest',
+        status: 'ok',
+        started_at: '2026-10-14T05:30:00.000Z',
+        finished_at: '2026-10-14T05:30:01.200Z',
+      },
+      {
+        name: 'frames',
+        status: 'ok',
+        started_at: '2026-10-14T05:30:01.200Z',
+        finished_at: '2026-10-14T05:30:05.400Z',
+      },
+      {
+        name: 'reconstruction',
+        status: 'failed',
+        started_at: '2026-10-14T05:30:05.400Z',
+        finished_at: '2026-10-14T05:30:44.000Z',
+        error_code: 'too_few_registered_frames',
+      },
+      { name: 'export', status: 'skipped' },
     ],
   };
   const sites = groupRunsIntoSites([run]);

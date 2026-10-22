@@ -1,4 +1,5 @@
-"""frames stage: video -> JPEG frames at an adaptive rate + blur/exposure scores.
+"""frames stage: video -> JPEG candidate frames at an adaptive rate + blur/exposure scores ->
+parallax keyframes (keyframes.py) + footage quality report (quality.py).
 
 Decoding is driven by probe.VideoInfo: ffmpeg autorotates, HDR is tone-mapped to 8-bit
 BT.709, frames are picked by presentation time. frames/manifest.json records what was done.
@@ -11,13 +12,15 @@ import json
 import re
 import shutil
 import subprocess
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
 
+from . import keyframes as kf
+from . import quality
 from .interfaces import StageError
 from .probe import VideoInfo, probe_video
 
@@ -121,7 +124,20 @@ def decide_drops(blur: list[float], expo: list[dict[str, float]]) -> list[str | 
     return reasons
 
 
-def run(video: Path, out: Path, max_frames: int | None = None) -> dict[str, Any]:
+def run(
+    video: Path,
+    out: Path,
+    max_frames: int | None = None,
+    keys: kf.KeyframeParams | None = None,
+) -> dict[str, Any]:
+    """Candidates -> quality drops -> keyframes among the usable ones -> frames.json and
+    quality_report.json. 'parallax' (default): keys.oversample x the frame budget decoded,
+    keyframes fit to the budget by parallax; 'fixed': the budget decoded, every usable
+    candidate kept (pre-P2b). A budget capped below FRAMES_PER_S (long video, --max-frames)
+    is run as 'fixed': its frames are already sparse, and moving them out of the slow parts
+    weakens those (orono at 150 frames / 91 s: reprojection 0.57 -> 0.67 px). Candidates
+    that are not keyframes: kept=False, drop_reason 'not_keyframe'."""
+    keys = keys or kf.KeyframeParams()
     if shutil.which("ffmpeg") is None:
         raise StageError("ffmpeg not found on PATH: install FFmpeg (brew/apt install ffmpeg)")
     info = probe_video(video)
@@ -130,8 +146,14 @@ def run(video: Path, out: Path, max_frames: int | None = None) -> dict[str, Any]
     fdir.mkdir(exist_ok=True)
     for old in [*fdir.glob("*.jpg"), fdir / "manifest.json"]:
         old.unlink(missing_ok=True)
-    n_target = target_frames(info.duration_s, max_frames)
-    rate = min(n_target / info.duration_s, info.avg_fps or 1e9)
+    n_target = target_frames(info.duration_s, max_frames)  # frame budget for COLMAP
+    capped = n_target < target_frames(info.duration_s, 10**9)
+    asked = keys.label()
+    if keys.mode == "parallax" and capped:
+        keys = replace(keys, mode="fixed")
+        asked = f"{asked}; budget capped below {FRAMES_PER_S:g} fps -> fixed"
+    n_cand = n_target * (keys.oversample if keys.mode == "parallax" else 1)
+    rate = min(n_cand / info.duration_s, info.avg_fps or 1e9)
     vf, conv, warn = decode_plan(info, rate, has_zscale())
     p = subprocess.run(
         ["ffmpeg", "-hide_banner", "-y", "-i", str(video), "-map", "0:v:0", "-an", "-vf", vf,
@@ -166,6 +188,18 @@ def run(video: Path, out: Path, max_frames: int | None = None) -> dict[str, Any]
     scores = [score(f) for f in files]
     blur, expo = [s[0] for s in scores], [s[1] for s in scores]
     reasons = decide_drops(blur, expo)
+    dropped = sum(1 for r in reasons if r)
+    greys = [kf.load_grey(f) for f in files]
+    tracks = kf.track(greys)
+    usable = [r is None for r in reasons]
+    picked, theta = kf.fit(tracks, times, usable, kf.diagonal(greys[0]), keys, n_target)
+    chosen = set(picked)
+    reasons = [r or (None if i in chosen else "not_keyframe") for i, r in enumerate(reasons)]
+    selection = {**kf.params_dict(keys), "requested": asked, "budget": n_target,
+                 "budget_capped": capped, "parallax_frac_used": theta}  # fmt: skip
+    rep = quality.report(video.name, info.duration_s, times, blur, greys, tracks, len(chosen),
+                         selection)  # fmt: skip
+    (out / "quality_report.json").write_text(json.dumps(rep, indent=1))
     frames = [
         {"i": i, "file": f"frames/{f.name}", "t": round(times[i], 4), "blur": round(blur[i], 2),
          "exposure": expo[i], "kept": reasons[i] is None, "drop_reason": reasons[i]}
@@ -183,10 +217,14 @@ def run(video: Path, out: Path, max_frames: int | None = None) -> dict[str, Any]
         "is_hdr": info.is_hdr,
     }
     (out / "frames.json").write_text(json.dumps({"source": source, "frames": frames}, indent=1))
-    dropped = sum(1 for r in reasons if r)
     return {
-        "frames_extracted": len(files), "frames_dropped": dropped, "rate_fps": round(rate, 4),
-        "median_blur": round(float(np.median(blur)), 2), "conversions": conv, "warnings": warn,
+        "frames_extracted": len(files), "frames_dropped": dropped, "keyframes": len(chosen),
+        "keyframe_mode": f"{asked}; used {theta:.2g}" if theta else asked,
+        "keyframe_selection": selection,
+        "quality_verdict": rep["summary"]["verdict"],
+        "quality_issues": [i["kind"] for i in rep["issues"]],
+        "rate_fps": round(rate, 4), "median_blur": round(float(np.median(blur)), 2),
+        "conversions": conv, "warnings": warn,
     }  # fmt: skip
 
 

@@ -8,7 +8,12 @@ dependencies = [
   "numpy>=2",
   "opencv-python-headless>=4.10",
   "laspy[lazrs]>=2.5",
+  "pyyaml>=6.0.3",
+  "scipy>=1.14",
 ]
+
+[project.optional-dependencies]
+modal = ["modal==1.6.2"]  # ADR 0019: real dense GPU runs only (uv sync --extra modal)
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]

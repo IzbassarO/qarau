@@ -8,6 +8,7 @@ dependencies = [
     "langchain-core>=0.3",
     "langgraph-checkpoint-sqlite>=2.0",
     "anthropic>=0.70",
+    "httpx",  # transport errors mid-stream are not wrapped by the SDK
     "pyyaml>=6",
     "rich>=13",
     "python-dotenv>=1",
@@ -22,6 +23,9 @@ dev = ["pytest>=8", "ruff>=0.6"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+markers = ["backlog: checks of the real backlog, run before every status commit (gates.backlog_check)"]
 
 [tool.ruff]
 line-length = 100

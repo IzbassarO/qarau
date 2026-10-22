@@ -31,8 +31,11 @@ class StageError(RuntimeError):
 
 
 class Reconstructor(Protocol):
-    def reconstruct(self, frames_dir: Path, names: list[str], out_dir: Path) -> dict[str, Any]:
-        """Reconstruct the named images into out_dir (database.db, sparse/0); return metrics."""
+    def reconstruct(
+        self, frames_dir: Path, names: list[str], out_dir: Path, bridges: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Reconstruct the named images into out_dir (database.db, sparse/0); return metrics.
+        bridges: dropped frames that may only link parts of the map, never end up in it."""
         ...
 
 
@@ -56,6 +59,21 @@ class Segmenter(Protocol):
     def segment(self, image: np.ndarray, prompts: list[str], frame: int) -> list[MaskResult]:
         """image: H x W x 3 RGB uint8; frame: index into frames.json (for file-based masks)."""
         ...
+
+
+@dataclass
+class DensePoints:
+    """A dense cloud in COLMAP world with per-point frame links (CSR, ADR 0017).
+    Frames of point i: frame_ids[frame_offsets[i]:frame_offsets[i + 1]], best first."""
+
+    xyz: np.ndarray  # N x 3 float64
+    rgb: np.ndarray  # N x 3 uint8
+    normals: np.ndarray | None  # N x 3, or None when the densifier gives none
+    frame_offsets: np.ndarray  # N + 1 uint32
+    frame_ids: np.ndarray  # uint32 indices into the bundle's frames list
+    links_source: str  # "colmap_fusion" (exact, fused.ply.vis) | "sparse_tracks" (fallback)
+    max_frames_per_point: int
+    densifier: str  # "colmap" | "fake" (dense_fake, synthetic points) | "unknown"
 
 
 class Densifier(Protocol):

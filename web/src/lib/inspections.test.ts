@@ -1,13 +1,10 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import {
-  fetchRuns,
-  groupRunsIntoSites,
-  processingSteps,
-  UNASSIGNED_SITE_ID,
-  type RunSummary,
-} from './inspections';
+import { fetchRuns, groupRunsIntoSites, UNASSIGNED_SITE_ID, type RunSummary } from './inspections';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  sessionStorage.clear();
+  vi.unstubAllGlobals();
+});
 
 describe('groupRunsIntoSites', () => {
   it('groups runs by real site identity and preserves inspection metadata', () => {
@@ -30,6 +27,7 @@ describe('groupRunsIntoSites', () => {
       id: 'a',
       siteId: 'north',
       title: 'Walkdown',
+      source: null,
       createdAt: '2026-10-14T10:00:00Z',
       status: 'running',
     });
@@ -45,7 +43,8 @@ describe('groupRunsIntoSites', () => {
     expect(sites[0].inspections).toContainEqual({
       id: 'video',
       siteId: UNASSIGNED_SITE_ID,
-      title: 'survey.mp4',
+      title: 'video',
+      source: 'survey.mp4',
       createdAt: null,
       status: 'unknown',
     });
@@ -70,19 +69,6 @@ describe('groupRunsIntoSites', () => {
   });
 });
 
-it('keeps reported failures and does not infer success from elapsed time', () => {
-  expect(
-    processingSteps({
-      run_id: 'run',
-      stats: { processing_s: { frames: 1, reconstruction: 5 } },
-      stages: [{ name: 'reconstruction', status: 'failed' }],
-    }),
-  ).toEqual([
-    { name: 'frames', status: 'unknown', seconds: 1 },
-    { name: 'reconstruction', status: 'failed', seconds: 5 },
-  ]);
-});
-
 it('rejects failed HTTP requests and malformed run lists without a fixture fallback', async () => {
   vi.stubGlobal(
     'fetch',
@@ -93,4 +79,15 @@ it('rejects failed HTTP requests and malformed run lists without a fixture fallb
   );
   await expect(fetchRuns()).rejects.toThrow('503');
   await expect(fetchRuns()).rejects.toThrow('Invalid runs response');
+});
+
+it('sends the stored authorization header with inspection requests', async () => {
+  sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
+  const fetch = vi.fn().mockResolvedValue(Response.json([]));
+  vi.stubGlobal('fetch', fetch);
+  await fetchRuns();
+  expect(fetch).toHaveBeenCalledWith('/api/runs', {
+    signal: undefined,
+    headers: { Authorization: 'Bearer test-api-value' },
+  });
 });

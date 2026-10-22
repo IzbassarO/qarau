@@ -6,6 +6,8 @@ import json
 import os
 import shutil
 import time
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,10 +16,11 @@ import laspy
 import numpy as np
 import pycolmap
 
-from .interfaces import stage_seconds
+from .interfaces import DensePoints, stage_seconds
 
 NEVER = 65535
 THUMB_W = 960
+FAR_K = 2.5  # far layer: nearest-camera distance > FAR_K x median (ADR 0013)
 
 
 # ---------------------------------------------------------------- geometry
@@ -136,12 +139,99 @@ def frames_from_json(out: Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------- export
 
 
+def sanitize_points(xyz: np.ndarray) -> tuple[np.ndarray, dict[str, int]]:
+    """Mask of points safe to export + counts. Drops non-finite rows and far outliers:
+    distance from the per-axis median > max(100 x the 99th-percentile distance, 1)."""
+    finite = np.isfinite(xyz).all(axis=1)
+    keep = finite.copy()
+    if finite.any():
+        # ponytail: if >1% of points are outliers r99 is one of them and nothing is dropped;
+        # write_laz_ply still fits any finite extent, only precision suffers
+        d = np.linalg.norm(xyz[finite] - np.median(xyz[finite], axis=0), axis=1)
+        keep[finite] = d <= max(100 * float(np.percentile(d, 99)), 1.0)
+    report = {
+        "non_finite": int((~finite).sum()),
+        "far_outliers": int(finite.sum() - keep.sum()),
+        "kept": int(keep.sum()),
+        "total": len(xyz),
+    }
+    if not report["kept"]:
+        raise ValueError(f"export: no valid points to write ({report})")
+    return keep, report
+
+
+def far_mask(xyz: np.ndarray, centers: np.ndarray) -> np.ndarray:
+    """Points farther from every registered camera than FAR_K x the median such distance:
+    horizon, distant hills, sky remnants. Nearest camera, not the trajectory centroid, so a
+    long walk along a pipeline keeps its ends."""
+    # ponytail: dense N x C distance matrix in chunks; a KD-tree if C grows to thousands
+    d = np.concatenate(
+        [
+            np.sqrt(((xyz[i : i + 8192, None] - centers[None]) ** 2).sum(-1).min(1))
+            for i in range(0, len(xyz), 8192)
+        ]
+    )
+    return np.asarray(d > FAR_K * np.median(d))
+
+
+def las_offset_scale(xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Offset = middle of the extent, scale >= 1 mm and coarse enough that every quantized
+    coordinate (x - offset) / scale fits in int32 (10% margin for rounding)."""
+    lo, hi = xyz.min(axis=0), xyz.max(axis=0)
+    return (lo + hi) / 2, np.maximum(0.001, (hi - lo) / 2 / (2**31 - 1) * 1.1)
+
+
+def filter_rows(
+    offsets: np.ndarray, ids: np.ndarray, keep: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Keep the CSR rows where keep is True, so rows stay in step with the kept points."""
+    counts = np.diff(offsets).astype(np.int64)
+    new = np.concatenate([[0], np.cumsum(counts[keep])]).astype(np.uint32)
+    return new, ids[np.repeat(keep, counts)].astype(np.uint32)
+
+
+def dense_layer(
+    dense: DensePoints,
+    centers: np.ndarray,
+    A: np.ndarray,
+    c: np.ndarray,
+    n_frames: int,
+    w: Callable[[str, np.ndarray, str], str],
+) -> dict[str, Any]:
+    """Manifest key `dense` (ADR 0017): same sanitize and far rules as the sparse points; the
+    far ones are dropped (counted), never moved to the far layer. Rows filtered in step."""
+    keep, rep = sanitize_points(dense.xyz)
+    far = np.zeros(len(keep), bool)
+    far[keep] = far_mask(dense.xyz[keep], centers)
+    keep &= ~far
+    off, ids = filter_rows(dense.frame_offsets, dense.frame_ids, keep)
+    if len(ids) and int(ids.max()) >= n_frames:
+        raise ValueError(f"dense frame link {int(ids.max())} >= {n_frames} frames")
+    n = int(keep.sum())
+    return {
+        "count": n,
+        "position": w("dense.position.f32", dense.xyz[keep] @ A.T - c, "<f4"),
+        "color": w("dense.color.u8", dense.rgb[keep], "u1"),
+        "densifier": dense.densifier,
+        "frame_links_source": dense.links_source,
+        "max_frames_per_point": dense.max_frames_per_point,
+        "frame_offsets": {"path": w("dense.frame_offsets.u32", off, "<u4"), "dtype": "<u4",
+                          "length": n + 1},
+        "frame_ids": {"path": w("dense.frame_ids.u32", ids, "<u4"), "dtype": "<u4",
+                      "length": len(ids)},
+        "linked_points": int((np.diff(off) > 0).sum()),
+        "dropped": {"non_finite": rep["non_finite"], "far_outliers": rep["far_outliers"],
+                    "far": int(far.sum())},
+    }  # fmt: skip
+
+
 def export_bundle(
     rec: pycolmap.Reconstruction,
     frames: list[dict[str, Any]],
     out: Path,
     source: dict[str, Any],
     run_id: str,
+    dense: DensePoints | None = None,
 ) -> dict[str, Any]:
     t0 = time.perf_counter()
     web = out / "web"
@@ -161,13 +251,25 @@ def export_bundle(
     if N == 0 or not reg:
         raise ValueError("reconstruction has no registered images or no points")
     xyz = np.array([rec.points3D[int(p)].xyz for p in pids], dtype=np.float64)
-    rgb = np.array([rec.points3D[int(p)].color for p in pids], dtype=np.uint8)
+    keep, report = sanitize_points(xyz)
+    dropped = {"non_finite": report["non_finite"], "far_outliers": report["far_outliers"]}
+    if report["kept"] < N:
+        print(f"export: dropped {N - report['kept']} of {N} points {dropped}", flush=True)
+    pids, xyz = pids[keep], xyz[keep]
 
     # poses (COLMAP world)
     R = {iid: np.asarray(rec.images[iid].cam_from_world().rotation.matrix()) for iid in reg}
     t = {iid: np.asarray(rec.images[iid].cam_from_world().translation) for iid in reg}
     Rs = np.stack(list(R.values()))
     centers = np.stack([-R[i].T @ t[i] for i in reg])
+
+    # far layer (ADR 0013): own arrays, never in the object cloud
+    far = far_mask(xyz, centers)
+    far_xyz = xyz[far]
+    far_rgb = np.array([rec.points3D[int(p)].color for p in pids[far]], np.uint8).reshape(-1, 3)
+    pids, xyz = pids[~far], xyz[~far]  # every per-point array below derives from pids
+    N = len(pids)
+    rgb = np.array([rec.points3D[int(p)].color for p in pids], dtype=np.uint8)
 
     # alignment: up -> +Z, point centroid -> origin, no scale
     A = rotation_between(estimate_up(Rs, centers), np.array([0.0, 0, 1]))
@@ -244,8 +346,9 @@ def export_bundle(
     mean_err = float(rec.compute_mean_reprojection_error())
     secs = stage_seconds(out)
     manifest: dict[str, Any] = {
-        "version": 1,
+        "version": 2,  # 2: optional `dense` layer with frame links (ADR 0017)
         "run_id": run_id,
+        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),  # when exported
         "source": source,
         "world": {
             "up": [0, 0, 1], "world_from_colmap": W.flatten().tolist(),
@@ -259,6 +362,12 @@ def export_bundle(
             "first_seen": w("points.first_seen.u16", first_seen, "<u2"),
             "num_obs": w("points.num_obs.u8", num_obs, "u1"),
         },
+        "far": {
+            "count": len(far_xyz),
+            "position": w("far.position.f32", far_xyz @ A.T - c, "<f4"),
+            "color": w("far.color.u8", far_rgb, "u1"),
+            "rule": f"nearest camera distance > {FAR_K:g} x median",
+        },
         "tracks": {
             "frame_offsets": w("tracks.frame_offsets.u32", frame_offsets, "<u4"),
             "frame_points": w("tracks.frame_points.u32", frame_points, "<u4"),
@@ -271,24 +380,30 @@ def export_bundle(
             "frames_dropped": sum(1 for f in frames if not f["kept"]),
             "frames_registered": len(reg),
             "points": N,
+            "far_points": len(far_xyz),
+            "dropped_points": dropped,
             "mean_track_length": round(mean_track, 3),
             "mean_reproj_error_px": round(mean_err, 3),
             "processing_s": {k: v for k, v in secs.items() if k in ("frames", "reconstruction")},
         },
     }  # fmt: skip
+    extra: dict[str, Any] = {}
+    if dense is not None:
+        d = manifest["dense"] = dense_layer(dense, centers, A, c, F, w)
+        extra = {"dense_points": d["count"], "dense_linked_points": d["linked_points"],
+                 "frame_links_source": d["frame_links_source"]}  # fmt: skip
 
     write_laz_ply(out, xyz_a, rgb)
     manifest["stats"]["processing_s"]["export"] = round(time.perf_counter() - t0, 2)
     (web / "manifest.json").write_text(json.dumps(manifest))
 
-    check = check_projection(rec, out, manifest, reg)
-    return {**manifest["stats"], "reproj_check_px": check}
+    check = check_projection(rec, out, manifest, reg, pids)
+    return {**manifest["stats"], **extra, "reproj_check_px": check}
 
 
 def write_laz_ply(out: Path, xyz: np.ndarray, rgb: np.ndarray) -> None:
     hdr = laspy.LasHeader(point_format=2, version="1.2")
-    hdr.scales = np.array([0.001] * 3)
-    hdr.offsets = xyz.min(axis=0)
+    hdr.offsets, hdr.scales = las_offset_scale(xyz)
     las = laspy.LasData(hdr)
     las.x, las.y, las.z = xyz[:, 0], xyz[:, 1], xyz[:, 2]
     las.red, las.green, las.blue = (rgb[:, 0].astype("u2") << 8, rgb[:, 1].astype("u2") << 8,
@@ -313,12 +428,13 @@ def check_projection(
     out: Path,
     manifest: dict[str, Any],
     reg: dict[int, int],
+    pids: np.ndarray,
     n: int = 3000,
 ) -> dict[str, float]:
     """Project points with the STORED aligned pose + camera params (read back from the
-    written files) and compare with COLMAP's own 2D observations. Returns px error."""
+    written files) and compare with COLMAP's own 2D observations. Returns px error.
+    pids = COLMAP point ids of the written points, in file order."""
     pos = np.fromfile(out / manifest["points"]["position"], dtype="<f4").reshape(-1, 3)
-    pids = np.array(sorted(rec.points3D.keys()))
     sel = np.random.default_rng(0).choice(len(pids), size=min(n, len(pids)), replace=False)
     errs = []
     for k in sel:

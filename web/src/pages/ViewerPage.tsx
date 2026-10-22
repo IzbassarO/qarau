@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
+import { createDemo } from '../fixtures/demo';
 import { useI18n, type Key } from '../i18n';
-import { BundleError, loadBundle, loadManifest, type Bundle } from '../lib/bundle';
+import { BundleError, FarLayerError, loadBundle, loadManifest, type Bundle } from '../lib/bundle';
 import { ViewerScreen } from '../viewer/ViewerScreen';
 
 type State =
@@ -11,10 +12,12 @@ type State =
 
 export function ViewerPage() {
   const { runId = '' } = useParams();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [st, setSt] = useState<State>({ s: 'loading', p: 0 });
+  const [search] = useSearchParams();
 
   useEffect(() => {
+    if (runId === 'demo') return;
     let dead = false;
     setSt({ s: 'loading', p: 0 });
     (async () => {
@@ -24,6 +27,10 @@ export function ViewerPage() {
         if (!dead) setSt({ s: 'ready', bundle });
       } catch (e) {
         if (dead) return;
+        if (e instanceof FarLayerError) {
+          setSt({ s: 'ready', bundle: e.bundle });
+          return;
+        }
         const code = e instanceof BundleError ? e.code : 'generic';
         setSt({ s: 'error', code, msg: String(e) });
       }
@@ -33,35 +40,54 @@ export function ViewerPage() {
     };
   }, [runId]);
 
-  if (st.s === 'ready') return <ViewerScreen bundle={st.bundle} />;
+  // The demo reuses the local bundle and does not need a backend manifest.
+  const bundle = runId === 'demo' ? createDemo(lang).bundle : st.s === 'ready' ? st.bundle : null;
+  if (bundle) {
+    const value = search.get('point');
+    const point = value !== null && /^\d+$/.test(value) ? Number(value) : null;
+    const valid =
+      point !== null &&
+      Number.isSafeInteger(point) &&
+      point < bundle.manifest.points.count &&
+      point * 3 + 2 < bundle.position.length;
+    return (
+      <ViewerScreen
+        key={`${runId}:${search}`}
+        bundle={bundle}
+        initialPoint={valid ? point : null}
+        invalidPoint={search.has('point') && !valid}
+        initialMode={search.get('mode') === 'observer' ? 'observer' : 'orbit'}
+      />
+    );
+  }
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 bg-bg p-6 text-center">
+    <div className="viewer-page-message">
       {st.s === 'loading' ? (
         <>
           <p>
-            {t('viewer.loading')} · <span className="font-mono">{Math.round(st.p * 100)}%</span>
+            {t('viewer.loading')} · <span className="viewer-mono">{Math.round(st.p * 100)}%</span>
           </p>
           <div
-            className="h-1 w-64 rounded-full bg-line"
+            className="viewer-loading-track"
             role="progressbar"
             aria-valuenow={Math.round(st.p * 100)}
           >
-            <div className="h-1 rounded-full bg-inspected" style={{ width: `${st.p * 100}%` }} />
+            <div className="viewer-loading-progress" style={{ width: `${st.p * 100}%` }} />
           </div>
         </>
-      ) : (
+      ) : st.s === 'error' ? (
         <>
-          <p className="max-w-md text-watch" role="alert">
+          <p className="viewer-page-error" role="alert">
             {t(`error.${st.code}` as Key)}
           </p>
-          <p className="font-mono text-xs text-ink-2">
+          <p className="viewer-mono viewer-caption viewer-muted">
             {runId}: {st.msg}
           </p>
-          <Link className="text-link hover:underline" to="/">
+          <Link className="viewer-page-link" to="/">
             {t('error.back')}
           </Link>
         </>
-      )}
+      ) : null}
     </div>
   );
 }

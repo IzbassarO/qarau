@@ -1,10 +1,44 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { Link } from 'react-router';
 import { useI18n } from '../i18n';
-import { runUrl, type Bundle, type Finding } from '../lib/bundle';
-import { csrSlice, heightRamp, RAMP } from '../lib/geometry';
-import { ViewerEngine, type Options } from './engine';
-import { H2, LangSwitch, Logo, Row, Toggle } from './ui';
+import { hasRgb, runUrl, type Bundle, type Finding } from '../lib/bundle';
+import { heightRamp, RAMP } from '../lib/geometry';
+import './viewer.css';
+import { ViewerEngine, type ColorMode, type Options, type PointLayer } from './engine';
+import { defaultViewState } from './defaults';
+import { AxisGizmo, type AxisGizmoHandle } from './AxisGizmo';
+import {
+  H2,
+  DenseToggle,
+  LangSwitch,
+  Logo,
+  ModeSwitch,
+  NavigationSettings,
+  PointInfoTool,
+  Row,
+  Toggle,
+  ToolButton,
+} from './ui';
+import { buildDensePointInfo, buildPointInfo, frameTime } from './pointInfo';
+import { PointInfoPanel } from './PointInfoPanel';
+import { Minimap, type MinimapHandle } from './Minimap.tsx';
+import { canShowHumanFigure } from './observer';
+import { SessionImage } from '../auth/SessionImage';
+import { sessionUserId, subscribeToAuth } from '../auth/auth';
+import {
+  loadSensitivity,
+  saveSensitivity,
+  loadObserverBoostKey,
+  saveObserverBoostKey,
+} from './settings';
 
 declare global {
   interface Window {
@@ -13,37 +47,27 @@ declare global {
       fps: number;
       engine?: ViewerEngine;
       bench: (on: boolean) => void;
+      denseLayer: () => { available: boolean; visible: boolean; count: number };
+      densePointScreen: (index: number) => { x: number; y: number } | null;
     };
   }
 }
 
-const mono = 'font-mono';
+const mono = 'viewer-mono';
+const colorModeStorageKey = 'qarau.viewer.colorMode.v2';
+function savedColorMode(): ColorMode | undefined {
+  try {
+    const saved = localStorage.getItem(colorModeStorageKey);
+    return saved === 'rgb' || saved === 'height' ? saved : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const fmtTime = (s: number) => {
   const m = Math.floor(s / 60);
   return `${String(m).padStart(2, '0')}:${(s - m * 60).toFixed(1).padStart(4, '0')}`;
 };
-
-function ToolButton({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      className="flex size-9 cursor-pointer items-center justify-center rounded-lg border-0 bg-transparent text-xl text-[#c9ced6] hover:bg-raised"
-    >
-      {children}
-    </button>
-  );
-}
 
 const icon = (d: ReactNode) => (
   <svg
@@ -51,7 +75,7 @@ const icon = (d: ReactNode) => (
     height="18"
     viewBox="0 0 18 18"
     fill="none"
-    stroke="#C9CED6"
+    stroke="currentColor"
     strokeWidth="1.5"
     strokeLinecap="round"
     strokeLinejoin="round"
@@ -61,22 +85,66 @@ const icon = (d: ReactNode) => (
   </svg>
 );
 
-export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; embedded?: boolean }) {
+export function ViewerScreen({
+  bundle,
+  embedded = false,
+  initialPoint = null,
+  invalidPoint = false,
+  initialMode = 'orbit',
+}: {
+  bundle: Bundle;
+  embedded?: boolean;
+  initialPoint?: number | null;
+  invalidPoint?: boolean;
+  initialMode?: 'orbit' | 'observer';
+}) {
   const { t } = useI18n();
   const m = bundle.manifest;
   const frames = m.frames;
   const isImages = m.source.kind === 'images';
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
+  const gizmoRef = useRef<AxisGizmoHandle>(null);
+  const minimapRef = useRef<MinimapHandle>(null);
+  const [flyMode, setFlyMode] = useState(initialMode === 'observer');
+  const [thirdPerson, setThirdPerson] = useState(false);
+  const [humanFigure, setHumanFigure] = useState(false);
+  const [alignMode, setAlignMode] = useState(false);
+  const [pointInfoMode, setPointInfoMode] = useState(
+    initialMode !== 'observer' && initialPoint !== null,
+  );
+  const userId = useSyncExternalStore(subscribeToAuth, sessionUserId, () => null);
+  const [sensitivitySetting, setSensitivitySetting] = useState(() => ({
+    userId,
+    value: loadSensitivity(userId),
+  }));
+  const sensitivity =
+    sensitivitySetting.userId === userId ? sensitivitySetting.value : loadSensitivity(userId);
+  const [boostSetting, setBoostSetting] = useState(() => ({
+    userId,
+    value: loadObserverBoostKey(userId),
+  }));
+  const boostKey =
+    boostSetting.userId === userId ? boostSetting.value : loadObserverBoostKey(userId);
   const [frame, setFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [picked, setPicked] = useState<number | null>(null);
+  const [picked, setPicked] = useState<{ index: number; layer: PointLayer } | null>(
+    initialPoint === null ? null : { index: initialPoint, layer: 'sparse' },
+  );
   const [fps, setFps] = useState(0);
+  const [colorMode, setColorMode] = useState(savedColorMode);
+  const defaults = defaultViewState(bundle, colorMode);
+  const rgbAvailable = hasRgb(bundle) || !!bundle.dense?.color.length;
+  const activeColorMode = defaults.colorMode;
+  const colorModeHintId = useId();
+  const [showFarLayer, setShowFarLayer] = useState(defaults.showFarLayer);
+  const farAvailable = !!bundle.far?.position.length;
+  const denseAvailable = !!bundle.dense;
+  const [showDenseLayer, setShowDenseLayer] = useState(denseAvailable);
   const [opts, setOpts] = useState<Options>({
-    buildUp: true,
+    buildUp: defaults.buildUp,
     showCurrent: true,
-    frustums: true,
-    rgb: false,
+    frustums: defaults.frustums,
     findings: true,
     pointSize: 2.5,
   });
@@ -87,22 +155,34 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
   const f = frames[frame];
   const findings = useMemo(() => bundle.findings ?? [], [bundle]);
   const selected = findings.find((x) => x.id === sel) ?? null;
-  const sevColor = (x: Finding) => (x.severity === 'critical' ? '#F0565C' : '#F2A33A');
+  const sevColor = (x: Finding) =>
+    x.severity === 'critical' ? 'var(--color-finding-critical)' : 'var(--color-finding-watch)';
   // a finding exists on the map once its first frame has played (always, with build-up off)
   const seen = (x: Finding) => !opts.buildUp || !x.frames.length || x.frames[0] <= frame;
-  const tc = (i: number) => (isImages ? `#${i}` : fmtTime(frames[i].t));
+  const tc = (i: number) => {
+    const time = frameTime(frames[i]);
+    return isImages ? `#${i}` : time === null ? t('pointInfo.noTimestamp') : fmtTime(time);
+  };
+  const canPlay = isImages || frames.every((frame) => frameTime(frame) !== null);
 
   // engine lifecycle
   useEffect(() => {
     const canvas = canvasRef.current!;
     let eng: ViewerEngine;
     try {
-      eng = new ViewerEngine(canvas, bundle, { onPick: (p) => setPicked(p) });
+      eng = new ViewerEngine(canvas, bundle, {
+        onPick: (p, layer = 'sparse') => setPicked(p === null ? null : { index: p, layer }),
+        onFlyModeChange: setFlyMode,
+        onThirdPersonChange: setThirdPerson,
+        onAlignModeChange: setAlignMode,
+        onPointInfoModeChange: setPointInfoMode,
+      });
     } catch {
       setGlError(true);
       return;
     }
     engineRef.current = eng;
+    if (initialMode === 'observer') eng.setObserverMode();
     const ro = new ResizeObserver(() => eng.resize());
     ro.observe(canvas);
     eng.resize();
@@ -113,6 +193,24 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
         fps: 0,
         engine: eng,
         bench: (on) => (eng.bench = on),
+        denseLayer: () => ({
+          available: eng.hasDenseLayer(),
+          visible: eng.scene.getObjectByName('dense')?.visible ?? false,
+          count: bundle.dense?.count ?? 0,
+        }),
+        densePointScreen: (index) => {
+          if (
+            !bundle.dense ||
+            !Number.isSafeInteger(index) ||
+            index < 0 ||
+            index >= bundle.dense.count
+          )
+            return null;
+          const p = eng.project(
+            Array.from(bundle.dense.position.subarray(index * 3, index * 3 + 3)),
+          );
+          return p.visible ? { x: p.x, y: p.y } : null;
+        },
       };
       const q = setInterval(() => window.__qarau && (window.__qarau.fps = eng.fps), 500);
       return () => {
@@ -128,18 +226,32 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
       ro.disconnect();
       eng.dispose();
     };
-  }, [bundle]);
+  }, [bundle, initialMode]);
 
   useEffect(() => engineRef.current?.setFrame(frame), [frame, bundle]);
   useEffect(() => engineRef.current?.setOptions(opts), [opts, bundle]);
-  useEffect(() => engineRef.current?.setPicked(picked), [picked, bundle]);
+  useEffect(() => engineRef.current?.setFarVisible(showFarLayer), [showFarLayer, bundle]);
+  useEffect(() => engineRef.current?.setDenseVisible(showDenseLayer), [showDenseLayer, bundle]);
+  useEffect(() => engineRef.current?.setColorMode(activeColorMode), [activeColorMode, bundle]);
+  useEffect(() => {
+    const point = pointInfoMode ? picked : null;
+    if (point?.layer === 'dense') engineRef.current?.setPicked(point.index, 'dense');
+    else engineRef.current?.setPicked(point?.index ?? null);
+  }, [picked, pointInfoMode, bundle]);
+  useEffect(() => engineRef.current?.setPointInfoMode(pointInfoMode), [pointInfoMode, bundle]);
   useEffect(() => engineRef.current?.setSelectedFinding(sel ?? 0), [sel, bundle]);
+  useEffect(() => engineRef.current?.setSensitivity(sensitivity), [sensitivity, bundle]);
+  useEffect(() => engineRef.current?.setBoostKey(boostKey), [boostKey, bundle]);
+  useEffect(() => engineRef.current?.setHumanFigureVisible(humanFigure), [humanFigure, bundle]);
 
   // finding markers are HTML on top of the canvas, re-placed after every render
   useEffect(() => {
     const e = engineRef.current;
     if (!e) return;
     const place = () => {
+      gizmoRef.current?.update(e.camera.quaternion);
+      const observer = e.observerView;
+      if (observer) minimapRef.current?.update(observer);
       for (const x of findings) {
         const el = markerEls.current.get(x.id);
         if (!el) continue;
@@ -153,19 +265,19 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
     return () => {
       e.onRender = undefined;
     };
-  }, [bundle, findings, frame, opts.buildUp, opts.findings]);
+  }, [bundle, findings, frame, opts.buildUp, opts.findings, flyMode]);
 
   // play: step in real time by frames[i].t (photo sets: 4 frames per second)
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || !canPlay) return;
     const rate = isImages ? 4 : 1;
     const start = performance.now();
-    const t0 = isImages ? frame : frames[frame].t;
+    const t0 = isImages ? frame : frameTime(frames[frame])!;
     let raf = 0;
     const tick = () => {
       const el = ((performance.now() - start) / 1000) * rate + t0;
       let i = frame;
-      while (i + 1 < frames.length && (isImages ? i + 1 : frames[i + 1].t) <= el) i++;
+      while (i + 1 < frames.length && (isImages ? i + 1 : frameTime(frames[i + 1])!) <= el) i++;
       setFrame(i);
       if (i >= frames.length - 1) setPlaying(false);
       else raf = requestAnimationFrame(tick);
@@ -187,15 +299,35 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
     engineRef.current?.flyToFinding(x.centroid, Math.hypot(d[0], d[1], d[2]));
   };
 
-  const observed = useMemo(
+  const pointInfo = useMemo(
     () =>
       picked === null
         ? null
-        : Array.from(csrSlice(bundle.pointOffsets, bundle.pointFrames, picked)),
+        : picked.layer === 'dense'
+          ? buildDensePointInfo(bundle, picked.index)
+          : buildPointInfo(bundle, picked.index),
     [picked, bundle],
   );
+  const closePointInfo = () => {
+    setPicked(null);
+    setPointInfoMode(false);
+  };
+  const seekPointFrame = (timeSec: number, frameId: number) => {
+    const index = frames.findIndex((frame) => frame.i === frameId && frameTime(frame) === timeSec);
+    if (index < 0) return;
+    setPlaying(false);
+    jump(index);
+  };
 
   const eng = () => engineRef.current;
+  const changeColorMode = (mode: ColorMode) => {
+    setColorMode(mode);
+    try {
+      localStorage.setItem(colorModeStorageKey, mode);
+    } catch {
+      // The current view still works when browser storage is unavailable.
+    }
+  };
   const tickFindings = !opts.findings ? [] : selected ? [selected] : findings;
   const ticks = frames.filter((x) => !x.registered || !x.kept);
   const stats = m.stats;
@@ -203,34 +335,23 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
   const rampSwatches = [0, 1 / 3, 2 / 3, 1].map((v) => heightRamp(v));
 
   return (
-    <div className="flex h-full min-h-[640px] flex-col overflow-hidden bg-bg">
+    <div className="viewer-screen">
       {!embedded && (
-        <header className="flex flex-wrap items-center gap-4 border-b border-line bg-surface px-4 py-2.5">
+        <header className="viewer-header">
           <Link to="/" aria-label="Qarau">
             <Logo />
           </Link>
-          <span className="text-ink-2">{bundle.runId}</span>
-          <div
-            role="tablist"
-            className="flex gap-0.5 rounded-[9px] border border-line-strong p-[3px]"
-          >
-            <span
-              role="tab"
-              aria-selected="false"
-              className="inline-flex h-7 items-center rounded-md px-3 text-[13px] text-ink-2"
-            >
+          <span className="viewer-run-id">{bundle.runId}</span>
+          <div role="tablist" className="viewer-tabs">
+            <span role="tab" aria-selected="false" className="viewer-tab">
               {t('nav.overview')}
             </span>
-            <span
-              role="tab"
-              aria-selected="true"
-              className="inline-flex h-7 items-center rounded-md bg-line px-3 text-[13px]"
-            >
+            <span role="tab" aria-selected="true" className="viewer-tab">
               {t('nav.viewer')}
             </span>
           </div>
           <div className="grow" />
-          <span className={`${mono} text-xs text-ink-2`}>
+          <span className={`${mono} viewer-caption viewer-muted`}>
             {stats.points.toLocaleString()}
             {import.meta.env.DEV && fps > 0 && ` · ${fps} fps`}
           </span>
@@ -238,12 +359,23 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
         </header>
       )}
 
-      <div className="flex min-h-0 grow">
+      {bundle.farError && (
+        <p role="alert" className="viewer-notice viewer-error">
+          {t(bundle.farError === 'missing' ? 'viewer.far.errorMissing' : 'viewer.far.errorBroken')}
+        </p>
+      )}
+      {invalidPoint && (
+        <p role="note" className="viewer-notice viewer-caption viewer-muted">
+          {t('pointInfo.invalidPoint')}
+        </p>
+      )}
+
+      <div className="viewer-workspace">
         <div
           role="toolbar"
           aria-label={t('toolbar.label')}
           aria-orientation="vertical"
-          className="flex w-[52px] shrink-0 flex-col items-center gap-1.5 border-r border-line bg-surface py-2.5"
+          className="viewer-toolbar"
         >
           <ToolButton label={t('toolbar.reset')} onClick={() => eng()?.resetView()}>
             {icon(<path d="M3 9a6 6 0 1 0 2-4.5M3 3v3h3" />)}
@@ -252,12 +384,25 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
             {icon(
               <>
                 <rect x="3" y="3" width="12" height="12" rx="2" />
-                <circle cx="9" cy="9" r="2" fill="#C9CED6" />
+                <circle cx="9" cy="9" r="2" fill="currentColor" />
               </>,
             )}
           </ToolButton>
           <ToolButton label={t('toolbar.side')} onClick={() => eng()?.sideView()}>
             {icon(<path d="M2 14h14M5 14V7h8v7" />)}
+          </ToolButton>
+          <ToolButton label={t('toolbar.front')} onClick={() => eng()?.frontView()}>
+            {icon(<path d="M3 14V4h12v10M6 14V9h6v5M2 14h14" />)}
+          </ToolButton>
+          <ToolButton label={t('toolbar.threeQuarter')} onClick={() => eng()?.threeQuarterView()}>
+            {icon(<path d="m9 2 6 3.5v7L9 16l-6-3.5v-7L9 2Zm0 7L3 5.5M9 9l6-3.5M9 9v7" />)}
+          </ToolButton>
+          <ToolButton
+            label={t('toolbar.alignSurface')}
+            pressed={alignMode}
+            onClick={() => eng()?.beginSurfaceAlignment()}
+          >
+            {icon(<path d="m2 12 7 4 7-4-7-4-7 4ZM9 10V2M6 5l3-3 3 3" />)}
           </ToolButton>
           <ToolButton label={t('toolbar.camera')} onClick={() => eng()?.viewThroughFrame(frame)}>
             {icon(
@@ -267,27 +412,83 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
               </>,
             )}
           </ToolButton>
-          <span className="my-1 h-px w-6 bg-line" />
-          <ToolButton label={t('toolbar.zoomIn')} onClick={() => eng()?.zoom(0.8)}>
+          <PointInfoTool
+            active={pointInfoMode}
+            onClick={() => {
+              if (pointInfoMode) closePointInfo();
+              else setPointInfoMode(true);
+            }}
+          />
+          <span className="viewer-toolbar-divider" />
+          <ToolButton
+            label={t('toolbar.zoomIn')}
+            onClick={(event) => eng()?.zoom(0.8, event.altKey)}
+          >
             +
           </ToolButton>
-          <ToolButton label={t('toolbar.zoomOut')} onClick={() => eng()?.zoom(1.25)}>
+          <ToolButton
+            label={t('toolbar.zoomOut')}
+            onClick={(event) => eng()?.zoom(1.25, event.altKey)}
+          >
             −
           </ToolButton>
         </div>
 
-        <main className="flex min-w-0 flex-1 flex-col">
-          <div className="relative min-h-0 grow bg-black">
+        <main className="viewer-main">
+          <div className="viewer-modebar">
+            <ModeSwitch
+              orbitActive={!flyMode}
+              onOrbit={() => eng()?.setOrbitMode()}
+              onObserver={() => eng()?.setObserverMode()}
+            />
+            {flyMode && (
+              <div className="viewer-inline">
+                <button
+                  type="button"
+                  aria-pressed={thirdPerson}
+                  onClick={() => {
+                    eng()?.toggleThirdPerson();
+                    canvasRef.current?.focus({ preventScroll: true });
+                  }}
+                  className="viewer-control"
+                >
+                  {t('viewer.observer.thirdPerson')}
+                </button>
+                {thirdPerson && canShowHumanFigure(bundle) && (
+                  <button
+                    type="button"
+                    aria-pressed={humanFigure}
+                    onClick={() => {
+                      setHumanFigure((visible) => !visible);
+                      canvasRef.current?.focus({ preventScroll: true });
+                    }}
+                    className="viewer-control"
+                  >
+                    {t('viewer.observer.humanFigure')}
+                  </button>
+                )}
+              </div>
+            )}
+            <NavigationSettings
+              sensitivity={sensitivity}
+              onSensitivityChange={(value) => {
+                setSensitivitySetting({ userId, value });
+                saveSensitivity(userId, value);
+              }}
+              boostKey={boostKey}
+              onBoostKeyChange={(value) => {
+                setBoostSetting({ userId, value });
+                saveObserverBoostKey(userId, value);
+              }}
+            />
+          </div>
+          <div className="viewer-canvas">
             <canvas
               ref={canvasRef}
               aria-label={t('canvas.label')}
-              className="absolute inset-0 size-full outline-none"
+              className="viewer-point-canvas"
             />
-            {glError && (
-              <p className="absolute inset-0 grid place-items-center text-watch">
-                {t('error.webgl')}
-              </p>
-            )}
+            {glError && <p className="viewer-canvas-error">{t('error.webgl')}</p>}
             {opts.findings && (
               <div className="pointer-events-none absolute inset-0 overflow-hidden">
                 {findings.filter(seen).map((x) => (
@@ -301,7 +502,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                     data-testid="finding-marker"
                     aria-label={`${t('findings.marker')} ${x.id}`}
                     onClick={() => select(x)}
-                    className={`pointer-events-auto absolute left-0 top-0 flex size-6 cursor-pointer items-center justify-center rounded-full border-2 p-0 font-mono text-xs font-semibold text-bg ${x.id === sel ? 'border-white' : 'border-bg'} ${x.status === 'low_evidence' ? 'opacity-80 outline-dashed outline-1 outline-offset-2 outline-ink-2' : ''}`}
+                    className={`viewer-finding-marker ${x.id === sel ? 'selected' : ''} ${x.status === 'low_evidence' ? 'low-evidence' : ''}`}
                     style={{ background: sevColor(x) }}
                   >
                     {x.id}
@@ -309,35 +510,58 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                 ))}
               </div>
             )}
-            <div className="absolute right-3 top-3 flex flex-col gap-1.5 rounded-lg bg-bg/85 px-3 py-2.5 text-xs leading-4">
+            <div className="viewer-legend">
               {[
-                ['#EAF2FF', 'legend.now'],
+                ['var(--color-viewer-current)', 'legend.now'],
                 [`rgb(${rampSwatches[1].join(',')})`, 'legend.seen'],
-                ['#2A3240', 'legend.later'],
-                ['#6B727D', 'legend.never'],
+                ['var(--color-viewer-later)', 'legend.later'],
+                ['var(--color-finding-not-seen)', 'legend.never'],
               ].map(([c, k]) => (
-                <span key={k} className="flex items-center gap-2">
-                  <span className="size-2 rounded-full" style={{ background: c }} />
+                <span key={k} className="viewer-inline">
+                  <span className="viewer-legend-swatch" style={{ background: c }} />
                   {t(k as 'legend.now')}
                 </span>
               ))}
             </div>
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-bg/80 px-2.5 py-1.5 text-xs text-ink-2">
-              {t('canvas.hint')}
+            <AxisGizmo
+              ref={gizmoRef}
+              onSelect={(axis) => {
+                eng()?.axisView(axis);
+                canvasRef.current?.focus({ preventScroll: true });
+              }}
+            />
+            {flyMode && (
+              <Minimap ref={minimapRef} bundle={bundle} label={t('viewer.observer.minimap')} />
+            )}
+            <div role="status" className={`viewer-hint ${flyMode ? 'observer' : 'orbit'}`}>
+              {alignMode
+                ? t('canvas.alignHint')
+                : flyMode
+                  ? t('canvas.observerHint')
+                  : pointInfoMode
+                    ? t('pointInfo.hint')
+                    : t('canvas.hint')}
             </div>
           </div>
 
-          <div className="flex flex-col gap-2 border-t border-line bg-surface px-4 pb-3.5 pt-2.5">
-            <div className="flex items-center gap-3">
+          <div className="viewer-timeline">
+            <div className="viewer-timeline-row">
               <button
                 type="button"
+                disabled={!canPlay}
                 onClick={() =>
                   setPlaying((p) => (!p && frame >= frames.length - 1 ? (setFrame(0), true) : !p))
                 }
                 aria-label={playing ? t('timeline.pause') : t('timeline.play')}
-                className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-ink"
+                className="viewer-play"
               >
-                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" fill="#0B0C0E">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  aria-hidden="true"
+                  fill="currentColor"
+                >
                   {playing ? (
                     <>
                       <rect x="2" y="1" width="3.5" height="12" rx="1" />
@@ -348,15 +572,15 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                   )}
                 </svg>
               </button>
-              <span className={`${mono} min-w-24 text-[13px]`}>{tc(frame)}</span>
-              <div className="relative flex h-9 grow items-center">
-                <div aria-hidden="true" className="absolute inset-x-0 top-0.5 h-2">
+              <span className={`${mono} viewer-timecode`}>{tc(frame)}</span>
+              <div className="viewer-timeline-track">
+                <div aria-hidden="true" className="viewer-timeline-ticks">
                   {/* gray marks = frames not used; coloured = frames where a finding is visible */}
                   {ticks.map((x) => (
                     <span
                       key={x.i}
                       title={t('timeline.notUsed')}
-                      className="absolute top-0 h-2 w-0.5 rounded-sm bg-notseen"
+                      className="viewer-timeline-tick unused"
                       style={{ left: `${(x.i / Math.max(1, frames.length - 1)) * 100}%` }}
                     />
                   ))}
@@ -366,7 +590,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                         key={`${x.id}-${i}`}
                         data-testid="finding-tick"
                         title={`${t('timeline.findingTick')}: ${t('findings.marker')} ${x.id}`}
-                        className="absolute top-0 h-2 w-0.5 rounded-sm"
+                        className="viewer-timeline-tick"
                         style={{
                           left: `${(i / Math.max(1, frames.length - 1)) * 100}%`,
                           background: sevColor(x),
@@ -383,40 +607,46 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                   step={1}
                   value={frame}
                   onChange={(e) => setFrame(Number(e.target.value))}
-                  className="mt-3.5 w-full"
+                  className="viewer-timeline-range"
                 />
               </div>
-              <span className={`${mono} text-xs text-ink-2`}>
+              <span className={`${mono} viewer-caption viewer-muted`}>
                 {frame + 1} / {frames.length}
               </span>
             </div>
-            <span className="text-xs text-ink-2">{t('timeline.hint')}</span>
+            <span className="viewer-caption viewer-muted">{t('timeline.hint')}</span>
           </div>
         </main>
 
-        <aside className="flex w-[340px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-line bg-surface p-4">
-          <section className="flex flex-col gap-2">
-            <div className="flex items-baseline justify-between">
-              <h2 className="m-0 text-sm font-semibold">{t('panel.frame')}</h2>
-              <span className={`${mono} text-xs text-ink-2`}>{tc(frame)}</span>
+        <aside className="viewer-panel">
+          {pointInfoMode && pointInfo && (
+            <PointInfoPanel info={pointInfo} onSeek={seekPointFrame} onClose={closePointInfo} />
+          )}
+          {pointInfoMode && !pointInfo && (
+            <p className="viewer-small viewer-muted">{t('pointInfo.hint')}</p>
+          )}
+          <section className="viewer-section">
+            <div className="viewer-section-heading">
+              <h2 className="viewer-heading">{t('panel.frame')}</h2>
+              <span className={`${mono} viewer-caption viewer-muted`}>{tc(frame)}</span>
             </div>
-            <div className="relative aspect-video overflow-hidden rounded-lg border border-line bg-[#0d1014]">
-              <img
+            <div className="viewer-frame">
+              <SessionImage
                 src={bundle.assetUrl?.(f.thumb) ?? runUrl(bundle.runId, f.thumb)}
                 alt={t('panel.frame')}
                 className="size-full object-contain"
               />
             </div>
-            <p className={`${mono} m-0 truncate text-xs text-ink-2`}>
+            <p className={`${mono} viewer-caption viewer-muted truncate`}>
               {f.image.split('/').pop()} · {t('panel.blur')}{' '}
               {f.blur === null ? '—' : f.blur.toFixed(1)}
               {f.drop_reason === 'blur' && ` · ${t('panel.droppedBlur')}`}
               {f.drop_reason === 'exposure' && ` · ${t('panel.droppedExposure')}`}
             </p>
             {!f.registered && (
-              <p className="m-0 text-[13px] text-watch">{t('panel.notRegistered')}</p>
+              <p className="viewer-small viewer-error">{t('panel.notRegistered')}</p>
             )}
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[13px]">
+            <div className="viewer-data">
               <Row k={t('panel.cameraHeight')} v={f.center ? f.center[2].toFixed(2) : '—'} />
               <Row
                 k={t('panel.visible')}
@@ -427,15 +657,15 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                 v={`${Math.round((bundle.assembled[frame] / m.points.count) * 100)}%`}
               />
             </div>
-            <p className="m-0 text-xs text-ink-2">{t('panel.cameraHeightNote')}</p>
+            <p className="viewer-caption viewer-muted">{t('panel.cameraHeightNote')}</p>
           </section>
 
-          <section className="flex flex-col gap-2" aria-label={t('findings.title')}>
+          <section className="viewer-section" aria-label={t('findings.title')}>
             <H2>{t('findings.title')}</H2>
             {!m.findings ? (
-              <p className="m-0 text-[13px] text-ink-2">{t('findings.notRun')}</p>
+              <p className="viewer-small viewer-muted">{t('findings.notRun')}</p>
             ) : bundle.findingsError ? (
-              <p role="alert" className="m-0 text-[13px] text-watch">
+              <p role="alert" className="viewer-small viewer-error">
                 {t(
                   bundle.findingsError === 'missing'
                     ? 'findings.errorMissing'
@@ -443,9 +673,9 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                 )}
               </p>
             ) : findings.length === 0 ? (
-              <p className="m-0 text-[13px] text-ink-2">{t('findings.empty')}</p>
+              <p className="viewer-small viewer-muted">{t('findings.empty')}</p>
             ) : (
-              <ul className="m-0 flex list-none flex-col gap-1 p-0">
+              <ul className="viewer-findings">
                 {findings.map((x) => (
                   <li key={x.id}>
                     <button
@@ -453,21 +683,18 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                       data-testid="finding-item"
                       aria-pressed={x.id === sel}
                       onClick={() => select(x)}
-                      className={`flex w-full cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-1.5 text-left text-[13px] text-ink ${x.id === sel ? 'border-line-strong bg-raised' : 'border-transparent bg-transparent'}`}
+                      className="viewer-finding-item"
                     >
-                      <span
-                        className="flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-xs font-semibold text-bg"
-                        style={{ background: sevColor(x) }}
-                      >
+                      <span className="viewer-finding-id" style={{ background: sevColor(x) }}>
                         {x.id}
                       </span>
-                      <span className="flex min-w-0 grow flex-col">
+                      <span className="viewer-finding-label">
                         <span className="truncate">
                           {x.class} ·{' '}
                           {t(x.severity === 'critical' ? 'findings.critical' : 'findings.watch')}
                         </span>
                         <span
-                          className={`text-xs ${x.status === 'low_evidence' ? 'text-watch' : 'text-ink-2'}`}
+                          className={`viewer-caption ${x.status === 'low_evidence' ? 'viewer-error' : 'viewer-muted'}`}
                         >
                           {t(
                             x.status === 'low_evidence'
@@ -476,7 +703,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
                           )}
                         </span>
                       </span>
-                      <span className={`${mono} shrink-0 text-xs text-ink-2`}>
+                      <span className={`${mono} shrink-0 viewer-caption viewer-muted`}>
                         {x.frames.length} {t('findings.frames')}
                       </span>
                     </button>
@@ -485,22 +712,19 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
               </ul>
             )}
             {selected && (
-              <div
-                data-testid="finding-detail"
-                className="flex flex-col gap-2 rounded-[10px] border border-line-strong p-3"
-              >
+              <div data-testid="finding-detail" className="viewer-finding-detail">
                 {selected.status === 'low_evidence' && (
-                  <p className="m-0 text-xs text-watch">{t('findings.lowEvidenceNote')}</p>
+                  <p className="viewer-caption viewer-error">{t('findings.lowEvidenceNote')}</p>
                 )}
-                <span className="text-[13px]">{t('findings.seenAt')}</span>
-                <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
+                <span className="viewer-small">{t('findings.seenAt')}</span>
+                <div className="viewer-finding-times">
                   {selected.frames.map((i) => (
                     <button
                       key={i}
                       type="button"
                       data-testid="finding-timecode"
                       onClick={() => jump(i)}
-                      className={`${mono} h-7 cursor-pointer rounded-md border border-line-strong bg-transparent px-2 text-xs text-ink ${i === frame ? 'bg-raised' : ''}`}
+                      className={`${mono} viewer-control viewer-caption ${i === frame ? 'selected' : ''}`}
                     >
                       {tc(i)}
                     </button>
@@ -510,7 +734,7 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
             )}
           </section>
 
-          <section className="flex flex-col gap-1.5">
+          <section className="viewer-section">
             <H2>{t('show.title')}</H2>
             <Toggle on={opts.buildUp} onChange={(v) => setOpts({ ...opts, buildUp: v })}>
               {t('show.buildUp')}
@@ -521,15 +745,40 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
             <Toggle on={opts.frustums} onChange={(v) => setOpts({ ...opts, frustums: v })}>
               {t('show.frustums')}
             </Toggle>
+            {farAvailable && (
+              <Toggle on={showFarLayer} onChange={setShowFarLayer}>
+                {t('viewer.show.farPoints')}
+              </Toggle>
+            )}
+            {denseAvailable && <DenseToggle on={showDenseLayer} onChange={setShowDenseLayer} />}
             {findings.length > 0 && (
               <Toggle on={opts.findings} onChange={(v) => setOpts({ ...opts, findings: v })}>
                 {t('show.findings')}
               </Toggle>
             )}
-            <Toggle on={opts.rgb} onChange={(v) => setOpts({ ...opts, rgb: v })}>
-              {t('show.rgb')}
-            </Toggle>
-            <label className="flex items-center gap-3 px-2.5 text-[13px]">
+            <div title={!rgbAvailable ? t('show.rgbUnavailable') : undefined}>
+              <Toggle
+                on={activeColorMode === 'rgb'}
+                onChange={(on) => changeColorMode(on ? 'rgb' : 'height')}
+                disabled={!rgbAvailable}
+                label={t('show.colorMode')}
+                title={!rgbAvailable ? t('show.rgbUnavailable') : undefined}
+                describedBy={!rgbAvailable ? colorModeHintId : undefined}
+              >
+                <span className="viewer-label-stack">
+                  <span>{t('show.colorMode')}</span>
+                  <span className="viewer-caption viewer-muted">
+                    {t(activeColorMode === 'rgb' ? 'show.rgb' : 'show.heightBlue')}
+                  </span>
+                </span>
+              </Toggle>
+              {!rgbAvailable && (
+                <span id={colorModeHintId} role="tooltip" className="sr-only">
+                  {t('show.rgbUnavailable')}
+                </span>
+              )}
+            </div>
+            <label className="viewer-slider-row">
               <span className="shrink-0">{t('show.pointSize')}</span>
               <input
                 type="range"
@@ -543,50 +792,18 @@ export function ViewerScreen({ bundle, embedded = false }: { bundle: Bundle; emb
             </label>
           </section>
 
-          <section className="flex flex-col gap-2">
-            <H2>{t('point.title')}</H2>
-            {observed === null ? (
-              <p className="m-0 text-[13px] text-ink-2">{t('point.hint')}</p>
-            ) : (
-              <div className="flex flex-col gap-2 rounded-[10px] border border-line-strong p-3">
-                <span className="text-[13px]">
-                  {observed.length ? t('point.observed') : t('point.none')}
-                </span>
-                <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
-                  {observed.map((i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => jump(i)}
-                      className={`${mono} h-7 cursor-pointer rounded-md border border-line-strong bg-transparent px-2 text-xs text-ink ${i === frame ? 'bg-raised' : ''}`}
-                    >
-                      {tc(i)}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setPicked(null)}
-                  className="h-7 cursor-pointer self-start rounded-md border border-line-strong bg-transparent px-2 text-xs text-ink-2"
-                >
-                  {t('point.clear')}
-                </button>
-              </div>
-            )}
-          </section>
-
-          <section className="flex flex-col gap-1.5">
+          <section className="viewer-section">
             <H2>{t('run.title')}</H2>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[13px]">
+            <div className="viewer-data">
               <Row k={t('run.used')} v={stats.frames_extracted - stats.frames_dropped} />
               <Row k={t('run.dropped')} v={stats.frames_dropped} />
               <Row k={t('run.registered')} v={stats.frames_registered} />
               <Row k={t('run.points')} v={stats.points.toLocaleString()} />
               {totalS > 0 && <Row k={t('run.time')} v={`${totalS.toFixed(1)} ${t('unit.s')}`} />}
             </div>
-            <div className="mt-1 flex gap-1" aria-hidden="true">
+            <div className="viewer-height-ramp" aria-hidden="true">
               {RAMP.map((c) => (
-                <span key={c} className="h-1.5 flex-1 rounded-full" style={{ background: c }} />
+                <span key={c} className="viewer-height-swatch" style={{ background: c }} />
               ))}
             </div>
           </section>

@@ -8,7 +8,6 @@ import socket
 import sqlite3
 import threading
 
-import pytest
 from conftest import CFG, git, remote_of
 from langgraph.checkpoint.sqlite import SqliteSaver
 from test_gates import bench_repo
@@ -78,10 +77,12 @@ def test_codex_developer_runs_resumes_and_logs_load(repo, tmp_path, monkeypatch)
         "worktree": str(repo),
     }
     out = RealAgents().develop(team, s)
-    assert out == {"session": "01a13f6c-eace", "summary": "DONE"}
+    assert out == {"session": "01a13f6c-eace", "summary": "DONE", "tokens": 29513 + 58}
     argv = (tmp_path / "argv").read_text().splitlines()
-    assert argv[0] == f"exec --json --sandbox workspace-write -C {repo} -"
+    scratch = team.home / "scratch" / "A1a"  # outside the worktree, writable in the sandbox
+    assert argv[0] == f"exec --json --sandbox workspace-write -C {repo} --add-dir {scratch} -"
     assert "Task A1a: Shell" in (tmp_path / "stdin").read_text()
+    assert f"goes ONLY to\n  {scratch}" in (tmp_path / "stdin").read_text()
     assert "quick set" not in (tmp_path / "stdin").read_text()  # web dev: no benchmark lines
     assert not (tmp_path / "key").exists()  # ChatGPT login only, never the API key
 
@@ -106,6 +107,8 @@ def test_quick_benchmark_brief_only_for_pipeline_and_with_dev_baseline(repo):
     assert "--only notre-dame,room" in text and "No cached dev baseline" in text
     G.benchmark(team, team.git("rev-parse", "devteam-fake/dev").strip())
     assert "| room | 90.0 |" in quick_benchmark(team, s, devs["dev_pipeline"])
+    s["task"]["quick_only"] = ["notre-dame", "aegviidu"]  # a task picks the videos it needs
+    assert "--only notre-dame,aegviidu" in quick_benchmark(team, s, devs["dev_pipeline"])
 
 
 def test_benchmark_cache_survives_merges_that_leave_pipeline_alone(repo):
@@ -139,6 +142,7 @@ def test_screenshots_stop_the_server_and_report_failures(repo, tmp_path):
         "serve": f"python3 -m http.server {n} --bind 127.0.0.1",
         "url": f"http://127.0.0.1:{n}",
         "shoot": "case {url} in *broken*) exit 1;; esac; echo png > {png}",
+        "viewports": ["1440x900"],  # one shot per route
     }
     s = {"task": {"id": "A1a"}, "assignee": "dev_app", "worktree": str(repo)}
     paths, problems = G.screenshots(team, s, ["/", "/viewer/broken"])
@@ -221,6 +225,7 @@ def test_a_crashing_parallel_task_says_so_at_once(repo):
     team = team_for(repo)
     team.agents = Crash()
     graph = build_graph(team, SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False)))
-    with pytest.raises(RuntimeError):
-        graph.invoke({}, {"configurable": {"thread_id": "r"}})
-    assert "CRASHED in develop: codex failed: usage limit" in (team.home / "events.log").read_text()
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})  # both tasks blocked, no raise
+    log = (team.home / "events.log").read_text()
+    assert "BLOCKED: CRASHED in develop at test_v2.py:" in log
+    assert "codex failed: usage limit" in log
