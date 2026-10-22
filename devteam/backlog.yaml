@@ -767,9 +767,12 @@ tasks:
     - The viewer shows the dense layer from manifest.dense (with frame↔point links).
 
     '
-  status: in_progress
+  status: done
   owner: dev_app
   run: run-20261021-200952
+  branch: devteam/UX-dense
+  pr: https://github.com/IzbassarO/qarau/pull/62
+  done_at: '2026-10-22'
 - id: A1a
   area: app
   title: Control center layout with sites and inspections
