@@ -8,7 +8,6 @@ import socket
 import sqlite3
 import threading
 
-import pytest
 from conftest import CFG, git, remote_of
 from langgraph.checkpoint.sqlite import SqliteSaver
 from test_gates import bench_repo
@@ -226,6 +225,7 @@ def test_a_crashing_parallel_task_says_so_at_once(repo):
     team = team_for(repo)
     team.agents = Crash()
     graph = build_graph(team, SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False)))
-    with pytest.raises(RuntimeError):
-        graph.invoke({}, {"configurable": {"thread_id": "r"}})
-    assert "CRASHED in develop: codex failed: usage limit" in (team.home / "events.log").read_text()
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})  # both tasks blocked, no raise
+    log = (team.home / "events.log").read_text()
+    assert "BLOCKED: CRASHED in develop at test_v2.py:" in log
+    assert "codex failed: usage limit" in log

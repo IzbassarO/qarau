@@ -71,18 +71,17 @@ class CoreCrashes(Fast):
         return super().develop(team, s)
 
 
-def test_a_crash_pauses_only_that_developer_and_its_round_resumes_next_run(repo):
+def test_a_crash_blocks_only_that_task(repo):
+    """2026-10-21: a crash blocks its task (it no longer pauses the developer mid-round)."""
     team, graph = make(repo, CoreCrashes())
-    cont = C.Continuous(team, graph)
-    s = cont.run()
-    st = statuses(team)
-    assert st["T-002"] == "done"  # dev_app kept going
-    assert st["T-001"] == "in_progress" and st["T-003"] == "todo"
-    assert s["stop_reason"].startswith("no developer can take a task: dev_pipeline paused: crashed")
-    assert "'claude'" in s["stop_reason"]
-    pending = json.loads((team.home / "continuous.json").read_text())
-    assert list(pending) == ["dev_pipeline"]  # the next run resumes this round first
-    assert s["in_flight"] == {"dev_pipeline": "T-001"}
+    s = C.Continuous(team, graph).run()
+    tasks = {t["id"]: t for t in team.load_backlog()}
+    assert tasks["T-002"]["status"] == "done"  # dev_app kept going
+    assert tasks["T-001"]["status"] == "blocked"
+    assert tasks["T-001"]["blocked_reason"].startswith("CRASHED in develop at test_run3.py:")
+    assert "'claude'" in tasks["T-001"]["blocked_reason"]
+    assert "2 of its tasks in a row ended blocked (T-001, T-003)" in s["stop_reason"]
+    assert s["in_flight"] == {}
 
 
 # --- 2. a dev merge made before a crash is the orchestrator's, not the developer's ------------
@@ -107,13 +106,11 @@ class MergeThenCrash(Fast):
 
 def test_a_dev_merge_before_a_crash_is_not_a_violation(repo):
     team, graph = make(repo, MergeThenCrash())
-    cfg = {"configurable": {"thread_id": "r"}}
-    with pytest.raises(RuntimeError, match="crash right after"):
-        graph.invoke({}, cfg)
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})  # the crash blocks T-001
     wt = team.home / "worktrees" / "T-001"
-    assert "Merge" in git(wt, "log", "-1", "--format=%s")  # the merge is there, unrecorded
-    graph.invoke(None, cfg)
-    assert statuses(team)["T-001"] == "done"
+    assert "Merge" in git(wt, "log", "-1", "--format=%s")  # the merge is kept
+    t = next(t for t in team.load_backlog() if t["id"] == "T-001")
+    assert t["status"] == "blocked" and "crash right after the dev merge" in t["blocked_reason"]
     assert not (team.home / "violations.jsonl").exists()
 
 

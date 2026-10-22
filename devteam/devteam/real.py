@@ -11,7 +11,7 @@ import anthropic
 import httpx
 import yaml
 
-from devteam import costs
+from devteam import costs, procs
 from devteam import gates as G
 from devteam import supervise as SV
 from devteam.supervise import TaskHalted
@@ -64,6 +64,7 @@ def llm_call(
     with its own reservation; then the error is raised (`devteam resume` re-runs the node).
     Prompt caching: `system` and `context` (the stable part of the user turn: repository
     rules, the task and its criteria) are cached; images and `prompt` come after them."""
+    system, context, prompt = map(procs.clean_text, (system, context, prompt))
     m = team.cfg["models"][role]
     if m["provider"] != "anthropic":
         raise NotImplementedError(f"provider {m['provider']!r} for {role}: only anthropic so far")

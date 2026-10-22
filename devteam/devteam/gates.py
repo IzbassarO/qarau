@@ -120,7 +120,7 @@ def run_benchmark(team, sha: str, out: Path, only: list[str] | None = None) -> d
         if only:
             cmd += " --only " + shlex.quote(",".join(only))
         r = team.run_proc(cmd, cwd=str(tmp), timeout=bcfg["timeout_min"] * 60)
-        (out / "log.txt").write_text(team.redact(r["output"]))
+        (out / "log.txt").write_text(team.redact(r["output"]), encoding="utf-8", errors="replace")
         if (out / "results.json").exists():
             return json.loads((out / "results.json").read_text())
         return None
@@ -576,7 +576,9 @@ def release(team) -> str:
     body.write_text(
         f"Weekly release: {ahead} commits from `{base}`.\n\n## Benchmark on "
         f"`{base}`\n\n{bench_table(on_dev)}\n\n## Commits\n\n```\n{log}```\n\n"
-        "Merged automatically when CI and the full benchmark are green.\n"
+        "Merged automatically when CI and the full benchmark are green.\n",
+        encoding="utf-8",
+        errors="replace",
     )
     pr = team.gh.open_pr(base, main, f"Release {time.strftime('%Y-%m-%d')}", body)
     ok, why = team.gh.wait_ci(pr["number"], dev_sha, team.cfg["gates"]["ci_timeout_min"] * 60)

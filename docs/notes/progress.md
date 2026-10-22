@@ -2,6 +2,18 @@
 
 Newest first. Keep it short.
 
+## 2026-10-22 — Kerege: lone-surrogate crash, crash isolation
+
+- **Crash 2026-10-21 20:29:** UX-dense's tester crashed with `'utf-8' codec can't encode
+  character '\udcdc'`. Cause: the branch adds a binary fixture
+  (`web/src/fixtures/dense-bundle/dense.color.u8`, byte 0xDC); `Team.git()` decoded the diff
+  with `surrogateescape`; the judge's `llm_call` `.encode()`d the prompt. Fixed: subprocess and
+  git output decoded with `replace`; node outputs, events, the LLM prompt and file writes cleaned.
+- **Crash isolation:** `loud()` logged "the others go on" and re-raised, which ended the whole
+  run. Now a crash blocks only its task (`CRASHED in <step> at <file:line>: …`), the run ends
+  normally; `devteam resume <task>` continues it. Usage limits and budget stops still stop the run.
+- **Waiting for the owner:** merge the PR, then `devteam resume` (UX-dense's test step re-runs).
+
 ## 2026-10-21 — P4a-2a-run: first real COLMAP dense on Modal (notre-dame-p3e)
 
 - **Done on notre-dame-p3e:** L4, 121 views at 640x480. PatchMatch photometric 11.6 min +
