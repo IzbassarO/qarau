@@ -94,6 +94,30 @@ class GpuProvider(Protocol):
 
 
 @dataclass(frozen=True)
+class PatchMatchKnobs:
+    """dense_remote.patch_match: COLMAP PatchMatch speed knobs; None keeps COLMAP's default
+    (docs/notes/dense-speed.md). Ranges are COLMAP 4.2.1's PatchMatchOptions::Check."""
+
+    max_image_size: int | None = None  # image_undistorter and PatchMatchStereo; default: full
+    num_iterations: int | None = None  # default 5
+    window_radius: int | None = None  # default 5, at most 32
+    window_step: int | None = None  # default 1, 1 or 2
+    num_sources: int | None = None  # source frames per view; default 20 (patch-match.cfg)
+
+
+NO_KNOBS = PatchMatchKnobs()
+
+# key -> (lowest, highest) allowed; highest None = no upper bound
+PATCH_MATCH_RANGES: dict[str, tuple[int, int | None]] = {
+    "max_image_size": (1, None),
+    "num_iterations": (1, None),
+    "window_radius": (1, 32),
+    "window_step": (1, 2),
+    "num_sources": (1, None),
+}
+
+
+@dataclass(frozen=True)
 class DenseRemoteConfig:
     enabled: bool
     timeout_s: float
@@ -106,6 +130,29 @@ class DenseRemoteConfig:
     cuda_architectures: str = "89"  # the image's CUDA_ARCHITECTURES build arg, e.g. "75;86;90"
     gpu_fallback: tuple[str, ...] = ()  # tried after gpu_type when the provider has no capacity
     start_timeout_s: float = 300.0  # per GPU type: how long to wait for capacity
+    patch_match: PatchMatchKnobs = NO_KNOBS
+
+
+def _patch_match(path: Path, raw: Any) -> PatchMatchKnobs:
+    if raw is None:
+        return NO_KNOBS
+    if not isinstance(raw, dict):
+        raise DenseConfigError(f"{path}: dense_remote.patch_match must be a mapping of knobs")
+    if unknown := sorted(map(str, set(raw) - set(PATCH_MATCH_RANGES))):
+        raise DenseConfigError(
+            f"{path}: dense_remote.patch_match.{unknown[0]} is not a knob; "
+            f"known: {', '.join(PATCH_MATCH_RANGES)}"
+        )
+    for key, v in raw.items():
+        lo, hi = PATCH_MATCH_RANGES[key]
+        if v is None:
+            continue
+        if not isinstance(v, int) or isinstance(v, bool) or v < lo or (hi is not None and v > hi):
+            need = f"an integer {lo}..{hi}" if hi is not None else f"an integer >= {lo}"
+            raise DenseConfigError(
+                f"{path}: dense_remote.patch_match.{key} must be {need}, got {v!r}"
+            )
+    return PatchMatchKnobs(**raw)
 
 
 def make_provider(cfg: DenseRemoteConfig) -> GpuProvider:
@@ -167,6 +214,7 @@ def load_dense_remote_config(path: Path = DEFAULT_CONFIG) -> DenseRemoteConfig:
         cuda_architectures=str(sec.get("cuda_architectures", "89")),
         gpu_fallback=tuple(sec.get("gpu_fallback") or ()),
         start_timeout_s=number("start_timeout_s") if "start_timeout_s" in sec else 300.0,
+        patch_match=_patch_match(path, sec.get("patch_match")),
     )
     if cfg.start_timeout_s > cfg.timeout_s:
         raise DenseConfigError(
@@ -219,16 +267,40 @@ class GpuLedger:
         os.replace(tmp, self.path)
 
 
-def dense_commands(images: str, sparse: str, dense: str) -> list[list[str]]:
-    """COLMAP dense argv: undistort → PatchMatch (geometric consistency) → fusion."""
-    return [
-        ["colmap", "image_undistorter", "--image_path", images, "--input_path", sparse,
-         "--output_path", dense, "--output_type", "COLMAP"],
-        ["colmap", "patch_match_stereo", "--workspace_path", dense,
-         "--workspace_format", "COLMAP", "--PatchMatchStereo.geom_consistency", "true"],
+def dense_commands(
+    images: str, sparse: str, dense: str, knobs: PatchMatchKnobs = NO_KNOBS
+) -> list[list[str]]:
+    """COLMAP dense argv: undistort → PatchMatch (geometric consistency) → fusion. Only the
+    knobs that are set add flags; with none the argv is the pre-P4a-3 one."""
+    undistort = ["colmap", "image_undistorter", "--image_path", images, "--input_path", sparse,
+                 "--output_path", dense, "--output_type", "COLMAP"]  # fmt: skip
+    patch_match = ["colmap", "patch_match_stereo", "--workspace_path", dense, "--workspace_format",
+                   "COLMAP", "--PatchMatchStereo.geom_consistency", "true"]  # fmt: skip
+    if knobs.max_image_size is not None:
+        undistort += ["--max_image_size", str(knobs.max_image_size)]
+    for key in ("max_image_size", "num_iterations", "window_radius", "window_step"):
+        if (v := getattr(knobs, key)) is not None:
+            patch_match += [f"--PatchMatchStereo.{key}", str(v)]
+    commands = [undistort, patch_match]
+    if knobs.num_sources is not None:
+        # The source count is not a patch_match_stereo option: image_undistorter writes it to
+        # stereo/patch-match.cfg as two lines per image, "<name>" then "__auto__, 20".
+        # Verified 2026-10-21 with pycolmap 4.2.1 (same undistorter code as the image):
+        # num_patch_match_src_images -1 writes "__auto__, 20", 8 writes "__auto__, 8". The
+        # grep fails the step if no line was rewritten (a changed format is never silent).
+        cfg, n = f"{dense}/stereo/patch-match.cfg", knobs.num_sources
+        commands.insert(1, ["sh", "-c", f"sed -i -E 's/^__auto__, [0-9]+$/__auto__, {n}/' {cfg}"
+                            f" && grep -qx '__auto__, {n}' {cfg}"])  # fmt: skip
+    commands.append(
         ["colmap", "stereo_fusion", "--workspace_path", dense, "--workspace_format", "COLMAP",
-         "--input_type", "geometric", "--output_path", f"{dense}/fused.ply"],
-    ]  # fmt: skip
+         "--input_type", "geometric", "--output_path", f"{dense}/fused.ply"]
+    )  # fmt: skip
+    return commands
+
+
+def _step(argv: list[str]) -> str:
+    """The name errors give a command: the COLMAP subcommand, else the program."""
+    return argv[1] if argv[0] == "colmap" else argv[0]
 
 
 def _utc_now() -> datetime:
@@ -284,10 +356,11 @@ class RemoteDenseExecutor:
         p = self.provider
         self._call(deadline, "upload", lambda t: p.upload(h, frames, REMOTE_IMAGES, t))
         self._call(deadline, "upload", lambda t: p.upload(h, sparse, REMOTE_SPARSE, t))
-        for argv in dense_commands(REMOTE_IMAGES, REMOTE_SPARSE, REMOTE_DENSE):
-            code = self._call(deadline, argv[1], partial(p.run, h, argv))
+        knobs = self.config.patch_match
+        for argv in dense_commands(REMOTE_IMAGES, REMOTE_SPARSE, REMOTE_DENSE, knobs):
+            code = self._call(deadline, _step(argv), partial(p.run, h, argv))
             if code != 0:
-                raise DenseExecutorError(f"{argv[1]} exited with {code} on worker {h.id}")
+                raise DenseExecutorError(f"{_step(argv)} exited with {code} on worker {h.id}")
         out.mkdir(parents=True, exist_ok=True)
         for name in RESULTS:
             self._call(deadline, "download", partial(p.download, h, f"{REMOTE_DENSE}/{name}", out))
