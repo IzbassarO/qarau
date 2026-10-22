@@ -36,7 +36,7 @@ videos (notre-dame 0.0018 of the diagonal, room 0.0011, aegviidu 0.0004; still c
 ## Consequences
 
 - notre-dame: +15 % points at the same 100 % / 1 model; room within run-to-run spread
-  (`docs/notes/p2b-plan.md`).
+  (plan removed, see git history: 481b00d).
 - A flat surface filmed head-on moves like a homography, so it gets few keyframes (track
   loss keeps overlap) and may be reported as `pure_rotation`.
 - One KLT pass over ~1.5× the frames: a few seconds per video, shared with the quality

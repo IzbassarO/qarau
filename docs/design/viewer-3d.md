@@ -5,10 +5,7 @@ the site like in Blender, and see exactly how the video became the map: which pa
 object each moment of the video saw, and which video moments prove each point and each
 finding.
 
-Interactive prototype: `docs/design/prototypes/Viewer3D.dc.html` (open the logic in the
-`<script type="text/x-dc">` block — the visibility, frustum and projection math there is a
-reference, not production code). Overview screen: `prototypes/Main.dc.html`. Finding
-evidence: `prototypes/Finding.dc.html`.
+Finding evidence prototype: `prototypes/Finding.dc.html`.
 
 ## Layout
 

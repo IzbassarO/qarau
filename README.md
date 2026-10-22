@@ -26,8 +26,7 @@ See [`docs/roadmap.md`](docs/roadmap.md).
 - [`docs/architecture.md`](docs/architecture.md) — layers, pipeline, data flow
 - [`docs/roadmap.md`](docs/roadmap.md) — milestones to pilot-ready
 - [`docs/decisions/`](docs/decisions/) — architecture decision records
-- [`docs/tasks/M1.md`](docs/tasks/M1.md) — the first build task
-- [`docs/design/`](docs/design/) — design tokens, screen prototypes, 3D viewer spec
+- [`docs/design/`](docs/design/) — design rules, finding prototype, 3D viewer spec
 
 ## Local development
 

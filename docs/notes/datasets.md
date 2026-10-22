@@ -13,7 +13,16 @@ Licences were read from the host's own record (Commons API, Zenodo API, figshare
 
 Honest assessment (Part T): no clip found shows a **slow orbit of a corroded tank or pipe**. Stock sites (Pexels, Pixabay) have such clips but their pages block scripted access (Pexels returns 403) and no clip was verified for length and motion, so none were downloaded. Commons video search returns almost no industrial-asset footage. A real oil-and-gas orbit video probably needs our own capture or a pilot customer.
 
-Previously downloaded (M1, no defect focus): see `docs/notes/m1-results.md`.
+Previously downloaded (M1, no defect focus; moved from the removed `m1-results.md`):
+
+| file | source | licence |
+| --- | --- | --- |
+| south-building | COLMAP sample dataset, github.com/colmap/colmap/releases/download/3.11.1/south-building.zip | COLMAP sample data |
+| notre_dame_oubiels.webm | Wikimedia Commons, "Notre Dame des Oubiels drone.webm", by Lothur | CC0 |
+| aegviidu_water_tower.ogv | Wikimedia Commons, "Aegviidu veetorn (Aegviidu water tower).ogv", by Sillerkiil | CC0 |
+| orono_water_tower.webm | Wikimedia Commons, "Orono Leaning Water Tower Drone Video (2022-07-10).webm", by Drozwik Drones | CC BY 3.0 |
+
+Attribution for Orono: "Orono Leaning Water Tower Drone Video (2022-07-10)" by Drozwik Drones, CC BY 3.0, via Wikimedia Commons. Any screenshot showing an Orono frame is derived from it.
 
 ## 2. Segmentation datasets (pixel masks)
 

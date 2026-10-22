@@ -120,7 +120,7 @@ keyframes) should be judged on several videos, not on room alone.
 ## Mykolaiv (P3c, 2026-10-16)
 
 **Verdict: stays not gated.** 1 model with ≥ 90 % registered is not reachable on this video
-without a wrong model; full diagnosis in `docs/notes/p3c-mykolaiv-plan.md`.
+without a wrong model; full diagnosis: plan removed, see git history: 76d9149.
 
 **Why: the frames.** `mykolaiv_oil_tanks.webm` is not a drone survey. It is an edited night
 news clip of an oil depot fire (State Emergency Service of Ukraine): ~18 shots with hard cuts
