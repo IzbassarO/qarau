@@ -60,3 +60,17 @@ def remote_of(repo) -> str:
 @pytest.fixture(autouse=True)
 def no_retry_waits(monkeypatch):
     monkeypatch.setattr("devteam.real.RETRY_WAITS", (0, 0, 0))
+
+
+@pytest.fixture(autouse=True)
+def banners(tmp_path, monkeypatch):
+    """No test shows a real macOS banner: `osascript` on PATH only logs its arguments (also for
+    the CLI child processes a test starts). Returns the log: one line per banner."""
+    bin_ = tmp_path / "osascript-bin"
+    bin_.mkdir()
+    log = tmp_path / "banners.log"
+    osa = bin_ / "osascript"
+    osa.write_text(f'#!/bin/sh\nprintf "%s | %s\\n" "$3" "$4" >> "{log}"\n')
+    osa.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_}{os.pathsep}{os.environ['PATH']}")
+    return log
