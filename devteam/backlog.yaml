@@ -551,7 +551,9 @@ tasks:
   licence: 'COLMAP (BSD-3-Clause) options only; nothing new.
 
     '
-  status: todo
+  status: in_progress
+  owner: dev_pipeline
+  run: run-20261021-200952
 - id: P4a-2b
   area: core
   title: Depth Anything V2 Small depth prior (estimated points)
