@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
@@ -77,7 +78,7 @@ CONFLICT = re.compile(rb"^(<{7}|>{7})( |$)", re.M)  # markers git leaves (not "=
 def _feed(pipe, text: str):
     """stdin for a step, from a thread: a large brief must not block the wait."""
     try:
-        pipe.write(text.encode("utf-8", "surrogateescape"))
+        pipe.write(text.encode("utf-8", "replace"))
         pipe.close()
     except (BrokenPipeError, OSError):
         pass
@@ -406,9 +407,12 @@ class Team:
             "task": task,
             "to": to,
             "status": status,
-            "msg": self.redact(msg),
+            "msg": procs.clean_text(self.redact(msg)),
         }
-        with self._lock, open(self.home / "events.log", "a") as f:
+        with (
+            self._lock,
+            open(self.home / "events.log", "a", encoding="utf-8", errors="replace") as f,
+        ):
             f.write(yaml.safe_dump([event], allow_unicode=True, width=1000))
         try:
             get_stream_writer()(event)
@@ -432,7 +436,11 @@ class Team:
                             t[k] = v
             # readers don't take the lock: replace the file whole, never truncate it in place
             tmp = self.home / "backlog.yaml.tmp"  # same filesystem: os.replace is atomic
-            tmp.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100))
+            tmp.write_text(
+                yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100),
+                encoding="utf-8",
+                errors="replace",
+            )
             os.replace(tmp, self.backlog_path)
 
     # --- processes (all killable by `devteam stop`) --------------------------------------
@@ -579,7 +587,7 @@ class Team:
         """Scope / protected / bypass violations: kept for the dashboard and the report."""
         row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "task": task_id, "agent": agent}
         row.update(kind=kind, detail=self.redact(detail)[:1000])
-        with self._lock, open(self.home / "violations.jsonl", "a") as f:
+        with self._lock, open(self.home / "violations.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
         self.emit("tester", f"VIOLATION {kind}: {detail[:300]}", task=task_id)
 
@@ -717,12 +725,15 @@ class Team:
                 ["git", *args],
                 cwd=cwd or self.root,
                 capture_output=True,
-                input=input.encode("utf-8", "surrogateescape") if input is not None else None,
+                input=input.encode("utf-8", "replace") if input is not None else None,
                 env={**os.environ, "GIT_LITERAL_PATHSPECS": "1", **(env or {})},
             )
         if r.returncode:
             raise RuntimeError(f"git {' '.join(args)}: {r.stderr.decode(errors='replace').strip()}")
-        return r.stdout.decode("utf-8", "surrogateescape")
+        # never surrogateescape: a binary file in a diff reached the judge's prompt as lone
+        # surrogates (2026-10-21). ponytail: a non-UTF-8 file name no longer round-trips to git;
+        # APFS has none, a Linux runner would fail that git call loudly.
+        return r.stdout.decode("utf-8", "replace")
 
     def fetch(self, *branches: str):
         specs = [f"+refs/heads/{b}:refs/remotes/{self.remote_name}/{b}" for b in branches]
@@ -853,7 +864,7 @@ class Team:
         if not cmd or self.fake:
             return ""
         path = self.home / "backlog-check.yaml"
-        path.write_text(text)
+        path.write_text(text, encoding="utf-8", errors="replace")
         r = subprocess.run(
             cmd,
             shell=True,
@@ -1087,7 +1098,9 @@ class Team:
                     else ""
                 )
                 + f"## Files\n\n```\n{stat}```\n\n🤖 Automated by devteam — no human review.\n"
-            )
+            ),
+            encoding="utf-8",
+            errors="replace",
         )
         return path
 
@@ -1237,6 +1250,11 @@ def build_graph(team: Team, checkpointer):
             team.commit_round(s, s["head"], s["snap"])  # what the round made stays on the branch
             reason = str(e) + (limit_hint(tid) if str(e).startswith("supervisor") else "")
             return {**halt(s, reason), "head": team.git("rev-parse", "HEAD", cwd=wt).strip()}
+        except (SubscriptionLimit, BudgetExceeded):  # the same round runs again later
+            raise
+        except Exception:  # a crash: the round's commits are checked like a halted round's
+            team.commit_round(s, s["head"], s["snap"])  # (forbidden ones unwound); loud() blocks
+            raise
         res = team.commit_round(s, s["head"], s["snap"])
         head = team.git("rev-parse", "HEAD", cwd=wt).strip()
         if tried := [p for p in res["refused"] if SC.is_protected(p, cfg)]:
@@ -1684,20 +1702,21 @@ def build_graph(team: Team, checkpointer):
             try:
                 if name in ("develop", "test", "gates") and (why := team.stop_reason(tid)):
                     return halt(s, why)
-                return fn(s)
+                return procs.clean(fn(s))  # the checkpoint can't store a lone surrogate
             except TaskHalted as e:  # a limit or the owner: this task ends, the others go on
                 return halt(s, str(e))
             except (SubscriptionLimit, BudgetExceeded):  # the caller waits or stops, no crash
                 raise
-            except Exception as e:
-                team.emit(
-                    s.get("assignee", "brain"),
-                    f"CRASHED in {name}: {e}. This developer stops here, the others go on; "
-                    "fix it, then `devteam resume`.",
-                    task=s["task"]["id"],
-                    status="idle",
+            except Exception as e:  # this task ends blocked; raising would stop every task's
+                # branch of the run (2026-10-21: UX-dense's tester crash ended the whole run)
+                at = traceback.extract_tb(e.__traceback__)[-1]
+                reason = (
+                    f"CRASHED in {name} at {Path(at.filename).name}:{at.lineno}: {e}. Fix it, "
+                    f"then `devteam resume {tid}`"
                 )
-                raise
+                # ponytail: a crash in finish itself leaves the backlog in_progress (logged)
+                out = {**halt(s, reason), "branch": s.get("branch") or team.branch_for(tid)}
+                return procs.clean(out)
             finally:
                 team._ctx.task = ""
 
@@ -1713,7 +1732,11 @@ def build_graph(team: Team, checkpointer):
     ]:
         sub.add_node(name, loud(name, fn))
     sub.add_edge(START, "worktree")
-    sub.add_edge("worktree", "develop")
+    sub.add_conditional_edges(
+        "worktree",
+        lambda s: "finish" if s.get("gate", {}).get("blocked") else "develop",
+        ["develop", "finish"],
+    )
     sub.add_conditional_edges("develop", after_develop, ["test", "develop", "finish"])
     sub.add_conditional_edges("test", after_test, ["gates", "develop", "finish"])
     sub.add_conditional_edges("gates", after_gates, ["develop", "finish"])

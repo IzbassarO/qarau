@@ -121,7 +121,7 @@ def write_report(team, day: str | None = None) -> Path:
 
     out = (team.home if team.fake else team.root / "devteam") / "reports" / f"{day}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(team.redact("\n".join(lines)))
+    out.write_text(team.redact("\n".join(lines)), encoding="utf-8", errors="replace")
     return out
 
 

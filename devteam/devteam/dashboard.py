@@ -981,7 +981,7 @@ def make_server(team: Team, port: int, gh: GhCache | None = None) -> ThreadingHT
             if self.path.split("?")[0] != "/":
                 self.send_error(404)
                 return
-            body = page(team, gh).encode()
+            body = page(team, gh).encode("utf-8", "replace")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

@@ -303,7 +303,7 @@ def record_limit(
                 task,
                 reset_at,
                 waited_s,
-                message[:300],
+                message[:300].encode("utf-8", "replace").decode("utf-8"),
             ),
         )
 
