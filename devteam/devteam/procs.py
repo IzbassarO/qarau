@@ -16,12 +16,31 @@ import uuid
 MARKER = "KEREGE_STEP"
 
 
+def clean_text(s: str) -> str:
+    """Valid UTF-8 only. A lone surrogate (bytes decoded with surrogateescape, or a \\udcxx
+    escape in an agent's JSON) can't be written as UTF-8: not to a file, YAML, the checkpoint or
+    the API (2026-10-21: a binary fixture in UX-dense's diff crashed the tester)."""
+    return s.encode("utf-8", "replace").decode("utf-8")
+
+
+def clean(v):
+    """clean_text through dicts and lists: a node's output before LangGraph checkpoints it."""
+    if isinstance(v, str):
+        return clean_text(v)
+    if isinstance(v, dict):
+        return {k: clean(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [clean(x) for x in v]
+    return v
+
+
 def new_marker() -> str:
     return uuid.uuid4().hex
 
 
 def _ps(*args: str) -> str:
-    return subprocess.run(["ps", *args], capture_output=True, text=True).stdout
+    # `ps axeww` shows every process's environment: not all of it is UTF-8
+    return subprocess.run(["ps", *args], capture_output=True, text=True, errors="replace").stdout
 
 
 def step_pids(pgid: int, marker: str) -> set[int]:
@@ -73,6 +92,7 @@ def listening(pids: set[int]) -> list[tuple[int, int]]:
         ["lsof", "-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-p", ",".join(map(str, pids)), "-Fpn"],
         capture_output=True,
         text=True,
+        errors="replace",
     ).stdout
     found, pid = set(), 0
     for line in out.splitlines():

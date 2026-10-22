@@ -464,14 +464,13 @@ class CommitThenCrash(Quick):
         return super().develop(team, s)
 
 
-def test_forbidden_commit_before_a_crash_is_unwound_on_resume(repo):
+def test_forbidden_commit_before_a_crash_is_unwound(repo):
     agents = CommitThenCrash()
     agents.plan = only_core
     team, graph = make(repo, agents)
     config = {"configurable": {"thread_id": "r6"}}
-    with pytest.raises(RuntimeError, match="crash"):
-        graph.invoke({}, config)
-    graph.invoke(None, config)
+    graph.invoke({}, config)  # the crash blocks the task, the run ends normally
+    assert statuses(team)["T-001"] == "blocked"
     branch = team.branch_for("T-001")
     assert git(repo, "show", f"{branch}:web/app.ts") == "export {}\n"
     assert "sneaky" not in git(repo, "log", "--format=%s", branch)

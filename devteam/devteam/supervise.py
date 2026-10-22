@@ -52,7 +52,7 @@ def _json_lines(buf: bytearray, chunk: bytes):
     buf[:] = rest
     for line in lines:
         try:
-            yield json.loads(line)
+            yield json.loads(line.decode("utf-8", "replace"))
         except ValueError:
             continue
 

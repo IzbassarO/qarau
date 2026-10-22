@@ -1,4 +1,4 @@
-"""End-to-end run of the fake team on a throwaway repo, including crash + resume."""
+"""End-to-end run of the fake team on a throwaway repo, including a usage limit + resume."""
 
 import sqlite3
 import subprocess
@@ -8,6 +8,7 @@ from conftest import CFG, remote_of
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from devteam.agents import FakeAgents
+from devteam.costs import SubscriptionLimit
 from devteam.graph import Team, build_graph
 
 
@@ -25,7 +26,7 @@ class CrashOnce(FakeAgents):
     def judge(self, team, s, checks):
         if not CrashOnce.crashed:
             CrashOnce.crashed = True
-            raise RuntimeError("usage limit")
+            raise SubscriptionLimit("usage limit", None)  # stops the run; a crash would block
         return super().judge(team, s, checks)
 
 
@@ -37,7 +38,7 @@ def test_fake_team_runs_parallel_loops_and_resumes(repo):
 
     try:
         graph.invoke({}, config)
-        raise AssertionError("expected the crash")
+        raise AssertionError("expected the limit")
     except RuntimeError as e:
         assert "usage limit" in str(e)
     calls_before = CrashOnce.dev_calls

@@ -18,7 +18,7 @@ uv run devteam run             # one round: brain plans, developers build, teste
 uv run devteam run --continuous  # keep going: next task per developer until a stop condition
 uv run devteam dashboard       # read-only status page on http://127.0.0.1:8765 (--port N)
 uv run devteam stop            # from any terminal: stop everything now (agents, checks, CI wait)
-uv run devteam resume          # continue after stop, crash, usage limit or budget cap
+uv run devteam resume          # continue after stop, usage limit or budget cap
 uv run devteam stop A7         # stop one task: its step is killed, it is blocked, others go on
 uv run devteam resume A7       # that task back to todo; it continues on its branch
 uv run devteam status          # backlog with PR links / blocked reasons
@@ -128,8 +128,16 @@ uv run pytest                  # tests, incl. gates, crash + resume, forbidden a
   toward "2 tasks in a row blocked".
 - A developer whose 2 tasks in a row end blocked pauses for the rest of the run (it is said in
   the events and the stop reason); the others keep going, and the run ends only when no
-  developer can take a task. A crash (any error in a step) pauses only that developer the same
-  way; its round stays in `.state/continuous.json` and the next run resumes it first.
+  developer can take a task.
+- A crash (any error in a task's step) blocks only that task, with `CRASHED in <step> at
+  <file:line>: <error>` as its reason; the other tasks keep running and the run ends normally
+  (2026-10-21: UX-dense's tester crash stopped the whole run). A crash in a developer round
+  first checks the round's work like a halted round (forbidden commits unwound). Fix the
+  cause, then `devteam resume <task>`. A crash outside a task (planning) pauses that developer
+  in continuous mode; its round stays in `.state/continuous.json` and the next run resumes it.
+- Subprocess output and git output are decoded as UTF-8 with replacement, never
+  `surrogateescape`: a lone surrogate (a binary file in a diff) can't be written to the events,
+  the backlog, a packet, the checkpoint or the API (2026-10-21, UX-dense's `dense.color.u8`).
 - `claude` / `codex` are resolved to absolute paths at run start and checked before every
   round; a missing one is looked up on PATH again, then once more after 30 s, then the round
   crashes (2026-10-18 23:39: `claude` vanished in a failed self-update and stopped the run).
