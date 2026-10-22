@@ -79,6 +79,51 @@ it('shows metric values and supplied confidence when available', () => {
   expect(screen.getByText('0.800')).toBeTruthy();
 });
 
+it.each<Lang>(['en', 'ru', 'kk'])('names COLMAP fusion evidence in %s', (lang) => {
+  setLang(lang);
+  const locale = LANGS[lang];
+  render(
+    <PointInfoPanel
+      info={{ ...info, visibilitySource: 'colmap_fusion' }}
+      onSeek={vi.fn()}
+      onClose={vi.fn()}
+    />,
+  );
+  expect(screen.getByText(locale['pointInfo.colmapFusionNote'])).toBeTruthy();
+  expect(screen.queryByText(locale['pointInfo.estimated'])).toBeNull();
+  expect(screen.queryByText(locale['pointInfo.synthetic'])).toBeNull();
+});
+
+it.each<Lang>(['en', 'ru', 'kk'])(
+  'names sparse-derived estimates and synthetic points in %s',
+  (lang) => {
+    setLang(lang);
+    const locale = LANGS[lang];
+    render(
+      <PointInfoPanel
+        info={{ ...info, visibilitySource: 'sparse_tracks', synthetic: true }}
+        onSeek={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(locale['pointInfo.sparseTracksNote'])).toBeTruthy();
+    expect(screen.getByText(locale['pointInfo.estimated'])).toBeTruthy();
+    expect(screen.getByText(locale['pointInfo.synthetic'])).toBeTruthy();
+  },
+);
+
+it('does not present unrecognized link sources as COLMAP fusion', () => {
+  render(
+    <PointInfoPanel
+      info={{ ...info, visibilitySource: 'unknown' }}
+      onSeek={vi.fn()}
+      onClose={vi.fn()}
+    />,
+  );
+  expect(screen.getByText('Frame link source unavailable.')).toBeTruthy();
+  expect(screen.queryByText('Frames linked by COLMAP fusion.')).toBeNull();
+});
+
 it.each<Lang>(['en', 'ru', 'kk'])('localizes panel labels and unavailability in %s', (lang) => {
   setLang(lang);
   const locale = LANGS[lang];

@@ -225,6 +225,110 @@ describe('ViewerEngine point info tool', () => {
   });
 });
 
+describe('ViewerEngine dense layer', () => {
+  function denseBundle(): Bundle {
+    const bundle = navigationBundle();
+    bundle.manifest.world.z_range = [-1, 1];
+    bundle.dense = {
+      count: 4,
+      position: new Float32Array([0, 0, 0.25, -0.55, 0.25, 0.4, 0.45, -0.3, -0.25, 0, 0.6, -0.55]),
+      color: new Uint8Array([220, 50, 30, 30, 220, 50, 50, 30, 220, 220, 200, 30]),
+      frameOffsets: new Uint32Array([0, 2, 3, 3, 5]),
+      frameIds: new Uint32Array([0, 2, 1, 0, 1]),
+      densifier: 'fake',
+      frameLinksSource: 'colmap_fusion',
+    };
+    return bundle;
+  }
+
+  const cloud = (engine: ViewerEngine) =>
+    engine.scene.getObjectByName('dense') as Points<import('three').BufferGeometry, ShaderMaterial>;
+
+  it('renders one visible geometry with direct typed arrays and shared colour/size controls', () => {
+    const bundle = denseBundle();
+    const { engine } = setup(bundle);
+    const points = cloud(engine);
+    const geometry = points.geometry;
+    const positions = geometry.getAttribute('position');
+    const height = geometry.getAttribute('color');
+    expect(engine.hasDenseLayer()).toBe(true);
+    expect(engine.scene.children.filter((child) => child.name === 'dense')).toHaveLength(1);
+    expect(points.visible).toBe(true);
+    expect(positions.count).toBe(4);
+    expect(positions.array).toBe(bundle.dense!.position);
+    expect(engine.colorMode).toBe('height');
+    expect(height.normalized).toBe(true);
+    // z=.25 in [-1,1] is 7/8 along the second segment of the blue ramp.
+    expect(Array.from(height.array).slice(0, 3)).toEqual([142, 185, 250]);
+
+    engine.setColorMode('rgb');
+    expect(geometry.getAttribute('color').array).toBe(bundle.dense!.color);
+    engine.setOptions({
+      buildUp: true,
+      showCurrent: true,
+      findings: true,
+      frustums: false,
+      pointSize: 4,
+    });
+    expect(points.material.uniforms.uPointSize.value).toBe(4);
+    engine.setColorMode('height');
+    expect(geometry.getAttribute('color')).toBe(height);
+    expect(points.geometry).toBe(geometry);
+    expect(geometry.getAttribute('position')).toBe(positions);
+    engine.setDenseVisible(false);
+    expect(points.visible).toBe(false);
+    engine.setDenseVisible(true);
+    expect(points.visible).toBe(true);
+  });
+
+  it('picks the dense layer by canvas click, excludes it when hidden, and marks its coordinates', () => {
+    const { engine, canvas, onPick } = setup(denseBundle());
+    engine.setPointInfoMode(true);
+    const p = engine.project([0, 0, 0.25]);
+    pointer(canvas, 'pointerdown', p.x, p.y);
+    pointer(canvas, 'pointerup', p.x, p.y);
+    expect(onPick).toHaveBeenLastCalledWith(0, 'dense');
+    engine.setPicked(0, 'dense');
+    const marker = engine.scene.getObjectByName('selected-point') as Points;
+    expect(Array.from(marker.geometry.getAttribute('position').array)).toEqual([0, 0, 0.25]);
+    expect(marker.visible).toBe(true);
+    engine.setDenseVisible(false);
+    pointer(canvas, 'pointerdown', p.x, p.y);
+    pointer(canvas, 'pointerup', p.x, p.y);
+    expect(onPick).toHaveBeenLastCalledWith(null);
+  });
+
+  it('compares sparse and dense candidate depths and keeps sparse evidence selectable', () => {
+    const bundle = denseBundle();
+    bundle.dense!.position.set([0, 0, 0], 0);
+    const { engine, canvas, onPick } = setup(bundle);
+    engine.camera.position.set(0, -5, 0);
+    engine.controls.target.set(0, 0, 0);
+    engine.controls.sync();
+    bundle.position.set([0, -0.5, 0], 0);
+    engine.setPointInfoMode(true);
+    pointer(canvas, 'pointerdown', 400, 300);
+    pointer(canvas, 'pointerup', 400, 300);
+    expect(onPick).toHaveBeenLastCalledWith(0);
+    bundle.position.set([0, 0.5, 0], 0);
+    pointer(canvas, 'pointerdown', 400, 300);
+    pointer(canvas, 'pointerup', 400, 300);
+    expect(onPick).toHaveBeenLastCalledWith(0, 'dense');
+  });
+
+  it('disposes dense buffers and material with the viewer', () => {
+    const { engine } = setup(denseBundle());
+    const points = cloud(engine);
+    const geometryDispose = vi.spyOn(points.geometry, 'dispose');
+    const materialDispose = vi.spyOn(points.material, 'dispose');
+    engine.dispose();
+    engines.delete(engine);
+    expect(geometryDispose).toHaveBeenCalledOnce();
+    expect(materialDispose).toHaveBeenCalledOnce();
+    expect(points.parent).toBeNull();
+  });
+});
+
 describe('ViewerEngine far layer', () => {
   const farPoints = (engine: ViewerEngine) =>
     engine.scene.getObjectByName('far') as Points<import('three').BufferGeometry, PointsMaterial>;

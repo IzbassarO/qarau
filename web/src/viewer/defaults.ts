@@ -15,7 +15,10 @@ interface DefaultViewState {
 export function defaultViewState(bundle: Bundle, saved?: ColorMode): DefaultViewState {
   return {
     mode: 'orbit',
-    colorMode: hasRgb(bundle) ? (saved ?? 'rgb') : 'height',
+    colorMode:
+      hasRgb(bundle) || !!bundle.dense?.color.length
+        ? (saved ?? (bundle.dense ? 'height' : 'rgb'))
+        : 'height',
     buildUp: false,
     frustums: false,
     showFarLayer: false,

@@ -1,4 +1,4 @@
-import { runUrl, type Bundle, type FrameInfo } from '../lib/bundle';
+import { framesForDensePoint, runUrl, type Bundle, type FrameInfo } from '../lib/bundle';
 import { quatToMat3 } from '../lib/geometry';
 
 type Measurement<R extends string> =
@@ -10,7 +10,9 @@ export interface PointInfo {
   unit: 'm' | 'model';
   frames: { frameId: number; thumbnailUrl: string; timeSec: number | null }[];
   views: number;
-  visibilitySource: 'track' | 'estimated';
+  visibilitySource: 'track' | 'estimated' | 'colmap_fusion' | 'sparse_tracks' | 'unknown';
+  /** The fake densifier supplies synthetic test points, not a reconstruction. */
+  synthetic?: boolean;
   /** Signed height along world-up, relative to the model origin (not ground). */
   height: Measurement<'needs_scale'>;
   /** Euclidean distance from the model origin. */
@@ -95,6 +97,46 @@ export function buildPointInfo(bundle: Bundle, pointIndex: number): PointInfo {
     indices = bundle.manifest.frames.flatMap((frame, i) => (inFrame(point, frame) ? [i] : []));
     visibilitySource = 'estimated';
   }
+  const confidence =
+    bundle.pointConfidence?.length === bundle.manifest.points.count
+      ? bundle.pointConfidence[pointIndex]
+      : undefined;
+  return pointInfo(bundle, pointIndex, point, indices, visibilitySource, confidence);
+}
+
+/** Dense evidence uses its declared CSR rows only, including intentionally empty rows. */
+export function buildDensePointInfo(bundle: Bundle, pointIndex: number): PointInfo {
+  const layer = bundle.dense;
+  if (
+    !layer ||
+    !Number.isSafeInteger(pointIndex) ||
+    pointIndex < 0 ||
+    pointIndex >= layer.count ||
+    pointIndex * 3 + 2 >= layer.position.length
+  )
+    throw new RangeError('Dense point index is outside the bundle');
+
+  const source = layer.frameLinksSource;
+  return {
+    ...pointInfo(
+      bundle,
+      pointIndex,
+      Array.from(layer.position.subarray(pointIndex * 3, pointIndex * 3 + 3)),
+      framesForDensePoint(layer, pointIndex),
+      source === 'colmap_fusion' || source === 'sparse_tracks' ? source : 'unknown',
+    ),
+    synthetic: layer.densifier === 'fake',
+  };
+}
+
+function pointInfo(
+  bundle: Bundle,
+  pointIndex: number,
+  point: number[],
+  indices: Iterable<number>,
+  visibilitySource: PointInfo['visibilitySource'],
+  confidence?: number,
+): PointInfo {
   const frames = [...new Set(indices)].flatMap((i) => {
     const frame = bundle.manifest.frames[i];
     return frame
@@ -112,10 +154,6 @@ export function buildPointInfo(bundle: Bundle, pointIndex: number): PointInfo {
   const up = bundle.manifest.world.up;
   const upLength = Math.hypot(...up);
   const height = position.reduce((sum, value, axis) => sum + value * up[axis], 0) / upLength;
-  const confidence =
-    bundle.pointConfidence?.length === bundle.manifest.points.count
-      ? bundle.pointConfidence[pointIndex]
-      : undefined;
   return {
     index: pointIndex,
     position: { x: position[0], y: position[1], z: position[2] },

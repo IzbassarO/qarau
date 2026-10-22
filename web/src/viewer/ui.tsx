@@ -3,6 +3,21 @@ import { useI18n } from '../i18n';
 import { LanguageSwitch, Wordmark } from '../shell/ShellIdentity';
 import { MAX_SENSITIVITY, MIN_SENSITIVITY, type ObserverBoostKey } from './settings';
 
+export function DenseToggle({
+  on,
+  onChange,
+}: {
+  on: boolean;
+  onChange: (visible: boolean) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <Toggle on={on} onChange={onChange}>
+      {t('viewer.show.densePoints')}
+    </Toggle>
+  );
+}
+
 export function ToolButton({
   label,
   onClick,

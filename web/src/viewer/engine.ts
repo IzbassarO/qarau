@@ -61,6 +61,21 @@ export interface Options {
 }
 
 export type ColorMode = 'height' | 'rgb';
+export type PointLayer = 'sparse' | 'dense';
+
+function heightColors(position: Float32Array, [low, high]: [number, number]) {
+  const colors = new Uint8Array(position.length);
+  for (let p = 0; p < position.length / 3; p++)
+    colors.set(heightRamp((position[p * 3 + 2] - low) / (high - low || 1)), p * 3);
+  // BufferAttribute preserves the typed array instead of copying it.
+  return new BufferAttribute(colors, 3, true);
+}
+
+const POINT_PROJECTION = /* glsl */ `
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  gl_Position = projectionMatrix * mv;
+  gl_PointSize = clamp(uPointSize * k * uPixelRatio * uRefDist / max(-mv.z, 1e-6), 1.5 * uPixelRatio, 6.0 * uPixelRatio);
+`;
 
 const VERT = /* glsl */ `
 uniform float uFindings, uSelected;
@@ -82,9 +97,17 @@ void main() {
     if (uSelected > 0.5 && fid != uSelected) c *= 0.65;
   }
   vColor = c;
-  vec4 mv = modelViewMatrix * vec4(position, 1.0);
-  gl_Position = projectionMatrix * mv;
-  gl_PointSize = clamp(uPointSize * k * uPixelRatio * uRefDist / max(-mv.z, 1e-6), 1.5 * uPixelRatio, 6.0 * uPixelRatio); // cap: close-up (through-camera) views turn into blobs above ~6 px
+  ${POINT_PROJECTION}
+}`;
+
+// Dense exports have point -> frame links, without timeline or finding attributes.
+const DENSE_VERT = /* glsl */ `
+uniform float uPointSize, uPixelRatio, uRefDist;
+varying vec3 vColor;
+void main() {
+  vColor = color;
+  float k = 1.0;
+  ${POINT_PROJECTION}
 }`;
 
 const FRAG = /* glsl */ `
@@ -95,7 +118,7 @@ void main() {
 }`;
 
 export interface Callbacks {
-  onPick: (point: number | null) => void;
+  onPick: (point: number | null, layer?: PointLayer) => void;
   onFlyModeChange?: (active: boolean) => void;
   onThirdPersonChange?: (active: boolean) => void;
   onAlignModeChange?: (active: boolean) => void;
@@ -129,6 +152,9 @@ export class ViewerEngine {
   private dot: Points;
   private pickMark: Points;
   private farPoints?: Points<BufferGeometry, PointsMaterial>;
+  private densePoints?: Points<BufferGeometry, ShaderMaterial>;
+  private denseHeightColors?: BufferAttribute;
+  private denseRgbColors?: BufferAttribute;
   private navigationBounds: Box3;
   private navigationMargin: number;
   private ground;
@@ -189,6 +215,8 @@ export class ViewerEngine {
     const r = this.bounds.radius;
     // Navigation includes every point and recorded camera; trimming is only for framing.
     this.navigationBounds = new Box3().setFromArray(b.position);
+    if (b.dense?.position.length)
+      this.navigationBounds.union(new Box3().setFromArray(b.dense.position));
     for (const center of centers) this.navigationBounds.expandByPoint(new Vector3(...center));
     if (this.navigationBounds.isEmpty()) this.navigationBounds.set(new Vector3(), new Vector3());
     this.navigationMargin = Math.max(
@@ -203,13 +231,12 @@ export class ViewerEngine {
     const g = new BufferGeometry();
     this.pointGeometry = g;
     g.setAttribute('position', new BufferAttribute(b.position, 3));
-    const heightColors = new Uint8Array(b.position.length);
-    const [low, high] = m.world.z_range;
-    for (let p = 0; p < m.points.count; p++)
-      heightColors.set(heightRamp((b.position[p * 3 + 2] - low) / (high - low || 1)), p * 3);
-    this.heightColors = new Uint8BufferAttribute(heightColors, 3, true);
-    if (hasRgb(b)) this.rgbColors = new Uint8BufferAttribute(b.color!, 3, true);
-    g.setAttribute('color', this.rgbColors ?? this.heightColors);
+    this.heightColors = heightColors(b.position, m.world.z_range);
+    if (hasRgb(b)) this.rgbColors = new BufferAttribute(b.color!, 3, true);
+    g.setAttribute(
+      'color',
+      defaults.colorMode === 'rgb' && this.rgbColors ? this.rgbColors : this.heightColors,
+    );
     g.setAttribute('firstSeen', new BufferAttribute(b.firstSeen, 1));
     this.visibleNow = new Uint8Array(m.points.count);
     this.visAttr = new BufferAttribute(this.visibleNow, 1);
@@ -256,6 +283,30 @@ export class ViewerEngine {
     const pts = new Points(g, this.mat);
     pts.frustumCulled = false;
     this.scene.add(pts);
+
+    if (b.dense) {
+      const geometry = new BufferGeometry();
+      geometry.setAttribute('position', new BufferAttribute(b.dense.position, 3));
+      this.denseHeightColors = heightColors(b.dense.position, m.world.z_range);
+      this.denseRgbColors = new BufferAttribute(b.dense.color, 3, true);
+      geometry.setAttribute(
+        'color',
+        defaults.colorMode === 'rgb' ? this.denseRgbColors : this.denseHeightColors,
+      );
+      const { uPointSize, uPixelRatio, uRefDist } = this.mat.uniforms;
+      this.densePoints = new Points(
+        geometry,
+        new ShaderMaterial({
+          vertexShader: DENSE_VERT,
+          fragmentShader: FRAG,
+          vertexColors: true,
+          uniforms: { uPointSize, uPixelRatio, uRefDist },
+        }),
+      );
+      this.densePoints.name = 'dense';
+      this.densePoints.frustumCulled = false;
+      this.scene.add(this.densePoints);
+    }
 
     // ---- far layer: flat not-seen colour, independent of object colours and tracks
     if (b.far && b.far.position.length > 0) {
@@ -480,15 +531,32 @@ export class ViewerEngine {
     this.dirty = true;
   }
 
+  hasDenseLayer(): boolean {
+    return !!this.densePoints;
+  }
+
+  setDenseVisible(visible: boolean) {
+    if (this.densePoints) this.densePoints.visible = visible;
+    this.dirty = true;
+  }
+
   get colorMode(): ColorMode {
     return this.currentColorMode;
   }
 
   /** Swap precomputed attributes; positions, tracks and finding colours stay on the GPU. */
   setColorMode(mode: ColorMode) {
-    if (mode === 'rgb' && !this.rgbColors) return;
+    if (mode === 'rgb' && !this.rgbColors && !this.denseRgbColors) return;
     this.currentColorMode = mode;
-    this.pointGeometry.setAttribute('color', mode === 'rgb' ? this.rgbColors! : this.heightColors);
+    this.pointGeometry.setAttribute(
+      'color',
+      mode === 'rgb' && this.rgbColors ? this.rgbColors : this.heightColors,
+    );
+    if (this.densePoints)
+      this.densePoints.geometry.setAttribute(
+        'color',
+        mode === 'rgb' ? this.denseRgbColors! : this.denseHeightColors!,
+      );
     this.dirty = true;
   }
 
@@ -507,11 +575,12 @@ export class ViewerEngine {
     };
   }
 
-  setPicked(p: number | null) {
+  setPicked(p: number | null, layer: PointLayer = 'sparse') {
     if (p === null) this.pickMark.visible = false;
     else {
       const a = this.pickMark.geometry.getAttribute('position') as BufferAttribute;
-      a.set(this.b.position.subarray(p * 3, p * 3 + 3));
+      const position = layer === 'dense' ? this.b.dense!.position : this.b.position;
+      a.set(position.subarray(p * 3, p * 3 + 3));
       a.needsUpdate = true;
       this.pickMark.visible = true;
     }
@@ -934,7 +1003,11 @@ export class ViewerEngine {
       if (point !== undefined) this.alignToPoint(point);
       return;
     }
-    if (this.pointInfoActive) this.cb.onPick(this.pickAt(e) ?? null);
+    if (this.pointInfoActive) {
+      const point = this.pickInfoAt(e);
+      if (point?.layer === 'dense') this.cb.onPick(point.index, 'dense');
+      else this.cb.onPick(point?.index ?? null);
+    }
   };
   private noCtx = (e: Event) => e.preventDefault();
 
@@ -1117,6 +1190,41 @@ export class ViewerEngine {
     return p < 0 ? undefined : p;
   }
 
+  private pickInfoAt(e: MouseEvent): { index: number; layer: PointLayer } | undefined {
+    const sparse = this.pickAt(e);
+    if (!this.densePoints?.visible || !this.b.dense)
+      return sparse === undefined ? undefined : { index: sparse, layer: 'sparse' };
+    const rc = this.canvas.getBoundingClientRect();
+    const vp = this.camera.projectionMatrix.clone().multiply(this.camera.matrixWorldInverse);
+    const dense = pickNearest(
+      this.b.dense.position,
+      vp.elements,
+      rc.width,
+      rc.height,
+      e.clientX - rc.left,
+      e.clientY - rc.top,
+      8,
+    );
+    if (dense < 0) return sparse === undefined ? undefined : { index: sparse, layer: 'sparse' };
+    if (sparse !== undefined) {
+      // Compare the two candidates with pickNearest's pixel-distance + depth score.
+      const score = (position: Float32Array, index: number) => {
+        const p = new Vector3().fromArray(position, index * 3);
+        const depth = -p.clone().applyMatrix4(this.camera.matrixWorldInverse).z;
+        p.applyMatrix4(vp);
+        return (
+          Math.hypot(
+            (p.x * 0.5 + 0.5) * rc.width - (e.clientX - rc.left),
+            (0.5 - p.y * 0.5) * rc.height - (e.clientY - rc.top),
+          ) + Math.log2(Math.max(depth, 1e-6))
+        );
+      };
+      if (score(this.b.position, sparse) < score(this.b.dense.position, dense))
+        return { index: sparse, layer: 'sparse' };
+    }
+    return { index: dense, layer: 'dense' };
+  }
+
   // ------------------------------------------------------------ loop
   /** Final safety pass for every camera producer (input, presets, tween and benchmark). */
   private enforceCamera() {
@@ -1273,6 +1381,11 @@ export class ViewerEngine {
     this.farPoints?.geometry.dispose();
     this.farPoints?.material.dispose();
     this.farPoints?.removeFromParent();
+    this.pointGeometry.dispose();
+    this.mat.dispose();
+    this.densePoints?.geometry.dispose();
+    this.densePoints?.material.dispose();
+    this.densePoints?.removeFromParent();
     this.renderer.dispose();
   }
 }

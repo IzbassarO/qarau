@@ -49,7 +49,7 @@ export function PointInfoPanel({
       <div className="point-info-row">
         <span>{t('pointInfo.views')}</span>
         <span className="viewer-inline">
-          {info.visibilitySource === 'estimated' && (
+          {(info.visibilitySource === 'estimated' || info.visibilitySource === 'sparse_tracks') && (
             <span className="viewer-badge">{t('pointInfo.estimated')}</span>
           )}
           <span className="viewer-mono">{info.views}</span>
@@ -58,6 +58,16 @@ export function PointInfoPanel({
       {info.visibilitySource === 'estimated' && (
         <p className="viewer-caption viewer-muted">{t('pointInfo.estimatedNote')}</p>
       )}
+      {info.visibilitySource === 'colmap_fusion' && (
+        <p className="viewer-caption viewer-muted">{t('pointInfo.colmapFusionNote')}</p>
+      )}
+      {info.visibilitySource === 'sparse_tracks' && (
+        <p className="viewer-caption viewer-muted">{t('pointInfo.sparseTracksNote')}</p>
+      )}
+      {info.visibilitySource === 'unknown' && (
+        <p className="viewer-caption viewer-muted">{t('pointInfo.unknownSourceNote')}</p>
+      )}
+      {info.synthetic && <p className="viewer-badge">{t('pointInfo.synthetic')}</p>}
       <div>
         <p className="point-info-label">{t('pointInfo.frames')}</p>
         {info.frames.length === 0 ? (

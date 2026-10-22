@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Bundle, FrameInfo } from '../lib/bundle';
-import { buildPointInfo } from './pointInfo';
+import { buildDensePointInfo, buildPointInfo } from './pointInfo';
 
 function frame(i: number, t: number | null = i * 1.25): FrameInfo {
   return {
@@ -197,5 +197,85 @@ describe('buildPointInfo', () => {
 
   it.each([-1, 3, 0.5, NaN])('rejects invalid point index %s', (index) => {
     expect(() => buildPointInfo(bundle(), index)).toThrow(RangeError);
+  });
+});
+
+describe('buildDensePointInfo', () => {
+  function denseBundle(): Bundle {
+    return {
+      ...bundle(),
+      dense: {
+        count: 4,
+        position: new Float32Array([0, 3, 4, 1, 1, 2, 0, 0, 2, -2, 1, 3]),
+        color: new Uint8Array(12),
+        frameOffsets: new Uint32Array([0, 2, 3, 3, 5]),
+        frameIds: new Uint32Array([0, 2, 1, 0, 1]),
+        densifier: 'colmap',
+        frameLinksSource: 'colmap_fusion',
+      },
+    };
+  }
+
+  it('uses dense coordinates and CSR frame indices mapped to the manifest frame ids', () => {
+    const data = denseBundle();
+    data.assetUrl = (path) => `/fixtures/dense/${path}`;
+    expect(buildDensePointInfo(data, 0)).toMatchObject({
+      index: 0,
+      position: { x: 0, y: 3, z: 4 },
+      unit: 'model',
+      visibilitySource: 'colmap_fusion',
+      synthetic: false,
+      views: 2,
+      frames: [
+        { frameId: 0, thumbnailUrl: '/fixtures/dense/thumbs/0.jpg', timeSec: 0 },
+        { frameId: 9, thumbnailUrl: '/fixtures/dense/thumbs/9.jpg', timeSec: 4.5 },
+      ],
+      confidence: { available: false, reason: 'needs_confidence' },
+    });
+    expect(buildDensePointInfo(data, 1).frames).toEqual([
+      { frameId: 7, thumbnailUrl: '/fixtures/dense/thumbs/7.jpg', timeSec: 2.75 },
+    ]);
+  });
+
+  it('keeps an empty CSR row empty even when sparse tracks and camera projections see the point', () => {
+    expect(buildDensePointInfo(denseBundle(), 2)).toMatchObject({
+      visibilitySource: 'colmap_fusion',
+      frames: [],
+      views: 0,
+    });
+  });
+
+  it('shares explicit metric calibration without reusing sparse-point confidence', () => {
+    const data = denseBundle();
+    data.manifest.world.scale_m_per_unit = 2;
+    data.pointConfidence = new Float32Array([0.75, 0.8, 0.9]);
+    expect(buildDensePointInfo(data, 0)).toMatchObject({
+      position: { x: 0, y: 6, z: 8 },
+      unit: 'm',
+      height: { available: true, value: 8 },
+      distance: { available: true, value: 10 },
+      confidence: { available: false, reason: 'needs_confidence' },
+    });
+  });
+
+  it('preserves sparse-derived provenance and marks fake densifier points as synthetic', () => {
+    const data = denseBundle();
+    data.dense!.frameLinksSource = 'sparse_tracks';
+    data.dense!.densifier = 'fake';
+    expect(buildDensePointInfo(data, 0)).toMatchObject({
+      visibilitySource: 'sparse_tracks',
+      synthetic: true,
+      views: 2,
+    });
+    data.dense!.frameLinksSource = 'another_provider';
+    expect(buildDensePointInfo(data, 0).visibilitySource).toBe('unknown');
+  });
+
+  it.each([-1, 4, 0.5, NaN])('rejects invalid dense point index %s', (index) => {
+    expect(() => buildDensePointInfo(denseBundle(), index)).toThrow(RangeError);
+  });
+
+  it('rejects picking a dense point when the bundle has no dense layer', () => {
+    expect(() => buildDensePointInfo(bundle(), 0)).toThrow(RangeError);
   });
 });
