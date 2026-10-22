@@ -1,0 +1,65 @@
+{
+  "version": 2,
+  "run_id": "dense-fixture",
+  "source": { "kind": "images", "name": "Dense frame-link fixture" },
+  "world": {
+    "up": [0, 0, 1],
+    "bounds": { "min": [-1, -1, -1], "max": [1, 1, 1] },
+    "z_range": [-1, 1]
+  },
+  "points": {
+    "count": 8,
+    "position": "web/points.position.f32",
+    "color": "web/points.color.u8",
+    "first_seen": "web/points.first_seen.u16",
+    "num_obs": "web/points.num_obs.u16"
+  },
+  "dense": {
+    "count": 4,
+    "position": "web/dense.position.f32",
+    "color": "web/dense.color.u8",
+    "frame_offsets": { "path": "web/dense.frame_offsets.u32", "dtype": "<u4", "length": 5 },
+    "frame_ids": { "path": "web/dense.frame_ids.u32", "dtype": "<u4", "length": 5 },
+    "densifier": "fake",
+    "frame_links_source": "colmap_fusion",
+    "max_frames_per_point": 2
+  },
+  "frames": [
+    {
+      "i": 10,
+      "t": 0,
+      "image": "web/frame.svg",
+      "thumb": "web/frame.svg",
+      "kept": true,
+      "drop_reason": null,
+      "blur": null,
+      "registered": false
+    },
+    {
+      "i": 20,
+      "t": 1,
+      "image": "web/frame.svg",
+      "thumb": "web/frame.svg",
+      "kept": true,
+      "drop_reason": null,
+      "blur": null,
+      "registered": false
+    },
+    {
+      "i": 30,
+      "t": 2,
+      "image": "web/frame.svg",
+      "thumb": "web/frame.svg",
+      "kept": true,
+      "drop_reason": null,
+      "blur": null,
+      "registered": false
+    }
+  ],
+  "stats": {
+    "frames_extracted": 3,
+    "frames_dropped": 0,
+    "frames_registered": 0,
+    "points": 8
+  }
+}

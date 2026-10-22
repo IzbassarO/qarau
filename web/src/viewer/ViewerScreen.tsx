@@ -12,11 +12,12 @@ import { useI18n } from '../i18n';
 import { hasRgb, runUrl, type Bundle, type Finding } from '../lib/bundle';
 import { heightRamp, RAMP } from '../lib/geometry';
 import './viewer.css';
-import { ViewerEngine, type ColorMode, type Options } from './engine';
+import { ViewerEngine, type ColorMode, type Options, type PointLayer } from './engine';
 import { defaultViewState } from './defaults';
 import { AxisGizmo, type AxisGizmoHandle } from './AxisGizmo';
 import {
   H2,
+  DenseToggle,
   LangSwitch,
   Logo,
   ModeSwitch,
@@ -26,7 +27,7 @@ import {
   Toggle,
   ToolButton,
 } from './ui';
-import { buildPointInfo, frameTime } from './pointInfo';
+import { buildDensePointInfo, buildPointInfo, frameTime } from './pointInfo';
 import { PointInfoPanel } from './PointInfoPanel';
 import { Minimap, type MinimapHandle } from './Minimap.tsx';
 import { canShowHumanFigure } from './observer';
@@ -46,6 +47,8 @@ declare global {
       fps: number;
       engine?: ViewerEngine;
       bench: (on: boolean) => void;
+      denseLayer: () => { available: boolean; visible: boolean; count: number };
+      densePointScreen: (index: number) => { x: number; y: number } | null;
     };
   }
 }
@@ -125,15 +128,19 @@ export function ViewerScreen({
     boostSetting.userId === userId ? boostSetting.value : loadObserverBoostKey(userId);
   const [frame, setFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [picked, setPicked] = useState<number | null>(initialPoint);
+  const [picked, setPicked] = useState<{ index: number; layer: PointLayer } | null>(
+    initialPoint === null ? null : { index: initialPoint, layer: 'sparse' },
+  );
   const [fps, setFps] = useState(0);
   const [colorMode, setColorMode] = useState(savedColorMode);
   const defaults = defaultViewState(bundle, colorMode);
-  const rgbAvailable = hasRgb(bundle);
+  const rgbAvailable = hasRgb(bundle) || !!bundle.dense?.color.length;
   const activeColorMode = defaults.colorMode;
   const colorModeHintId = useId();
   const [showFarLayer, setShowFarLayer] = useState(defaults.showFarLayer);
   const farAvailable = !!bundle.far?.position.length;
+  const denseAvailable = !!bundle.dense;
+  const [showDenseLayer, setShowDenseLayer] = useState(denseAvailable);
   const [opts, setOpts] = useState<Options>({
     buildUp: defaults.buildUp,
     showCurrent: true,
@@ -164,7 +171,7 @@ export function ViewerScreen({
     let eng: ViewerEngine;
     try {
       eng = new ViewerEngine(canvas, bundle, {
-        onPick: (p) => setPicked(p),
+        onPick: (p, layer = 'sparse') => setPicked(p === null ? null : { index: p, layer }),
         onFlyModeChange: setFlyMode,
         onThirdPersonChange: setThirdPerson,
         onAlignModeChange: setAlignMode,
@@ -186,6 +193,24 @@ export function ViewerScreen({
         fps: 0,
         engine: eng,
         bench: (on) => (eng.bench = on),
+        denseLayer: () => ({
+          available: eng.hasDenseLayer(),
+          visible: eng.scene.getObjectByName('dense')?.visible ?? false,
+          count: bundle.dense?.count ?? 0,
+        }),
+        densePointScreen: (index) => {
+          if (
+            !bundle.dense ||
+            !Number.isSafeInteger(index) ||
+            index < 0 ||
+            index >= bundle.dense.count
+          )
+            return null;
+          const p = eng.project(
+            Array.from(bundle.dense.position.subarray(index * 3, index * 3 + 3)),
+          );
+          return p.visible ? { x: p.x, y: p.y } : null;
+        },
       };
       const q = setInterval(() => window.__qarau && (window.__qarau.fps = eng.fps), 500);
       return () => {
@@ -206,11 +231,13 @@ export function ViewerScreen({
   useEffect(() => engineRef.current?.setFrame(frame), [frame, bundle]);
   useEffect(() => engineRef.current?.setOptions(opts), [opts, bundle]);
   useEffect(() => engineRef.current?.setFarVisible(showFarLayer), [showFarLayer, bundle]);
+  useEffect(() => engineRef.current?.setDenseVisible(showDenseLayer), [showDenseLayer, bundle]);
   useEffect(() => engineRef.current?.setColorMode(activeColorMode), [activeColorMode, bundle]);
-  useEffect(
-    () => engineRef.current?.setPicked(pointInfoMode ? picked : null),
-    [picked, pointInfoMode, bundle],
-  );
+  useEffect(() => {
+    const point = pointInfoMode ? picked : null;
+    if (point?.layer === 'dense') engineRef.current?.setPicked(point.index, 'dense');
+    else engineRef.current?.setPicked(point?.index ?? null);
+  }, [picked, pointInfoMode, bundle]);
   useEffect(() => engineRef.current?.setPointInfoMode(pointInfoMode), [pointInfoMode, bundle]);
   useEffect(() => engineRef.current?.setSelectedFinding(sel ?? 0), [sel, bundle]);
   useEffect(() => engineRef.current?.setSensitivity(sensitivity), [sensitivity, bundle]);
@@ -273,7 +300,12 @@ export function ViewerScreen({
   };
 
   const pointInfo = useMemo(
-    () => (picked === null ? null : buildPointInfo(bundle, picked)),
+    () =>
+      picked === null
+        ? null
+        : picked.layer === 'dense'
+          ? buildDensePointInfo(bundle, picked.index)
+          : buildPointInfo(bundle, picked.index),
     [picked, bundle],
   );
   const closePointInfo = () => {
@@ -718,6 +750,7 @@ export function ViewerScreen({
                 {t('viewer.show.farPoints')}
               </Toggle>
             )}
+            {denseAvailable && <DenseToggle on={showDenseLayer} onChange={setShowDenseLayer} />}
             {findings.length > 0 && (
               <Toggle on={opts.findings} onChange={(v) => setOpts({ ...opts, findings: v })}>
                 {t('show.findings')}

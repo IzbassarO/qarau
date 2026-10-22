@@ -36,6 +36,42 @@ export interface Source {
   height?: number;
 }
 
+/** Depth-prior runs store their points in `points` and only describe the method here. */
+export interface DenseMetadata {
+  method: string;
+  frames_used?: number;
+  points?: number;
+}
+
+interface DenseFrameArray {
+  path: string;
+  dtype: '<u4';
+  length: number;
+}
+
+/** ADR 0017: a separate dense cloud with CSR links into `manifest.frames`. */
+export interface DenseManifest {
+  count: number;
+  position: string;
+  color: string;
+  frame_offsets: DenseFrameArray;
+  frame_ids: DenseFrameArray;
+  densifier: string;
+  frame_links_source: string;
+  max_frames_per_point?: number;
+  linked_points?: number;
+}
+
+export interface DenseLayer {
+  count: number;
+  position: Float32Array;
+  color: Uint8Array;
+  frameOffsets: Uint32Array;
+  frameIds: Uint32Array;
+  densifier: string;
+  frameLinksSource: string;
+}
+
 export interface Manifest {
   version: number;
   run_id: string;
@@ -60,7 +96,7 @@ export interface Manifest {
   };
   /** ADR 0003 / P3b: separate XYZ float32 and RGB uint8 triplets, without tracks. */
   far?: { count: number; position: string; color: string; rule: string };
-  dense?: { method: string; frames_used?: number; points?: number };
+  dense?: DenseManifest | DenseMetadata;
   findings?: string;
   tracks?: {
     frame_offsets: string;
@@ -103,6 +139,7 @@ export interface Bundle {
   position: Float32Array;
   /** Real per-point RGB, when the bundle includes a complete colour buffer. */
   color?: Uint8Array;
+  dense?: DenseLayer;
   far?: { position: Float32Array; color: Uint8Array };
   /** A declared far layer failed; the object cloud remains usable. */
   farError?: 'missing' | 'broken';
@@ -154,6 +191,12 @@ export function hasRgb(bundle: Bundle): boolean {
     bundle.color.length > 0 &&
     bundle.color.length === bundle.manifest.points.count * 3
   );
+}
+
+/** Views the CSR row without copying frame ids or allocating per-point objects. */
+export function framesForDensePoint(layer: DenseLayer, i: number): Uint32Array {
+  if (!Number.isInteger(i) || i < 0 || i >= layer.count) return layer.frameIds.subarray(0, 0);
+  return layer.frameIds.subarray(layer.frameOffsets[i], layer.frameOffsets[i + 1]);
 }
 
 export async function loadManifest(runId: string): Promise<Manifest> {
@@ -215,6 +258,66 @@ async function loadFindings(
   }
 }
 
+async function loadDenseLayer(
+  dense: DenseManifest,
+  frameCount: number,
+  get: (rel: string) => Promise<ArrayBuffer>,
+): Promise<DenseLayer> {
+  const validPath = (path: unknown): path is string => typeof path === 'string' && !!path.trim();
+  const validFrameArray = (array: DenseFrameArray | undefined) =>
+    array !== undefined &&
+    array !== null &&
+    validPath(array.path) &&
+    array.dtype === '<u4' &&
+    Number.isSafeInteger(array.length) &&
+    array.length >= 0;
+  if (
+    !Number.isSafeInteger(dense.count) ||
+    dense.count < 0 ||
+    !validPath(dense.position) ||
+    !validPath(dense.color) ||
+    !validFrameArray(dense.frame_offsets) ||
+    !validFrameArray(dense.frame_ids) ||
+    dense.frame_offsets.length !== dense.count + 1
+  )
+    throw new BundleError('generic', 'invalid dense manifest');
+
+  const [position, color, offsets, ids] = await Promise.all([
+    get(dense.position),
+    get(dense.color),
+    get(dense.frame_offsets.path),
+    get(dense.frame_ids.path),
+  ]);
+  if (
+    position.byteLength !== dense.count * 12 ||
+    color.byteLength !== dense.count * 3 ||
+    offsets.byteLength !== dense.frame_offsets.length * 4 ||
+    ids.byteLength !== dense.frame_ids.length * 4
+  )
+    throw new BundleError('generic', 'invalid dense buffer lengths');
+
+  const frameOffsets = new Uint32Array(offsets);
+  const frameIds = new Uint32Array(ids);
+  if (frameOffsets[0] !== 0 || frameOffsets[dense.count] !== frameIds.length)
+    throw new BundleError('generic', 'invalid dense frame offsets');
+  for (let i = 1; i < frameOffsets.length; i++) {
+    if (frameOffsets[i] < frameOffsets[i - 1] || frameOffsets[i] > frameIds.length)
+      throw new BundleError('generic', 'invalid dense frame offsets');
+  }
+  for (const frameId of frameIds) {
+    if (frameId >= frameCount) throw new BundleError('generic', 'invalid dense frame id');
+  }
+  return {
+    count: dense.count,
+    position: new Float32Array(position),
+    color: new Uint8Array(color),
+    frameOffsets,
+    frameIds,
+    densifier: dense.densifier,
+    frameLinksSource: dense.frame_links_source,
+  };
+}
+
 /** Download manifest + all typed arrays; progress is 0..1 over bytes. */
 export async function loadBundle(
   runId: string, // the route id: a copied run may carry a stale manifest.run_id
@@ -237,7 +340,7 @@ export async function loadBundle(
       report();
     });
   const { points: p, tracks: k } = manifest;
-  const [pos, col, fs, fo, fp, po, pf] = await Promise.all([
+  const [pos, col, fs, fo, fp, po, pf, dense] = await Promise.all([
     get(p.position),
     // Colour is optional: missing or invalid RGB must not hide usable geometry.
     p.color?.trim() ? get(p.color).catch(() => undefined) : undefined,
@@ -246,6 +349,9 @@ export async function loadBundle(
     k ? get(k.frame_points) : new ArrayBuffer(0),
     k ? get(k.point_offsets) : new ArrayBuffer(0),
     k ? get(k.point_frames) : new ArrayBuffer(0),
+    manifest.dense && 'position' in manifest.dense
+      ? loadDenseLayer(manifest.dense, manifest.frames.length, get)
+      : undefined,
   ]);
   const firstSeen = new Uint16Array(fs);
   const fnd = manifest.findings ? await loadFindings(manifest, get) : {};
@@ -256,6 +362,7 @@ export async function loadBundle(
     position: new Float32Array(pos),
     color:
       col && col.byteLength > 0 && col.byteLength === p.count * 3 ? new Uint8Array(col) : undefined,
+    dense,
     firstSeen,
     frameOffsets: new Uint32Array(fo),
     frameInPoints: new Uint32Array(fp),

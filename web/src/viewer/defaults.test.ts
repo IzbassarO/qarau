@@ -35,6 +35,30 @@ it('falls back to height for a saved RGB choice when RGB is unavailable', () => 
   expect(defaultViewState(createDemo('en').bundle, 'rgb').colorMode).toBe('height');
 });
 
+it('opens a dense layer in height colour and respects saved colour preferences', () => {
+  const bundle = bundleWithRgb();
+  bundle.dense = {
+    count: 1,
+    position: new Float32Array([0, 0, 0]),
+    color: new Uint8Array([20, 40, 60]),
+    frameOffsets: new Uint32Array([0, 0]),
+    frameIds: new Uint32Array(),
+    densifier: 'colmap',
+    frameLinksSource: 'colmap_fusion',
+  };
+  expect(defaultViewState(bundle).colorMode).toBe('height');
+  expect(defaultViewState(bundle, 'rgb').colorMode).toBe('rgb');
+  expect(defaultViewState(bundle, 'height').colorMode).toBe('height');
+  // Dense RGB remains usable when the sparse layer has no colour file.
+  expect(defaultViewState({ ...bundle, color: undefined }, 'rgb').colorMode).toBe('rgb');
+});
+
+it('preserves the default for legacy dense metadata stored on the sparse cloud', () => {
+  const bundle = bundleWithRgb();
+  bundle.manifest.dense = { method: 'depth_prior', frames_used: 2, points: 3 };
+  expect(defaultViewState(bundle).colorMode).toBe('rgb');
+});
+
 it.each([true, false])(
   'defaults to timeline colouring off and frustums hidden (RGB: %s)',
   (rgb) => {

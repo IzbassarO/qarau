@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readDenseFixture } from '../fixtures/dense-bundle/readFixture';
 import {
   FarLayerError,
+  framesForDensePoint,
   hasRgb,
   loadBundle,
   loadManifest,
   runUrl,
+  type DenseManifest,
   type Finding,
   type Manifest,
 } from './bundle';
@@ -73,6 +76,128 @@ function serveFiles(assets = files()) {
   vi.stubGlobal('fetch', fetch);
   return fetch;
 }
+
+describe('optional dense layer with frame links (ADR 0017)', () => {
+  async function parseFixture(
+    dense: Manifest['dense'],
+    changeFixture?: (fixture: ReturnType<typeof readDenseFixture>) => void,
+  ) {
+    const fixture = readDenseFixture();
+    fixture.manifest.dense = dense;
+    changeFixture?.(fixture);
+    const prefix = runUrl(routeId, '');
+    const fetch = vi.fn(async (url: string) => {
+      if (url === `/api/runs/${encodeURIComponent(routeId)}/manifest.json`)
+        return Response.json(fixture.manifest);
+      const body = url.startsWith(prefix) ? fixture.files.get(url.slice(prefix.length)) : undefined;
+      return body === undefined
+        ? new Response(null, { status: 404 })
+        : new Response(Uint8Array.from(body).buffer);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const bundle = await loadBundle(routeId, await loadManifest(routeId), vi.fn());
+    return { bundle, fetch };
+  }
+
+  it('reads the four-point fixture as typed arrays and returns its exact CSR frame IDs', async () => {
+    const { bundle } = await parseFixture(readDenseFixture().manifest.dense);
+    const dense = bundle.dense!;
+    expect(dense.count).toBe(4);
+    expect(dense.position).toBeInstanceOf(Float32Array);
+    expect(dense.position).toHaveLength(12);
+    expect(dense.position.subarray(0, 3)).toEqual(new Float32Array([0, 0, 0.25]));
+    expect(dense.color).toBeInstanceOf(Uint8Array);
+    expect(dense.color).toEqual(
+      new Uint8Array([220, 50, 30, 30, 220, 50, 50, 30, 220, 220, 200, 30]),
+    );
+    expect(dense.frameOffsets).toBeInstanceOf(Uint32Array);
+    expect(dense.frameOffsets).toEqual(new Uint32Array([0, 2, 3, 3, 5]));
+    expect(dense.frameIds).toBeInstanceOf(Uint32Array);
+    expect(dense.frameIds).toEqual(new Uint32Array([0, 2, 1, 0, 1]));
+    expect(Array.from(framesForDensePoint(dense, 0))).toEqual([0, 2]);
+    expect(Array.from(framesForDensePoint(dense, 1))).toEqual([1]);
+    expect(Array.from(framesForDensePoint(dense, 2))).toEqual([]);
+    expect(Array.from(framesForDensePoint(dense, 3))).toEqual([0, 1]);
+    expect(framesForDensePoint(dense, 0).buffer).toBe(dense.frameIds.buffer);
+    expect(dense.densifier).toBe('fake');
+    expect(dense.frameLinksSource).toBe('colmap_fusion');
+    expect(bundle.manifest.points.count).toBe(8);
+    expect(bundle.position).toHaveLength(24);
+  });
+
+  it('sends the authenticated session with every dense array request', async () => {
+    sessionStorage.setItem('qarau.auth.session', 'Bearer dense-fixture-session');
+    const { fetch } = await parseFixture(readDenseFixture().manifest.dense);
+    for (const path of [
+      'web/dense.position.f32',
+      'web/dense.color.u8',
+      'web/dense.frame_offsets.u32',
+      'web/dense.frame_ids.u32',
+    ])
+      expect(fetch).toHaveBeenCalledWith(runUrl(routeId, path), {
+        headers: { Authorization: 'Bearer dense-fixture-session' },
+      });
+  });
+
+  it.each(['position.f32', 'color.u8', 'frame_offsets.u32', 'frame_ids.u32'])(
+    'rejects a truncated dense %s buffer',
+    async (filename) => {
+      await expect(
+        parseFixture(readDenseFixture().manifest.dense, ({ files }) => {
+          const path = `web/dense.${filename}`;
+          const bytes = files.get(path)!;
+          files.set(path, bytes.subarray(0, bytes.length - 1));
+        }),
+      ).rejects.toThrow('invalid dense buffer lengths');
+    },
+  );
+
+  it('rejects an offsets descriptor that does not declare count + 1 entries', async () => {
+    const dense = readDenseFixture().manifest.dense as DenseManifest;
+    dense.frame_offsets.length = 4;
+    await expect(parseFixture(dense)).rejects.toThrow('invalid dense manifest');
+  });
+
+  it.each([
+    ['nonzero first offset', 'frame_offsets.u32', [1, 2, 3, 3, 5], 'invalid dense frame offsets'],
+    ['nonmonotone offsets', 'frame_offsets.u32', [0, 2, 1, 3, 5], 'invalid dense frame offsets'],
+    [
+      'offset beyond frame ids',
+      'frame_offsets.u32',
+      [0, 2, 6, 3, 5],
+      'invalid dense frame offsets',
+    ],
+    ['wrong terminal offset', 'frame_offsets.u32', [0, 2, 3, 3, 4], 'invalid dense frame offsets'],
+    ['out-of-range frame id', 'frame_ids.u32', [0, 3, 1, 0, 1], 'invalid dense frame id'],
+  ] as const)('rejects %s in dense CSR links', async (_, filename, values, message) => {
+    await expect(
+      parseFixture(readDenseFixture().manifest.dense, ({ files }) => {
+        const bytes = files.get(`web/dense.${filename}`)!;
+        values.forEach((value, index) => bytes.writeUInt32LE(value, index * 4));
+      }),
+    ).rejects.toThrow(message);
+  });
+
+  it('preserves the older depth-prior metadata without loading a separate dense layer', async () => {
+    const { bundle, fetch } = await parseFixture({
+      method: 'depth_prior',
+      frames_used: 3,
+      points: 8,
+    });
+    expect(bundle.manifest.dense).toEqual({ method: 'depth_prior', frames_used: 3, points: 8 });
+    expect(bundle.dense).toBeUndefined();
+    expect(bundle.position).toHaveLength(24);
+    expect(fetch.mock.calls.some(([url]) => url.includes('/dense.'))).toBe(false);
+  });
+
+  it('keeps a bundle without dense unchanged', async () => {
+    const { bundle, fetch } = await parseFixture(undefined);
+    expect(bundle.manifest.dense).toBeUndefined();
+    expect(bundle.dense).toBeUndefined();
+    expect(bundle.position).toHaveLength(24);
+    expect(fetch.mock.calls.some(([url]) => url.includes('/dense.'))).toBe(false);
+  });
+});
 
 describe('optional far layer (ADR 0003)', () => {
   const far: NonNullable<Manifest['far']> = {
