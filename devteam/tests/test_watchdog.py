@@ -16,6 +16,7 @@ from conftest import CFG, git, remote_of
 from test_continuous import Fast, make
 
 from devteam import continuous as C
+from devteam import gates as G
 from devteam import procs
 from devteam import watchdog as W
 from devteam.graph import Team
@@ -84,6 +85,15 @@ def test_second_crash_stops_and_needs_you(team, monkeypatch, banners):
     assert "fix the cause, then `devteam resume`" in last
 
 
+def test_a_crash_after_a_healthy_resume_gets_its_own_resume(team, monkeypatch, banners):
+    crash(monkeypatch, "raise", times=3)  # healthy_s=0: every run counts as hours of good work
+    code = W.supervise(team, ["run", "--fake"], cmd=DRIVER, wait_s=0, healthy_s=0)
+    assert code == W.FINISHED and runs(team) == 3
+    assert json.loads((team.home / "last_crash.json").read_text())["attempt"] == 3
+    text = banners.read_text()
+    assert text.count("crashed: ") == 3 and "needs you" not in text
+
+
 @pytest.mark.parametrize(
     "kind, code, note",
     [
@@ -111,8 +121,7 @@ def test_stop_cancels_the_pending_resume(team, monkeypatch, banners, capsys):
     crash(monkeypatch, "raise")
 
     def stop_during_the_wait():  # `devteam stop` signals the watchdog too
-        while "Resuming" not in (banners.read_text() if banners.exists() else ""):
-            time.sleep(0.05)
+        until(lambda: "Resuming" in (banners.read_text() if banners.exists() else ""), 120)
         os.kill(os.getpid(), signal.SIGTERM)
 
     threading.Thread(target=stop_during_the_wait, daemon=True).start()
@@ -134,7 +143,7 @@ def test_steps_a_killed_orchestrator_left_are_reaped(team):
     (team.home / "steps").mkdir()
     (team.home / "steps" / f"{p.pid}-{marker}").touch()
     W.reap_steps(team)
-    assert p.wait(timeout=5) == -signal.SIGTERM
+    assert p.wait(timeout=10) == -signal.SIGTERM
     assert not list((team.home / "steps").iterdir())
 
 
@@ -158,12 +167,18 @@ def test_blocked_task_notifies_but_an_owner_stop_does_not(team, banners):
     assert banners.read_text() == "T-001 blocked: tester: 3 send-backs | Kerege (fake)\n"
 
 
+def until(cond, timeout_s: float = 10.0):
+    """Polls cond() until it is truthy (a slow CI runner gets the whole timeout)."""
+    deadline = time.monotonic() + timeout_s
+    while not (v := cond()):
+        assert time.monotonic() < deadline, f"timed out after {timeout_s} s"
+        time.sleep(0.05)
+    return v
+
+
 def test_heartbeat_is_written_and_aged(team):
     W.heartbeat(team)
-    for _ in range(50):
-        if (team.home / "heartbeat").exists():
-            break
-        time.sleep(0.05)
+    until(lambda: W.heartbeat_age(team, time.time()) is not None)
     age = W.heartbeat_age(team, time.time() + 400)
     assert age is not None and 399 <= age <= 402
 
@@ -218,3 +233,33 @@ def test_dashboard_lists_a_crash_until_a_newer_heartbeat(team):
     (team.home / "heartbeat").write_text(f"{now + 5:.0f} 1\n")  # a run beat since: resolved
     kinds = [a["kind"] for a in D.collect(team, fake_gh([], []), now=now + 5)["attention"]]
     assert "crash" not in kinds
+
+
+def real_refs(repo) -> list[str]:
+    """Every ref and where it points, except the fake run's own devteam-fake/* namespace."""
+    out = git(repo, "for-each-ref", "--format=%(refname) %(objectname)")
+    own = ("refs/heads/devteam-fake/", "refs/remotes/devteam-fake/")
+    return [line for line in out.splitlines() if not line.startswith(own)]
+
+
+def test_a_fake_run_leaves_the_real_repos_tags_branches_and_commits_alone(repo, monkeypatch):
+    """2026-10-22: a fake release tagged the real repo (refs/tags is shared by all checkouts)."""
+    monkeypatch.setenv("KEREGE_REPO", str(repo))
+    tags, branches, refs = git(repo, "tag"), git(repo, "branch"), real_refs(repo)
+    out = subprocess.run([*DRIVER, "run", "--fake"], capture_output=True, text=True, timeout=600)
+    assert out.returncode == 0, out.stdout[-2000:] + out.stderr[-2000:]
+    day = time.strftime("%Y-%m-%d")
+    fake_remote = repo / "devteam" / ".state" / "fake" / "remote.git"
+    assert git(fake_remote, "tag", "-l") == f"release-{day}\n"  # it released, in the fake remote
+    assert git(repo, "tag") == tags
+    mine = [b for b in git(repo, "branch").splitlines() if "devteam-fake/" not in b]
+    assert mine == branches.splitlines()
+    assert real_refs(repo) == refs  # no ref moved: no commit on dev, main or any other branch
+    assert git(repo, "status", "--porcelain") == ""
+
+
+def test_a_real_release_tag_is_made_locally_and_pushed(repo):
+    team = Team(repo, copy.deepcopy(CFG), {}, Fast(), fake=False, remote=remote_of(repo))
+    day = time.strftime("%Y-%m-%d")
+    assert G.tag_release(team, "note") == f"release-{day}"
+    assert git(repo, "tag") == git(remote_of(repo), "tag") == f"release-{day}\n"

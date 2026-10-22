@@ -44,7 +44,9 @@ then unattended (`run --continuous` overnight).
   `.state/last_crash.json` (error, file:line, traceback, exit code, attempt), a notification,
   the steps it left running are killed (`.state/steps/`), and after 60 s the watchdog runs
   `devteam resume` (continuous: `run --continuous`, which resumes its pending rounds) once.
-  If that fails too, it stops and notifies "needs you". Ctrl+C or `devteam stop` during the
+  If the resume crashes (or refuses to start) within 30 min, it stops and notifies "needs
+  you"; a resume that ran longer was healthy, so its crash gets one resume again.
+  Ctrl+C or `devteam stop` during the
   60 s cancels the resume. Notifications: a macOS banner (`osascript`), plus an email when
   `DEVTEAM_NOTIFY_EMAIL` is set in `devteam/.env` (SMTP: `DEVTEAM_SMTP_HOST`, `_PORT` (587
   STARTTLS, 465 SSL), `_USER`, `_PASSWORD`, optional `DEVTEAM_NOTIFY_FROM`); without it the
@@ -60,7 +62,10 @@ then unattended (`run --continuous` overnight).
   `backlog.yaml`, the fake remote seeded from `origin/dev`, `devteam-fake/*` branches removed) it
   runs `devteam run --fake --only <first plannable todo task of each developer>` through the
   watchdog. PASS: exit 0, every task `done`, no crash recorded (a crash the resume recovered
-  from is still a FAIL). Fake agents, real checks and gates: takes minutes, costs nothing.
+  from is still a FAIL). Fake agents and the fake tester (no lint or tests run), real scope /
+  secret gates, merges and release on the fake remote: well under a minute, costs nothing.
+- A fake run never changes the real repo outside `devteam-fake/*`: its release tag goes to the
+  fake remote only (2026-10-22: `release-YYYY-MM-DD.2` landed in the shared `refs/tags`).
 - Continuous mode (`run --continuous`, limits in `config.yaml` → `continuous`): one loop per
   developer. When a developer's task ends (merged or blocked), the brain plans the next task
   for that developer only; the others keep working. Stops when no developer can take a task

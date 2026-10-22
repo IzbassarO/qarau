@@ -275,8 +275,6 @@ def rehearse(cmd: list[str] | None = None) -> int:
     ).stdout  # fmt: skip
     subprocess.run([*git, "update-ref", "--stdin"], input=refs, check=True, text=True)
     team = make_team(True)  # seeds the fake backlog and remote again
-    # never a fake release: its tag would land in the real repo's refs/tags (shared)
-    (team.home / "last_release").write_text(time.strftime("%Y-%m-%d"))
     tasks = team.load_backlog()
     done = {t["id"] for t in tasks if t["status"] == "done"}
     ready = [

@@ -5,7 +5,8 @@ finished (the child notifies with its one-line result), stopped by the owner (Ct
 `devteam stop`), halted by the budget cap or a subscription limit, refused to start: nothing
 more. Anything else (an unhandled exception, killed by a signal) is a crash:
 .state/last_crash.json, a notification, the steps it left running are killed, `resume` once
-after RETRY_WAIT_S; a second crash (or a refused resume) stops with "needs you".
+after RETRY_WAIT_S; a resume that crashes (or refuses to start) within HEALTHY_S stops with
+"needs you"; one that ran longer was healthy, so its crash gets one resume again.
 The child writes .state/heartbeat every HEARTBEAT_S; the dashboard shows its age.
 Notifications: a macOS banner (osascript), and an email when DEVTEAM_NOTIFY_EMAIL is set in
 devteam/.env (DEVTEAM_SMTP_HOST, _PORT, _USER, _PASSWORD there); each goes to
@@ -28,6 +29,7 @@ from devteam import procs
 
 FINISHED, REFUSED, HALTED, STOPPED = 0, 2, 75, 130  # child exit codes that are not a crash
 RETRY_WAIT_S = 60
+HEALTHY_S = 30 * 60  # a resume that ran this long before crashing earns its crash a resume too
 HEARTBEAT_S = 30
 HEARTBEAT_STALE_S = 300
 WATCHED = "DEVTEAM_WATCHED"  # set in the child: it runs the orchestrator, not another watchdog
@@ -94,9 +96,11 @@ def run_line(results: list[dict], usd: float, why: str = "") -> str:
 # --- in the child ------------------------------------------------------------------------
 def heartbeat(team):
     def beat():
+        tmp = team.home / f"heartbeat.{os.getpid()}.tmp"
         while True:
-            try:
-                (team.home / "heartbeat").write_text(f"{time.time():.0f} {os.getpid()}\n")
+            try:  # whole file or none: write_text truncates first, a reader could see it empty
+                tmp.write_text(f"{time.time():.0f} {os.getpid()}\n")
+                os.replace(tmp, team.home / "heartbeat")
             except OSError:
                 pass
             time.sleep(HEARTBEAT_S)
@@ -146,7 +150,9 @@ def reap_steps(team):
         f.unlink(missing_ok=True)
 
 
-def supervise(team, args: list[str], cmd: list[str] | None = None, wait_s=RETRY_WAIT_S) -> int:
+def supervise(
+    team, args: list[str], cmd: list[str] | None = None, wait_s=RETRY_WAIT_S, healthy_s=HEALTHY_S
+) -> int:
     """Runs `cmd + args` (default: this same CLI) and returns its exit code."""
     cmd = cmd or [sys.executable, sys.argv[0]]
     stop = threading.Event()  # Ctrl+C, `devteam stop`, a closed terminal: never resume after it
@@ -160,26 +166,29 @@ def supervise(team, args: list[str], cmd: list[str] | None = None, wait_s=RETRY_
     pid_file.write_text(str(os.getpid()))
     if not team.secrets.get("DEVTEAM_NOTIFY_EMAIL"):
         print("watchdog: email notifications off (DEVTEAM_NOTIFY_EMAIL not set in devteam/.env)")
+    crashes, resumed = 0, False  # resumed: the running child is a resume not yet healthy
     try:
-        for attempt in (1, 2):
-            if attempt == 2:
-                args = retry_args(args)
+        while True:
+            t0 = time.monotonic()
             child = subprocess.Popen([*cmd, *args], env={**os.environ, WATCHED: "1"})
             code = child.wait()
-            if code in (FINISHED, HALTED, STOPPED) or (attempt == 1 and code == REFUSED):
+            if code in (FINISHED, HALTED, STOPPED) or (not crashes and code == REFUSED):
                 return code
-            why = _crashed(team, child.pid, code, args, attempt)
-            if attempt == 2 or stop.is_set():
+            if time.monotonic() - t0 >= healthy_s:
+                resumed = False  # it ran well that long: a new crash, not the same one again
+            crashes += 1
+            why = _crashed(team, child.pid, code, args, crashes)
+            if resumed or stop.is_set():
                 notify(team, f"needs you: {why}. Not resumed: fix the cause, then "
                        "`devteam resume`. Details: devteam/.state/last_crash.json")  # fmt: skip
                 return code
             notify(team, f"crashed: {why}. Resuming in {wait_s:g} s.")
-            print(f"watchdog: {why}; `devteam {' '.join(retry_args(args))}` in {wait_s:g} s "
+            args, resumed = retry_args(args), True
+            print(f"watchdog: {why}; `devteam {' '.join(args)}` in {wait_s:g} s "
                   "(Ctrl+C or `devteam stop` cancels)", flush=True)  # fmt: skip
             if stop.wait(wait_s):
                 print("watchdog: resume cancelled")
                 return code
-        return code
     finally:
         pid_file.unlink(missing_ok=True)
         for sig, h in old.items():
@@ -196,7 +205,7 @@ def _crashed(team, pid: int, code: int, args: list[str], attempt: int) -> str:
     if info.get("pid") != pid:  # killed: it could write nothing itself
         how = f"killed by {signal.Signals(-code).name}" if code < 0 else f"exited with {code}"
         info = {"pid": pid, "error": f"the orchestrator {how}", "where": ""}
-    if attempt == 2 and code == REFUSED:
+    if code == REFUSED:  # only a resume gets here
         info["error"] = "the resume refused to start (see the terminal)"
     info.update(exit_code=code, command="devteam " + " ".join(args), attempt=attempt)
     _write(team, info)
