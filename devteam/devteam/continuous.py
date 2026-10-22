@@ -43,6 +43,7 @@ class Continuous:
         self.ended = 0  # rounds that ran a task and ended
         self.results: list[dict] = []  # in the order they ended
         self.stop_reason = ""
+        self.crash: Exception | None = None  # a developer loop's own bug (not a round's)
         self.draining = False  # no new tasks, rounds in flight finish
         self.limit_since: dict[str, float] = {}
         self.paused: dict[str, str] = {}  # developer -> why it takes no more tasks this run
@@ -151,7 +152,7 @@ class Continuous:
                 if self.team.stopping.is_set():
                     return
                 inp = None
-                if thread and not self.graph.get_state(self._cfg(thread)).next:
+                if thread and not self.graph.get_state(self._cfg(thread)).tasks:  # see cli
                     thread = None  # finished, or crashed before its first step: start anew
                 if not thread:
                     if self.draining:
@@ -238,6 +239,14 @@ class Continuous:
             self.say("brain", reason, status="")  # the run goes on while anyone can work
             return
 
+    def _dev_main(self, dev: str):
+        try:
+            self.dev_loop(dev)
+        except Exception as e:  # its thread would end silently: stop the run, it is a crash
+            self.crash = self.crash or e
+            self._idle(dev)
+            self.halt(f"{dev}: the developer loop crashed: {self.team.redact(str(e))[:300]}")
+
     def _idle(self, dev: str):
         with self.cond:
             self.busy.discard(dev)
@@ -255,7 +264,7 @@ class Continuous:
         self.say("brain", f"Kerege continuous run {self.run_id}", status="")
         threading.Thread(target=self._timer, daemon=True).start()
         threads = [
-            threading.Thread(target=self.dev_loop, args=(d,), name=d, daemon=True)
+            threading.Thread(target=self._dev_main, args=(d,), name=d, daemon=True)
             for d in self.team.cfg["developers"]
         ]
         for t in threads:

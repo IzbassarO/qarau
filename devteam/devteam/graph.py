@@ -30,7 +30,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
 from devteam import gates as G
-from devteam import procs
+from devteam import procs, watchdog
 from devteam import scope as SC
 from devteam import supervise as SV
 from devteam.costs import BudgetExceeded, SubscriptionLimit
@@ -425,10 +425,12 @@ class Team:
         return yaml.safe_load(self.backlog_path.read_text())["tasks"]
 
     def update_task(self, task_id: str, **fields):
+        was = ""
         with self._lock:
             data = yaml.safe_load(self.backlog_path.read_text())
             for t in data["tasks"]:
                 if t["id"] == task_id:
+                    was = t["status"]
                     for k, v in fields.items():  # None removes the field
                         if v is None:
                             t.pop(k, None)
@@ -442,6 +444,10 @@ class Team:
                 errors="replace",
             )
             os.replace(tmp, self.backlog_path)
+        why = str(fields.get("blocked_reason") or "")
+        newly = fields.get("status") == "blocked" and was != "blocked"
+        if newly and not why.startswith(OWNER_STOP):  # the owner knows about their own stop
+            watchdog.notify(self, f"{task_id} blocked: {why[:250]}")
 
     # --- processes (all killable by `devteam stop`) --------------------------------------
     def run_proc(
@@ -477,6 +483,9 @@ class Team:
             )
             with self._lock:
                 self._procs.add(p)
+            step = self.home / "steps" / f"{p.pid}-{marker}"  # a killed orchestrator's leftovers
+            step.parent.mkdir(exist_ok=True)  # are reaped by the watchdog before it resumes
+            step.touch()
             if input:
                 threading.Thread(target=_feed, args=(p.stdin, input), daemon=True).start()
             note, t0, pos, cpu_at = "", time.monotonic(), 0, -CPU_EVERY_S
@@ -512,6 +521,7 @@ class Team:
                         f"WARNING: `{label[:80]}` left port {port} listening (pid {pid}); "
                         "killed it",
                     )
+                step.unlink(missing_ok=True)
                 p.wait()
             fo.seek(0)
             fe.seek(0)
