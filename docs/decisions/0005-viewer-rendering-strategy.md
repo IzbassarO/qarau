@@ -21,7 +21,7 @@ a loader in the viewer and complexity in per-point attributes.
   re-targeting, keyboard views and "view through the video camera".
 - No octree/LOD in M1. Trigger for adding Potree (or a custom octree): a real run whose
   cloud exceeds ~5 M points or drops below 30 fps in the measured test
-  (`docs/notes/m1-results.md`).
+  (M1 results removed, see git history: 8be36b3).
 
 ## Consequences
 

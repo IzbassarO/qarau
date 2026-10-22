@@ -8,7 +8,7 @@
 Three of five benchmark videos came out as several COLMAP models (room 2, aegviidu 3,
 mykolaiv 3); only the largest reached the map. On room the cause is a fast pan over a blank
 wall: the frame-quality check drops the two blurred frames in the middle of it, and the frames
-on either side share **zero** feature matches (`docs/notes/p3-one-model-plan.md`). No mapper,
+on either side share **zero** feature matches (plan removed, see git history: 6f18013). No mapper,
 merger or threshold can join two groups of images that have no correspondence.
 
 pycolmap 4.2.1 (BSD-3, already pinned) ships both COLMAP's incremental mapper and the GLOMAP
@@ -19,7 +19,7 @@ global mapper (`pycolmap.global_mapping`). It has no binding for COLMAP's model 
 1. `ColmapReconstructor.mapper = "incremental" | "global"` (CLI `--mapper`), unknown values
    are refused. **Default stays `incremental`**: on single-model videos it is the measured
    baseline (notre-dame 100 %, 0.39 px), and an earlier room experiment with GLOMAP on
-   sequential matches triangulated almost nothing (`docs/notes/room-test.md`).
+   sequential matches triangulated almost nothing (room test removed, see git history: 3ff2b64).
 2. When the mapper output is split (or one model misses ≥ 10 kept frames), the stage joins it:
    1. the frames the quality check dropped are added to the database as **bridges** (same
       camera, matched against everything);

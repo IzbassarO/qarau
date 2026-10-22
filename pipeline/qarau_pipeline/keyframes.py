@@ -1,5 +1,5 @@
 """Parallax keyframes: KLT tracks over the candidate frames; a new keyframe where the camera
-moved enough to add 3D geometry, not on a fixed clock (docs/notes/p2b-plan.md)."""
+moved enough to add 3D geometry, not on a fixed clock (ADR 0020)."""
 
 from __future__ import annotations
 
@@ -29,12 +29,12 @@ class KeyframeParams:
     fewer frames lose points (the gate fails on -10 %). frames.run decodes `oversample` x
     that many candidates and `fit` raises the parallax threshold above `parallax_frac` until
     the keyframes fit the budget, so they go where the camera moves, not by the clock.
-    parallax_frac itself is the floor: a still camera measures ~5e-5 (docs/notes/p2b-plan.md)."""
+    parallax_frac itself is the floor: a still camera measures ~5e-5 (ADR 0020)."""
 
     mode: str = "parallax"
     parallax_frac: float = 0.0003  # median residual after the best homography -> new keyframe
     # candidates per budgeted keyframe; room at 2.0: frames bunch into the fast parts and
-    # points fall 11 % (1.5: -2.6 %, within run-to-run spread; docs/notes/p2b-plan.md)
+    # points fall 11 % (1.5: -2.6 %, within run-to-run spread; ADR 0020)
     oversample: float = 1.5
     min_track_frac: float = 0.6  # fewer of the keyframe's tracks left -> new keyframe
     max_gap_s: float = 2.0  # this long since the last keyframe and the image moved -> new one

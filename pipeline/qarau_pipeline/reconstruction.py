@@ -90,7 +90,7 @@ class ColmapReconstructor:
     cameras). mapper: 'incremental' (COLMAP) or 'global' (GLOMAP, shipped in pycolmap).
     Exhaustive matching up to EXHAUSTIVE_MAX images, else sequential with quadratic overlap.
     A split video is joined again (_merge), with the frames the quality check dropped
-    (bridges) as temporary links (docs/notes/p3-one-model-plan.md)."""
+    (bridges) as temporary links (ADR 0011)."""
 
     mode: str = "video"
     max_image_size: int = 1600
