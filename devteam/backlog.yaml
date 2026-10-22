@@ -551,9 +551,12 @@ tasks:
   licence: 'COLMAP (BSD-3-Clause) options only; nothing new.
 
     '
-  status: in_progress
+  status: done
   owner: dev_pipeline
   run: run-20261021-200952
+  branch: devteam/P4a-3
+  pr: https://github.com/IzbassarO/qarau/pull/60
+  done_at: '2026-10-21'
 - id: P4a-2b
   area: core
   title: Depth Anything V2 Small depth prior (estimated points)
