@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import CFG, remote_of
+from conftest import CFG, git, remote_of
 from test_continuous import Fast, make
 
 from devteam import continuous as C
@@ -174,6 +174,7 @@ def test_rehearse_runs_the_first_todo_task_of_each_developer(repo, monkeypatch):
     assert out.returncode == 0, out.stdout[-2000:] + out.stderr[-2000:]
     assert "`devteam run --fake --only T-001,T-002` on a fresh fake state" in out.stdout
     assert "rehearse: PASS" in out.stdout and "T-001 done, T-002 done" in out.stdout
+    assert not git(repo, "tag", "-l")  # no fake release tag in the (shared) repo
 
 
 def test_rehearse_fails_on_a_crash_even_when_the_resume_recovered(repo, monkeypatch):
@@ -196,7 +197,7 @@ def test_dashboard_shows_heartbeat_age_red_when_stale_during_a_run(team):
     d = D.collect(team, fake_gh([], []), now=now)
     assert d["heartbeat"] == pytest.approx(20, abs=1) and not d["hb_stale"]
     assert "last heartbeat 20 s ago</div>" in D.render(d)
-    (team.home / "heartbeat").write_text(f"{now - 600:.0f} 1\n")
+    (team.home / "heartbeat").write_text(f"{now - 610:.0f} 1\n")
     d = D.collect(team, fake_gh([], []), now=now)
     assert d["hb_stale"] and "heartbeat" in [a["kind"] for a in d["attention"]]
     assert "class='s bad'>last heartbeat 10 min ago — no sign of life" in D.render(d)
