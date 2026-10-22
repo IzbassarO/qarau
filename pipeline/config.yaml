@@ -26,3 +26,12 @@ dense_remote:
   # infra/colmap-cuda; Modal builds it from the Dockerfile in our workspace, never pushed
   image: qarau/colmap-cuda:4.2.1
   ledger_path: ../data/dense_remote/gpu_ledger.json # GPU hours per UTC day (data/ is gitignored)
+  # COLMAP PatchMatch speed knobs (P4a-3, docs/notes/dense-speed.md). Each one is optional; an
+  # absent key keeps COLMAP's default and today's commands exactly. Proposed for a 3-min 1080p
+  # video (300 frames), until the owner's Modal timing run confirms them:
+  # patch_match:
+  #   max_image_size: 960 # px, longest side (image_undistorter + PatchMatchStereo); default full
+  #   num_iterations: 3 # default 5
+  #   window_radius: 5 # default 5, at most 32; kept, so the window covers the same patch
+  #   window_step: 2 # 1 or 2; default 1
+  #   num_sources: 8 # source frames per view (stereo/patch-match.cfg); default 20

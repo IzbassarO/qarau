@@ -100,6 +100,22 @@ def test_default_provider_is_fake(
     assert not load_dense_remote_config(env["cfg"]).ledger_path.exists()
 
 
+def test_fake_run_prints_patch_match_knobs(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    text = env["cfg"].read_text()
+    env["cfg"].write_text(text + "  patch_match:\n    max_image_size: 960\n"
+                          "    num_iterations: 3\n    num_sources: 8\n")  # fmt: skip
+    monkeypatch.setattr(dense_remote, "make_provider", Mock(side_effect=AssertionError("paid")))
+    cli(env)
+    out = capsys.readouterr().out
+    assert "run colmap image_undistorter " in out and " --max_image_size 960\n" in out
+    assert "--PatchMatchStereo.max_image_size 960" in out
+    assert "--PatchMatchStereo.num_iterations 3" in out
+    assert "run sh -c sed -i -E 's/^__auto__, [0-9]+$/__auto__, 8/'" in out
+    assert (env["out"] / "fused.ply").is_file()
+
+
 def test_modal_without_flag_refuses_before_make_provider(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
