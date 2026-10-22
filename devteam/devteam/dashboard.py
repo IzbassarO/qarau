@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import yaml
 
 from devteam import costs
+from devteam import watchdog as W
 from devteam.continuous import runs_of_day
 from devteam.graph import AGENTS, OWNER_STOP, Team
 
@@ -255,6 +256,31 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
             "Raise daily_budget_usd in devteam/config.yaml, or let Kerege stop at the cap.",
         )
 
+    hb = W.heartbeat_age(team, now)  # a run whose pid file is left behind died without cleanup
+    supposed = active or (team.home / "run.pid").exists()
+    hb_stale = hb is not None and hb > W.HEARTBEAT_STALE_S and supposed
+    if hb_stale:
+        need(
+            "heartbeat",
+            f"no heartbeat from Kerege for {_ago(hb)} while a run is active",
+            "Look at its terminal. If it is gone: `devteam resume` (continuous: `devteam run "
+            "--continuous`).",
+        )
+    crash = team.home / "last_crash.json"
+    beat_at = now - hb if hb is not None else 0.0  # a run that beat since then resolved it
+    if not active and crash.exists() and crash.stat().st_mtime > beat_at:
+        try:
+            c = json.loads(crash.read_text())
+        except (OSError, json.JSONDecodeError):
+            c = {}
+        where = f" at {c['where']}" if c.get("where") else ""
+        need(
+            "crash",
+            f"Kerege crashed {c.get('at', '')[:16].replace('T', ' ')}: "
+            f"{c.get('error', '?')[:300]}{where} (attempt {c.get('attempt', 1)})",
+            "Fix the cause, then `devteam resume` (continuous: `devteam run --continuous`). "
+            "Details: devteam/.state/last_crash.json",
+        )
     events = recent_events(team)
     agents = agent_states(
         events, started, now, {t["id"] for t in tasks if t["status"] != "in_progress"}
@@ -339,6 +365,8 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
         "attention": attention,
         "violations": violations,
         "last_run": last_run,
+        "heartbeat": hb,
+        "hb_stale": hb_stale,
     }
 
 
@@ -373,6 +401,7 @@ border-radius:10px;background:var(--panel)}
 .summary .k{color:var(--ink2);font-size:12.5px}
 .summary .v{font-size:22px;font-weight:600;line-height:1.25;margin-top:2px}
 .summary .s{color:var(--ink2);font-size:12.5px;overflow-wrap:anywhere}
+.summary .s.bad{color:var(--blocked);font-weight:600}
 .meter{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:8px}
 .meter>i{display:block;height:100%;background:var(--bar)}.meter>i.hot{background:var(--blocked)}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;
@@ -504,6 +533,10 @@ def _dur(secs) -> str:
     return f"{m // 60} h {m % 60:02d} min" if m >= 60 else f"{m} min"
 
 
+def _ago(secs: float) -> str:
+    return f"{secs:.0f} s" if secs < 120 else _dur(secs)
+
+
 def _tok(n) -> str:
     n = n or 0
     return f"{n / 1e6:.1f} M" if n >= 1e6 else f"{n / 1e3:.0f} k" if n >= 1e3 else str(n)
@@ -619,7 +652,7 @@ def _summary(d: dict) -> str:
     return (
         "<section class='summary' aria-label='Summary'>"
         f"<div class='{cls}'><div class='k'>Run</div><div class='v'><span class='dot'></span>"
-        f"{_e(r['state'])}</div><div class='s'>{_e(reason)}</div></div>"
+        f"{_e(r['state'])}</div><div class='s'>{_e(reason)}</div>{_beat(d)}</div>"
         f"<div><div class='k'>Tasks done today</div><div class='v'>{len(d['done_today'])}</div>"
         f"<div class='s'>{_e(', '.join(d['done_today']) or 'none yet')}</div></div>"
         f"<div><div class='k'>API spend, 24 h</div><div class='v'>${d['spent']:.2f}</div>"
@@ -631,6 +664,17 @@ def _summary(d: dict) -> str:
         f"<div><div class='k'>{'Running for' if d['active'] else 'Last run lasted'}</div>"
         f"<div class='v'>{_dur(r['secs'])}</div><div class='s'>{_e(d['now'][11:16])} now</div>"
         "</div></section>"
+    )
+
+
+def _beat(d: dict) -> str:
+    if d["heartbeat"] is None:
+        return ""
+    stale = d["hb_stale"]
+    return (
+        f"<div class='s{' bad' if stale else ''}'>last heartbeat {_ago(d['heartbeat'])} ago"
+        + (" — no sign of life" if stale else "")
+        + "</div>"
     )
 
 
