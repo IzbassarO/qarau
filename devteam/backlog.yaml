@@ -764,7 +764,9 @@ tasks:
     - The viewer shows the dense layer from manifest.dense (with frame↔point links).
 
     '
-  status: todo
+  status: in_progress
+  owner: dev_app
+  run: run-20261021-200952
 - id: A1a
   area: app
   title: Control center layout with sites and inspections
