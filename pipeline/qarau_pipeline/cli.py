@@ -1,5 +1,5 @@
-"""CLI: python -m qarau_pipeline {run,quality,export,segment,project,dense-remote,benchmark,
-refresh} ..."""
+"""CLI: python -m qarau_pipeline {run,quality,export,segment,project,dense-remote,
+finding-evidence,benchmark,refresh} ..."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from typing import Any
 
 from . import frames as frames_stage
 from . import quality
+from .cameras import project
 from .interfaces import StageError, run_stage
 from .keyframes import MODES, KeyframeParams, subsample
 from .segmentation import GroundedSam2, ManualMasks, SamApiSegmenter, parse_prompt, segment_stage
@@ -192,6 +193,44 @@ def cmd_dense_remote(a: argparse.Namespace) -> None:
     print("dense-remote:", ply)
 
 
+def cmd_finding_evidence(a: argparse.Namespace) -> None:
+    import cv2
+    import numpy as np
+
+    from .findings import evidence_for, load_bundle, region_area, select_points
+
+    run, out = Path(a.run).resolve(), Path(a.out).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    bundle = load_bundle(run)
+    try:
+        sel = select_points(bundle.positions, json.loads(a.polygon))
+    except ValueError as err:
+        raise StageError(str(err)) from err
+    if not len(sel):
+        raise StageError("the polygon selects no points of the map")
+    frames = evidence_for(bundle, sel)
+    for ev in frames:
+        img = cv2.imread(str(run / ev["image"]))
+        if img is None:
+            raise StageError(f"cannot read {ev['image']}")
+        cam = bundle.cameras[ev["frame"]]
+        k = np.array([img.shape[1] / cam.width, img.shape[0] / cam.height])
+        xc = bundle.positions[sel] @ cam.R.T + cam.t
+        for u, v in (project(cam.model, cam.params, xc[xc[:, 2] > 0]) * k).round().astype(int):
+            cv2.circle(img, (int(u), int(v)), 2, (0, 255, 0), -1)
+        if ev["outline"]:
+            poly = (np.array(ev["outline"]) * k).round().astype(np.int32).reshape(-1, 1, 2)
+            cv2.polylines(img, [poly], True, (0, 0, 255), 2)
+        ev["render"] = str(out / f"frame_{ev['frame']:06d}.png")
+        cv2.imwrite(ev["render"], img)
+    doc = {"run": str(run), "polygon": json.loads(a.polygon), "n_points": int(len(sel)),
+           "area_units": region_area(bundle.positions[sel]), "scale": "not set",
+           "point_indices": sel.tolist(), "frames": frames}  # fmt: skip
+    (out / "finding.json").write_text(json.dumps(doc, indent=1))
+    print(f"finding-evidence: {len(sel)} points, area {doc['area_units']:.4g} units^2 "
+          f"(scale not set), frames {[ev['frame'] for ev in frames]} -> {out}")  # fmt: skip
+
+
 def cmd_benchmark(a: argparse.Namespace) -> None:
     from .benchmark import run_benchmark
 
@@ -272,6 +311,12 @@ def main(argv: list[str] | None = None) -> None:
     dr.add_argument("--out", required=True)
     dr.add_argument("--config", default=str(Path(__file__).resolve().parent.parent / "config.yaml"))
     dr.set_defaults(fn=cmd_dense_remote)
+    fe = sub.add_parser("finding-evidence", help="polygon on a run's map -> the 3 best frames "
+                        "with the region outlined (PNG) + finding.json (DEF1)")  # fmt: skip
+    fe.add_argument("--run", required=True, help="run dir with web/manifest.json")
+    fe.add_argument("--polygon", required=True, help="JSON: [[x, y, z], ...] (>= 3 vertices)")
+    fe.add_argument("--out", required=True)
+    fe.set_defaults(fn=cmd_finding_evidence)
     b = sub.add_parser("benchmark", help="all reference videos -> <out>/results.json")
     b.add_argument("--data", required=True, help="dir with the reference videos (read-only)")
     b.add_argument("--out", required=True)

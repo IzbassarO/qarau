@@ -983,7 +983,7 @@ wheels = [
 [[package]]
 name = "qarau-pipeline"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "laspy", extra = ["lazrs"] },
     { name = "numpy" },

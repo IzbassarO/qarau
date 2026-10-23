@@ -28,6 +28,12 @@ WRITE_ROUTES = [
         "engineer",
     ),
     ("POST", "/api/users", {"org_id": 1, "name": "aidana", "role": "engineer"}, "admin"),
+    (
+        "POST",
+        "/api/inspections/1/findings",
+        {"class": "corrosion", "severity": "watch", "point_indices": [0]},
+        "engineer",
+    ),
 ]
 READ_ROUTES = [
     ("GET", "/api/organizations", "viewer"),
@@ -36,6 +42,8 @@ READ_ROUTES = [
     ("GET", "/api/inspections/1", "viewer"),
     ("GET", "/api/inspections/1/runs", "viewer"),
     ("GET", "/api/inspections/1/video/chunks?upload_id=1", "viewer"),
+    ("GET", "/api/inspections/1/findings", "viewer"),
+    ("GET", "/api/findings/1", "viewer"),
     ("GET", "/api/users", "admin"),
     ("GET", "/api/audit-log", "admin"),
 ]

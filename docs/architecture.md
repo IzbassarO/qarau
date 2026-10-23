@@ -147,6 +147,23 @@ shown as a reconstruction. Dense points go through the same sanitize and far rul
 sparse ones (far ones are dropped and counted in `dense.dropped`), their link rows filtered
 in step. The sparse `points`/`tracks` arrays, `cloud.laz` and `cloud.ply` are unchanged.
 
+**Manual findings (`findings.py` in the pipeline, `backend/app/findings.py`, ADR 0022).**
+Until automatic detection returns, an engineer marks a finding through the API and the server
+does the geometry. `POST /api/inspections/{id}/findings` (engineer): `class` (corrosion, crack,
+leak, deformation, coating, other), `severity` (critical | watch), optional `comment`, and one
+region: `polygon` (≥ 3 `[x, y, z]` map vertices) or `point_indices` (bundle `points` indices).
+The server selects the bundle points inside the region (plane through the polygon, points within
+5 % of its extent, even-odd test), measures `area_units` (convex hull in the points' best-fit
+plane, bundle units²) and attaches evidence: the 3 frames from the bundle's point → frame links
+that see the most selected points and are spread in viewpoint, each with the region projected as
+an `outline` polygon in pixels (an `observation`, confidence 1.0). `area_m2` is filled only when
+the inspection has a `ScaleReference` with `m_per_unit`; otherwise it is null and `scale` is
+`"not set"`. 422 for a bad body or an empty region, 409 when the inspection has no exported run.
+`GET /api/inspections/{id}/findings` and `GET /api/findings/{id}` (viewer) return class, severity,
+status, area and scale, point indices with xyz, and the evidence frames with outline and
+`image_url` (`/api/runs/<run>/files/frames/…`). `python -m qarau_pipeline finding-evidence --run R
+--polygon JSON --out O` renders the same frames with the outline drawn (OpenCV) for a visual check.
+
 ## Benchmark
 
 `python -m qarau_pipeline benchmark --data D --out O` runs every reference video in
