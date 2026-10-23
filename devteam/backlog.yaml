@@ -1133,9 +1133,11 @@ tasks:
     ranking, 403 for a viewer; ruff, mypy, pytest pass.
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - B1
+  owner: dev_pipeline
+  run: cont-20261023-094355-dev_pipeline-2
 - id: UI-inspections
   area: app
   title: Inspections list per DESIGN.md v2
