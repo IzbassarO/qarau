@@ -1,11 +1,14 @@
 """Kerege CLI: devteam run [--continuous]|resume [task]|stop [task]|status|costs|report|release|
-cleanup|dashboard (--fake: no cost, local remote)."""
+cleanup|dashboard|rehearse (--fake: no cost, local remote). `run` / `resume` go through the
+watchdog (devteam/watchdog.py): the orchestrator runs in a child process."""
 
 import argparse
 import os
 import queue
+import shutil
 import signal
 import sqlite3
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -18,10 +21,12 @@ from rich.live import Live
 from rich.table import Table
 
 from devteam import costs
+from devteam import watchdog as W
 from devteam.agents import FakeAgents
 from devteam.continuous import Continuous, summary_lines
+from devteam.costs import BudgetExceeded, SubscriptionLimit
 from devteam.gates import EMPTY_BENCH, release
-from devteam.graph import AGENTS, Team, build_graph
+from devteam.graph import AGENTS, StopRun, Team, build_graph
 from devteam.report import write_report, write_reports
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,6 +52,12 @@ def make_team(fake: bool) -> Team:
 
         agents = RealAgents()
     return Team(ROOT, cfg, secrets, agents, fake=fake)
+
+
+def refuse(msg: str):
+    """Did not start: not a crash, the watchdog does not resume it."""
+    print(msg, file=sys.stderr)
+    sys.exit(W.REFUSED)
 
 
 def status_table(team: Team, working: dict) -> Table:
@@ -91,13 +102,14 @@ def run_continuous(team: Team):
     if not team.fake and (drift := team.backlog_drift()):
         mine = cont.ignored_drift()  # claims of rounds this run resumes
         if drift := [d for d in drift if d.split(".", 1)[0] not in mine]:
-            sys.exit(
+            refuse(
                 "backlog.yaml status fields differ from origin/dev; merge them into dev first:\n"
                 + "\n".join(drift)
             )
     team.unblock_ready()
     pid_file = team.home / "run.pid"
     pid_file.write_text(str(os.getpid()))
+    W.heartbeat(team)
     presses = []
 
     def on_int(signum, frame):
@@ -136,7 +148,12 @@ def run_continuous(team: Team):
                     show_event(team, live, working, cont.events.get(timeout=0.25))
                 except queue.Empty:
                     pass
-        finish(cont.finish())
+        s = cont.finish()
+        finish(s)
+        if cont.crash:  # main records it, the watchdog resumes
+            raise cont.crash
+        usd = sum(x["usd"] for x in s["spend"] if x["billed"])
+        W.notify(team, W.run_line(s["tasks"], usd, s["stop_reason"]))
     finally:
         pid_file.unlink(missing_ok=True)
 
@@ -147,16 +164,18 @@ def run_graph(team: Team, resume: bool):
     graph = build_graph(team, SqliteSaver(db))
     if resume:
         if not thread_file.exists():
-            sys.exit("nothing to resume")
+            refuse("nothing to resume")
         config = {"configurable": {"thread_id": thread_file.read_text()}}
-        if not graph.get_state(config).next:
-            sys.exit("the last run finished; nothing to resume")
-        inp = None
+        snap, inp = graph.get_state(config), None
+        if snap.metadata is None:  # it crashed before its first checkpoint: start it again
+            inp = {}
+        elif not snap.tasks:  # not .next: it hides a step whose writes were saved, not applied
+            refuse("the last run finished; nothing to resume")
     else:
         if thread_file.exists():
             old = {"configurable": {"thread_id": thread_file.read_text()}}
-            if graph.get_state(old).next:
-                sys.exit(
+            if graph.get_state(old).tasks:
+                refuse(
                     "the last run did not finish: `devteam resume` (or delete "
                     f"{thread_file} to drop it)"
                 )
@@ -165,6 +184,8 @@ def run_graph(team: Team, resume: bool):
         inp = {}
     pid_file = team.home / "run.pid"
     pid_file.write_text(str(os.getpid()))
+    W.heartbeat(team)
+    mark = costs.last_row(team.home)
     since = time.mktime(time.strptime(config["configurable"]["thread_id"], "run-%Y%m%d-%H%M%S"))
 
     def on_stop(signum, frame):  # Ctrl-C or `devteam stop`: kill agents, checks, benchmark
@@ -180,10 +201,16 @@ def run_graph(team: Team, resume: bool):
         print(f"\nstopped. Report: {write_reports(team, since)}. Continue with `devteam resume`.")
         sys.stdout.flush()
         os._exit(130)  # don't wait for worker threads; every finished step is checkpointed
-    except Exception as e:  # usage limit, budget cap, crash: the checkpoint keeps the progress
+    except (BudgetExceeded, SubscriptionLimit, StopRun) as e:  # the checkpoint keeps the progress
         console.print(f"[red]stopped:[/] {team.redact(str(e))}")
         write_reports(team, since)
-        sys.exit("Fix the cause, then `devteam resume` continues where it stopped.")
+        results = graph.get_state(config).values.get("results", [])
+        W.notify(team, W.run_line(results, run_usd(team, mark), f"stopped: {e}"))
+        console.print("Fix the cause, then `devteam resume` continues where it stopped.")
+        sys.exit(W.HALTED)
+    except Exception:  # a crash: main records it, the watchdog resumes once
+        write_reports(team, since)
+        raise
     finally:
         pid_file.unlink(missing_ok=True)
     results = graph.get_state(config).values.get("results", [])
@@ -194,6 +221,12 @@ def run_graph(team: Team, resume: bool):
     if release_due(team):
         console.print(release(team))
     console.print(f"report: {write_reports(team, since)}")
+    W.notify(team, W.run_line(results, run_usd(team, mark)))
+
+
+def run_usd(team: Team, mark: int) -> float:
+    return sum(usd or 0 for _t, _a, billed, _n, usd, _i, _o in costs.spend_since(team.home, mark)
+               if billed)  # fmt: skip
 
 
 def release_due(team: Team) -> bool:
@@ -205,15 +238,73 @@ def release_due(team: Team) -> bool:
 
 
 def stop(team: Team):
-    pid_file = team.home / "run.pid"
-    if not pid_file.exists():
+    """The run, and its watchdog (which then never resumes; it may be waiting to)."""
+    sent = False
+    for name in ("run.pid", "watchdog.pid"):
+        pid_file = team.home / name
+        try:
+            os.kill(int(pid_file.read_text()), signal.SIGTERM)
+            sent = True
+        except (FileNotFoundError, ValueError):
+            pass
+        except ProcessLookupError:
+            pid_file.unlink()
+    if not sent:
         sys.exit("no devteam run is active")
-    try:
-        os.kill(int(pid_file.read_text()), signal.SIGTERM)
-        print("stop sent; finished steps are kept, `devteam resume` continues later")
-    except ProcessLookupError:
-        pid_file.unlink()
-        print("the run was already gone")
+    print("stop sent; finished steps are kept, `devteam resume` continues later")
+
+
+def rehearse(cmd: list[str] | None = None) -> int:
+    """`devteam rehearse`: `run --fake --only` the first plannable todo task of each developer,
+    through the watchdog, on a fresh fake state (fake backlog = devteam/backlog.yaml, fake remote
+    = origin/dev, no devteam-fake/* branches or worktrees). PASS: the run exited cleanly, every
+    task is done, nothing crashed."""
+    home = ROOT / "devteam" / ".state" / "fake"
+    for name in ("run.pid", "watchdog.pid"):
+        try:
+            os.kill(int((home / name).read_text()), 0)
+            refuse("a --fake run is active: `devteam stop --fake` first")
+        except (FileNotFoundError, ValueError, ProcessLookupError):
+            pass
+    shutil.rmtree(home, ignore_errors=True)  # only fake-run state lives there
+    git = ["git", "-C", str(ROOT)]
+    subprocess.run([*git, "worktree", "prune"], check=True)
+    refs = subprocess.run(
+        [*git, "for-each-ref", "--format=delete %(refname)", "refs/heads/devteam-fake/",
+         "refs/remotes/devteam-fake/"], check=True, capture_output=True, text=True,
+    ).stdout  # fmt: skip
+    subprocess.run([*git, "update-ref", "--stdin"], input=refs, check=True, text=True)
+    team = make_team(True)  # seeds the fake backlog and remote again
+    tasks = team.load_backlog()
+    done = {t["id"] for t in tasks if t["status"] == "done"}
+    ready = [
+        t
+        for t in tasks
+        if t["status"] == "todo"
+        and not t.get("owner_only")
+        and set(t.get("depends_on") or []) <= done
+    ]
+    firsts = (next((t["id"] for t in ready if t.get("area") in d["areas"]), None)
+              for d in team.cfg["developers"].values())  # fmt: skip
+    pick = [tid for tid in firsts if tid]
+    if not pick:
+        refuse("nothing to rehearse: no plannable todo task")
+    only, t0 = ",".join(pick), time.time()
+    console.print(f"rehearse: `devteam run --fake --only {only}` on a fresh fake state")
+    code = subprocess.run(
+        [*(cmd or [sys.executable, sys.argv[0]]), "run", "--fake", "--only", only]
+    ).returncode
+    status = {t["id"]: t["status"] for t in team.load_backlog() if t["id"] in pick}
+    crashed = (team.home / "last_crash.json").exists()
+    ok = code == 0 and not crashed and all(v == "done" for v in status.values())
+    line = ", ".join(f"{k} {v}" for k, v in status.items())
+    print(
+        f"rehearse: {'PASS' if ok else 'FAIL'} in {(time.time() - t0) / 60:.1f} min "
+        f"(exit {code}; {line}"
+        + ("; crashed, see .state/fake/last_crash.json" if crashed else "")
+        + ")"
+    )
+    return 0 if ok else 1
 
 
 def control_task(team: Team, kind: str, tid: str):
@@ -264,6 +355,7 @@ def main():
             "release",
             "cleanup",
             "dashboard",
+            "rehearse",
         ],
     )
     p.add_argument("task", nargs="?", help="stop / resume: only this task, e.g. A7")
@@ -276,6 +368,8 @@ def main():
     p.add_argument("--fake", action="store_true", help="fake agents, no cost, separate state")
     p.add_argument("--only", default="", help="run: only these task ids, e.g. --only P1,A1a")
     args = p.parse_args()
+    if args.command == "rehearse":
+        sys.exit(rehearse())
     team = make_team(args.fake)
     team.only = {t for t in args.only.split(",") if t}
     if args.command in ("run", "resume", "costs", "report"):  # the dashboard only reads
@@ -284,21 +378,19 @@ def main():
         return control_task(team, args.command, args.task)
     if args.task:
         sys.exit(f"`devteam {args.command}` takes no task id")
-    if args.command == "run" and args.continuous:
-        return run_continuous(team)
-    if args.command == "dashboard":
+    if args.command in ("run", "resume"):
+        if not os.environ.get(W.WATCHED):
+            sys.exit(W.supervise(team, sys.argv[1:]))
+        try:
+            orchestrate(team, args)
+        except Exception as e:  # the orchestrator itself crashed (a task's crash blocks only it)
+            team.kill_all()
+            W.record_crash(team, e)
+            raise
+    elif args.command == "dashboard":
         from devteam.dashboard import serve
 
-        return serve(team, args.port)
-    if args.command == "run" and not args.fake and (drift := team.backlog_drift()):
-        sys.exit(  # statuses kept only in the working tree get lost: get them into dev first
-            "backlog.yaml status fields differ from origin/dev; merge them into dev first:\n"
-            + "\n".join(drift)
-        )
-    if args.command == "run":  # dependencies finished outside a run (e.g. done by hand)
-        team.unblock_ready()
-    if args.command in ("run", "resume"):
-        run_graph(team, resume=args.command == "resume")
+        serve(team, args.port)
     elif args.command == "stop":
         stop(team)
     elif args.command == "report":
@@ -312,6 +404,19 @@ def main():
     elif args.command == "cleanup":
         for line in team.cleanup() or ["nothing to clean: no done/dropped task has a worktree"]:
             console.print(line)
+
+
+def orchestrate(team: Team, args):
+    if args.command == "run" and args.continuous:
+        return run_continuous(team)
+    if args.command == "run" and not args.fake and (drift := team.backlog_drift()):
+        refuse(  # statuses kept only in the working tree get lost: get them into dev first
+            "backlog.yaml status fields differ from origin/dev; merge them into dev first:\n"
+            + "\n".join(drift)
+        )
+    if args.command == "run":  # dependencies finished outside a run (e.g. done by hand)
+        team.unblock_ready()
+    run_graph(team, resume=args.command == "resume")
 
 
 if __name__ == "__main__":

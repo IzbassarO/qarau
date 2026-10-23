@@ -593,24 +593,31 @@ def release(team) -> str:
 
 def tag_release(team, note: str) -> str:
     """Annotated tag release-YYYY-MM-DD[.N] on the released main, pushed; tags never move, so
-    every release can be checked out or rolled back to. Idempotent (resume after a crash)."""
+    every release can be checked out or rolled back to. Idempotent (resume after a crash).
+    A fake team tags its fake remote only: refs/tags of the real repo are shared by every
+    checkout, a fake tag there would be pushed by the next `git push --tags` (2026-10-22)."""
     main = team.cfg["release_branch"]
     team.fetch(main)
     sha = team.git("rev-parse", f"{team.remote_name}/{main}").strip()
+    where = ["--git-dir", team.remote_url] if team.fake else ["-C", str(team.root)]
     day, n = time.strftime("%Y-%m-%d"), 1
     while True:
         tag = f"release-{day}" + (f".{n}" if n > 1 else "")
         have = subprocess.run(
-            ["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}"],
-            cwd=team.root,
+            ["git", *where, "rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}"],
             capture_output=True,
             text=True,
         ).stdout.strip()
         if not have:
-            team.git("tag", "-a", tag, sha, "-m", f"Release {day}: {note}")
+            msg = f"Release {day}: {note}"
+            if team.fake:
+                subprocess.run(["git", *where, "tag", "-a", tag, sha, "-m", msg], check=True)
+            else:
+                team.git("tag", "-a", tag, sha, "-m", msg)
             break
         if have == sha:  # already tagged (re-run)
             break
         n += 1  # a second release the same day
-    team.git("push", "-q", team.remote_url, f"refs/tags/{tag}")
+    if not team.fake:  # a fake tag is in the fake remote already
+        team.git("push", "-q", team.remote_url, f"refs/tags/{tag}")
     return tag

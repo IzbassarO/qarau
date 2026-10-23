@@ -27,9 +27,45 @@ uv run devteam release         # dev -> main now (also runs automatically every 
 uv run devteam costs           # API spend per day / agent / model
 uv run devteam cleanup         # remove leftover worktrees of done/dropped tasks
 uv run devteam run --fake      # whole flow with fake agents and a local fake GitHub, no cost
+uv run devteam rehearse        # fake run of the first todo task per developer: PASS / FAIL
 uv run pytest                  # tests, incl. gates, crash + resume, forbidden actions
 ```
 
+**Rule after any change to `devteam/`** (owner, 2026-10-22): first `devteam rehearse` (must
+print PASS), then one real task attended (`devteam run --only <id>`, you watch it end), and only
+then unattended (`run --continuous` overnight).
+
+- Watchdog (owner, 2026-10-22: Kerege crashed at 20:29, the owner found out at 01:50;
+  `devteam/watchdog.py`): `run` and `resume` start the orchestrator as a child process. A
+  finished run notifies one line (done / blocked / API $, and why it stopped); a blocked task
+  notifies too (not an owner's own `devteam stop <task>`). Ctrl+C, `devteam stop`, the budget cap,
+  a subscription limit and a refused start (backlog drift, nothing to resume) are not crashes.
+  Anything else (an unhandled exception in the orchestrator itself, or the process killed):
+  `.state/last_crash.json` (error, file:line, traceback, exit code, attempt), a notification,
+  the steps it left running are killed (`.state/steps/`), and after 60 s the watchdog runs
+  `devteam resume` (continuous: `run --continuous`, which resumes its pending rounds) once.
+  If the resume crashes (or refuses to start) within 30 min, it stops and notifies "needs
+  you"; a resume that ran longer was healthy, so its crash gets one resume again.
+  Ctrl+C or `devteam stop` during the
+  60 s cancels the resume. Notifications: a macOS banner (`osascript`), plus an email when
+  `DEVTEAM_NOTIFY_EMAIL` is set in `devteam/.env` (SMTP: `DEVTEAM_SMTP_HOST`, `_PORT` (587
+  STARTTLS, 465 SSL), `_USER`, `_PASSWORD`, optional `DEVTEAM_NOTIFY_FROM`); without it the
+  email is skipped and the watchdog says so at start. Every notification is logged with what was
+  sent in `.state/notifications.log`. A crash in a continuous developer loop itself (not in a
+  round) halts the run and counts as a crash. Not covered: the watchdog process itself being
+  killed (with its terminal, or `kill -9`): the heartbeat shows it.
+- Heartbeat: the orchestrator writes `.state/heartbeat` every 30 s. The dashboard's Run card
+  shows "last heartbeat N s ago", red with an item under "Needs your attention" when it is over
+  5 min while a run is active (or its `run.pid` was left behind); a crash not followed by a
+  newer heartbeat is listed there too.
+- `devteam rehearse`: on a fresh fake state (`.state/fake` emptied, the fake backlog copied from
+  `backlog.yaml`, the fake remote seeded from `origin/dev`, `devteam-fake/*` branches removed) it
+  runs `devteam run --fake --only <first plannable todo task of each developer>` through the
+  watchdog. PASS: exit 0, every task `done`, no crash recorded (a crash the resume recovered
+  from is still a FAIL). Fake agents and the fake tester (no lint or tests run), real scope /
+  secret gates, merges and release on the fake remote: well under a minute, costs nothing.
+- A fake run never changes the real repo outside `devteam-fake/*`: its release tag goes to the
+  fake remote only (2026-10-22: `release-YYYY-MM-DD.2` landed in the shared `refs/tags`).
 - Continuous mode (`run --continuous`, limits in `config.yaml` → `continuous`): one loop per
   developer. When a developer's task ends (merged or blocked), the brain plans the next task
   for that developer only; the others keep working. Stops when no developer can take a task
