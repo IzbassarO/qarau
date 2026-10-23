@@ -9,7 +9,7 @@ import time
 import pytest
 from conftest import CFG, git, remote_of
 from langgraph.checkpoint.sqlite import SqliteSaver
-from test_v2 import CODEX_FAILED
+from test_supervisor import CODEX_FAILED
 
 from devteam import continuous as C
 from devteam import costs

@@ -1,16 +1,18 @@
 """Kerege dashboard: real data only, read-only, local, never shows secrets."""
 
 import copy
+import io
 import json
 import os
 import threading
 import time
 import urllib.error
 import urllib.request
+from contextlib import redirect_stderr
 
 import pytest
 import yaml
-from conftest import CFG, remote_of
+from conftest import CFG, remote_of, team_for
 
 from devteam import costs
 from devteam import dashboard as D
@@ -217,3 +219,39 @@ def test_office_figures_differ_by_state():
     assert "#e2655b" in svgs["blocked"] and "#4fb3a0" in svgs["working"]
     assert "14:30" in D.figure({"state": "waiting", "reset": time.mktime(
         time.strptime("2026-10-17T14:30:00", "%Y-%m-%dT%H:%M:%S"))})  # fmt: skip
+
+
+# --- 6. dashboard: a closed connection is not an error --------------------------------------
+def test_dashboard_is_quiet_when_the_browser_drops_the_connection(repo):
+    team = team_for(repo)
+    server = D.make_server(team, 0)
+    err = io.StringIO()
+    with redirect_stderr(err):
+        for exc in (ConnectionResetError(54, "reset"), BrokenPipeError(32, "pipe")):
+            try:
+                raise exc
+            except ConnectionError:
+                server.handle_error(None, ("127.0.0.1", 1))
+        assert err.getvalue() == ""
+        try:
+            raise ValueError("a real bug")
+        except ValueError:
+            server.handle_error(None, ("127.0.0.1", 1))
+    assert "ValueError: a real bug" in err.getvalue()  # real errors still show
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/"
+        assert urllib.request.urlopen(url, timeout=30).status == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+# --- 4. owner-only tasks: never `devteam resume` --------------------------------------------------
+def test_dashboard_never_suggests_resume_for_an_owner_only_task():
+    reason = "waits for the owner: P4a-2a-code merged, then the owner runs it"
+    t = {"id": "P4a-2a-run", "status": "blocked", "blocked_reason": reason}
+    assert "devteam resume" in D.blocked_action(t, {})  # what it said before
+    do = D.blocked_action({**t, "owner_only": True}, {})
+    assert "devteam resume" not in do and "Owner-only" in do

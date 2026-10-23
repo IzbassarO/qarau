@@ -1,23 +1,30 @@
 """Automated gates instead of human review: CI, secrets, benchmark, conflicts, forbidden
-actions, stop, release, daily report."""
+actions, stop, release, daily report, the e2e gate, the test-weakening guard, criteria numbers."""
 
 import copy
 import json
 import shutil
+import socket
 import sqlite3
+import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-from conftest import CFG, git, remote_of
+import yaml
+from conftest import CFG, HERE, git, remote_of, team_for
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from devteam import costs
 from devteam import gates as G
+from devteam import graph as GR
+from devteam import real as R
 from devteam.agents import FakeAgents
 from devteam.gates import FakeGitHub, GitHub, regressions, release, tag_release
-from devteam.graph import Team, build_graph
+from devteam.graph import Team, build_graph, criterion_key
+from devteam.real import e2e_rule, quick_benchmark
 from devteam.report import write_report, write_reports
 
 BENCH = """import json, pathlib, sys
@@ -72,6 +79,25 @@ def make(repo, agents, gh=None, **cfg_over):
         team.gh = gh(team)
     graph = build_graph(team, SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False)))
     return team, graph
+
+
+class Fast(FakeAgents):
+    delay = 0
+
+
+def make_team(repo, agents=None, fake=True, **cfg_over):
+    cfg = copy.deepcopy(CFG)
+    cfg.update(cfg_over)
+    team = Team(repo, cfg, {}, agents or Fast(), fake=fake, remote=remote_of(repo))
+    graph = build_graph(team, SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False)))
+    return team, graph
+
+
+def only(tid, dev):
+    def plan(team, todo, feedback=None, devs=None):
+        return [{"task_id": tid, "assignee": dev, "plan": "p", "criteria": ["stub file exists"]}]
+
+    return plan
 
 
 def run(graph, tid="r"):
@@ -566,3 +592,297 @@ def test_a_run_past_midnight_writes_the_report_of_both_days(repo):
     assert "| brain |" not in today.read_text()  # each day's own costs
     for path in (old, today):  # the run itself is in both
         assert "Kerege continuous run cont-x" in path.read_text()
+
+
+# --- 2. e2e gate --------------------------------------------------------------------------------
+E2E = (
+    "{py} -c \"import os; open({log!r}, 'w').write(os.getcwd() + ' {port}')\" && "
+    "({py} -m http.server {port} --bind 127.0.0.1 >/dev/null 2>&1 &) && sleep 1 && "
+    "echo '  ✓  1 [chromium] › e2e/far-layer.spec.ts:9:1 › malformed far arrays warn (2.0s)' && "
+    "echo '  -  2 [chromium] › e2e/viewer.spec.ts:5:1 › real bundle (skipped)' && "
+    "echo '  1 passed, 1 skipped' && exit {code}"
+)
+
+
+class Judged(Fast):
+    """Counts the LLM tester calls."""
+
+    judged = 0
+    feedback = ""
+
+    def judge(self, team, s, checks):
+        self.judged += 1
+        return super().judge(team, s, checks)
+
+    def develop(self, team, s):
+        self.feedback = s.get("feedback") or self.feedback
+        return super().develop(team, s)
+
+
+def e2e_team(repo, tmp_path, code=0, dev="dev_app", agents=None, loops=0):
+    agents = agents or Fast()
+    agents.plan = only("T-002" if dev == "dev_app" else "T-001", dev)
+    devs = copy.deepcopy(CFG["developers"])
+    for d in devs.values():
+        d.update(setup=[], checks=[])
+        d.pop("screenshots", None)
+    gates = copy.deepcopy(CFG["gates"])
+    log = tmp_path / "e2e.log"
+    gates["e2e"]["command"] = E2E.format(py=sys.executable, log=str(log), port="{port}", code=code)
+    team, graph = make_team(
+        repo, agents, fake=False, developers=devs, gates=gates, max_fix_loops=loops
+    )
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})
+    return team, log
+
+
+def port_open(port: int) -> bool:
+    with socket.socket() as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+@pytest.mark.usefixtures("fast_poll")
+def test_e2e_runs_on_the_clean_checkout_with_a_fresh_server_stopped_after(repo, tmp_path):
+    team, log = e2e_team(repo, tmp_path)
+    cwd, port = log.read_text().rsplit(" ", 1)
+    assert Path(cwd).resolve() == (team.home / "check-wt" / "T-002").resolve()
+    assert int(port) > 0 and not port_open(int(port))  # the server it left was killed
+    packet = (team.home / "packets" / "T-002.md").read_text()
+    assert "- ok: `" in packet and "http.server" in packet
+    events = (team.home / "events.log").read_text()
+    assert "e2e (Playwright) on the clean checkout" in events
+    assert f"left port {port} listening" in events  # reported, as for any step
+
+
+@pytest.mark.usefixtures("fast_poll")
+def test_failed_e2e_sends_the_task_back_with_each_test_line(repo, tmp_path):
+    team, _ = e2e_team(repo, tmp_path, code=1)
+    t = task(team, "T-002")
+    assert t["status"] == "blocked"
+    packet = (team.home / "packets" / "T-002.md").read_text()
+    assert "- FAIL: `" in packet and "http.server" in packet
+
+
+@pytest.mark.usefixtures("fast_poll")
+def test_failed_e2e_goes_back_without_calling_the_llm_tester(repo, tmp_path):
+    agents = Judged()
+    team, _ = e2e_team(repo, tmp_path, code=1, agents=agents, loops=1)
+    assert agents.judged == 0  # neither round: the e2e failed both times
+    assert "e2e failed: sent back without the LLM tester" in (team.home / "events.log").read_text()
+    reason = task(team, "T-002")["blocked_reason"]
+    assert "Kerege ran the e2e tests (Playwright) right after your round" in reason
+    assert "Failing checks:" in agents.feedback and "1 passed, 1 skipped" in agents.feedback
+    assert "screenshots missing" not in reason
+
+
+@pytest.mark.usefixtures("fast_poll")
+def test_passing_e2e_still_goes_to_the_llm_tester(repo, tmp_path):
+    agents = Judged()
+    e2e_team(repo, tmp_path, agents=agents)
+    assert agents.judged == 1
+
+
+@pytest.mark.usefixtures("fast_poll")
+def test_e2e_runs_only_when_the_branch_changes_web(repo, tmp_path):
+    team, log = e2e_team(repo, tmp_path, dev="dev_pipeline")
+    assert not log.exists()
+    assert "e2e (Playwright)" not in (team.home / "events.log").read_text()
+
+
+def test_judge_sees_which_e2e_tests_ran_or_skipped():
+    out = "vite log\n" * 500 + "  ✓  1 [chromium] › a.spec.ts:1:1 › far (1s)\n" * 3
+    out += "  -  4 [chromium] › b.spec.ts:1:1 › real data\n  3 passed, 1 skipped\n"
+    shown = GR.e2e_output(out)
+    assert "› far" in shown and "› real data" in shown and "3 passed, 1 skipped" in shown
+    assert shown.count("vite log") <= 40
+
+
+def test_web_developer_is_told_the_tester_runs_e2e():
+    team = SimpleNamespace(cfg=CFG)
+    assert "run by Kerege, not inside your sandbox" in e2e_rule(team, CFG["developers"]["dev_app"])
+    assert e2e_rule(team, CFG["developers"]["dev_pipeline"]) == ""
+
+
+# --- 3. "the same reason" = the same criterion number -----------------------------------------
+def test_criterion_key_is_the_number_not_the_wording():
+    crit = ["first", "/ lists the new runs"]
+    a = {"number": 2, "criterion": "The root page lists the runs", "met": False}
+    b = {"number": 2, "criterion": "Run list on / shows the dated runs", "met": False}
+    assert criterion_key(a, crit) == criterion_key(b, crit) == "criterion #2"
+    assert criterion_key({"number": 9, "criterion": "x"}, crit) == "criterion: x"  # out of range
+
+
+def test_the_judge_numbers_its_criteria():
+    assert "number" in R.TESTER_SYSTEM and "`number`" in R.TESTER_SYSTEM
+
+
+# --- 1. test files are compared between rounds --------------------------------------------------
+TWO = "def test_area():\n    assert area(2) == 4\n    assert area(3) == 9\n"
+ONE = "def test_area():\n    assert area(2) == 4\n"
+THREE = TWO + "    assert area(4) == 16\n"
+
+
+def weakening_dev(later: str):
+    """T-001 writes a test with two assertions in round 1, then `later` in every next round.
+    The fake judge fails round 1 and passes from round 2 on."""
+
+    class Dev(Fast):
+        def develop(self, team, s):
+            if s["task"]["id"] == "T-001":
+                test = Path(s["worktree"]) / "pipeline" / "tests" / "test_area.py"
+                test.parent.mkdir(exist_ok=True)
+                test.write_text(TWO if not s.get("rounds") else later)
+            return super().develop(team, s)
+
+    return Dev()
+
+
+@pytest.mark.usefixtures("fast_poll")
+def test_an_assertion_removed_after_a_send_back_fails_and_blocks_on_resubmit(repo):
+    """Base -> HEAD shows the new test with one assertion: nothing removed. Only the diff
+    between rounds shows it, and resubmitting it unchanged is the same reason again."""
+    team, graph = make_team(repo, weakening_dev(ONE))
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})
+    t = {t["id"]: t for t in team.load_backlog()}["T-001"]
+    assert t["status"] == "blocked" and "twice in a row" in t["blocked_reason"]
+    found = [v for v in team.violations(time.strftime("%Y-%m-%d")) if v["task"] == "T-001"]
+    assert found and "since the last round: removes test assertions" in found[0]["detail"]
+
+
+@pytest.mark.usefixtures("fast_poll")
+def test_a_test_made_stronger_after_a_send_back_passes(repo):
+    team, graph = make_team(repo, weakening_dev(THREE))
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})
+    assert {t["id"]: t for t in team.load_backlog()}["T-001"]["status"] == "done"
+
+
+def judge_with(monkeypatch, verdict: dict, **state) -> tuple[dict, dict]:
+    seen = {}
+
+    def fake_llm_call(team, role, task, system, prompt, schema, **kw):
+        seen.update(system=system, prompt=prompt, schema=schema, images=kw.get("images"))
+        return copy.deepcopy(verdict)
+
+    monkeypatch.setattr(R, "llm_call", fake_llm_call)
+    team = SimpleNamespace(remote_name="origin", cfg=CFG, git=lambda *a, **k: "", redact=str)
+    s = {"task": {"id": "T-1", "title": "t"}, "plan": "p", "criteria": ["c"], "worktree": "."}
+    return R.RealAgents().judge(team, {**s, **state}, []), seen
+
+
+PASS = {
+    "passed": True,
+    "criteria": [{"number": 1, "criterion": "c", "met": True, "note": ""}],
+    "tests_weakened": True,
+    "feedback": "",
+    "summary": "",
+    "how_to_try": "",
+}
+
+
+def test_the_judge_sees_the_test_diff_and_tests_weakened_fails_the_task(monkeypatch):
+    diff = "-    expect(date).toBe('16 қаз.')\n+    expect(date).toBe(intlFormat(d))\n"
+    v, seen = judge_with(monkeypatch, PASS, test_changes=diff)
+    assert "<test_changes_since_last_round>\n" + diff in seen["prompt"]
+    assert "tests_weakened" in seen["schema"]["required"]
+    assert v["passed"] is False and "weaken the tests" in v["feedback"]
+    # no test diff (round 1): the flag alone cannot fail it
+    v, seen = judge_with(monkeypatch, PASS)
+    assert v["passed"] is True and "test_changes_since_last_round" not in seen["prompt"]
+
+
+def test_fixtures_rule_is_in_the_dev_tester_and_brain_prompts():
+    rule = "Expected values come from fixtures, never from the code under test"
+    assert rule in R.TESTER_SYSTEM
+    assert rule in Path(R.__file__).read_text().split("def _brief", 1)[1].split("def _claude")[0]
+    assert "never values computed by the code\n  under test" in R.BRAIN_SYSTEM
+
+
+def test_images_over_the_request_limit_are_named_never_silently_cut(monkeypatch, tmp_path):
+    shots = []
+    for name in ("root-ru.png", "root-kk.png", "dev-root.png"):
+        (tmp_path / name).write_bytes(b"x" * 100)
+        shots.append(str(tmp_path / name))
+    monkeypatch.setattr(R, "MAX_IMAGES", 2)
+    _v, seen = judge_with(monkeypatch, {**PASS, "tests_weakened": False}, screenshots=shots)
+    assert seen["images"] == shots[:2]
+    assert "dev-root.png: not attached (API request size limit)" in seen["prompt"]
+
+
+def test_quick_benchmark_brief_only_for_pipeline_and_with_dev_baseline(repo):
+    team = team_for(repo, gates=bench_repo(repo, "90"))
+    team.fetch("dev")
+    s = {"task": {"id": "P3"}}
+    devs = team.cfg["developers"]
+    assert quick_benchmark(team, s, devs["dev_app"]) == ""
+    text = quick_benchmark(team, s, devs["dev_pipeline"])
+    assert "--only notre-dame,room" in text and "No cached dev baseline" in text
+    G.benchmark(team, team.git("rev-parse", "devteam-fake/dev").strip())
+    assert "| room | 90.0 |" in quick_benchmark(team, s, devs["dev_pipeline"])
+    s["task"]["quick_only"] = ["notre-dame", "aegviidu"]  # a task picks the videos it needs
+    assert "--only notre-dame,aegviidu" in quick_benchmark(team, s, devs["dev_pipeline"])
+
+
+def test_benchmark_cache_survives_merges_that_leave_pipeline_alone(repo):
+    team = team_for(repo, gates=bench_repo(repo, "90"))
+    first = git(repo, "rev-parse", "HEAD").strip()
+    assert G.benchmark(team, first)["videos"]["room"]["registered_pct"] == 90
+    (repo / "web" / "app.ts").write_text("export const x = 1\n")
+    git(repo, "commit", "-qam", "web only")
+    team.cfg["gates"]["benchmark"]["command"] = "false"  # a re-run would fail
+    assert G.benchmark(team, git(repo, "rev-parse", "HEAD").strip()) is not None
+    (repo / "pipeline" / "score.txt").write_text("91")
+    git(repo, "commit", "-qam", "pipeline change")
+    assert G.benchmark(team, git(repo, "rev-parse", "HEAD").strip()) is None  # re-ran, failed
+
+
+def test_per_video_tolerance():
+    v = {"registered_pct": 85, "models": 3, "reproj_px": 0.64, "points": 13384}
+    noisy = {**v, "reproj_px": 0.74, "points": 10845}  # two identical runs of mykolaiv
+    cfg = CFG["gates"]["benchmark"]
+    assert G.regressions({"videos": {"mykolaiv": v}}, {"videos": {"mykolaiv": noisy}}, cfg) == []
+    assert len(G.regressions({"videos": {"other": v}}, {"videos": {"other": noisy}}, cfg)) == 2
+
+
+def test_report_shows_subscription_load_per_task(repo):
+    team = team_for(repo)
+    costs.record(
+        team.home,
+        "dev_pipeline",
+        "claude-code (subscription)",
+        "P2a",
+        9e5,
+        2e4,
+        4.2,
+        False,
+        secs=1800,
+    )
+    costs.record(
+        team.home,
+        "dev_pipeline",
+        "claude-code (subscription)",
+        "P2a",
+        1e5,
+        1e4,
+        0.8,
+        False,
+        secs=600,
+    )
+    costs.record(
+        team.home, "dev_app", "codex (subscription)", "A1a", 5e5, 3e4, 0.0, False, secs=1200
+    )
+    text = write_report(team).read_text()
+    assert "## Subscription load per task" in text
+    assert (
+        "| P2a | dev_pipeline | claude-code (subscription) | 2 | 40 | 1,000,000 | 30,000 | 5.00 |"
+        in text
+    )
+    assert "| A1a | dev_app | codex (subscription) | 1 | 20 | 500,000 | 30,000 | — |" in text
+    json.dumps(text)
+
+
+def test_mykolaiv_stays_ungated_by_the_owners_decision():
+    cfg = yaml.safe_load((HERE / "config.yaml").read_text())["gates"]["benchmark"]
+    assert not G.gated(cfg, "mykolaiv")
+    why = cfg["per_video"]["mykolaiv"]["why"]
+    assert "owner 2026-10-21" in why and "P3c" in why
+    assert "gate again after P3" not in (HERE / "config.yaml").read_text()
