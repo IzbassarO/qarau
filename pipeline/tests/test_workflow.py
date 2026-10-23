@@ -77,17 +77,23 @@ def test_crash_leaves_no_done_marker_and_next_run_redoes_only_it(tmp_path: Path)
     assert m["status"] == "failed" and m["error"] == "RuntimeError: sparse exploded"
     assert not (tmp_path / "export").exists()
 
-    # A process killed mid-step leaves no marker at all: same outcome.
+    # A process killed mid-step leaves no marker at all: same outcome, and the half-written
+    # step dir is cleared before the redo while the finished steps keep their files.
     (tmp_path / "sparse/step.json").unlink()
+    (tmp_path / "sparse/stale.bin").write_bytes(b"\0" * 8)
     c2 = Counting()
     run_steps(tmp_path, c2.steps())
     assert c2.calls == {"probe": 0, "frames": 0, "sparse": 1, "export": 1}
     assert marker(tmp_path, "sparse")["status"] == "done"
+    assert sorted(p.name for p in (tmp_path / "sparse").iterdir()) == ["out.txt", "partial.txt",
+                                                                        "step.json"]  # fmt: skip
+    assert (tmp_path / "frames/out.txt").read_text() == "done"
 
 
 def test_from_step_runs_exactly_that_slice(tmp_path: Path) -> None:
     c = Counting()
     run_steps(tmp_path, c.steps())
+    untouched = {n: (tmp_path / n / "step.json").stat().st_mtime_ns for n in ("probe", "frames")}
     seen: list[tuple[str, str, str | None]] = []
     c2 = Counting()
     res = run_steps(
@@ -96,6 +102,8 @@ def test_from_step_runs_exactly_that_slice(tmp_path: Path) -> None:
     )  # fmt: skip
     assert list(res) == ["sparse", "export"]
     assert c2.calls == {"probe": 0, "frames": 0, "sparse": 1, "export": 1}
+    assert {n: (tmp_path / n / "step.json").stat().st_mtime_ns for n in untouched} == untouched
+    assert marker(tmp_path, "sparse")["metrics"] == {"n": 1}  # the forced rerun wrote a new one
     assert seen == [("sparse", "start", None), ("sparse", "end", "ok"),
                     ("export", "start", None), ("export", "end", "ok")]  # fmt: skip
     with pytest.raises(StageError, match="unknown step 'nope'"):
@@ -125,6 +133,15 @@ def test_layout_helpers_resolve_a_legacy_run(tmp_path: Path) -> None:
     assert layout.manifest_path(legacy) == legacy / "web/manifest.json"
     assert layout.frames_json(legacy) == legacy / "frames.json"
     assert layout.quality_report(legacy) == legacy / "quality_report.json"
+    # A step marker alone (a rerun through the step runner) does not move the model or bundle.
+    for name in ("sparse", "export"):
+        (legacy / name).mkdir()
+        (legacy / name / "step.json").write_text("{}")
+    assert layout.sparse_dir(legacy) == legacy / "colmap"
+    assert layout.export_dir(legacy) == legacy
+    (legacy / "export/web").mkdir()
+    (legacy / "export/web/manifest.json").write_text("{}")
+    assert layout.export_dir(legacy) == legacy / "export"
 
     new = tmp_path / "new"  # nothing there yet: the new layout
     new.mkdir()

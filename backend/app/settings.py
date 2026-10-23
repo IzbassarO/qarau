@@ -16,8 +16,9 @@ class Settings(BaseSettings):
     s3_secret_key: str = ""
     s3_bucket: str = "qarau"
     qarau_runs_dir: str = "../data/runs"
-    # Job queue: Valkey (ADR 0012) over the Redis protocol; RQ queue `qarau`.
-    queue_url: str = "redis://localhost:6379/0"
+    # Job queue: Valkey (ADR 0012) over the Redis protocol (hence the redis:// scheme the
+    # redis-py client expects); RQ queue `qarau`. Compose sets redis://valkey:6379/0.
+    valkey_url: str = "redis://localhost:6379/0"
     # The pipeline checkout whose `.venv/bin/python -m qarau_pipeline step …` the worker spawns.
     qarau_pipeline_dir: str = "../pipeline"
     # Shared read-only token (M1). Empty = open dev mode: reads need no token, writes always do.

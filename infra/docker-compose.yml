@@ -63,7 +63,7 @@ services:
     image: qarau/worker:dev
     platform: linux/amd64
     environment:
-      QUEUE_URL: redis://valkey:6379/0
+      VALKEY_URL: redis://valkey:6379/0
       QARAU_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       QARAU_RUNS_DIR: /data/runs
       QARAU_PIPELINE_DIR: /app/pipeline

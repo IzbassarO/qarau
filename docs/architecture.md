@@ -51,9 +51,10 @@ the fake provider only; a paid Modal run is never started from the workflow (ADR
 - **Done marker.** When a step finishes, the runner writes `<run>/<step>/step.json` atomically
   (temp file + `os.replace`) with `name`, `status` (`done` | `failed`), `started_at`,
   `finished_at`, `duration_s`, `error`, `outputs`, `metrics`. A step whose marker says `done` is
-  a **no-op** unless `force`; the old marker is removed before a step runs again, so a process
-  killed mid-step leaves **no** marker and the next run redoes exactly that step. Re-running a
-  step overwrites its own folder only.
+  a **no-op** unless `force`; otherwise `<run>/<step>/` is **cleared** before the body runs, so a
+  process killed mid-step leaves **no** marker and the next run redoes exactly that step from
+  scratch. A step never writes outside its own folder (the uploaded video, `run.json`, `log.txt`
+  and `workflow.json` at the run root belong to the run).
 - `run_steps(run_dir, steps, from_step=None, force=False, on_event=…)` runs a slice in order
   and calls `on_event(name, "start" | "end", result)` around each step; it knows nothing about
   queues. `from_step` with `force` is the "rerun this step and the ones after it" operation.
@@ -62,20 +63,25 @@ the fake provider only; a paid Modal run is never started from the workflow (ADR
 `run_inspection(run_id, from_step)` spawns one `python -m qarau_pipeline step …` child per step
 in the pipeline environment (the API environment never imports pycolmap) and, after every
 transition, writes `Run.status` (`queued | running | done | failed`), `current_step`, `progress`
-(finished steps / total, %), `error` and one `run_step` row per step (`name, status, started_at,
-finished_at, duration_s, error`, the shape `web/src/lib/processing.ts` parses) to Postgres.
-Because the steps carry their own done markers, re-queueing a run after a worker crash redoes
-only the unfinished step. **Temporal (or any other orchestrator) can replace the RQ runner
-later without touching a step**: the step contract above is the whole interface.
+(finished steps / total, integer 0-100), `error`, `rq_job_id` and `Run.steps`, a JSON list with
+one `{name, status (pending | running | done | failed), started_at, finished_at, duration_s,
+error}` per step in workflow order (the shape `web/src/lib/processing.ts` parses), to Postgres,
+each write in its own short transaction. Because the steps carry their own done markers,
+re-queueing a run after a worker crash redoes only the unfinished step. **Temporal (or any other
+orchestrator) can replace the RQ runner later without touching a step**: the step contract above
+is the whole interface.
 
 API (`backend/app/inspections.py`): `POST /api/inspections/{id}/runs` (engineer) queues the
 inspection's newest run (the one B1's upload created; body `{run_id?, force?}`, 409 while
 queued/running unless `force`, the escape after a crashed worker), `GET /api/inspections/{id}`
 (viewer) returns the inspection with `run_id, progress, current_step, error, steps[]`, and
-`POST /api/inspections/{id}/runs/{run_id}/steps/{step}/rerun` (engineer) queues `from_step` with
-force for that step and the ones after it. Infra: `infra/docker-compose.yml` services `valkey`
-(`valkey/valkey`, BSD-3) and `worker` (`infra/worker/Dockerfile`, `rq worker qarau`, reads
-`QUEUE_URL`, mounts `data/runs`); `backend/app/settings.py` `queue_url`, `qarau_pipeline_dir`.
+`POST /api/inspections/{id}/runs/{run_id}/steps/{step}/rerun` (engineer, 404 for an unknown
+step) queues `from_step` with force for that step and the ones after it; earlier finished steps
+keep their markers and their entries. Infra: `infra/docker-compose.yml` services `valkey`
+(`valkey/valkey`, BSD-3) and `worker` (`infra/worker/Dockerfile`, `rq worker qarau`, mounts
+`data/runs`); both the worker and the API (`make api`) read the queue address from `VALKEY_URL`
+(`backend/app/settings.py` `valkey_url`, default `redis://localhost:6379/0`: the redis-py client
+speaks the Redis protocol to Valkey, hence the scheme) and the worker also `qarau_pipeline_dir`.
 
 **Run directory** (`pipeline/qarau_pipeline/layout.py`):
 
@@ -98,7 +104,7 @@ helper falls back to those paths when they exist, so old runs stay readable and 
 Each stage reads inputs from the run dir and writes outputs under `<run>/<step>/` (above). A
 stage records `status`, `started_at`, `finished_at`, `tool_version`, `params` and `metrics` in
 `<run>/run.json` (stage names `frames`, `reconstruction`, `export`) and the worker mirrors the
-step state to the `run_step` table. Re-running a stage overwrites its own folder only. This
+step state to `Run.steps`. Re-running a stage overwrites its own folder only. This
 makes every result reproducible and every failure local.
 
 | Stage | Inputs | Outputs |

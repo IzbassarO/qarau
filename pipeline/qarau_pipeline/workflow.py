@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -93,13 +94,13 @@ def write_marker(run_dir: Path, name: str, doc: dict[str, Any]) -> None:
 
 
 def run_step(step: Step, ctx: StepContext) -> StepResult:
-    """One step: skipped when its marker says done (unless ctx.force); otherwise the old marker
-    is removed first, the body runs, and the marker records done or failed. A crash between the
-    two leaves no marker."""
+    """One step: skipped when its marker says done (unless ctx.force); otherwise `<run>/<step>/`
+    is cleared (a half-written output of a killed process never leaks into the redo), the body
+    runs, and the marker records done or failed. A crash between the two leaves no marker."""
     old = read_marker(ctx.run_dir, step.name)
     if old is not None and old.get("status") == "done" and not ctx.force:
         return StepResult("skipped", list(old.get("outputs", [])), dict(old.get("metrics", {})))
-    marker_path(ctx.run_dir, step.name).unlink(missing_ok=True)
+    shutil.rmtree(ctx.run_dir / step.name, ignore_errors=True)
     (ctx.run_dir / step.name).mkdir(parents=True, exist_ok=True)
     started, t0 = _now(), time.perf_counter()
     try:

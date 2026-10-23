@@ -5,22 +5,22 @@ GET  /api/inspections/{id}                               viewer   -> inspection 
 POST /api/inspections/{id}/runs/{run_id}/steps/{step}/rerun  engineer -> queued from that step
 
 The worker (app/workflow.py) writes Run.status / current_step / progress / error and the
-run_step rows; this module only reads them and enqueues jobs on RQ (Valkey, ADR 0012).
+`steps` list; this module only reads them and enqueues jobs on RQ (Valkey, ADR 0012).
 """
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 from rq import Queue
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import workflow
 from .crud import Db, Engineer, InspectionOut, Viewer, audit, get_or_404
-from .models import Inspection, Run, RunStep
+from .models import Inspection, Run
 
 router = APIRouter(prefix="/api/inspections/{inspection_id}")
 ACTIVE = ("queued", "running")
@@ -41,19 +41,13 @@ class StepOut(BaseModel):
     duration_s: float | None
     error: str | None
 
-    @field_validator("started_at", "finished_at")
-    @classmethod
-    def _utc(cls, v: datetime | None) -> datetime | None:
-        """The worker writes UTC; SQLite returns it naive. Always serialize with the zone."""
-        return v.replace(tzinfo=UTC) if v is not None and v.tzinfo is None else v
-
 
 class InspectionStatus(InspectionOut):
     """InspectionOut plus the latest run's progress, in the shape web/src/lib/processing.ts
     parses (status, steps[name, status, started_at, finished_at, duration_s, error])."""
 
     run_id: str | None = None
-    progress: float | None = None
+    progress: int | None = None
     current_step: str | None = None
     error: str | None = None
     steps: list[StepOut] = []
@@ -83,9 +77,8 @@ def get_run(db: Session, inspection_id: int, run_id: str) -> Run:
     return run
 
 
-def steps_of(db: Session, run_id: str) -> list[StepOut]:
-    rows = db.scalars(select(RunStep).where(RunStep.run_id == run_id).order_by(RunStep.id))
-    return [StepOut.model_validate(r, from_attributes=True) for r in rows]
+def steps_of(run: Run) -> list[StepOut]:
+    return [StepOut.model_validate(s) for s in run.steps]
 
 
 @router.get(
@@ -100,7 +93,7 @@ def get_inspection(inspection_id: int, db: Db, _: Viewer) -> InspectionStatus:
     if run is not None:
         out.run_id, out.progress = run.id, run.progress
         out.current_step, out.error = run.current_step, run.error
-        out.steps = steps_of(db, run.id)
+        out.steps = steps_of(run)
     return out
 
 
@@ -136,13 +129,13 @@ def rerun_step(
     inspection_id: int, run_id: str, step: str, db: Db, who: Engineer, request: Request, q: Q
 ) -> Queued:
     run = get_run(db, inspection_id, run_id)
+    known = {s.name for s in steps_of(run)}
+    if known and step not in known:  # before the first run the worker checks the name itself
+        raise HTTPException(404, f"unknown step '{step}'; steps: {', '.join(sorted(known))}")
     if run.status in ACTIVE:
         raise HTTPException(409, f"run is {run.status}; wait for it to finish")
     if run.status == "uploading":
         raise HTTPException(409, "the video upload is not complete")
-    known = {s.name for s in steps_of(db, run.id)}
-    if known and step not in known:  # before the first run the worker checks the name itself
-        raise HTTPException(404, f"unknown step '{step}'; steps: {', '.join(sorted(known))}")
     return _queue(db, who, request, q, run, step)
 
 
@@ -157,5 +150,6 @@ def _queue(
         insp.status = "queued"
     audit(db, who, request, "run", run.id, "queue" if from_step is None else f"rerun:{from_step}")
     db.commit()  # the row says queued before the worker can pick the job up
-    job_id = workflow.enqueue(q, run.id, from_step)
+    job_id = run.rq_job_id = workflow.enqueue(q, run.id, from_step)
+    db.commit()  # only rq_job_id: a worker that already started keeps its status fields
     return Queued(run_id=run.id, status="queued", job_id=job_id, from_step=from_step)

@@ -3,11 +3,12 @@
 `run_inspection(run_id, from_step)` runs the pipeline steps in order, one subprocess per step
 (`python -m qarau_pipeline step <name> --run <dir> [--force]`, ADR 0022), so the backend
 environment never imports pycolmap. After every transition it writes Run.status
-(queued | running | done | failed), current_step, progress (finished steps / total, %), error
-and one RunStep row per step, and mirrors the status on the Inspection. The pipeline's own
-<run>/<step>/step.json markers make the job idempotent: re-enqueueing a run after a worker
-crash redoes only the steps without a `done` marker. `from_step` forces that step and the ones
-after it; earlier steps are not touched.
+(queued | running | done | failed), current_step, progress (finished steps / total, 0-100), error
+and the `steps` list (one {name, status, started_at, finished_at, duration_s, error} per step),
+and mirrors the status on the Inspection. The pipeline's own <run>/<step>/step.json markers
+make the job idempotent: re-enqueueing a run after a worker crash redoes only the steps without
+a `done` marker. `from_step` forces that step and the ones after it; earlier steps are not
+touched.
 
 The step runner is a protocol (`StepRunner`) so tests plug in in-process fakes via `make_runner`.
 """
@@ -18,7 +19,7 @@ import json
 import logging
 import subprocess
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -27,7 +28,7 @@ from rq import Queue
 from sqlalchemy.orm import Session
 
 from .db import engine_for
-from .models import Inspection, Run, RunStep, now
+from .models import Inspection, Run
 from .settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -86,7 +87,7 @@ def make_runner() -> StepRunner:
 
 
 def queue(connection: Redis | None = None) -> Queue:
-    return Queue(QUEUE, connection=connection or Redis.from_url(get_settings().queue_url))
+    return Queue(QUEUE, connection=connection or Redis.from_url(get_settings().valkey_url))
 
 
 def enqueue(q: Queue, run_id: str, from_step: str | None = None) -> str:
@@ -97,8 +98,8 @@ def enqueue(q: Queue, run_id: str, from_step: str | None = None) -> str:
 # ---------------------------------------------------------------- the job
 
 
-def _parse(ts: str | None) -> datetime | None:
-    return datetime.fromisoformat(ts) if ts else None
+def _now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _write(fn: Callable[[Session], None]) -> None:
@@ -122,14 +123,25 @@ def _set_run(run_id: str, **fields: Any) -> None:
     _write(go)
 
 
+def _pending(name: str) -> StepDoc:
+    return {"name": name, "status": "pending", "started_at": None, "finished_at": None,
+            "duration_s": None, "error": None}  # fmt: skip
+
+
 def _set_step(run_id: str, name: str, **fields: Any) -> None:
+    """Update one entry of Run.steps (the list is replaced, so SQLAlchemy sees the change)."""
+
     def go(db: Session) -> None:
-        row = db.query(RunStep).filter_by(run_id=run_id, name=name).one_or_none()
+        run = db.get(Run, run_id)
+        if run is None:
+            raise RuntimeError(f"run {run_id} vanished")
+        steps = [dict(s) for s in run.steps]
+        row = next((s for s in steps if s["name"] == name), None)
         if row is None:
-            row = RunStep(run_id=run_id, name=name)
-            db.add(row)
-        for k, v in fields.items():
-            setattr(row, k, v)
+            row = _pending(name)
+            steps.append(row)
+        row.update(fields)
+        run.steps = steps
 
     _write(go)
 
@@ -142,22 +154,19 @@ def run_inspection(run_id: str, from_step: str | None = None) -> str:
         if run is None:
             raise RuntimeError(f"run {run_id} not found")
         run_dir = Path(get_settings().qarau_runs_dir).resolve() / run.run_dir
+        old = {s["name"]: dict(s) for s in run.steps}
     names = runner.names()
     if from_step is not None and from_step not in names:
         _set_run(run_id, status="failed", error=f"unknown step '{from_step}'")
         return "failed"
     start = names.index(from_step) if from_step else 0
     force = from_step is not None
-    for name in names:  # every step has a row; the ones to run (re)start as pending
-        if name in names[start:]:
-            _set_step(run_id, name, status="pending", started_at=None, finished_at=None,
-                      duration_s=None, error=None)  # fmt: skip
-        else:
-            _set_step(run_id, name)
+    # Every step has an entry; the ones to run (re)start as pending, earlier ones keep theirs.
+    steps = [old.get(n, _pending(n)) if i < start else _pending(n) for i, n in enumerate(names)]
     _set_run(run_id, status="running", current_step=names[start], error=None,
-             progress=round(100 * start / len(names), 1))  # fmt: skip
+             progress=100 * start // len(names), steps=steps)  # fmt: skip
     for i, name in enumerate(names[start:], start):
-        _set_step(run_id, name, status="running", started_at=now())
+        _set_step(run_id, name, status="running", started_at=_now())
         _set_run(run_id, current_step=name)
         try:
             doc = runner.run(run_dir, name, force)
@@ -168,14 +177,14 @@ def run_inspection(run_id: str, from_step: str | None = None) -> str:
         _set_step(
             run_id, name,
             status="done" if ok else "failed",
-            started_at=_parse(doc.get("started_at")) or now(),
-            finished_at=_parse(doc.get("finished_at")) or now(),
+            started_at=doc.get("started_at") or _now(),
+            finished_at=doc.get("finished_at") or _now(),
             duration_s=doc.get("duration_s"),
             error=None if ok else str(doc.get("error") or "failed without a message"),
         )  # fmt: skip
         if not ok:
             _set_run(run_id, status="failed", error=f"{name}: {doc.get('error')}")
             return "failed"
-        _set_run(run_id, progress=round(100 * (i + 1) / len(names), 1))
-    _set_run(run_id, status="done", current_step=None, progress=100.0)
+        _set_run(run_id, progress=100 * (i + 1) // len(names))
+    _set_run(run_id, status="done", current_step=None, progress=100)
     return "done"

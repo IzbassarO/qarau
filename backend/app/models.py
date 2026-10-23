@@ -87,36 +87,24 @@ class Inspection(Base):
 
 class Run(Base):
     """One pipeline run of an inspection. `id` is also the directory name under QARAU_RUNS_DIR.
-    The worker (app/workflow.py) writes status, current_step, progress and error after every
-    step: status uploading | uploaded | queued | running | done | failed."""
+    The worker (app/workflow.py) writes status, current_step, progress, error and the step list
+    after every step: status uploading | uploaded | queued | running | done | failed.
+    `steps` is a JSON list of {name, status (pending | running | done | failed), started_at,
+    finished_at (ISO 8601, UTC), duration_s, error}, in workflow order (migration v0002)."""
 
     __tablename__ = "run"
     id: Mapped[str] = mapped_column(sa.String(32), primary_key=True, default=new_id)
     inspection_id: Mapped[int] = mapped_column(sa.ForeignKey("inspection.id"))
     run_dir: Mapped[str] = mapped_column(sa.String(500))  # relative to QARAU_RUNS_DIR
     status: Mapped[str] = mapped_column(sa.String(32), default="created")
-    progress: Mapped[float] = mapped_column(sa.Float, default=0.0)  # finished steps / total, %
+    progress: Mapped[int] = mapped_column(sa.Integer, default=0)  # finished steps / total, 0-100
     current_step: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
     error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    rq_job_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    steps: Mapped[Any] = mapped_column(sa.JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), default=now, server_default=sa.text("CURRENT_TIMESTAMP")
     )
-
-
-class RunStep(Base):
-    """One workflow step of a Run, mirrored from <run>/<step>/step.json by the worker.
-    status: pending | running | done | failed (the shape web/src/lib/processing.ts parses)."""
-
-    __tablename__ = "run_step"
-    __table_args__ = (sa.UniqueConstraint("run_id", "name"),)
-    id: Mapped[int] = mapped_column(primary_key=True)
-    run_id: Mapped[str] = mapped_column(sa.ForeignKey("run.id"))
-    name: Mapped[str] = mapped_column(sa.String(32))
-    status: Mapped[str] = mapped_column(sa.String(16), default="pending")
-    started_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
-    duration_s: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
-    error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
 
 class Finding(Base):

@@ -154,12 +154,12 @@ def test_run_goes_queued_running_done(client: TestClient, runner: FakeRunner, wo
     hold(runner, "export")
     work()
     mid = observe_running(log, runner, "export")
-    assert (mid["status"], mid["current_step"], mid["progress"]) == ("running", "export", 75.0)
+    assert (mid["status"], mid["current_step"], mid["progress"]) == ("running", "export", 75)
     body = log.until("done", "failed")
     assert log.seen == ["queued", "running", "done"]
     assert runner.calls == [("probe", False), ("frames", False), ("sparse", False),
                             ("export", False)]  # fmt: skip
-    assert (body["progress"], body["current_step"], body["error"]) == (100.0, None, None)
+    assert (body["progress"], body["current_step"], body["error"]) == (100, None, None)
     assert step_view(body) == [(n, "done") for n in NAMES]
     assert all(set(s) == {"name", "status", "started_at", "finished_at", "duration_s", "error"}
                for s in body["steps"])  # fmt: skip
@@ -167,11 +167,8 @@ def test_run_goes_queued_running_done(client: TestClient, runner: FakeRunner, wo
     assert body["steps"][2]["finished_at"] == "2026-10-23T10:00:02Z"
     assert body["steps"][2]["duration_s"] == 2.0 and body["steps"][2]["error"] is None
     runs = client.get("/api/inspections/1/runs", headers=VIEW).json()
-    assert (runs[0]["status"], runs[0]["progress"], runs[0]["current_step"]) == (
-        "done",
-        100.0,
-        None,
-    )
+    assert (runs[0]["status"], runs[0]["progress"], runs[0]["current_step"]) == ("done", 100, None)
+    assert runs[0]["rq_job_id"] == r.json()["job_id"]
     # The audit log has the queue action.
     log_rows = client.get("/api/audit-log", headers=bearer("admin")).json()
     assert (log_rows[0]["object_type"], log_rows[0]["object_id"], log_rows[0]["action"]) == (
@@ -195,7 +192,7 @@ def test_failed_step_ends_the_run_with_its_error(
     body = log.until("done", "failed")
     assert log.seen == ["queued", "running", "failed"]
     assert body["error"] == "sparse: StageError: COLMAP could not build a model"
-    assert body["current_step"] == "sparse" and body["progress"] == 50.0
+    assert body["current_step"] == "sparse" and body["progress"] == 50
     assert step_view(body) == [("probe", "done"), ("frames", "done"), ("sparse", "failed"),
                                ("export", "pending")]  # fmt: skip
     assert body["steps"][2]["error"] == "StageError: COLMAP could not build a model"
@@ -217,11 +214,17 @@ def test_rerun_executes_exactly_that_step_and_the_following(
     assert r.status_code == 202, r.text
     assert r.json() == {"run_id": run_id, "status": "queued", "job_id": r.json()["job_id"],
                         "from_step": "sparse"}  # fmt: skip
+    # While it is queued: a second rerun is refused, an unknown step is still a 404.
+    r = client.post(f"/api/inspections/1/runs/{run_id}/steps/export/rerun", headers=ENG)
+    assert r.status_code == 409 and r.json()["detail"] == "run is queued; wait for it to finish"
+    r = client.post(f"/api/inspections/1/runs/{run_id}/steps/nope/rerun", headers=ENG)
+    assert r.status_code == 404
     work()
     body = StatusLog(client).until("done", "failed")
     assert body["status"] == "done"
     assert runner.calls == [("sparse", True), ("export", True)]
     assert step_view(body) == [(n, "done") for n in NAMES]
+    assert body["steps"][2]["error"] is None and body["progress"] == 100
     r = client.post(f"/api/inspections/1/runs/{run_id}/steps/nope/rerun", headers=ENG)
     assert r.status_code == 404
     r = client.post("/api/inspections/1/runs/zzz/steps/sparse/rerun", headers=ENG)
@@ -241,7 +244,7 @@ def test_api_answers_while_a_step_is_running(
     assert runner.entered["frames"].wait(timeout=30)
 
     body = client.get("/api/inspections/1", headers=VIEW).json()
-    assert (body["status"], body["current_step"], body["progress"]) == ("running", "frames", 25.0)
+    assert (body["status"], body["current_step"], body["progress"]) == ("running", "frames", 25)
     assert step_view(body) == [("probe", "done"), ("frames", "running"), ("sparse", "pending"),
                                ("export", "pending")]  # fmt: skip
     t0 = time.perf_counter()
@@ -337,3 +340,4 @@ def test_subprocess_runner_reads_the_marker_or_reports_the_exit(tmp_path: Path) 
     log = (run_dir / "log.txt").read_text()
     assert "step probe --run" in log and "--force" in log and "ERROR: boom" in log
     assert get_settings().qarau_pipeline_dir == "../pipeline"
+    assert get_settings().valkey_url == "redis://localhost:6379/0"

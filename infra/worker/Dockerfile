@@ -26,5 +26,6 @@ RUN cd /app/pipeline && uv sync --frozen --no-dev && cd /app/backend && uv sync 
 
 WORKDIR /app/backend
 ENV QARAU_PIPELINE_DIR=/app/pipeline QARAU_RUNS_DIR=/data/runs
-# `rq worker` reads the Valkey URL from QUEUE_URL (RQ_REDIS_URL); the queue name is `qarau`.
-CMD ["sh", "-c", "exec uv run --no-sync rq worker --url \"$QUEUE_URL\" qarau"]
+# `rq worker` reads the Valkey URL from VALKEY_URL (redis:// scheme: the redis-py client speaks
+# to Valkey, ADR 0012); the queue name is `qarau`.
+CMD ["sh", "-c", "exec uv run --no-sync rq worker --url \"$VALKEY_URL\" qarau"]

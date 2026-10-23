@@ -38,8 +38,11 @@ def quality_report(run: Path) -> Path:
 
 
 def sparse_dir(run: Path) -> Path:
-    """The COLMAP work dir: database.db, masks/, sparse/0 (the model: `sparse_model`)."""
-    return _pick(run / "sparse", run / "colmap")
+    """The COLMAP work dir: database.db, masks/, sparse/0 (the model: `sparse_model`). A legacy
+    run keeps `colmap/` until a model exists under `sparse/` (a bare `sparse/step.json` of the
+    step runner does not count)."""
+    new, legacy = run / "sparse", run / "colmap"
+    return legacy if legacy.exists() and not (new / "sparse").exists() else new
 
 
 def sparse_model(run: Path) -> Path:
@@ -47,9 +50,11 @@ def sparse_model(run: Path) -> Path:
 
 
 def export_dir(run: Path) -> Path:
-    """Holds web/, cloud.laz and cloud.ply: `<run>/export`, or the run root for a legacy run."""
-    legacy = (run / "web" / "manifest.json").exists() and not (run / "export").exists()
-    return run if legacy else run / "export"
+    """Holds web/, cloud.laz and cloud.ply: `<run>/export`, or the run root for a legacy run
+    (judged by the manifest, not by `export/` itself: a re-export of a legacy run through the
+    step runner puts only `export/step.json` there)."""
+    new, legacy = run / "export" / "web" / "manifest.json", run / "web" / "manifest.json"
+    return run if legacy.exists() and not new.exists() else run / "export"
 
 
 def manifest_path(run: Path) -> Path:

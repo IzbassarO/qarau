@@ -71,9 +71,10 @@ def test_chunked_upload_with_one_retried_chunk(client: TestClient, runs_root: Pa
             "inspection_id": 1,
             "run_dir": run_id,
             "status": "uploaded",
-            "progress": 0.0,
+            "progress": 0,
             "current_step": None,
             "error": None,
+            "rq_job_id": None,
         }
     ]
     # Finished: more chunks or a second complete are refused, next_offset is the size.

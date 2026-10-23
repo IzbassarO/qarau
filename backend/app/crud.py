@@ -86,9 +86,10 @@ class RunOut(Out):
     inspection_id: int
     run_dir: str
     status: str
-    progress: float
+    progress: int
     current_step: str | None = None
     error: str | None = None
+    rq_job_id: str | None = None
 
 
 class UserIn(BaseModel):
