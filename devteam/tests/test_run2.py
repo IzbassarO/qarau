@@ -347,8 +347,8 @@ def test_o1_is_split_into_a_backend_task_and_the_web_page():
     )
     assert "require_role" in o1a["goal"] and "Alembic" in o1a["goal"]
     assert o1["area"] == "app" and o1["depends_on"] == ["O1a"]
-    core = [t["id"] for t in by.values() if t["area"] == "core"]
-    assert core.index("O1a") == core.index("S1") + 1
+    for t in (o1a, o1):  # owner 2026-10-22: off the demo chain (LATER)
+        assert t["blocked_reason"].startswith("LATER")
     assert GR.outside_paths([o1a["goal"]], "dev_pipeline", CFG, o1a) == []
     assert GR.outside_paths([o1["goal"]], "dev_app", CFG, o1) == []
 

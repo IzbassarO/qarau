@@ -507,16 +507,17 @@ def test_real_backlog_split_a7_p3e_and_order():
     assert by["A7"]["depends_on"] == ["A7a"] and by["A7"]["branch"] == "devteam/A7"
     assert by["P3e"]["writable"] == ["data/runs"]
     assert not {"P4a-2a-code", "P4a-2a-run"} & set(by["S1"].get("depends_on") or [])
-    assert by["U2"]["area"] == "app" and by["U2"]["depends_on"] == ["S1"]
+    assert by["U2"]["area"] == "app" and by["U2"]["depends_on"] == ["B1"]  # owner 2026-10-22
     assert by["D2"]["area"] == "core" and by["D2"]["depends_on"] == ["S1", "U2"]
     assert "U2" in by["A8"]["depends_on"]  # no new viewer features before upload
 
     def order(area, ids):
         return [t["id"] for t in tasks if t["area"] == area and t["id"] in ids]
 
-    core = ["P3e", "P4a-1b", "P5a-1", "P5a-2", "D1", "S1", "O1a", "A7a"]  # owner, 2026-10-19
+    # owner, 2026-10-22: done tasks first, then the demo chain (S1, D1), then LATER
+    core = ["P3e", "P4a-1b", "S1", "D1", "P5a-1", "P5a-2", "A7a", "O1a"]
     assert order("core", core) == core
-    app = ["A9-fix", "A5-fix", "O1", "U2", "A8"]  # the historic violations first
+    app = ["A9-fix", "A5-fix", "U2", "O1", "A8"]  # the historic violations first
     assert order("app", app) == app
     assert by["P4a-1b"]["area"] == "core" and "MODAL_TOKEN_ID" in by["P4a-1b"]["goal"]
     assert "no real Modal call" in by["P4a-1b"]["goal"]
@@ -524,9 +525,10 @@ def test_real_backlog_split_a7_p3e_and_order():
     assert "P4a-2" not in by
     code, run, prior = by["P4a-2a-code"], by["P4a-2a-run"], by["P4a-2b"]
     assert "No real Modal call" in code["goal"] and "--allow-paid-gpu" in code["goal"]
-    assert "not Kerege" in run["title"] and "Modal account" in run.get("blocked_reason", "")
+    assert "not Kerege" in run["title"] and run["owner_only"]
     assert not run.get("depends_on")  # unblock_ready would hand a blocked task to Kerege
-    assert "P4a-2a-code" in run["goal"] and "P4a-2a-code" in run["blocked_reason"]
+    assert "P4a-2a-code" in run["goal"]
+    assert run["pr"].endswith("/pull/58") and run["done_at"] == "2026-10-21"  # the owner ran it
     assert prior["depends_on"] == ["P4a-2a-run"] and "Small only" in prior["goal"]
     assert by["P4c"]["depends_on"] == ["P4a-2a-run", "A7"]
     for t in (code, run):  # Modal's ADR is 0019 (0018 is the design tokens, #52)

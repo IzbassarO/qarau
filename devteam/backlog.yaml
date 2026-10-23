@@ -1,3 +1,32 @@
+# Qarau backlog, read by Kerege (devteam/devteam). Per-task fields: id, area, title, goal, status,
+# owner, depends_on, run, branch, pr, done_at, blocked_reason, owner_only, writable, licence, quick_only,
+# supervisor. Statuses: todo | in_progress | blocked | done | dropped | later.
+# Comments die at the first status commit (Kerege re-dumps the file): `notes` is the durable record.
+notes: 'Demo chain (owner, 2026-10-22). Product first, then metres: website + deploy before scale-from-sheet;
+
+  until a ScaleReference exists every area is reported as "scale not set". Automatic defect detection
+
+  (SAM, training, DEF2) is STOPPED until Kubernetes: LATER section. Manual defect marking, confirm/reject
+
+  and the decision log STAY (tables and buttons, not CV; the decision log is the future training set).
+
+  Design comes from Claude Design (tokens.json, bundle.css, DESIGN.md v2) in task DS1; until it lands,
+
+  dev_app builds on the current tokens. Quality over speed: every goal ends with "Done when" checks the
+
+  tester can run; no task is done without tests and, for web/, screenshots.
+
+  Queue for the brain (todo tasks, file order): B1, U2, S1, DS1, D1, DEF1-api, UI-inspections, REV1-api,
+
+  UI-evidence, RPT1, UI-mark, UI-report, D2, COV1. Then LATER: status `later`, off the demo chain; the
+
+  brain never plans it, dependencies never un-block it, `devteam resume` does not touch it. A task comes
+
+  back only by a PR into dev that sets its status to todo. Comments in this file vanish at the first status
+
+  commit (Kerege re-dumps it); this note stays.
+
+  '
 tasks:
 - id: P1
   area: core
@@ -263,177 +292,6 @@ tasks:
   status: dropped
   owner: dev_pipeline
   branch: devteam/P5a
-- id: P5a-1
-  area: core
-  title: Metric scale from a measured distance, and gravity
-  goal: 'The user marks two points in two or more frames and gives the distance between them in metres
-    (a JSON scale reference, docs/notes/scale-reference-format.md); the map is scaled to metres and rotated
-    so gravity points down (camera up estimate, refined by the floor plane). The export records metric,
-    scale source, gravity source and scale error; the benchmark reports scale_err_cm for a video that
-    has a reference. Not in this task: the reference sheet (P5a-2). The branch devteam/P5a-1 already has
-    the first draft from P5a (scale.py, ADR 0018, tests; never checked): finish and verify it, and leave
-    the sheet (Letter / A4) reference kind out of this branch (it comes back in P5a-2).
-
-    '
-  status: blocked
-  blocked_reason: split from P5a (8.2 M tokens in one round, limit 8 M); `devteam resume P5a-1` to start
-    it on its branch
-- id: P5a-2
-  area: core
-  title: Metric scale from a reference sheet (Letter, A4 or custom)
-  goal: 'A paper sheet of known size as the scale reference: the user marks its four corners in order
-    in two or more frames; the scale is fitted to the four edges and two diagonals (both orientations),
-    and the fit residual is reported as the scale error. The sheet size is a parameter of the scale reference
-    (docs/notes/scale-reference-format.md): letter = 215.9 x 279.4 mm (the default: the owner is in the
-    US), a4 = 210 x 297 mm, or custom = width x height in mm. Reuses the reference format, triangulation
-    and alignment of P5a-1; a first draft of the A4 fit (hard-coded 210 x 297 mm) is in commit b26082f
-    on branch devteam/P5a. Automatic detection of the sheet in images is not in this task.
-
-
-    Acceptance:
-
-    - Without a size the sheet is letter; a4 and custom width x height in mm are accepted; an unknown
-    size name or a non-positive custom size is a clear error.
-
-    - The run report (and the export metadata) shows which sheet size was used: its name and its dimensions
-    in mm (e.g. "letter 215.9 x 279.4 mm").
-
-    - Tests: synthetic scenes with a letter sheet and with an a4 sheet each recover the known scale; the
-    custom size is parsed and validated.
-
-    - docs/notes/scale-reference-format.md documents the size parameter and its default.
-
-    - ruff, mypy and pytest pass.
-
-    '
-  status: todo
-  depends_on:
-  - P5a-1
-- id: D1
-  area: core
-  title: Data foundation - storage layout and run catalog
-  goal: 'S3 layout: raw/ (immutable, never overwritten) and processed/<pipeline_version>/. Catalog tables
-    via Alembic (assets, captures, runs, stage_runs) record pipeline, model and parameter versions for
-    every result, and failed runs with their reasons.
-
-    '
-  licence: 'SQLAlchemy and Alembic (MIT), boto3 (Apache-2.0), Versity S3 Gateway (Apache-2.0), pgvector
-    (PostgreSQL licence). PostGIS (GPL-2.0): only as a separate, unmodified database server reached over
-    SQL (ADR 0010, owner 2026-10-15).
-
-    '
-  status: todo
-- id: S1
-  area: core
-  phase: server
-  title: Server job queue with per-stage progress
-  goal: 'The pipeline runs as jobs from a durable queue: Valkey + RQ (ADR 0012; not Redis). The queue
-    runs the current sparse pipeline now; the dense stage (P4a-2a) is plugged in later as one more stage.
-    Each stage reports progress 0-100 to the API (backend/), which U2 shows in the web app. A 30-minute
-    video is processed on a single worker without blocking the API.
-
-
-    Acceptance:
-
-    - Upload -> job -> progress available from the API -> the run is in the catalog when done.
-
-    - One stage can be re-run alone (stages are idempotent and read/write storage).
-
-    - The API stays responsive while a long job runs (test with a long job).
-
-    - Valkey runs in infra/ Docker Compose; no Redis image or Redis-only feature is used.
-
-    '
-  licence: 'Valkey (BSD-3-Clause), RQ (BSD-2-Clause), redis-py client (MIT). Redis server is not used:
-    RSALv2/SSPLv1 since 7.4, AGPLv3 since 8.0 (owner 2026-10-15, ADR 0012).
-
-    '
-  status: todo
-- id: O1a
-  area: core
-  title: Organizations and sites API
-  goal: 'Backend half of O1 (split 2026-10-18: dev_app may not edit backend/). Only backend/ and docs/.
-    Organization and Site SQLAlchemy models (Site: name, optional lat/lon) through an Alembic migration
-    (Alembic comes with D1). Seed the organization "Syracuse University" with zero sites (no invented
-    demo sites). Two authenticated routes, each declaring its role with the existing require_role dependency
-    (backend/app/auth.py): GET /api/organizations/{id} and GET /api/organizations/{id}/sites (sites with
-    nullable coordinates). backend/tests cover the seed, the empty site list, an unknown organization
-    (404) and the auth requirement; ruff, mypy and pytest pass.
-
-    '
-  licence: 'SQLAlchemy and Alembic (MIT), FastAPI and Pydantic (MIT): already used or added by D1.
-
-    '
-  status: todo
-  depends_on:
-  - D1
-- id: A7a
-  area: core
-  title: Region of interest API
-  goal: 'Backend half of A7 (split 2026-10-17: dev_app may not edit backend/). Only backend/ and docs/.
-    The contract is docs/notes/roi-format.md; the web part on branch devteam/A7 already calls these routes.
-    The stored JSON (version 1): {version: 1, site_id, source_run, frame (e.g. "reconstruction"), up_axis,
-    min: [x, y, z], max: [x, y, z], created_at, created_by}; all fields required, other fields ignored
-    and dropped on rewrite.
-
-    - FastAPI routes GET / PUT / DELETE /api/sites/{site_id}/roi. Each declares its role with the existing
-    require_role dependency (backend/app/auth.py): GET viewer (200 JSON, 404 when none is saved), PUT
-    editor (validate, site_id must match the path, save, 200 with the JSON; bad body 422, body over 64
-    KiB 413), DELETE editor (204, also when already absent).
-
-    - A Pydantic v2 model for ROI version 1: required fields, finite numbers, min <= max per axis, ISO
-    8601 created_at with a timezone, up_axis x|y|z.
-
-    - Atomic write into the run catalog: <QARAU_RUNS_DIR>/sites/<site_id>/roi.json through a uniquely
-    named temp file in the same directory and os.replace. Corrupt stored JSON is an error (500), never
-    reported as absent.
-
-    - Path-traversal checks: site ids match [A-Za-z0-9][A-Za-z0-9._:-]* without ''..''; encoded separators,
-    traversal and symlinked site directories or files are rejected (400).
-
-    - backend/tests/test_roi.py covers each route, roles and the shared-token auth, validation, the atomic
-    write, traversal and symlinks; ruff, mypy and pytest pass.
-
-    '
-  licence: 'FastAPI (MIT) and Pydantic (MIT), already backend dependencies; no new library.
-
-    '
-  status: todo
-- id: P5b
-  area: core
-  title: Drone telemetry reader (GPS, DJI SRT)
-  goal: 'Read per-frame GPS / DJI SRT telemetry into the capture so scale and georeference can come from
-    it later. Tested on a sample SRT file.
-
-    '
-  status: todo
-- id: P6
-  area: core
-  title: Point confidence and honest display
-  goal: 'Every point gets a confidence score from number of views, triangulation angle, reprojection error
-    and multi-view consistency, stored in the bundle. Low-confidence points are hidden or shown grey as
-    "uncertain". Holes are shown as "not reconstructed", never filled for looks. Estimated (prior-based)
-    geometry is marked and excluded from measurements.
-
-    '
-  licence: 'Own code on NumPy (BSD-3-Clause), pycolmap/COLMAP (BSD-3-Clause; check the licences of libraries
-    bundled in the pycolmap wheel), Open3D if needed (MIT).
-
-    '
-  status: todo
-- id: P7
-  area: core
-  title: Accuracy check with AprilTag markers
-  goal: 'Detect printed AprilTags (tag36h11) in the video, use their known printed size for metric scale,
-    and report the scale error in cm in the P1 benchmark. Include a printable tag sheet and filming instructions
-    in docs.
-
-    '
-  licence: 'OpenCV ArUco module with the AprilTag dictionaries (Apache-2.0, already a pipeline dependency)
-    - no new library. Alternative: AprilRobotics/apriltag (BSD-2-Clause).
-
-    '
-  status: todo
 - id: P4a-2a-code
   area: core
   title: Wire the real Modal provider into the dense-remote CLI (no real call)
@@ -518,9 +376,10 @@ tasks:
     only our own test footage goes to Modal, never customer footage (Kazakh data stays in Kazakhstan).
 
     '
-  status: blocked
-  blocked_reason: 'waits for the owner: P4a-2a-code merged, then the owner runs it with Claude Code on
-    the Modal account. Owner-only: never `devteam resume` this task'
+  status: done
+  branch: feat/p4a-2a-run
+  pr: https://github.com/IzbassarO/qarau/pull/58
+  done_at: '2026-10-21'
 - id: P4a-3
   area: core
   title: 'Dense speed: COLMAP PatchMatch knobs in config'
@@ -557,61 +416,6 @@ tasks:
   branch: devteam/P4a-3
   pr: https://github.com/IzbassarO/qarau/pull/60
   done_at: '2026-10-21'
-- id: P4a-2b
-  area: core
-  title: Depth Anything V2 Small depth prior (estimated points)
-  goal: 'Split from P4a-2 on 2026-10-21 (owner); later, after the first real COLMAP dense run. A depth-prior
-    stage behind the Densifier interface, starting from branch wip/dense-stage (its ADR 0008, unverified
-    WIP). Model: Depth Anything V2 **Small only** (depth-anything/Depth-Anything-V2-Small-hf, Apache-2.0);
-    Base and Large are CC-BY-NC (non-commercial) and must never be loaded: the code refuses any other
-    model id, with a test.
-
-
-    Its points are estimated, not measured: every one is marked `estimated` in the viewer bundle (own
-    arrays or a per-point flag, ADR 0003), is visually distinct from COLMAP points in the viewer, and
-    is excluded from every measurement (area, extent, scale) and from coverage counted as seen. Tests
-    check the flag in the bundle and that measurement ignores flagged points.
-
-    '
-  licence: 'Depth Anything V2 Small code and weights: Apache-2.0 (owner confirmed 2026-10-15). Base/Large:
-    CC-BY-NC-4.0, forbidden.
-
-    '
-  status: todo
-  depends_on:
-  - P4a-2a-run
-- id: P4c
-  area: core
-  title: Dense only inside the region of interest
-  goal: 'When a site has a region of interest (A7), dense reconstruction and the later stages process
-
-    only the frames and points that see it; camera poses still use all frames. Without a region
-
-    the pipeline runs as before. Tests on a synthetic scene with a box; benchmark unchanged for
-
-    videos without a region.
-
-    '
-  status: todo
-  depends_on:
-  - P4a-2a-run
-  - A7
-- id: D2
-  area: core
-  title: Deploy online
-  goal: 'infra/ only (and docs/). A written deployment plan in docs/ and scripts in infra/ for one small
-    cloud server running web + API + queue (Valkey + RQ) + S3-compatible storage + PostgreSQL, with GPU
-    workers started on demand by the P4a-1 executor (never always on). HTTPS with automatic certificates,
-    login required, no public sign-up. The PR states the estimated monthly cost per component. Do not
-    create any paid account and spend nothing: the scripts are tested locally (Docker Compose or a local
-    VM); the owner runs them on a server he pays for. Customer data for Kazakhstan stays in Kazakhstan:
-    say which providers fit.
-
-    '
-  depends_on:
-  - S1
-  - U2
-  status: todo
 - id: UX1a
   area: app
   title: 'Visual design pass, part 1: design system, login page, control centre'
@@ -680,60 +484,6 @@ tasks:
   branch: devteam/UX1b
   pr: https://github.com/IzbassarO/qarau/pull/53
   done_at: '2026-10-21'
-- id: UX-kk
-  area: app
-  title: Kazakh dates readable in Chrome; date tests with fixed expected strings
-  goal: 'web/ only; no new features. Owner, 2026-10-21 (Kerege rehearsal cont-20261021-021001): Chrome''s
-    ICU has no Kazakh month names, so the run list (web/src/shell/Sidebar.tsx `shortDate`) shows "M10
-    16" in kk where Node prints "16 қаз."; the inspection header date (web/src/shell/InspectionView.tsx,
-    Intl `dateStyle: ''long''`) has the same problem. UX1b round 2 then made its e2e compute the expected
-    date with the browser''s own Intl, a test that passes whatever the browser prints, and the Vitest
-    in web/src/shell/Sidebar.test.tsx does the same with Node''s Intl.
-
-
-    1. kk dates come from our own month table, never from Intl: short months қаң., ақп., нау., сәу., мам.,
-    мау., шіл., там., қыр., қаз., қар., жел.; long months қаңтар, ақпан, наурыз, сәуір, мамыр, маусым,
-    шілде, тамыз, қыркүйек, қазан, қараша, желтоқсан (CLDR kk, what Node''s full ICU prints). One date
-    helper, used by the run list and the inspection header. ru and en may keep Intl (Chrome has them)
-    as long as the strings below hold.
-
-
-    2. Expected values are fixed strings from fixtures, never computed with Intl or with the helper under
-    test. For 2026-10-16T12:00:00Z the run list shows en "16 Oct", ru "16 окт.", kk "16 қаз."; the kk
-    inspection header contains "16 қазан" and 2026. Vitest checks all 12 kk months (short and long) against
-    literal strings; the e2e (web/e2e/control-center.spec.ts) checks the fixed run-list strings in en,
-    ru and kk in Chrome, replacing its page.evaluate(Intl...) expectation, with every other assertion
-    of that test kept.
-
-
-    Tester screenshots: "/" (the run list); Kerege shoots it in ru, kk and en. No raw month number ("M10")
-    anywhere in kk.
-
-    '
-  status: todo
-- id: UX-390
-  area: app
-  title: 'Viewer layout at 390 px: hints, axis gizmo and timeline never overlap'
-  goal: 'web/ only; no new features, desktop layout unchanged. Measured 2026-10-21 on /viewer/notre-dame-p3e
-    at 390x844 (kk): the orbit hint (`.viewer-hint.orbit`) is squeezed into an 18 px wide column, one
-    word per line, over the language switch and the side panels; the axis gizmo (`.viewer-gizmo`, web/src/viewer/AxisGizmo.tsx)
-    sits on the camera stats panel; the timeline (`.viewer-timeline`) is 32 px wide; a side panel is cut
-    off at the left edge of the screen.
-
-
-    At 390x844 in en, ru and kk: the header, the hints, the gizmo, the timeline and the side panels do
-    not overlap each other (their bounding boxes do not intersect), none of them is clipped by the screen
-    edge, and hint text reads in lines of several words. The video stays visible and the canvas stays
-    black. At 1440x900 nothing moves.
-
-
-    Tests: a Playwright e2e at 390x844 for en, ru and kk asserts the boxes above pairwise do not intersect
-    and lie inside 0..390 px; the existing viewer e2e stay as they are (never loosened). Tester screenshots:
-    "/viewer/notre-dame"; Kerege shoots it at 1440x900 and 390x844, in ru, kk and en, with dev-* before
-    shots to compare the desktop.
-
-    '
-  status: todo
 - id: UX-dense
   area: app
   title: Viewer shows the COLMAP dense layer with frame links
@@ -981,28 +731,6 @@ tasks:
   branch: devteam/A1b
   pr: https://github.com/IzbassarO/qarau/pull/27
   done_at: '2026-10-17'
-- id: A7
-  area: app
-  title: Region of interest (web)
-  goal: 'Web part only (split 2026-10-17: the backend half is A7a). In top view the user draws a box around
-    the object; it is saved per site through the A7a API (docs/notes/roi-format.md) and reused for later
-    inspections of that site; the viewer can hide points outside it (toggle). i18n RU/KK/EN; unit tests
-    for the box math and save/load.
-
-
-    The work is done on branch devteam/A7 (previous work): it resumes there once A7a is merged, with dev
-    merged in, and checks itself against the real A7a routes. The tester cannot draw: make a saved box
-    visible on a route (e.g. loaded from the API) so the tester''s screenshot of /viewer/notre-dame shows
-    the box outline.
-
-    '
-  status: blocked
-  owner: dev_app
-  run: cont-20261017-123453-dev_app-4
-  branch: devteam/A7
-  blocked_reason: waits for A7a (Region of interest API); back to todo when it merges, resumes on devteam/A7
-  depends_on:
-  - A7a
 - id: A9-fix
   area: app
   title: 'Observer mode: restore the WASD travel threshold'
@@ -1040,6 +768,906 @@ tasks:
   branch: devteam/A5-fix
   pr: https://github.com/IzbassarO/qarau/pull/43
   done_at: '2026-10-18'
+# DEMO CHAIN — the brain's queue, in this order (owner 2026-10-22)
+- id: B1
+  area: core
+  title: Backend data model, roles and CRUD
+  goal: 'Today backend/app has 4 GET routes (health.py: /health; runs.py: /api/runs, /api/runs/{id}/manifest.json,
+
+    /api/runs/{id}/files/{path}) that read data/runs from disk; require_role in backend/app/auth.py checks
+    one
+
+    shared token and ignores its role argument; Postgres is only pinged by /health; no models, no Alembic.
+
+
+    Build (backend/, infra/, docs/ only):
+
+    1. SQLAlchemy 2 models + the first Alembic migration: Organization, User (role admin | engineer |
+    viewer,
+
+    hashed secret), Site, Inspection (mode quick_scan | monitoring, status), Run (one pipeline run of
+    an
+
+    inspection: run dir, status, progress), Finding (class, severity critical | watch, status, area_m2
+    nullable,
+
+    area_units, points JSON), Observation (a Finding in one frame: frame id, outline/mask path, confidence),
+
+    Decision (finding, user, verdict confirm | reject | reclass, comment, created_at), ScaleReference
+    (inspection,
+
+    kind, JSON payload, source), AuditLog (who, when, route, object, action).
+
+    2. Decision and AuditLog are INSERT-only: no PUT/PATCH/DELETE route exists (405) AND the database
+    refuses
+
+    UPDATE/DELETE (a trigger in the migration), so no code path can edit history.
+
+    3. require_role(role) checks the role for real: seeded dev users admin/engineer/viewer; viewer reads,
+    engineer
+
+    writes findings/decisions, admin manages organizations/sites/users. Every route declares a role and
+    says
+
+    it in its OpenAPI description. The shared dev token keeps working for /api/runs: the viewer must not
+    break.
+
+    4. Routes under /api: organizations, sites, inspections (list, create, get), runs by inspection, and
+    the
+
+    video upload U2 needs: POST /api/inspections/{id}/video (start: size, name -> upload id), PUT
+
+    /api/inspections/{id}/video/chunks (offset + bytes, resumable: GET returns the next offset), POST
+
+    .../video/complete (checksum verified); the file lands in the Run''s dir (QARAU_RUNS_DIR/<run>/video.<ext>;
+
+    D1 moves it to S3). Findings and decisions routes come in DEF1-api / REV1-api, not here.
+
+    Not in this task: queue or workflow (S1), S3 (D1), any UI, SSO.
+
+    Done when: `alembic upgrade head` on a fresh infra/ Postgres succeeds; backend/tests cover every route
+
+    (happy path, 401 without a token, 403 "viewer cannot write" on every write route, "decision cannot
+    be
+
+    edited": 405 on PUT/DELETE and a SQL UPDATE raises, a chunked upload with one retried chunk); /openapi.json
+
+    lists every new route; the existing /api/runs tests pass unchanged; ruff, mypy, pytest pass.
+
+    '
+  licence: SQLAlchemy, Alembic, FastAPI, Pydantic (MIT); psycopg (LGPL-3.0, dynamic use only); PostGIS
+    only as a separate unmodified server (ADR 0010).
+  status: todo
+- id: U2
+  area: app
+  title: Upload a video in the web app
+  goal: 'Today the "New inspection" dialog (NewInspectionDialog.tsx) only validates a file (type, empty)
+    and has no
+
+    upload; the list and the processing view (Sidebar, ProcessingSteps, lib/inspections.ts, lib/processing.ts)
+
+    read /api/runs. B1 adds the inspection + chunked upload routes (its OpenAPI document is the contract);
+    S1
+
+    adds the per-step status in the shape processing.ts already parses.
+
+
+    Build (web/ only):
+
+    1. "New inspection": choose a site (GET /api/sites) and a video -> POST /api/inspections -> chunked
+    upload
+
+    (PUT chunks with offset; resumable: after a failed chunk the retry asks the server for the next offset)
+    with
+
+    a progress bar (bytes, %, speed), cancel, and clear errors for unsupported type, too large, network
+    loss.
+
+    2. After the upload the inspection appears in the list with its status from the API (uploaded -> queued
+    ->
+
+    running -> done | failed once S1 exists; before S1 it stays "uploaded") and the processing view shows
+    the
+
+    steps from GET /api/inspections/{id}.
+
+    3. All text via i18n (ru/kk/en, keys.test.ts passes); no literal colours or sizes (noLiterals.test.ts).
+
+    Not in this task: signed S3 upload (D1), the v2 design (DS1), folder drag-and-drop, any backend change.
+
+    Done when: Vitest with a mocked API covers chunking, resume after a failed chunk, progress, cancel
+    and every
+
+    error; a Playwright e2e uploads a small fixture video against a mocked /api and sees it in the list;
+    tester
+
+    screenshots (ru, kk, en; light and dark) of the dialog mid-upload and of the list with the new inspection.
+
+    '
+  status: todo
+  depends_on:
+  - B1
+- id: S1
+  area: core
+  title: 'Inspection workflow: idempotent steps on a queue'
+  goal: 'Today the pipeline is a CLI run by hand (pipeline/qarau_pipeline/cli.py: run, export, quality,
+    segment,
+
+    project, dense-remote, benchmark, refresh); `run` does probe -> frames (+ quality) -> sparse (COLMAP)
+    ->
+
+    export into one run dir (data/runs/<run>/{frames,colmap,web,quality_report.json,run.json,log.txt}).
+    No
+
+    queue; backend/ never learns whether a run is going (B1''s Run.status is written by nobody yet).
+
+
+    Build (pipeline/, backend/, infra/, docs/):
+
+    1. One workflow per inspection with steps probe -> frames+quality -> sparse -> export -> [dense, only
+    when
+
+    pipeline/config.yaml enables it; never a paid call from Kerege]. A step is a plain callable `step(ctx)
+    ->
+
+    StepResult` that reads its inputs from the run dir, writes its outputs under <run>/<step>/ and is
+
+    idempotent (a finished step is a no-op unless forced). Steps know nothing about the queue: the interface
+
+    is documented in docs/architecture.md ("Workflow steps") so Temporal can replace the runner later
+    without
+
+    touching a step.
+
+    2. Runner: RQ on Valkey (ADR 0012; infra/docker-compose.yml gets valkey + worker services, no Redis).
+
+    POST /api/inspections/{id}/runs (engineer) enqueues; the worker runs the steps in order and writes
+
+    Run.status (queued | running | done | failed), current step, progress 0-100 and the step error to
+    Postgres
+
+    after every step.
+
+    3. GET /api/inspections/{id} (viewer) returns status and the step list in the shape the web app''s
+
+    processing view (A3) already parses: name, status, started_at, finished_at, duration_s, error.
+
+    4. A failed step reruns alone: POST /api/inspections/{id}/runs/{run_id}/steps/{step}/rerun (engineer)
+    runs
+
+    that step and the ones after it; earlier finished steps are not redone.
+
+    Not in this task: S3 (D1), web UI (U2 shows the progress), dense on Modal, Temporal, auto-detection.
+
+    Done when: `docker compose up` in infra/ starts valkey + worker; a data/samples video posted through
+    the
+
+    B1 upload shows step progress changing in GET /api/inspections/{id} while /health answers in < 1 s;
+    killing
+
+    the worker mid-step and restarting redoes only the unfinished step; tests cover step idempotence,
+    rerun of
+
+    one step, status transitions and the API during a long fake step; ruff, mypy, pytest pass.
+
+    '
+  licence: Valkey (BSD-3-Clause), RQ (BSD-2-Clause), redis-py client (MIT). Redis server is not used (ADR
+    0012).
+  status: todo
+  depends_on:
+  - B1
+- id: DS1
+  area: app
+  title: Design system v2 from Claude Design (tokens, bundle.css, DESIGN.md v2)
+  goal: 'Today tokens live in web/src/design/tokens.json (ADR 0018, light/dark sets, checked by tokens.test.ts
+    and
+
+    noLiterals.test.ts) and docs/design/DESIGN.md v1 states the rules. The owner produces v2 in Claude
+    Design:
+
+    tokens.json, bundle.css and DESIGN.md v2. Until this task lands, dev_app builds on the current tokens.
+
+
+    Blocked until the owner''s files exist (owner-only input): the owner puts tokens.json + bundle.css
+    into
+
+    web/src/design/ and DESIGN.md v2 into docs/design/, then moves this task to todo.
+
+
+    Build (web/ and docs/design/ only):
+
+    1. Replace the current tokens with the owner''s tokens.json; wire bundle.css into index.css (@theme)
+    so
+
+    every existing component takes its values from the new tokens; remove tokens no longer used; keep
+    the
+
+    reserved product colours (red critical, orange watch, gray not_seen, base blue) exactly as DESIGN.md
+    v2 says.
+
+    2. The shared components DESIGN.md v2 defines (button, input, table, status badge, panel, dialog)
+    as small
+
+    React components in web/src/design/, used by the existing shell (login, sidebar, dialog) so they are
+    visible.
+
+    3. tokens.test.ts / noLiterals.test.ts updated to the new file; an ADR for v2.
+
+    Not in this task: rebuilding any screen (the UI-* tasks do that), new features.
+
+    Done when: pnpm lint, typecheck, test and build pass; the existing e2e pass; no literal colour is
+    left in
+
+    web/src (noLiterals passes); tester screenshots of "/" and /viewer/notre-dame-p3e in light and dark,
+    ru/kk/en,
+
+    show the v2 palette and type.
+
+    '
+  licence: The owner's own design files; no new library.
+  status: blocked
+  writable:
+  - docs/design/
+  blocked_reason: 'waits for the owner''s design files: tokens.json + bundle.css in web/src/design/ and
+    DESIGN.md v2 in docs/design/; the owner moves it to todo when they exist'
+- id: D1
+  area: core
+  title: Storage layout on S3; data/runs is a cache
+  goal: 'Today every artefact lives on local disk under QARAU_RUNS_DIR (data/runs/<run>/...), served as
+    files by
+
+    backend/app/runs.py; infra/docker-compose.yml already runs Versity S3 Gateway (ADR 0006) but nothing
+
+    writes to it.
+
+
+    Build (pipeline/, backend/, infra/, docs/):
+
+    1. S3 layout <org>/<site>/<inspection>/{video,frames,sparse,dense,bundle}/..., written by the S1 steps
+
+    through one small storage module (boto3, Apache-2.0: put/get/list/signed_url); bucket and credentials
+    from
+
+    env (.env.example documents them); dev = Versity, cloud = S3, the same code.
+
+    2. data/runs becomes a local cache only: a step downloads what it lacks and uploads its outputs when
+    done;
+
+    wiping the cache loses nothing. The B1 upload lands in .../video/ directly.
+
+    3. The viewer loads the bundle through short-lived signed URLs: GET /api/runs/{id}/manifest.json and
+
+    /files/{path} keep their shape and either redirect (302) to a signed URL or stream, behind one setting;
+    the
+
+    existing web viewer works unchanged against both (backend tests with a fake S3: moto, Apache-2.0,
+    or the
+
+    infra/ Versity).
+
+    4. docs/architecture.md: the layout, what is immutable (video, frames) and what is rebuilt (sparse,
+    dense,
+
+    bundle); an ADR for the layout.
+
+    Not in this task: lifecycle rules, multi-region, one bucket per customer (M5), any UI.
+
+    Done when: a full S1 run on a sample video leaves every artefact in Versity under the layout above
+    (an S3
+
+    listing in the PR) and `rm -rf data/runs/<run>` followed by a viewer load still works; tests for put/get/
+
+    signed URL, the redirect route and the cache-miss path; ruff, mypy, pytest pass.
+
+    '
+  licence: boto3 (Apache-2.0), Versity S3 Gateway (Apache-2.0), moto (Apache-2.0) if used in tests.
+  status: todo
+  depends_on:
+  - S1
+- id: DEF1-api
+  area: core
+  title: Manual finding with evidence frames
+  goal: 'Automatic defect detection (SAM in pipeline/qarau_pipeline/segmentation.py and projection.py,
+    training,
+
+    DEF2) is STOPPED until Kubernetes (owner, 2026-10-22; LATER section): findings are marked by an engineer.
+
+    Today there is no Finding route (B1 creates the tables). pipeline/qarau_pipeline/visibility.py already
+
+    links points to the frames that see them (vis_links, rank_links, read_vis; ADR 0017).
+
+
+    Build (pipeline/, backend/, docs/):
+
+    1. POST /api/inspections/{id}/findings (engineer): class from a fixed list (corrosion, crack, leak,
+
+    deformation, coating, other), severity critical | watch, optional comment, and the region: a polygon
+    in map
+
+    coordinates (>= 3 xyz vertices) or a list of bundle point indices. The server selects the bundle points
+
+    inside the region.
+
+    2. Area from the selected points (hull of the region in its best-fit plane) in bundle units; converted
+    to m²
+
+    only when the inspection has a ScaleReference (B1 table; none exists before P5a-1, which is LATER).
+
+    Otherwise area_m2 is null, area_units is set and the response says scale "not set". Never a metre
+    value
+
+    without a scale.
+
+    3. Evidence: the 3 best frames for the region from visibility.py''s frame<->point links (most selected
+    points
+
+    visible, spread in viewpoint), each with the region projected into the frame as an outline polygon
+    (JSON,
+
+    no raster mask), stored as Observations with confidence 1.0 (manual).
+
+    4. GET /api/inspections/{id}/findings and GET /api/findings/{id} (viewer): class, severity, status,
+    area +
+
+    scale source, 3D points, evidence frames with outlines and the frame image URL.
+
+    Not in this task: any segmentation model, decisions (REV1-api), UI (UI-mark, UI-evidence), coverage.
+
+    Done when: on data/runs/notre-dame-p3e a POST with a polygon over the facade returns a finding with
+    3 frames
+
+    whose outlines fall on the facade (a test renders them with OpenCV under data/ and the PR shows the
+    images);
+
+    area says scale not set; tests cover point selection, area without and with a fake ScaleReference,
+    frame
+
+    ranking, 403 for a viewer; ruff, mypy, pytest pass.
+
+    '
+  status: todo
+  depends_on:
+  - B1
+- id: UI-inspections
+  area: app
+  title: Inspections list per DESIGN.md v2
+  goal: 'Today the sidebar lists runs by site (Sidebar.tsx, InspectionView.tsx) from /api/runs in the
+    v1 look. B1 and
+
+    S1 give GET /api/inspections (object, date, status; findings count once DEF1-api exists); DS1 gives
+    the v2
+
+    tokens and components.
+
+
+    Build (web/ only): the inspections list per DESIGN.md v2 as the start page: one row per inspection
+    with
+
+    object (site name), date, status badge (uploaded | queued | running | done | failed, from the API),
+    findings
+
+    count ("—" when the API has none yet) and one button: "Open map" when done, "Show progress" while
+    running,
+
+    "Retry" when failed (the S1 rerun route). Newest first; an empty state; U2''s "New inspection" button
+    at the
+
+    top. The viewer route is untouched.
+
+    Not in this task: filters, search, pagination beyond 50 (show a count), the evidence panel.
+
+    Done when: Vitest for the row states, the button per status and the empty state with a mocked API;
+    a
+
+    Playwright e2e for the list against a mocked /api; i18n keys in ru/kk/en; tester screenshots of "/"
+    in light
+
+    and dark, ru/kk/en, with one inspection in each status (fixture).
+
+    '
+  status: todo
+  depends_on:
+  - DS1
+  - U2
+- id: REV1-api
+  area: core
+  title: 'Decisions: append-only confirm / reject / reclass'
+  goal: 'Today nothing records who confirmed or rejected a finding. B1 creates the append-only Decision
+    table (the
+
+    DB refuses UPDATE/DELETE), DEF1-api creates findings. The decision log is the future training set
+    (CLAUDE.md,
+
+    trust rules): never lost, never edited.
+
+
+    Build (backend/, docs/):
+
+    1. POST /api/findings/{id}/decisions (engineer): verdict confirm | reject | reclass (reclass carries
+    the new
+
+    class and/or severity), comment (required for reject and reclass), user from the session, server time.
+
+    Inserts only. The finding''s current status/class/severity are derived from the latest decision; the
+    history
+
+    is untouched.
+
+    2. GET /api/findings/{id}/decisions (viewer): the full history, oldest first (user, verdict, comment,
+
+    created_at). No PUT/PATCH/DELETE route (405).
+
+    3. One AuditLog row per decision; both routes and their roles are in the OpenAPI document.
+
+    Not in this task: UI (UI-evidence), bulk decisions, notifications, an edit or undo of any kind.
+
+    Done when: tests show a viewer gets 403 on POST; an engineer''s confirm then reject gives a history
+    of 2 and
+
+    status rejected; UPDATE/DELETE via SQL raise; the same POST twice makes two rows (no dedup); /openapi.json
+    has
+
+    both routes; ruff, mypy, pytest pass.
+
+    '
+  status: todo
+  depends_on:
+  - DEF1-api
+- id: UI-evidence
+  area: app
+  title: Evidence panel with decisions
+  goal: 'Today clicking a point in the viewer shows the frames that see it (A6, UX-dense) but there are
+    no findings
+
+    and no decisions. DEF1-api gives findings with 3 evidence frames, outline polygons and area + scale
+    source;
+
+    REV1-api gives POST/GET decisions.
+
+
+    Build (web/ only): the evidence panel of the viewer spec (viewer-3d.md): click a finding (red/orange
+    points) ->
+
+    panel with class, severity, status, area ("1.2 m²", or "<n> units · scale not set"), the 3 frames
+    with the
+
+    outline drawn over them (SVG polygon from the API, no raster), confidence, and the decision log (user,
+
+    verdict, comment, time; oldest first; no edit or delete UI anywhere). Confirm / Reject / Reclass with
+    a
+
+    comment field (required for reject and reclass) -> POST decision, then the log and the status refresh.
+
+    Viewers (role) see the panel without the buttons.
+
+    Not in this task: marking a new finding (UI-mark), automatic findings, the PDF.
+
+    Done when: Vitest for the panel states, the outline overlay math, role-based buttons and the POST
+    with a
+
+    mocked API; an e2e in the viewer on a fixture bundle with a mocked finding; i18n ru/kk/en; tester
+
+    screenshots of /viewer/notre-dame-p3e with the panel open (light and dark, ru/kk/en).
+
+    '
+  status: todo
+  depends_on:
+  - DS1
+  - DEF1-api
+  - REV1-api
+- id: RPT1
+  area: core
+  title: PDF inspection report
+  goal: 'Today there is no report. After DEF1-api and REV1-api the inputs exist: inspection, findings
+    with evidence
+
+    frames and outlines, decisions, area with its scale source.
+
+
+    Build (pipeline/ for the generator, backend/ for the route, docs/):
+
+    1. One command `uv run python -m qarau_pipeline report --inspection <id> --lang ru|kk|en --out <pdf>`
+    and
+
+    GET /api/inspections/{id}/report.pdf?lang= (viewer) producing the same file. HTML template -> PDF
+
+    (WeasyPrint, BSD-3-Clause, or ReportLab, BSD; name the licence in the PR); all strings in one translations
+
+    file, no hard-coded text; fonts embedded.
+
+    2. Content, in order: object (organization, site, inspection, date, engineer of the last decision,
+    report
+
+    time); map snapshot (a headless render of the bundle from a fixed camera; say how in an ADR); per
+    finding:
+
+    class, severity, status, area + scale source ("scale not set" when none), the 3 evidence frames with
+
+    outlines, that finding''s decision log; a "Not-seen areas" section that says "coverage not computed"
+    until
+
+    COV1 fills it; footer with engineer and time.
+
+    3. The PDF''s SHA-256 and generation time go into a Report table (new Alembic migration) and into
+    the
+
+    response headers; the same inputs give the same hash (no clock inside the PDF other than the report
+    time
+
+    field).
+
+    Not in this task: XLSX, work orders, e-mail, signatures, coverage computation (COV1).
+
+    Done when: a report for notre-dame-p3e with 2 manual findings opens in a PDF viewer with every section
+    above
+
+    (page images in the PR), in ru, kk and en; tests check the sections, the three languages, the stored
+    hash
+
+    and that a viewer can GET it while no token is 401; ruff, mypy, pytest pass.
+
+    '
+  licence: WeasyPrint (BSD-3-Clause) or ReportLab (BSD-3-Clause); IBM Plex fonts (OFL-1.1).
+  status: todo
+  depends_on:
+  - REV1-api
+- id: UI-mark
+  area: app
+  title: Mark a region on the 3D map as a finding
+  goal: 'Today nothing in the viewer creates a finding. DEF1-api accepts POST /api/inspections/{id}/findings
+    with a
+
+    polygon in map coordinates; UI-evidence shows the result.
+
+
+    Build (web/ only): a "Mark finding" mode in the viewer: the engineer draws a polygon on the point
+    cloud
+
+    (click vertices on the surface by raycast onto points, double-click closes, Esc cancels, undo the
+    last
+
+    vertex), picks class and severity in a small form, optional comment -> POST finding -> the new finding
+
+    appears on the map (red/orange points) and the evidence panel opens on it. Viewers (role) do not see
+    the
+
+    mode. Mouse and trackpad both work; the polygon math lives in a pure module.
+
+    Not in this task: free-hand lasso, editing a region after creation, marking on 2D frames.
+
+    Done when: Vitest for the polygon module (closing, undo, minimum 3 vertices, degenerate polygons)
+    and the
+
+    form; a Playwright e2e draws 4 vertices on a fixture bundle with a mocked API and asserts the POST
+    body and
+
+    the finding on screen; i18n ru/kk/en; tester screenshots of the mode mid-drawing and after saving
+    (light and
+
+    dark, ru/kk/en).
+
+    '
+  status: todo
+  depends_on:
+  - UI-evidence
+- id: UI-report
+  area: app
+  title: Report preview page and PDF download
+  goal: 'Today there is no report in the web app. RPT1 gives GET /api/inspections/{id}/report.pdf?lang=
+    (its hash in
+
+    the headers); DS1 gives the v2 look.
+
+
+    Build (web/ only): a report page per inspection (/inspections/:id/report): a summary of what the PDF
+
+    contains (object, date, findings by severity with status and who decided, scale source, the coverage
+    line
+
+    or "coverage not computed"), a language choice (ru/kk/en -> the PDF''s lang), an inline preview (the
+
+    browser''s PDF viewer in an iframe) and "Download PDF" with the hash shown next to it. States: generating,
+
+    ready, failed with the API''s message. Linked from the inspections list ("Report" when done) and the
+    viewer.
+
+    Not in this task: editing the report, XLSX, e-mail.
+
+    Done when: Vitest for the summary and the three states with a mocked API; a Playwright e2e opens the
+    page on
+
+    a mocked API and downloads a fixture PDF; i18n ru/kk/en; tester screenshots of the page in light and
+    dark,
+
+    ru/kk/en.
+
+    '
+  status: todo
+  depends_on:
+  - RPT1
+  - DS1
+- id: D2
+  area: core
+  title: 'Deploy staging: one VM, compose, HTTPS, backups'
+  goal: 'Today infra/docker-compose.yml runs postgres + s3 (Versity) only, for dev; nothing is deployed
+    anywhere.
+
+    Owner (2026-10-22): product first, website + deploy before metres.
+
+
+    Build (infra/, docs/; Kerege spends nothing, the VM is the owner''s):
+
+    1. infra/docker-compose.staging.yml with api, worker (S1), web (static build behind a reverse proxy),
+
+    postgres, valkey, versity; .env.staging.example; Caddy (Apache-2.0) in front with automatic HTTPS
+    and the
+
+    app login (plus basic-auth while there is no public URL); no public sign-up.
+
+    2. infra/deploy.sh: run by the owner on a fresh Ubuntu VM (install docker + compose, pull, migrate,
+    start,
+
+    print the URL); idempotent. infra/backup.sh: nightly dump of Postgres and a dated copy of the S3 data,
+
+    keeps 14 days; infra/restore.sh restores one; both documented.
+
+    3. docs/notes/deploy-staging.md: steps, ports, where backups go, how to roll back, the estimated monthly
+
+    cost per component and which providers keep Kazakhstan data in Kazakhstan.
+
+    4. infra/smoke.sh: upload a sample video through the API, wait for the S1 workflow, GET the manifest;
+    exit
+
+    0 only when the map is served.
+
+    Not in this task: Kubernetes, GPU workers, SSO, monitoring stacks, a paid account of any kind.
+
+    Done when: everything above runs locally (Docker Compose on the dev machine, Caddy with internal TLS)
+    and
+
+    smoke.sh passes there; `docker compose config` validates; a backup + restore round-trip on a local
+    Postgres
+
+    passes in a test; the docs are complete. The VM itself is an owner-only step: the owner approves the
+
+    spending and runs deploy.sh and smoke.sh on the server; Kerege never creates an account or pays.
+
+    '
+  licence: Caddy (Apache-2.0), Docker Compose. No paid service is created by Kerege.
+  status: todo
+  depends_on:
+  - S1
+  - U2
+- id: COV1
+  area: core
+  title: 'Coverage: inspected_ok / finding / not_seen regions'
+  goal: 'Today coverage is not computed. CLAUDE.md fixes the states: inspected_ok (blue), finding (red/orange),
+
+    not_seen (gray); not_seen is never presented as OK; docs/design/viewer-3d.md plans the coverage layer.
+
+
+    Build (pipeline/, backend/, docs/):
+
+    1. A `coverage` step after export in the S1 workflow: the bundle''s points are split into regions
+    (a voxel
+
+    grid in bundle units, size in pipeline/config.yaml); a region is inspected_ok when enough frames see
+    it with
+
+    usable quality (camera frustums from the COLMAP poses + the quality report + a point-density threshold,
+    all
+
+    in config), finding when a Finding''s points fall in it, else not_seen. Written as
+
+    <run>/coverage/regions.json (bounds, state, frame count) and as CoverageRegion rows (new Alembic
+
+    migration).
+
+    2. GET /api/inspections/{id}/coverage (viewer): the regions with state and totals (% per state). The
+    bundle
+
+    gets a per-point coverage array (ADR 0003 arrays) so a later UI task can colour it.
+
+    3. RPT1''s "Not-seen areas" section lists the not_seen regions (count, bounds, nearest frames) instead
+    of the
+
+    placeholder.
+
+    Not in this task: viewer UI for the layer, dense-based coverage, comparing inspections (M4).
+
+    Done when: on notre-dame-p3e regions.json shows all three states and the report lists the not-seen
+    regions
+
+    (a synthetic test with a known frustum proves the geometry; a real run proves the plumbing); tests
+    for the
+
+    frustum check, the thresholds and the API; ruff, mypy, pytest pass.
+
+    '
+  status: todo
+  depends_on:
+  - RPT1
+# LATER — off the demo chain, not planned by the brain
+- id: P5a-1
+  area: core
+  title: Metric scale from a measured distance, and gravity
+  goal: 'The user marks two points in two or more frames and gives the distance between them in metres
+    (a JSON scale reference, docs/notes/scale-reference-format.md); the map is scaled to metres and rotated
+    so gravity points down (camera up estimate, refined by the floor plane). The export records metric,
+    scale source, gravity source and scale error; the benchmark reports scale_err_cm for a video that
+    has a reference. Not in this task: the reference sheet (P5a-2). The branch devteam/P5a-1 already has
+    the first draft from P5a (scale.py, ADR 0018, tests; never checked): finish and verify it, and leave
+    the sheet (Letter / A4) reference kind out of this branch (it comes back in P5a-2).
+
+    '
+  status: later
+  blocked_reason: 'LATER (owner 2026-10-22): metres come after the product (website + deploy); until then
+    every area is ''scale not set'''
+- id: P5a-2
+  area: core
+  title: Metric scale from a reference sheet (Letter, A4 or custom)
+  goal: 'A paper sheet of known size as the scale reference: the user marks its four corners in order
+    in two or more frames; the scale is fitted to the four edges and two diagonals (both orientations),
+    and the fit residual is reported as the scale error. The sheet size is a parameter of the scale reference
+    (docs/notes/scale-reference-format.md): letter = 215.9 x 279.4 mm (the default: the owner is in the
+    US), a4 = 210 x 297 mm, or custom = width x height in mm. Reuses the reference format, triangulation
+    and alignment of P5a-1; a first draft of the A4 fit (hard-coded 210 x 297 mm) is in commit b26082f
+    on branch devteam/P5a. Automatic detection of the sheet in images is not in this task.
+
+
+    Acceptance:
+
+    - Without a size the sheet is letter; a4 and custom width x height in mm are accepted; an unknown
+    size name or a non-positive custom size is a clear error.
+
+    - The run report (and the export metadata) shows which sheet size was used: its name and its dimensions
+    in mm (e.g. "letter 215.9 x 279.4 mm").
+
+    - Tests: synthetic scenes with a letter sheet and with an a4 sheet each recover the known scale; the
+    custom size is parsed and validated.
+
+    - docs/notes/scale-reference-format.md documents the size parameter and its default.
+
+    - ruff, mypy and pytest pass.
+
+    '
+  status: later
+  depends_on:
+  - P5a-1
+  blocked_reason: 'LATER (owner 2026-10-22): metres come after the product; waits for P5a-1'
+- id: P7
+  area: core
+  title: Accuracy check with AprilTag markers
+  goal: 'Detect printed AprilTags (tag36h11) in the video, use their known printed size for metric scale,
+    and report the scale error in cm in the P1 benchmark. Include a printable tag sheet and filming instructions
+    in docs.
+
+    '
+  licence: 'OpenCV ArUco module with the AprilTag dictionaries (Apache-2.0, already a pipeline dependency)
+    - no new library. Alternative: AprilRobotics/apriltag (BSD-2-Clause).
+
+    '
+  status: later
+  blocked_reason: 'LATER (owner 2026-10-22): superseded by ACC1 (accuracy vs tape on the owner''s videos)'
+- id: P4a-2b
+  area: core
+  title: Depth Anything V2 Small depth prior (estimated points)
+  goal: 'Split from P4a-2 on 2026-10-21 (owner); later, after the first real COLMAP dense run. A depth-prior
+    stage behind the Densifier interface, starting from branch wip/dense-stage (its ADR 0008, unverified
+    WIP). Model: Depth Anything V2 **Small only** (depth-anything/Depth-Anything-V2-Small-hf, Apache-2.0);
+    Base and Large are CC-BY-NC (non-commercial) and must never be loaded: the code refuses any other
+    model id, with a test.
+
+
+    Its points are estimated, not measured: every one is marked `estimated` in the viewer bundle (own
+    arrays or a per-point flag, ADR 0003), is visually distinct from COLMAP points in the viewer, and
+    is excluded from every measurement (area, extent, scale) and from coverage counted as seen. Tests
+    check the flag in the bundle and that measurement ignores flagged points.
+
+    '
+  licence: 'Depth Anything V2 Small code and weights: Apache-2.0 (owner confirmed 2026-10-15). Base/Large:
+    CC-BY-NC-4.0, forbidden.
+
+    '
+  status: later
+  depends_on:
+  - P4a-2a-run
+  blocked_reason: 'LATER (owner 2026-10-22): depth prior is part of automatic detection work, stopped
+    until Kubernetes'
+- id: P4c
+  area: core
+  title: Dense only inside the region of interest
+  goal: 'When a site has a region of interest (A7), dense reconstruction and the later stages process
+
+    only the frames and points that see it; camera poses still use all frames. Without a region
+
+    the pipeline runs as before. Tests on a synthetic scene with a box; benchmark unchanged for
+
+    videos without a region.
+
+    '
+  status: later
+  depends_on:
+  - P4a-2a-run
+  - A7
+  blocked_reason: 'LATER (owner 2026-10-22): needs the region of interest (A7) and dense; off the demo
+    chain'
+- id: A7a
+  area: core
+  title: Region of interest API
+  goal: 'Backend half of A7 (split 2026-10-17: dev_app may not edit backend/). Only backend/ and docs/.
+    The contract is docs/notes/roi-format.md; the web part on branch devteam/A7 already calls these routes.
+    The stored JSON (version 1): {version: 1, site_id, source_run, frame (e.g. "reconstruction"), up_axis,
+    min: [x, y, z], max: [x, y, z], created_at, created_by}; all fields required, other fields ignored
+    and dropped on rewrite.
+
+    - FastAPI routes GET / PUT / DELETE /api/sites/{site_id}/roi. Each declares its role with the existing
+    require_role dependency (backend/app/auth.py): GET viewer (200 JSON, 404 when none is saved), PUT
+    editor (validate, site_id must match the path, save, 200 with the JSON; bad body 422, body over 64
+    KiB 413), DELETE editor (204, also when already absent).
+
+    - A Pydantic v2 model for ROI version 1: required fields, finite numbers, min <= max per axis, ISO
+    8601 created_at with a timezone, up_axis x|y|z.
+
+    - Atomic write into the run catalog: <QARAU_RUNS_DIR>/sites/<site_id>/roi.json through a uniquely
+    named temp file in the same directory and os.replace. Corrupt stored JSON is an error (500), never
+    reported as absent.
+
+    - Path-traversal checks: site ids match [A-Za-z0-9][A-Za-z0-9._:-]* without ''..''; encoded separators,
+    traversal and symlinked site directories or files are rejected (400).
+
+    - backend/tests/test_roi.py covers each route, roles and the shared-token auth, validation, the atomic
+    write, traversal and symlinks; ruff, mypy and pytest pass.
+
+    '
+  licence: 'FastAPI (MIT) and Pydantic (MIT), already backend dependencies; no new library.
+
+    '
+  status: later
+  blocked_reason: 'LATER (owner 2026-10-22): region of interest is off the demo chain'
+- id: A7
+  area: app
+  title: Region of interest (web)
+  goal: 'Web part only (split 2026-10-17: the backend half is A7a). In top view the user draws a box around
+    the object; it is saved per site through the A7a API (docs/notes/roi-format.md) and reused for later
+    inspections of that site; the viewer can hide points outside it (toggle). i18n RU/KK/EN; unit tests
+    for the box math and save/load.
+
+
+    The work is done on branch devteam/A7 (previous work): it resumes there once A7a is merged, with dev
+    merged in, and checks itself against the real A7a routes. The tester cannot draw: make a saved box
+    visible on a route (e.g. loaded from the API) so the tester''s screenshot of /viewer/notre-dame shows
+    the box outline.
+
+    '
+  status: later
+  owner: dev_app
+  run: cont-20261017-123453-dev_app-4
+  branch: devteam/A7
+  blocked_reason: 'LATER (owner 2026-10-22): region of interest is off the demo chain (its work stays
+    on devteam/A7)'
+  depends_on:
+  - A7a
+- id: O1a
+  area: core
+  title: Organizations and sites API
+  goal: 'Backend half of O1 (split 2026-10-18: dev_app may not edit backend/). Only backend/ and docs/.
+    Organization and Site SQLAlchemy models (Site: name, optional lat/lon) through an Alembic migration
+    (Alembic comes with D1). Seed the organization "Syracuse University" with zero sites (no invented
+    demo sites). Two authenticated routes, each declaring its role with the existing require_role dependency
+    (backend/app/auth.py): GET /api/organizations/{id} and GET /api/organizations/{id}/sites (sites with
+    nullable coordinates). backend/tests cover the seed, the empty site list, an unknown organization
+    (404) and the auth requirement; ruff, mypy and pytest pass.
+
+    '
+  licence: 'SQLAlchemy and Alembic (MIT), FastAPI and Pydantic (MIT): already used or added by D1.
+
+    '
+  status: later
+  depends_on:
+  - D1
+  blocked_reason: 'LATER (owner 2026-10-22): organization map is off the demo chain; B1 brings organizations
+    and sites instead'
 - id: O1
   area: app
   title: Organization map (web)
@@ -1052,23 +1680,90 @@ tasks:
     empty state and click navigation; tester screenshot of the organization page.
 
     '
-  status: blocked
-  blocked_reason: waits for O1a (Organizations and sites API); back to todo when it merges
+  status: later
+  blocked_reason: 'LATER (owner 2026-10-22): organization map is off the demo chain'
   depends_on:
   - O1a
-- id: U2
-  area: app
-  title: Upload a video in the web app
-  goal: 'web/ only. "New inspection" uploads a video to the D1/S1 API with an upload progress bar, a clear
-    error for unsupported or too large files and a retry when the upload fails; then it shows the job''s
-    per-stage progress from the S1 API by reusing the A3 processing status view, and opens the map when
-    the job is done. All text via i18n (RU/KK/EN); unit tests with a mocked API; tester screenshots of
-    the upload screen and the progress view.
+- id: P5b
+  area: core
+  title: Drone telemetry reader (GPS, DJI SRT)
+  goal: 'Read per-frame GPS / DJI SRT telemetry into the capture so scale and georeference can come from
+    it later. Tested on a sample SRT file.
 
     '
-  depends_on:
-  - S1
-  status: todo
+  status: later
+  blocked_reason: 'LATER (owner 2026-10-22): drone telemetry is after the first market demo'
+- id: P6
+  area: core
+  title: Point confidence and honest display
+  goal: 'Every point gets a confidence score from number of views, triangulation angle, reprojection error
+    and multi-view consistency, stored in the bundle. Low-confidence points are hidden or shown grey as
+    "uncertain". Holes are shown as "not reconstructed", never filled for looks. Estimated (prior-based)
+    geometry is marked and excluded from measurements.
+
+    '
+  licence: 'Own code on NumPy (BSD-3-Clause), pycolmap/COLMAP (BSD-3-Clause; check the licences of libraries
+    bundled in the pycolmap wheel), Open3D if needed (MIT).
+
+    '
+  status: later
+  blocked_reason: 'LATER (owner 2026-10-22): point confidence display is not on the demo chain'
+- id: UX-kk
+  area: app
+  title: Kazakh dates readable in Chrome; date tests with fixed expected strings
+  goal: 'web/ only; no new features. Owner, 2026-10-21 (Kerege rehearsal cont-20261021-021001): Chrome''s
+    ICU has no Kazakh month names, so the run list (web/src/shell/Sidebar.tsx `shortDate`) shows "M10
+    16" in kk where Node prints "16 қаз."; the inspection header date (web/src/shell/InspectionView.tsx,
+    Intl `dateStyle: ''long''`) has the same problem. UX1b round 2 then made its e2e compute the expected
+    date with the browser''s own Intl, a test that passes whatever the browser prints, and the Vitest
+    in web/src/shell/Sidebar.test.tsx does the same with Node''s Intl.
+
+
+    1. kk dates come from our own month table, never from Intl: short months қаң., ақп., нау., сәу., мам.,
+    мау., шіл., там., қыр., қаз., қар., жел.; long months қаңтар, ақпан, наурыз, сәуір, мамыр, маусым,
+    шілде, тамыз, қыркүйек, қазан, қараша, желтоқсан (CLDR kk, what Node''s full ICU prints). One date
+    helper, used by the run list and the inspection header. ru and en may keep Intl (Chrome has them)
+    as long as the strings below hold.
+
+
+    2. Expected values are fixed strings from fixtures, never computed with Intl or with the helper under
+    test. For 2026-10-16T12:00:00Z the run list shows en "16 Oct", ru "16 окт.", kk "16 қаз."; the kk
+    inspection header contains "16 қазан" and 2026. Vitest checks all 12 kk months (short and long) against
+    literal strings; the e2e (web/e2e/control-center.spec.ts) checks the fixed run-list strings in en,
+    ru and kk in Chrome, replacing its page.evaluate(Intl...) expectation, with every other assertion
+    of that test kept.
+
+
+    Tester screenshots: "/" (the run list); Kerege shoots it in ru, kk and en. No raw month number ("M10")
+    anywhere in kk.
+
+    '
+  status: later
+  blocked_reason: 'LATER (owner 2026-10-22): polish; off the demo chain until the v2 design (DS1) lands'
+- id: UX-390
+  area: app
+  title: 'Viewer layout at 390 px: hints, axis gizmo and timeline never overlap'
+  goal: 'web/ only; no new features, desktop layout unchanged. Measured 2026-10-21 on /viewer/notre-dame-p3e
+    at 390x844 (kk): the orbit hint (`.viewer-hint.orbit`) is squeezed into an 18 px wide column, one
+    word per line, over the language switch and the side panels; the axis gizmo (`.viewer-gizmo`, web/src/viewer/AxisGizmo.tsx)
+    sits on the camera stats panel; the timeline (`.viewer-timeline`) is 32 px wide; a side panel is cut
+    off at the left edge of the screen.
+
+
+    At 390x844 in en, ru and kk: the header, the hints, the gizmo, the timeline and the side panels do
+    not overlap each other (their bounding boxes do not intersect), none of them is clipped by the screen
+    edge, and hint text reads in lines of several words. The video stays visible and the canvas stays
+    black. At 1440x900 nothing moves.
+
+
+    Tests: a Playwright e2e at 390x844 for en, ru and kk asserts the boxes above pairwise do not intersect
+    and lie inside 0..390 px; the existing viewer e2e stay as they are (never loosened). Tester screenshots:
+    "/viewer/notre-dame"; Kerege shoots it at 1440x900 and 390x844, in ru, kk and en, with dev-* before
+    shots to compare the desktop.
+
+    '
+  status: later
+  blocked_reason: 'LATER (owner 2026-10-22): polish; off the demo chain until the v2 design (DS1) lands'
 - id: A8
   area: app
   title: Walk mode
@@ -1081,8 +1776,30 @@ tasks:
     Unit tests for floor following; tester screenshots of /viewer/room in Walk mode.
 
     '
-  status: todo
+  status: later
   depends_on:
   - A6
   - P5a-1
   - U2
+  blocked_reason: 'LATER (owner 2026-10-22): walk mode needs metric scale (P5a-1), which is LATER'
+- id: ACC1
+  area: core
+  title: Accuracy vs tape measure on the owner's videos
+  goal: 'LATER (owner, 2026-10-22): after P5a-2 and after the owner films objects with a tape measure
+    in frame.
+
+    Compare distances and areas measured on the map (with a ScaleReference) against tape values on the
+    owner''s
+
+    videos; report mean and max error in cm and % in docs/notes/accuracy.md and in the benchmark as
+
+    scale_err_cm. Replaces P7 (AprilTags). Not planned until the owner provides the videos and moves it
+    to
+
+    todo.
+
+    '
+  status: later
+  depends_on:
+  - P5a-2
+  blocked_reason: 'LATER (owner 2026-10-22): after P5a-2 and the owner''s tape-measure videos'

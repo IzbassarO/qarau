@@ -12,13 +12,12 @@ KK_SHORT = "қаң., ақп., нау., сәу., мам., мау., шіл., та�
 
 
 @pytest.mark.backlog
-def test_ux_kk_and_ux_390_come_right_after_ux1b_for_dev_app():
+def test_ux_kk_and_ux_390_are_parked_later_and_still_plannable_by_dev_app():
     tasks = real_backlog()
-    app = [t["id"] for t in tasks if t["area"] == "app"]
-    assert app[app.index("UX1b") + 1 : app.index("UX1b") + 3] == ["UX-kk", "UX-390"]
     by = {t["id"]: t for t in tasks}
-    for tid in ("UX-kk", "UX-390"):
+    for tid in ("UX-kk", "UX-390"):  # owner 2026-10-22: polish waits for the v2 design (DS1)
         t = by[tid]
+        assert t["blocked_reason"].startswith("LATER")
         assert "web/ only" in t["goal"] and not t.get("depends_on")
         assert outside_paths([t["goal"]], "dev_app", CFG, t) == []  # no split needed
 

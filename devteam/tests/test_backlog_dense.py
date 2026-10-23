@@ -13,7 +13,7 @@ def test_ux_dense_and_p4a_3_are_plannable_by_their_developers():
     by = {t["id"]: t for t in tasks}
     ids = [t["id"] for t in tasks]
     assert ids.index("P4a-3") == ids.index("P4a-2a-run") + 1
-    assert ids.index("UX-dense") == ids.index("UX-390") + 1
+    assert "UX-dense" in ids  # UX-390 went LATER on 2026-10-22, UX-dense stays where it merged
     for tid, dev in (("UX-dense", "dev_app"), ("P4a-3", "dev_pipeline")):
         t = by[tid]
         assert t["area"] in CFG["developers"][dev]["areas"] and not t.get("depends_on")
