@@ -275,18 +275,29 @@ def rehearse(cmd: list[str] | None = None) -> int:
     ).stdout  # fmt: skip
     subprocess.run([*git, "update-ref", "--stdin"], input=refs, check=True, text=True)
     team = make_team(True)  # seeds the fake backlog and remote again
-    tasks = team.load_backlog()
-    done = {t["id"] for t in tasks if t["status"] == "done"}
-    ready = [
-        t
-        for t in tasks
-        if t["status"] == "todo"
-        and not t.get("owner_only")
-        and set(t.get("depends_on") or []) <= done
-    ]
-    firsts = (next((t["id"] for t in ready if t.get("area") in d["areas"]), None)
-              for d in team.cfg["developers"].values())  # fmt: skip
-    pick = [tid for tid in firsts if tid]
+
+    def plannable() -> list[str]:
+        tasks = team.load_backlog()
+        done = {t["id"] for t in tasks if t["status"] == "done"}
+        ready = [
+            t
+            for t in tasks
+            if t["status"] == "todo"
+            and not t.get("owner_only")
+            and set(t.get("depends_on") or []) <= done
+        ]
+        firsts = (next((t["id"] for t in ready if t.get("area") in d["areas"]), None)
+                  for d in team.cfg["developers"].values())  # fmt: skip
+        return [tid for tid in firsts if tid]
+
+    pick = plannable()
+    if not pick:  # every open task waits on a blocked one (2026-10-23: S1, DEF1-api and U2
+        # blocked by limits held the whole chain): the machinery is rehearsed on the fixture
+        # backlog instead; fake agents never read a task's text anyway
+        fixture = Path(__file__).parents[1] / "tests" / "backlog.yaml"
+        console.print(f"rehearse: nothing plannable in devteam/backlog.yaml; using {fixture}")
+        shutil.copy(fixture, team.backlog_path)
+        pick = plannable()
     if not pick:
         refuse("nothing to rehearse: no plannable todo task")
     only, t0 = ",".join(pick), time.time()

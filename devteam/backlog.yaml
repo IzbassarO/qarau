@@ -884,11 +884,12 @@ tasks:
     screenshots (ru, kk, en; light and dark) of the dialog mid-upload and of the list with the new inspection.
 
     '
-  status: in_progress
+  status: todo
   depends_on:
   - B1
   owner: dev_app
   run: cont-20261023-094355-dev_app-1
+  branch: devteam/U2
 - id: S1
   area: core
   title: 'Inspection workflow: idempotent steps on a queue'
@@ -959,7 +960,8 @@ tasks:
   depends_on:
   - B1
   owner: dev_pipeline
-  run: cont-20261023-094355-dev_pipeline-1
+  run: run-20261023-171202
+  branch: devteam/S1
 - id: DS1
   area: app
   title: Design system v2 from Claude Design (tokens, bundle.css, DESIGN.md v2)
@@ -1132,6 +1134,9 @@ tasks:
   status: todo
   depends_on:
   - B1
+  owner: dev_pipeline
+  run: cont-20261023-094355-dev_pipeline-2
+  branch: devteam/DEF1-api
 - id: UI-inspections
   area: app
   title: Inspections list per DESIGN.md v2

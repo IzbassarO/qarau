@@ -289,21 +289,41 @@ def screenshots(
             if team.writes_runs(s["task"])
             else team.home / "bench-dev" / s["task"]["id"]
         )
-    srv = subprocess.Popen(  # {runs_dir}: config runs_dir (QARAU_RUNS_DIR), read-only here
-        sc["serve"].format(  # {runs}: the runs this task's screenshots show (pipeline tasks)
-            data=shlex.quote(str(team.root / "data")),
-            runs_dir=shlex.quote(str(team.runs_dir)),
-            runs=shlex.quote(str(runs)),
-        ),
-        shell=True,
-        cwd=s["worktree"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-        env={**os.environ, procs.MARKER: marker},
+    db = team.home / "api" / f"{s['task']['id']}.sqlite"  # {db}: a fresh database every time
+    fmt = dict(  # {runs_dir}: config runs_dir (QARAU_RUNS_DIR), read-only here
+        data=shlex.quote(str(team.root / "data")),  # {runs}: the runs this task's screenshots show
+        runs_dir=shlex.quote(str(team.runs_dir)),
+        runs=shlex.quote(str(runs)),
+        api_port=procs.free_port(),
+        db=shlex.quote(str(db)),
     )
-    with team._lock:
-        team._procs.add(srv)  # `devteam stop` kills it too
+    procs_ = []
+
+    def start(cmd: str) -> subprocess.Popen:
+        p = subprocess.Popen(
+            cmd.format(**fmt),
+            shell=True,
+            cwd=s["worktree"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            env={**os.environ, procs.MARKER: marker},
+        )
+        procs_.append(p)
+        with team._lock:
+            team._procs.add(p)  # `devteam stop` kills it too
+        return p
+
+    def up(p: subprocess.Popen, url: str, what: str, tries: int) -> str:
+        """Empty once `url` answers, else why not (the server exited, or never answered)."""
+        for _ in range(tries):
+            if p.poll() is not None:  # exited, e.g. --strictPort on a busy port
+                return f"{what} exited with {p.returncode}: {sc[what]}"
+            if _answers(url):
+                return ""
+            time.sleep(1)
+        return f"{what} did not start: {sc[what]}"
+
     paths, problems = [], []
     login = {k: team.secrets[k] for k in TEST_LOGIN if team.secrets.get(k)}
     if len(login) < len(TEST_LOGIN):  # said, not a failed screenshot: the page is still shot
@@ -314,14 +334,15 @@ def screenshots(
             task=s["task"]["id"],
         )
     try:
-        for _ in range(60):
-            if srv.poll() is not None:  # exited, e.g. --strictPort on a busy port
-                return [], [f"dev server exited with {srv.returncode}: {sc['serve']}"]
-            if _answers(sc["url"]):
-                break
-            time.sleep(1)
-        else:
-            return [], [f"dev server did not start: {sc['serve']}"]
+        if sc.get("api"):  # the real API on a fresh SQLite first (web tasks); Vite proxies to it
+            db.parent.mkdir(exist_ok=True)
+            db.unlink(missing_ok=True)
+            # /api/runs, not /health: health waits 2 s each for Postgres and S3, absent here
+            api_url = f"http://127.0.0.1:{fmt['api_port']}/api/runs"
+            if why := up(start(sc["api"]), api_url, "api", 180):  # uv sync + migrate + seed
+                return [], [why]
+        if why := up(start(sc["serve"]), sc["url"], "serve", 60):
+            return [], [why]
         vs = variants(sc, before)
         for route, (size, theme, lang) in itertools.product(routes, vs):
             name = prefix + (re.sub(r"[^A-Za-z0-9]+", "-", route).strip("-") or "root")
@@ -347,10 +368,11 @@ def screenshots(
                 what = f"{route} ({' '.join(x for x in (size, theme, lang) if x)})"
                 problems.append(f"{what}: {team.redact(r['output'][-300:])}")
     finally:
-        procs.reap(srv.pid, marker)  # the server and anything it started; the port is free
-        srv.wait()
-        with team._lock:
-            team._procs.discard(srv)
+        for p in procs_:  # the servers and anything they started; the ports are free
+            procs.reap(p.pid, marker)
+            p.wait()
+            with team._lock:
+                team._procs.discard(p)
     return paths, problems
 
 

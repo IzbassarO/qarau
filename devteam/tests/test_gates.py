@@ -790,6 +790,17 @@ def test_the_judge_sees_the_test_diff_and_tests_weakened_fails_the_task(monkeypa
     assert v["passed"] is True and "test_changes_since_last_round" not in seen["prompt"]
 
 
+def test_tester_sendbacks_name_the_exact_place_and_judge_one_part():
+    """Owner, 2026-10-23: U2 was sent back three times on small screenshot points."""
+    assert "A\nsend-back must be fixable in ONE round" in R.TESTER_SYSTEM
+    assert "file and\nline in the diff" in R.TESTER_SYSTEM and "CSS selector" in R.TESTER_SYSTEM
+    assert "which screenshot, which element" in R.TESTER_SYSTEM
+    assert 'never a\nvague "adjust the layout"' in R.TESTER_SYSTEM
+    assert 'A <plan> that says "part k of n"' in R.TESTER_SYSTEM
+    assert "Judge only this part's\n<acceptance_criteria>" in R.TESTER_SYSTEM
+    assert "built in 2-3 `parts` inside the same task (never new backlog tasks)" in R.BRAIN_SYSTEM
+
+
 def test_fixtures_rule_is_in_the_dev_tester_and_brain_prompts():
     rule = "Expected values come from fixtures, never from the code under test"
     assert rule in R.TESTER_SYSTEM

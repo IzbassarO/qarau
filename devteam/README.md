@@ -62,7 +62,9 @@ then unattended (`run --continuous` overnight).
   `backlog.yaml`, the fake remote seeded from `origin/dev`, `devteam-fake/*` branches removed) it
   runs `devteam run --fake --only <first plannable todo task of each developer>` through the
   watchdog. PASS: exit 0, every task `done`, no crash recorded (a crash the resume recovered
-  from is still a FAIL). Fake agents and the fake tester (no lint or tests run), real scope /
+  from is still a FAIL). When nothing in `backlog.yaml` is plannable (2026-10-23: every todo
+  task waited on S1, DEF1-api or U2, blocked by limits) it rehearses on `tests/backlog.yaml`
+  (T-001, T-002) and says so; fake agents never read a task's text anyway. Fake agents and the fake tester (no lint or tests run), real scope /
   secret gates, merges and release on the fake remote: well under a minute, costs nothing.
 - A fake run never changes the real repo outside `devteam-fake/*`: its release tag goes to the
   fake remote only (2026-10-22: `release-YYYY-MM-DD.2` landed in the shared `refs/tags`).
@@ -112,9 +114,25 @@ then unattended (`run --continuous` overnight).
   (`~/.codex/sessions`). Over a limit, or past `timeout_min`: the step's process group is
   killed, what the round wrote is committed (same checks), the task is `blocked` with the
   reason and what to do, and shows under "Needs your attention"; the other developers keep
-  going (`devteam/supervise.py`).
+  going (`devteam/supervise.py`). Limits since 2026-10-23 (owner): 16 M per round, 36 M per
+  task, 90 min per round; the backlog of #66 has fewer, 2-3x bigger tasks (S1 and DEF1-api hit
+  the old 8 M per round, U2 the old 12 M per task while otherwise green).
+- Parts (owner, 2026-10-23): a task whose goal has more than ~4 build items is planned by the
+  brain as 2-3 parts inside the same task (`parts` in the plan, never new backlog tasks), each
+  with its own plan, acceptance criteria and routes; the task's top-level criteria (Owner
+  additions, "ruff, mypy, pytest pass") are checked in the last part. The developer's brief says
+  which part it is on, which parts are done and accepted (on the branch, not to be redone) and
+  which come later; the tester judges only the current part's criteria. A part accepted by the
+  tester starts the next one in a fresh round (new session, full brief); send-backs
+  (`max_fix_loops`) and loop detection count per part; the gates, PR and merge come once, after
+  the last part. The packet lists the parts with the accepted ones ticked.
 - Loop detection: the tester's reason is the set of unmet criteria, failing checks and missing
   screenshots. Sent back twice in a row for the same reason: no new round, `blocked`.
+- Tester send-backs name the exact place (owner, 2026-10-23: U2 was sent back three times on
+  small screenshot points): for every unmet criterion the feedback gives the file and line in
+  the diff, or the component with its CSS selector / i18n key, and what it must become; for
+  cosmetic points seen only in screenshots (truncated text, a chip on legacy rows) also which
+  screenshot and element, so the developer fixes it in one round.
 - Before every round the orchestrator merges the latest `dev` into the task branch (never the
   agent, never a rebase). Conflicts: a short "resolve conflicts" step with the file list
   instead of a full round; the orchestrator concludes the merge only when no marker is left
@@ -204,7 +222,11 @@ then unattended (`run --continuous` overnight).
   videos only (`--only`); the task goes back only if it repeats, and the packet shows both
   attempts. After a benchmark send-back the packet warns when `pipeline/` then changed only in
   comments or whitespace.
-- Screenshots: any task whose criteria mention the viewer lists `routes`; the tester
+- Screenshots: a web task whose criteria mention the viewer or screenshots lists `routes`; any
+  task whose criteria name an app page path (`/viewer/<run>`, `/inspections`; never an API route
+  like `/api/...` or a file like `/openapi.json`) lists it too. A backend task may say "the
+  viewer must not break" without routes (B1, S1 and DEF1-api lost their first plan to that
+  check, 2026-10-23). The tester
   screenshots them (pipeline tasks: the viewer on the quick benchmark output) at every
   `screenshots.viewports` (default 1440x900 and 390x844) and, for dev_app, in both
   `themes` (light, dark: emulated `prefers-color-scheme`) and `locales` (ru, kk, en: the app's
@@ -221,6 +243,15 @@ then unattended (`run --continuous` overnight).
   page itself. Plan check: a `/viewer/<run>` route shows the task's own output, i.e. a quick
   benchmark video, or for a task that writes runs a run not in `runs_before_task` (the runs
   dir at the task's start; the snapshot is kept until the task is done).
+  Web pages are shot against the real API (owner, 2026-10-23: U2's tester saw "could not load
+  sites" / "Status unavailable" because Vite alone serves only `/api/runs`): `screenshots.api`
+  of dev_app starts `backend/` of the same checkout on a fresh SQLite file
+  (`.state/api/<task>.sqlite`: `alembic upgrade head`, then `python -m app.seed` with org "dev"
+  and users admin / engineer / viewer; no sites) on a free port, waits until `/api/runs`
+  answers, then starts Vite with `QARAU_API_PROXY` pointing at it; `QARAU_API_TOKEN` is empty
+  (open dev mode), so the tester's login works with any password. Both servers are killed with
+  the step. An API that fails to start is a named screenshot problem (the task fails), never a
+  page shot without it. Pipeline tasks keep Vite's own `/api/runs` middleware.
 - Loop detection compares failing criteria by their number in the plan (the judge returns it),
   never by the judge's wording (P3e was sent back 3 times for one criterion, 2026-10-19).
 - Skills: `.claude/skills/` (pinned, licence checked, `.claude/skills/README.md`); Codex reads
