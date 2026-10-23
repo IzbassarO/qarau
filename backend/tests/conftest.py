@@ -8,19 +8,22 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
+import fakeredis
 import pytest
 from alembic.config import Config
 from fastapi.testclient import TestClient
+from rq import Queue
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from alembic import command
-from app import auth
+from app import auth, inspections
 from app.db import engine_for
 from app.main import app
 from app.models import Base, Inspection, Mode, Role, Site
 from app.seed import seed_dev_users
 from app.settings import get_settings
+from app.workflow import QUEUE
 
 BACKEND = Path(__file__).resolve().parents[1]
 TOKENS = {Role.admin: "admin-token", Role.engineer: "engineer-token", Role.viewer: "viewer-token"}
@@ -66,7 +69,15 @@ def runs_root(db_url: str) -> Path:
 
 
 @pytest.fixture
-def client(db_url: str) -> TestClient:
+def fake_redis() -> fakeredis.FakeStrictRedis:
+    """In-memory stand-in for Valkey (fakeredis, BSD-3); the API's queue dependency uses it."""
+    conn = fakeredis.FakeStrictRedis(server=fakeredis.FakeServer())
+    app.dependency_overrides[inspections.get_queue] = lambda: Queue(QUEUE, connection=conn)
+    return conn
+
+
+@pytest.fixture
+def client(db_url: str, fake_redis: fakeredis.FakeStrictRedis) -> TestClient:
     """Seeded: org 1 "dev" with users 1 admin, 2 engineer, 3 viewer; site 1; inspection 1."""
     with Session(engine_for(db_url)) as db:
         org = seed_dev_users(db, TOKENS)

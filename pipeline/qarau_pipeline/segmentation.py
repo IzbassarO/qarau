@@ -22,6 +22,7 @@ from typing import Any
 import cv2
 import numpy as np
 
+from . import layout
 from .interfaces import MaskResult, StageError, run_stage
 
 Transport = Callable[[dict[str, Any]], dict[str, Any]]
@@ -276,7 +277,7 @@ def run_segment(
     run: Path, seg: Any, prompts: list[dict[str, str]], which: str = "registered", stride: int = 5
 ) -> dict[str, Any]:
     """Segment the chosen frames of a bundle; write segmentation/ (idempotent)."""
-    manifest = json.loads((run / "web/manifest.json").read_text())
+    manifest = json.loads(layout.manifest_path(run).read_text())
     out = run / "segmentation"
     shutil.rmtree(out, ignore_errors=True)
     (out / "masks").mkdir(parents=True)

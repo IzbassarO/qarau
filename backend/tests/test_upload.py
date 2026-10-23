@@ -66,7 +66,15 @@ def test_chunked_upload_with_one_retried_chunk(client: TestClient, runs_root: Pa
 
     runs = client.get("/api/inspections/1/runs", headers=bearer("viewer")).json()
     assert runs == [
-        {"id": run_id, "inspection_id": 1, "run_dir": run_id, "status": "uploaded", "progress": 0.0}
+        {
+            "id": run_id,
+            "inspection_id": 1,
+            "run_dir": run_id,
+            "status": "uploaded",
+            "progress": 0.0,
+            "current_step": None,
+            "error": None,
+        }
     ]
     # Finished: more chunks or a second complete are refused, next_offset is the size.
     assert put(client, upload_id, 2500, b"x")[0] == 409

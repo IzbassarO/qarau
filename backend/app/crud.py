@@ -87,6 +87,8 @@ class RunOut(Out):
     run_dir: str
     status: str
     progress: float
+    current_step: str | None = None
+    error: str | None = None
 
 
 class UserIn(BaseModel):
@@ -183,9 +185,7 @@ def create_inspection(body: InspectionIn, db: Db, who: Engineer, request: Reques
     return InspectionOut.model_validate(insp)
 
 
-@router.get("/inspections/{inspection_id}", description="Role: viewer. One inspection.")
-def get_inspection(inspection_id: int, db: Db, _: Viewer) -> InspectionOut:
-    return InspectionOut.model_validate(get_or_404(db, Inspection, inspection_id))
+# GET /inspections/{id} (with the latest run's steps) lives in inspections.py (S1).
 
 
 @router.get(

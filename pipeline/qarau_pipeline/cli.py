@@ -1,57 +1,30 @@
-"""CLI: python -m qarau_pipeline {run,quality,export,segment,project,dense-remote,benchmark,
+"""CLI: python -m qarau_pipeline {run,step,quality,export,segment,project,dense-remote,benchmark,
 refresh} ..."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
-from . import frames as frames_stage
-from . import quality
-from .interfaces import StageError, run_stage
-from .keyframes import MODES, KeyframeParams, subsample
+from . import layout
+from .interfaces import StageError
+from .keyframes import MODES
 from .segmentation import GroundedSam2, ManualMasks, SamApiSegmenter, parse_prompt, segment_stage
-
-
-def _ffmpeg_version() -> str:
-    try:
-        out = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True).stdout
-        return out.split()[2]
-    except (OSError, IndexError):
-        return "unknown"
-
+from .workflow import (
+    StepContext,
+    export_run,
+    product_steps,
+    run_config,
+    run_step,
+    run_steps,
+    write_workflow_json,
+)
 
 # pycolmap is imported inside the commands that need it: it bundles its own libomp, which makes
 # torch abort in the same process (segment stage), so the segment path must not load it.
-
-
-def _export(
-    out: Path,
-    sparse: Path,
-    frames: list[dict[str, Any]],
-    source: dict[str, Any],
-    dense: Path | None = None,
-) -> None:
-    import pycolmap
-
-    from .export import export_bundle
-
-    def go() -> dict[str, Any]:
-        rec = pycolmap.Reconstruction(str(sparse))
-        dp = None
-        if dense is not None:
-            from .visibility import load_dense, max_frames_per_point
-
-            dp = load_dense(dense, rec, frames, max_frames_per_point())
-        return export_bundle(rec, frames, out, source, out.name, dp)
-
-    params = {"sparse": str(sparse), **({"dense": str(dense)} if dense else {})}
-    res = run_stage(out, "export", f"pycolmap {pycolmap.__version__}", params, go)
-    print("export:", res.metrics)
 
 
 def cmd_export(a: argparse.Namespace) -> None:
@@ -74,68 +47,60 @@ def cmd_export(a: argparse.Namespace) -> None:
         }
     else:
         frames = frames_from_json(out)
-        source = json.loads((out / "frames.json").read_text())["source"]
-    _export(out, Path(a.sparse), frames, source, Path(a.dense).resolve() if a.dense else None)
-
-
-def _frames(a: argparse.Namespace, out: Path) -> dict[str, Any]:
-    video = Path(a.video).resolve()
-    keys = KeyframeParams(mode=a.keyframes)
-    params = {"video": video.name, "max_frames": a.max_frames, "keyframes": keys.label()}
-    res = run_stage(
-        out, "frames", f"ffmpeg {_ffmpeg_version()}", params,
-        lambda: frames_stage.run(video, out, a.max_frames, keys),
-    )  # fmt: skip
-    print(quality.text(json.loads((out / "quality_report.json").read_text())))
-    print(f"report: {out / 'quality_report.json'}")
-    return res.metrics
+        source = json.loads(layout.frames_json(out).read_text())["source"]
+    dense = Path(a.dense).resolve() if a.dense else None
+    export_run(out, Path(a.sparse), frames, source, dense)
 
 
 def cmd_quality(a: argparse.Namespace) -> None:
+    """probe + frames steps only, always redone (an explicit request for a fresh report)."""
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    _frames(a, out)
+    cfg = run_config(out, video=str(Path(a.video).resolve()), max_frames=a.max_frames,
+                     keyframes=a.keyframes)  # fmt: skip
+    steps = [s for s in product_steps(cfg) if s.name in ("probe", "frames")]
+    run_steps(out, steps, force=True, config=cfg)
 
 
 def cmd_run(a: argparse.Namespace) -> None:
-    import pycolmap
-
-    from .export import frames_from_json
-    from .reconstruction import ColmapReconstructor
-
+    """The whole workflow (workflow.product_steps) on one input; finished steps are skipped
+    unless --force. Parameters are kept in <run>/workflow.json for later `step` reruns."""
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    if a.video:
-        _frames(a, out)
-    else:
-        run_stage(
-            out, "frames", "link", {"images": str(a.images)},
-            lambda: frames_stage.from_images(Path(a.images).resolve(), out),
-        )  # fmt: skip
-    fj = json.loads((out / "frames.json").read_text())
-    names = [Path(f["file"]).name for f in fj["frames"] if f["kept"]]
-    # bridges = quality drops only. The denser parallax candidates must not add merge
-    # matching time: there at most MAX_DROP of the keyframes. The fixed grid stays as it was
-    # (decide_drops already keeps drops <= MAX_DROP of all frames).
-    dropped = [Path(f["file"]).name for f in fj["frames"]
-               if not f["kept"] and f["drop_reason"] != "not_keyframe"]  # fmt: skip
-    if any(f["drop_reason"] == "not_keyframe" for f in fj["frames"]):
-        dropped = subsample(dropped, max(1, round(frames_stage.MAX_DROP * len(names))))
-    rc = ColmapReconstructor(
-        mode="video" if a.video else "images",
-        max_image_size=a.max_image_size,
-        max_num_features=a.max_features,
-        peak_threshold=a.peak_threshold,
-        mapper=a.mapper,
-        merge=a.merge,
-        sky_mask=a.sky_mask,
-    )
-    res = run_stage(
-        out, "reconstruction", f"pycolmap {pycolmap.__version__}", rc.params(),
-        lambda: rc.reconstruct(out / "frames", names, out / "colmap", dropped),
-    )  # fmt: skip
-    print("reconstruction:", res.metrics)
-    _export(out, out / "colmap/sparse/0", frames_from_json(out), fj["source"])
+    params: dict[str, Any] = {
+        "video": str(Path(a.video).resolve()) if a.video else None,
+        "images": str(Path(a.images).resolve()) if a.images else None,
+        "max_frames": a.max_frames,
+        "keyframes": a.keyframes,
+        "max_image_size": a.max_image_size,
+        "max_features": a.max_features,
+        "peak_threshold": a.peak_threshold,
+        "mapper": a.mapper,
+        "merge": a.merge,
+        "sky_mask": a.sky_mask,
+    }
+    write_workflow_json(out, params)
+    cfg = run_config(out)
+    run_steps(out, product_steps(cfg), force=a.force, config=cfg)
+
+
+def cmd_step(a: argparse.Namespace) -> None:
+    """Exactly one step of a run (the queue worker's entry point); exit 1 when it fails."""
+    run = Path(a.run).resolve() if a.run else None
+    cfg = run_config(run)
+    steps = product_steps(cfg)
+    if a.list:
+        print(json.dumps([s.name for s in steps]))
+        return
+    if run is None or a.name is None:
+        raise StageError("step needs a step name and --run DIR (or --list)")
+    step = next((s for s in steps if s.name == a.name), None)
+    if step is None:
+        raise StageError(f"unknown step {a.name!r}; steps: {', '.join(s.name for s in steps)}")
+    res = run_step(step, StepContext(run, cfg, a.force))
+    print(f"step {a.name}: {res.status}" + (f" ({res.error})" if res.error else ""))
+    if res.status == "failed":
+        sys.exit(1)
 
 
 def cmd_segment(a: argparse.Namespace) -> None:
@@ -218,11 +183,13 @@ def cmd_refresh(a: argparse.Namespace) -> None:
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="qarau_pipeline")
     sub = p.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run", help="video or image set -> frames -> COLMAP -> viewer bundle")
+    r = sub.add_parser("run", help="video or image set -> probe -> frames -> COLMAP -> viewer "
+                       "bundle (steps already done are skipped)")  # fmt: skip
     g = r.add_mutually_exclusive_group(required=True)
     g.add_argument("--video")
     g.add_argument("--images")
     r.add_argument("--out", required=True)
+    r.add_argument("--force", action="store_true", help="redo steps whose step.json says done")
     r.add_argument("--max-frames", type=int, help="upper cap on extracted frames (default 300)")
     r.add_argument("--keyframes", choices=MODES, default="parallax",
                    help="parallax: skip frames with no camera motion; fixed: all")  # fmt: skip
@@ -235,14 +202,21 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--no-sky-mask", dest="sky_mask", action="store_false",
                    help="extract features in the sky too (pre-P3b, ADR 0013)")  # fmt: skip
     r.set_defaults(fn=cmd_run)
+    st = sub.add_parser("step", help="run exactly one workflow step of a run dir (ADR 0022)")
+    st.add_argument("name", nargs="?", help="probe | frames | sparse | export [| dense]")
+    st.add_argument("--run", help="run dir: <run>/video.<ext> or <run>/workflow.json names the "
+                    "input")  # fmt: skip
+    st.add_argument("--force", action="store_true", help="redo the step even if step.json is done")
+    st.add_argument("--list", action="store_true", help="print the step names as JSON and exit")
+    st.set_defaults(fn=cmd_step)
     e = sub.add_parser("export", help="COLMAP model -> LAZ/PLY + viewer bundle")
     e.add_argument("--sparse", required=True)
-    e.add_argument("--images", help="image dir (image-set input); omit to use <out>/frames.json")
+    e.add_argument("--images", help="image dir (image-set input); omit to use <out>'s frames.json")
     e.add_argument("--out", required=True)
     e.add_argument("--dense", help="dir with fused.ply (+ fused.ply.vis): dense layer + frame "
                    "links (ADR 0017)")  # fmt: skip
     e.set_defaults(fn=cmd_export)
-    q = sub.add_parser("quality", help="video -> frames + <out>/quality_report.json only")
+    q = sub.add_parser("quality", help="video -> frames + <out>/frames/quality_report.json only")
     q.add_argument("--video", required=True)
     q.add_argument("--out", required=True)
     q.add_argument("--max-frames", type=int, help="upper cap on extracted frames (default 300)")

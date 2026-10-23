@@ -25,9 +25,17 @@ def run_dir(run_id: str) -> Path:
     return d
 
 
+def manifest_file(d: Path) -> Path | None:
+    """<run>/export/web/manifest.json (ADR 0022), or <run>/web/manifest.json for older runs."""
+    for rel in ("export/web/manifest.json", "web/manifest.json"):
+        if (d / rel).is_file():
+            return d / rel
+    return None
+
+
 def read_manifest(d: Path) -> dict[str, Any]:
-    f = d / "web" / "manifest.json"
-    if not f.is_file():
+    f = manifest_file(d)
+    if f is None:
         raise HTTPException(404, "manifest not found")
     data: dict[str, Any] = json.loads(f.read_text())
     return data
@@ -35,7 +43,8 @@ def read_manifest(d: Path) -> dict[str, Any]:
 
 def exported_at(d: Path) -> str:
     """Fallback for runs exported before the manifest had created_at: the file's mtime."""
-    t = (d / "web" / "manifest.json").stat().st_mtime
+    f = manifest_file(d)
+    t = f.stat().st_mtime if f else 0.0
     return datetime.fromtimestamp(t, UTC).isoformat(timespec="seconds")
 
 
@@ -44,7 +53,7 @@ def list_runs() -> list[dict[str, Any]]:
     root = Path(get_settings().qarau_runs_dir)
     out = []
     for d in sorted(root.iterdir()) if root.is_dir() else []:
-        if RUN_ID.fullmatch(d.name) and (d / "web" / "manifest.json").is_file():
+        if RUN_ID.fullmatch(d.name) and manifest_file(d) is not None:
             m = read_manifest(d)
             out.append(
                 {
