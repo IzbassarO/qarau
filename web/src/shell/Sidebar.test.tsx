@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LANGS, setLang, type Lang } from '../i18n';
 import { createDemo } from '../fixtures/demo';
 import { groupRunsIntoSites, type Site } from '../lib/inspections';
@@ -35,7 +35,14 @@ function Harness({ groups = sites, demo = false }: { groups?: Site[]; demo?: boo
   );
 }
 
-beforeEach(() => setLang('en'));
+beforeEach(() => {
+  setLang('en');
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(Response.json([{ id: 1, org_id: 1, name: 'North site' }])),
+  );
+});
+afterEach(() => vi.unstubAllGlobals());
 
 describe('Sidebar', () => {
   it('keeps the example badge on the demo entry and out of the footer link', () => {
@@ -118,8 +125,26 @@ describe('Sidebar', () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'New inspection' }));
     expect(screen.getByRole('dialog', { name: 'New inspection' })).toBeTruthy();
-    expect(screen.getByText(/Video upload is not available yet/)).toBeTruthy();
+    expect(screen.getByLabelText('Site')).toBeTruthy();
+    expect(screen.getByLabelText(/Choose a video/)).toBeTruthy();
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
+});
+
+it('renders visible uploaded and failed status chips', () => {
+  render(
+    <Harness
+      groups={groupRunsIntoSites([
+        { run_id: 'uploaded-1', status: 'uploaded' },
+        { run_id: 'failed-1', status: 'failed' },
+      ])}
+    />,
+  );
+  expect(
+    within(screen.getByRole('link', { name: /uploaded-1/ })).getByText('Uploaded').className,
+  ).toBe('inspection-status-chip uploaded');
+  expect(within(screen.getByRole('link', { name: /failed-1/ })).getByText('Failed').className).toBe(
+    'inspection-status-chip failed',
+  );
 });

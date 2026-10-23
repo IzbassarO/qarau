@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { useI18n } from '../i18n';
 import { createDemo } from '../fixtures/demo';
-import { groupRunsIntoSites, useRuns } from '../lib/inspections';
+import { useInspections } from '../lib/inspections';
 import { Sidebar } from './Sidebar';
 import { InspectionView } from './InspectionView';
 import { NewInspectionDialog } from './NewInspectionDialog';
@@ -10,22 +11,33 @@ import './shell.css';
 
 export function AppShell({ demo = false }: { demo?: boolean }) {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { t, lang } = useI18n();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  // Home lists the real runs; the demo lives only at /inspections/demo (never mixed in).
+  const [dialogOpen, setDialogOpen] = useState(() => searchParams.has('new-inspection'));
+  // The demo lives only at /inspections/demo, never mixed into API inspections.
   const showDemo = demo;
-  const runs = useRuns(!showDemo);
+  const inspections = useInspections(!showDemo);
   const demoData = useMemo(() => (showDemo ? createDemo(lang) : null), [showDemo, lang]);
   const sites = useMemo(
-    () => demoData?.sites ?? groupRunsIntoSites(runs.data ?? []),
-    [demoData, runs.data],
+    () => demoData?.sites ?? inspections.data ?? [],
+    [demoData, inspections.data],
   );
   const selected =
     demoData?.inspection ??
     sites.flatMap((site) => site.inspections).find((inspection) => inspection.id === id);
   const site = sites.find((item) => item.id === selected?.siteId);
   const closeNavigation = () => setSidebarOpen(false);
+  const closeDialog = () => {
+    setDialogOpen(false);
+    if (searchParams.has('new-inspection')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('new-inspection');
+      setSearchParams(next, { replace: true });
+    }
+  };
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -50,7 +62,7 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
         <Sidebar
           sites={sites}
           demo={showDemo}
-          loading={!showDemo && runs.isPending}
+          loading={!showDemo && inspections.isPending}
           onNavigate={closeNavigation}
           onNewInspection={() => {
             closeNavigation();
@@ -96,18 +108,22 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
           {showDemo && <span className="demo-badge">{t('shell.demo')}</span>}
         </header>
         <main id="inspection-main" tabIndex={-1} className="shell-main">
-          {!showDemo && runs.isError && (
+          {!showDemo && inspections.isError && (
             <div className="api-error" role="alert">
               <div>
                 <strong>{t('shell.connectionError')}</strong>
                 <p>
-                  {t(runs.error.message === '401' ? 'shell.authError' : 'shell.connectionHint')}
+                  {t(
+                    inspections.error.message === '401'
+                      ? 'shell.authError'
+                      : 'shell.connectionHint',
+                  )}
                 </p>
               </div>
               <button
                 className="shell-button"
-                disabled={runs.isFetching}
-                onClick={() => void runs.refetch()}
+                disabled={inspections.isFetching}
+                onClick={() => void inspections.refetch()}
               >
                 {t('shell.retry')}
               </button>
@@ -117,21 +133,21 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
             <InspectionView
               key={selected.id}
               inspection={selected}
-              run={demoData?.run ?? runs.data?.find((run) => run.run_id === selected.id)}
+              run={demoData?.run}
               demoBundle={demoData?.bundle}
             />
           ) : id ? (
             <div className="empty-state">
               <h1>
                 {t(
-                  runs.isPending
+                  inspections.isPending
                     ? 'shell.loading'
-                    : runs.isError
+                    : inspections.isError
                       ? 'inspection.unavailable'
                       : 'inspection.notFound',
                 )}
               </h1>
-              <p>{t(runs.isError ? 'shell.connectionHint' : 'inspection.selectOther')}</p>
+              <p>{t(inspections.isError ? 'shell.connectionHint' : 'inspection.selectOther')}</p>
             </div>
           ) : (
             <div className="empty-state">
@@ -151,7 +167,15 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
           )}
         </main>
       </div>
-      {dialogOpen && <NewInspectionDialog onClose={() => setDialogOpen(false)} />}
+      {dialogOpen && (
+        <NewInspectionDialog
+          onClose={closeDialog}
+          onUploaded={(inspectionId) => {
+            void queryClient.invalidateQueries({ queryKey: ['inspections'] });
+            navigate(`/inspections/${inspectionId}`);
+          }}
+        />
+      )}
     </div>
   );
 }

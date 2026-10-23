@@ -52,6 +52,11 @@ test('rejects bad credentials, signs in, restores the session and signs out', as
     expect(route.request().headers().authorization).toBe('Bearer test-api-value');
     return route.fulfill({ status: accepted ? 200 : 401, json: [] });
   });
+  for (const path of ['inspections', 'sites'])
+    await page.route(`**/api/${path}`, (route) => {
+      expect(route.request().headers().authorization).toBe('Bearer test-api-value');
+      return route.fulfill({ json: [] });
+    });
   await page.goto('/inspections/private-run');
   await page.getByLabel('Username').fill('test-operator');
   await page.getByLabel('Password').fill('test-api-value');

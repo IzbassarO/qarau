@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Source, Stats } from './bundle';
-import type { ProcessingStagePayload } from './processing';
+import type { ProcessingRunPayload, ProcessingStagePayload } from './processing';
 import { authHeader } from '../auth/auth';
+import { listSites, type SiteOption } from './sites';
 
-export type InspectionStatus = 'queued' | 'running' | 'completed' | 'failed' | 'unknown';
+export type InspectionStatus = 'uploaded' | 'queued' | 'running' | 'done' | 'failed' | 'unknown';
 
 export interface InspectionSummary {
   id: string;
@@ -14,6 +15,7 @@ export interface InspectionSummary {
   source: string | null;
   createdAt: string | null;
   status: InspectionStatus;
+  runId?: string;
 }
 
 export interface Site {
@@ -40,11 +42,14 @@ export const UNASSIGNED_SITE_ID = 'qarau:unassigned';
 
 export function inspectionStatus(status?: string | null): InspectionStatus {
   switch (status) {
+    case 'uploaded':
     case 'queued':
     case 'running':
-    case 'completed':
+    case 'done':
     case 'failed':
       return status;
+    case 'completed':
+      return 'done';
     default:
       return 'unknown';
   }
@@ -98,5 +103,118 @@ export function useRuns(enabled = true) {
     queryFn: ({ signal }) => fetchRuns(signal),
     enabled,
     retry: false,
+  });
+}
+
+export interface InspectionPayload extends ProcessingRunPayload {
+  id: number;
+  site_id: number;
+  mode: 'quick_scan' | 'monitoring';
+  status: string;
+  created_at: string;
+  title?: string;
+  run_id?: string;
+}
+
+export interface InspectionDetail extends InspectionPayload {
+  runId?: string;
+}
+
+interface InspectionRun {
+  id: string;
+  status: string;
+}
+
+async function readApi(path: string, signal?: AbortSignal): Promise<unknown> {
+  const response = await fetch(path, { signal, headers: authHeader() });
+  if (!response.ok) throw new Error(String(response.status));
+  return response.json();
+}
+
+function isInspection(value: unknown): value is InspectionPayload {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as InspectionPayload;
+  return (
+    Number.isInteger(item.id) && Number.isInteger(item.site_id) && typeof item.status === 'string'
+  );
+}
+
+async function withRun(
+  inspection: InspectionPayload,
+  signal?: AbortSignal,
+): Promise<InspectionDetail> {
+  if (inspection.run_id) return { ...inspection, runId: inspection.run_id };
+  // B1 completes Run.status, leaving Inspection.status at "created". S1 takes precedence.
+  if (inspection.status !== 'created' && inspectionStatus(inspection.status) !== 'done')
+    return inspection;
+  const runs = await readApi(`/api/inspections/${inspection.id}/runs`, signal);
+  if (
+    !Array.isArray(runs) ||
+    !runs.every((run) => typeof run?.id === 'string' && typeof run.status === 'string')
+  )
+    throw new Error('Invalid inspection runs response');
+  // UUID ordering is not chronology. Until the API identifies the current run, do not guess.
+  const run = runs.length === 1 ? (runs[0] as InspectionRun) : undefined;
+  return {
+    ...inspection,
+    status:
+      inspection.status === 'created' ? (run?.status ?? inspection.status) : inspection.status,
+    runId: run?.id,
+  };
+}
+
+export async function getInspection(id: string, signal?: AbortSignal): Promise<InspectionDetail> {
+  const inspection = await readApi(`/api/inspections/${encodeURIComponent(id)}`, signal);
+  if (!isInspection(inspection)) throw new Error('Invalid inspection response');
+  return withRun(inspection, signal);
+}
+
+export function groupInspectionsIntoSites(
+  inspections: readonly InspectionDetail[],
+  sites: readonly SiteOption[],
+): Site[] {
+  const groups = groupRunsIntoSites(
+    inspections.map((inspection) => ({
+      run_id: String(inspection.id),
+      site_id: String(inspection.site_id),
+      site_name: sites.find((site) => site.id === inspection.site_id)?.name,
+      title: inspection.title,
+      created_at: inspection.created_at,
+      status: inspection.status,
+    })),
+  );
+  for (const group of groups)
+    for (const summary of group.inspections) {
+      const detail = inspections.find((inspection) => String(inspection.id) === summary.id);
+      summary.runId = detail?.runId ?? detail?.run_id;
+    }
+  return groups;
+}
+
+export async function listInspections(signal?: AbortSignal): Promise<Site[]> {
+  const payload = await readApi('/api/inspections', signal);
+  if (!Array.isArray(payload) || !payload.every(isInspection))
+    throw new Error('Invalid inspections response');
+  const [sites, inspections] = await Promise.all([
+    listSites(signal),
+    Promise.all(payload.map((inspection) => withRun(inspection, signal))),
+  ]);
+  return groupInspectionsIntoSites(inspections, sites);
+}
+
+export function useInspections(enabled = true) {
+  return useQuery({
+    queryKey: ['inspections'],
+    queryFn: ({ signal }) => listInspections(signal),
+    enabled,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.some((site) =>
+        site.inspections.some((inspection) =>
+          ['uploaded', 'queued', 'running', 'unknown'].includes(inspection.status),
+        ),
+      )
+        ? 5000
+        : false,
   });
 }

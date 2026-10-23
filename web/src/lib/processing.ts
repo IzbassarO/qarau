@@ -88,6 +88,11 @@ export function processingSteps(
   manifest?: Pick<Manifest, 'stats'>,
 ): ProcessingStep[] {
   const payload = record(run);
+  if (
+    payload.status === 'uploaded' &&
+    (!Array.isArray(payload.stages) || payload.stages.length === 0)
+  )
+    return [];
   const timings = {
     ...record(manifest?.stats.processing_s),
     ...record(record(payload.stats).processing_s),

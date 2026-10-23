@@ -84,7 +84,9 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
                     <span className="inspection-link-title">
                       <span className="inspection-link-label">
                         <span className="inspection-link-name" title={inspection.title}>
-                          {inspection.title}
+                          {inspection.title === inspection.id && /^\d+$/.test(inspection.id)
+                            ? `${t('shell.inspection')} ${inspection.id}`
+                            : inspection.title}
                         </span>
                         {demo && inspection.id === 'demo' && (
                           <span className="demo-badge">{t('shell.demo')}</span>
@@ -96,7 +98,9 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
                         </time>
                       )}
                     </span>
-                    <span className="sr-only">{t(`status.${inspection.status}`)}</span>
+                    <span className={`inspection-status-chip ${inspection.status}`}>
+                      {t(`status.${inspection.status}`)}
+                    </span>
                   </NavLink>
                 </li>
               ))}

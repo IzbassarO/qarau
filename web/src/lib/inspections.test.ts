@@ -1,5 +1,13 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { fetchRuns, groupRunsIntoSites, UNASSIGNED_SITE_ID, type RunSummary } from './inspections';
+import {
+  fetchRuns,
+  getInspection,
+  listInspections,
+  groupRunsIntoSites,
+  inspectionStatus,
+  UNASSIGNED_SITE_ID,
+  type RunSummary,
+} from './inspections';
 
 afterEach(() => {
   sessionStorage.clear();
@@ -90,4 +98,99 @@ it('sends the stored authorization header with inspection requests', async () =>
     signal: undefined,
     headers: { Authorization: 'Bearer test-api-value' },
   });
+});
+
+it('lists inspection statuses from the API and uses the B1 sole run status before S1', async () => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url === '/api/sites') return Response.json([{ id: 1, org_id: 1, name: 'North site' }]);
+    if (url === '/api/inspections/7/runs')
+      return Response.json([{ id: 'run-7', inspection_id: 7, status: 'uploaded' }]);
+    return Response.json([
+      {
+        id: 7,
+        site_id: 1,
+        mode: 'quick_scan',
+        status: 'created',
+        created_at: '2026-10-23T12:00:00Z',
+      },
+      {
+        id: 8,
+        site_id: 1,
+        mode: 'quick_scan',
+        status: 'failed',
+        created_at: '2026-10-22T12:00:00Z',
+      },
+      {
+        id: 9,
+        site_id: 1,
+        mode: 'monitoring',
+        status: 'future_state',
+        created_at: '2026-10-21T12:00:00Z',
+      },
+    ]);
+  });
+  vi.stubGlobal('fetch', fetch);
+  const sites = await listInspections();
+  expect(sites[0].name).toBe('North site');
+  expect(sites[0].inspections.map(({ id, status }) => [id, status])).toEqual([
+    ['7', 'uploaded'],
+    ['8', 'failed'],
+    ['9', 'unknown'],
+  ]);
+  expect(sites[0].inspections[0].runId).toBe('run-7');
+  expect(fetch.mock.calls.some(([url]) => url === '/api/runs')).toBe(false);
+});
+
+it('does not guess the current run from UUID ordering when B1 has multiple runs', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) =>
+      Response.json(
+        url.endsWith('/runs')
+          ? [
+              { id: 'a', status: 'uploaded' },
+              { id: 'b', status: 'done' },
+            ]
+          : { id: 7, site_id: 1, status: 'created' },
+      ),
+    ),
+  );
+  expect(await getInspection('7')).toMatchObject({ status: 'created', runId: undefined });
+});
+
+it('reads inspection detail and stage fields from its own endpoint with auth', async () => {
+  sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
+  const fetch = vi.fn().mockResolvedValue(
+    Response.json({
+      id: 7,
+      site_id: 1,
+      status: 'running',
+      stages: [
+        { name: 'ingest', status: 'done' },
+        { name: 'frames', status: 'running' },
+      ],
+    }),
+  );
+  vi.stubGlobal('fetch', fetch);
+  const detail = await getInspection('7');
+  expect(detail.stages).toEqual([
+    { name: 'ingest', status: 'done' },
+    { name: 'frames', status: 'running' },
+  ]);
+  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/inspections/7', {
+    signal: undefined,
+    headers: { Authorization: 'Bearer test-api-value' },
+  });
+});
+
+it.each(['uploaded', 'queued', 'running', 'done', 'failed'] as const)(
+  'preserves inspection status %s',
+  (status) => {
+    expect(inspectionStatus(status)).toBe(status);
+  },
+);
+
+it('maps legacy completed to done and unfamiliar states to unknown', () => {
+  expect(inspectionStatus('completed')).toBe('done');
+  expect(inspectionStatus('future_state')).toBe('unknown');
 });
