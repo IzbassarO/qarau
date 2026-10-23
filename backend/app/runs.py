@@ -39,7 +39,7 @@ def exported_at(d: Path) -> str:
     return datetime.fromtimestamp(t, UTC).isoformat(timespec="seconds")
 
 
-@router.get("")
+@router.get("", description="Role: viewer. Exported pipeline runs found under QARAU_RUNS_DIR.")
 def list_runs() -> list[dict[str, Any]]:
     root = Path(get_settings().qarau_runs_dir)
     out = []
@@ -57,12 +57,12 @@ def list_runs() -> list[dict[str, Any]]:
     return out
 
 
-@router.get("/{run_id}/manifest.json")
+@router.get("/{run_id}/manifest.json", description="Role: viewer. The run's viewer manifest.")
 def manifest(run_id: str) -> dict[str, Any]:
     return read_manifest(run_dir(run_id))
 
 
-@router.get("/{run_id}/files/{path:path}")
+@router.get("/{run_id}/files/{path:path}", description="Role: viewer. A file of the run.")
 def run_file(run_id: str, path: str) -> FileResponse:
     d = run_dir(run_id)
     f = (d / path).resolve()
