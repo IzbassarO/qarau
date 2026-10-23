@@ -955,9 +955,11 @@ tasks:
     '
   licence: Valkey (BSD-3-Clause), RQ (BSD-2-Clause), redis-py client (MIT). Redis server is not used (ADR
     0012).
-  status: todo
+  status: in_progress
   depends_on:
   - B1
+  owner: dev_pipeline
+  run: cont-20261023-094355-dev_pipeline-1
 - id: DS1
   area: app
   title: Design system v2 from Claude Design (tokens, bundle.css, DESIGN.md v2)
