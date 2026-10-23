@@ -832,9 +832,12 @@ tasks:
     '
   licence: SQLAlchemy, Alembic, FastAPI, Pydantic (MIT); psycopg (LGPL-3.0, dynamic use only); PostGIS
     only as a separate unmodified server (ADR 0010).
-  status: in_progress
+  status: done
   owner: dev_pipeline
   run: run-20261022-232844
+  branch: devteam/B1
+  pr: https://github.com/IzbassarO/qarau/pull/67
+  done_at: '2026-10-23'
 - id: U2
   area: app
   title: Upload a video in the web app
