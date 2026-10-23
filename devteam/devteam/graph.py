@@ -101,6 +101,74 @@ def is_protected(path: str) -> bool:
 
 
 VISUAL = re.compile(r"\b(viewer|screenshots?)\b", re.I)  # criteria the tester must see
+# An app page named in a criterion ("/viewer/room", "/inspections/3", "/?signed-out"): never an
+# API route (/api/..., /health) or a file (/openapi.json). Backend tasks say "the viewer must not
+# break" with no page to look at: B1, S1 and DEF1-api lost their first plan to VISUAL (2026-10-23).
+PAGE_PATH = re.compile(
+    r"(?<![\w.:/])/(?!api\b|health\b)(?:[a-z][\w-]*(?:/[\w-]+)*|\?signed-out)(?![\w.-])"
+)
+
+
+def needs_routes(criteria: list, dev_cfg: dict):
+    """The match that asks for screenshots, or None. The web developer's pages are its task: any
+    mention of the viewer or screenshots. Others (pipeline): only a page path, e.g. /viewer/<run>.
+    A developer without a screenshots config can list no routes at all."""
+    sc = dev_cfg.get("screenshots")
+    if not sc:
+        return None
+    text = " ".join(map(str, criteria))
+    web = "{runs}" not in sc.get("serve", "")  # pipeline tasks serve the quick benchmark output
+    return (web and VISUAL.search(text)) or PAGE_PATH.search(text)
+
+
+def stages_of(p: dict) -> list[dict]:
+    """The parts the brain planned inside one task (owner, 2026-10-23: fewer, bigger tasks; a goal
+    with more than ~4 build items is built in 2-3 parts, each accepted by the tester before the
+    next starts). No parts: the whole plan is the one stage. The task's top-level criteria and
+    routes (its final state) belong to the last part on top of that part's own."""
+    parts = p.get("parts") or []
+    if not parts:
+        return [
+            {
+                "title": "",
+                "plan": p.get("plan", ""),
+                "criteria": list(p.get("criteria") or []),
+                "routes": list(p.get("routes") or []),
+            }
+        ]
+    out = [
+        {
+            "title": str(x.get("title", "")),
+            "plan": str(x.get("plan", "")),
+            "criteria": list(x.get("criteria") or []),
+            "routes": list(x.get("routes") or []),
+        }
+        for x in parts
+    ]
+    last = out[-1]
+    last["criteria"] += [c for c in p.get("criteria") or [] if c not in last["criteria"]]
+    last["routes"] += [r for r in p.get("routes") or [] if r not in last["routes"]]
+    return out
+
+
+def stage_state(overview: str, stages: list[dict], k: int) -> dict:
+    """What the developer and the tester see in part k: plan (the overview, the part, what is
+    done already and what comes later), criteria and routes of this part only."""
+    st = stages[k]
+    if len(stages) == 1:
+        return {"stage": k, "plan": overview, "criteria": st["criteria"], "routes": st["routes"]}
+    n = len(stages)
+    done = "\n".join(f"  {i + 1}. {s['title']}" for i, s in enumerate(stages[:k]))
+    later = "\n".join(f"  {i + 1}. {s['title']}" for i, s in enumerate(stages[k + 1 :], k + 1))
+    plan = (
+        f"This task is built in {n} parts; the tester accepts each part before the next starts. "
+        f"You are on part {k + 1} of {n}: {st['title']}.\n"
+        + (f"Parts already done and accepted (their code is on this branch; build on it, do not "
+           f"redo or rewrite it):\n{done}\n" if done else "")
+        + (f"Later parts (not now):\n{later}\n" if later else "")
+        + f"\nOverview of the whole task:\n{overview}\n\nPart {k + 1}: {st['plan']}"
+    )  # fmt: skip
+    return {"stage": k, "plan": plan, "criteria": st["criteria"], "routes": st["routes"]}
 
 
 def e2e_output(out: str) -> str:
@@ -256,9 +324,16 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
                 "list it in needs_split with the parts per developer. If they are only read, "
                 "do not name them in the criteria"
             )
-        if not str(p.get("plan", "")).strip() or not p.get("criteria"):
-            errors.append(f"{tid}: plan and acceptance criteria must not be empty")
-        crit = [_norm(c) for c in p.get("criteria") or []]
+        stages = stages_of(p)
+        if not str(p.get("plan", "")).strip() or not all(st["criteria"] for st in stages):
+            errors.append(
+                f"{tid}: plan and acceptance criteria must not be empty"
+                + (" (in every part)" if len(stages) > 1 else "")
+            )
+        if len(stages) > 3:
+            errors.append(f"{tid}: {len(stages)} parts; plan at most 3 inside one task")
+        all_crit = [c for st in stages for c in st["criteria"]]
+        crit = [_norm(c) for c in all_crit]
         if tid in by_id and (
             missing := [
                 a
@@ -270,32 +345,46 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
                 f"{tid}: the criteria drop {len(missing)} of the task's Owner additions; copy "
                 f"each word for word as its own criterion: {missing}"
             )
-        if VISUAL.search(" ".join(map(str, p.get("criteria") or []))) and not p.get("routes"):
-            errors.append(f"{tid}: criteria mention the viewer or screenshots but list no routes")
-        if p.get("routes") and dev in devs and not devs[dev].get("screenshots"):
+        for k, st in enumerate(stages):
+            if (m := needs_routes(st["criteria"], devs.get(dev, {}))) and not st["routes"]:
+                part = f" (part {k + 1})" if len(stages) > 1 else ""
+                errors.append(
+                    f"{tid}{part}: the criteria name {m.group(0)!r} but list no routes "
+                    "(the pages the tester screenshots)"
+                )
+        routes = [r for st in stages for r in st["routes"]]
+        if routes and dev in devs and not devs[dev].get("screenshots"):
             errors.append(f"{tid}: routes given but {dev} has no screenshots config")
         elif tid in by_id and dev in devs:
-            errors += route_errors(p, by_id[tid], cfg)
+            errors += route_errors({**p, "routes": routes}, by_id[tid], cfg)
     if errors:
         raise PlanError(errors, outside)
-    return [
-        {
-            "task": by_id[p["task_id"]],
-            "assignee": p["assignee"],
-            "plan": resume_note(by_id[p["task_id"]]) + p["plan"],
-            "criteria": list(p["criteria"]),
-            "routes": list(p.get("routes") or []),
-        }
-        for p in plans
-    ]
+    out = []
+    for p in plans:
+        task, stages = by_id[p["task_id"]], stages_of(p)
+        overview = resume_note(task) + p["plan"]
+        out.append(
+            {
+                "task": task,
+                "assignee": p["assignee"],
+                "overview": overview,
+                "stages": stages,
+                **stage_state(overview, stages, 0),
+            }
+        )
+    return out
 
 
 class TaskState(TypedDict, total=False):
     task: dict
     assignee: str
-    plan: str
+    plan: str  # of the current part (stage_state)
     criteria: list[str]
     routes: list[str]  # web pages to screenshot for the tester
+    overview: str  # the brain's plan for the whole task
+    stages: list[dict]  # the parts the brain planned inside the task (one when it planned none)
+    stage: int  # the part being built
+    part_done: bool  # the tester accepted a part that is not the last: the next one follows
     worktree: str
     branch: str
     session: str
@@ -1092,15 +1181,24 @@ class Team:
             f"- `{Path(p).relative_to(self.root)}`" for p in v.get("screenshots", [])
         )
         shots += "".join(f"\n- **failed:** {x}" for x in v.get("screenshot_problems", []))
+        stages, k, parts = s.get("stages") or [], s.get("stage", 0), ""
+        if len(stages) > 1:  # which parts the tester accepted; the criteria below are part k's
+            parts = "## Parts\n\n" + "\n".join(
+                f"- [{'x' if i < k or (i == k and v.get('passed')) else ' '}] "
+                f"part {i + 1}: {st['title']}"
+                for i, st in enumerate(stages)
+            ) + "\n\n"  # fmt: skip
         path.write_text(
             self.redact(
                 f"# {tid}: {s['task']['title']}\n\n"
                 f"**{status}** · developer: {s['assignee']} · branch `{s['branch']}` · "
-                f"rounds: {s.get('rounds', 0)} · sent back: {s.get('fixes', 0)} · "
-                f"judge: {'pass' if v.get('judge_passed') else 'fail'}\n\n"
+                f"rounds: {s.get('rounds', 0)} · sent back: {s.get('fixes', 0)}"
+                + (f" (part {k + 1}/{len(stages)})" if len(stages) > 1 else "")
+                + f" · judge: {'pass' if v.get('judge_passed') else 'fail'}\n\n"
                 f"## What changed\n\n{v.get('summary', '')}\n\n"
-                f"## How to try it\n\n{v.get('how_to_try', '')}\n\n"
-                f"## Acceptance criteria\n\n{crit}\n\n## Local checks\n\n{checks or '- (none)'}\n\n"
+                f"## How to try it\n\n{v.get('how_to_try', '')}\n\n{parts}"
+                f"## Acceptance criteria{f' (part {k + 1})' if parts else ''}\n\n{crit}\n\n"
+                f"## Local checks\n\n{checks or '- (none)'}\n\n"
                 f"## Gates\n\n{gate_lines or '- (not reached)'}\n\n"
                 + (
                     f"## Screenshots (dev machine, seen by the tester)\n\n{shots}\n\n"
@@ -1245,6 +1343,9 @@ def build_graph(team: Team, checkpointer):
             if (head := team.git("rev-parse", "HEAD", cwd=wt).strip()) != s["head"]:
                 s = {**s, "head": head, "snap": team.snapshot(wt)}  # dev's merge, accepted
         what = "fixing: " + s["feedback"][:200] if s.get("feedback") else "building the plan"
+        if not s.get("feedback") and len(stages := s.get("stages") or []) > 1:
+            k = s.get("stage", 0)
+            what = f"building part {k + 1}/{len(stages)}: {stages[k]['title']}"
         team.emit(dev, what, task=tid, status="working")
         if not team.fake:  # e.g. pnpm install: the Codex sandbox has no network
             for cmd in team.cfg["developers"][dev].get("setup", []):
@@ -1445,6 +1546,28 @@ def build_graph(team: Team, checkpointer):
                 f"was started: {verdict['feedback'].strip()[:400]}",
             )
             return {**out, "verdict": verdict, "fixes": fixes, "snap": snap, "last_sendback": key}
+        stages, nxt = s.get("stages") or [], s.get("stage", 0) + 1
+        if verdict["passed"] and nxt < len(stages):
+            # a part accepted: the next one starts in a fresh round (no feedback, so a new
+            # session with the full brief); send-backs and loop detection start again with it
+            team.emit(
+                "tester",
+                f"part {nxt}/{len(stages)} accepted; part {nxt + 1} next: {stages[nxt]['title']}",
+                task=tid,
+                to=s["assignee"],
+                status="idle",
+            )
+            return {
+                **stage_state(s.get("overview", ""), stages, nxt),
+                "verdict": verdict,
+                "fixes": 0,
+                "snap": snap,
+                "gate": {},
+                "last_sendback": "",
+                "feedback": "",
+                "part_done": True,
+                "tested_head": head,
+            }
         if verdict["passed"]:
             team.emit(
                 "tester", "local checks and criteria pass", task=tid, to="gates", status="idle"
@@ -1465,6 +1588,7 @@ def build_graph(team: Team, checkpointer):
             "snap": snap,
             "gate": {},
             "last_sendback": key,
+            "part_done": False,
             # weakened: the next round is compared with the same tests again, so resubmitting
             # them unchanged is the same reason twice in a row (blocked), never a pass
             "tested_head": (
@@ -1516,7 +1640,7 @@ def build_graph(team: Team, checkpointer):
         if s.get("gate", {}).get("blocked"):
             return "finish"
         if s["verdict"]["passed"]:
-            return "gates"
+            return "develop" if s.get("part_done") else "gates"  # the next part, or the gates
         return "develop" if s["fixes"] <= max_fixes else "finish"
 
     def gates(s: TaskState):
@@ -1831,9 +1955,12 @@ def build_graph(team: Team, checkpointer):
             team.update_task(a["task"]["id"], status="in_progress", owner=a["assignee"], run=run)
             # on dev too: a claim kept only in the main checkout left backlog.yaml modified there
             team.push_status(a["task"]["id"], f"backlog: {a['task']['id']} in_progress")
+            stages = a.get("stages") or []
+            n, total = len(stages), sum(len(x["criteria"]) for x in stages)
             team.emit(
                 "brain",
-                f"{a['task']['title']} — plan with {len(a['criteria'])} criteria",
+                f"{a['task']['title']} — plan with {len(a['criteria'])} criteria"
+                + (f" in part 1 ({total} in {n} parts)" if n > 1 else ""),
                 task=a["task"]["id"],
                 to=a["assignee"],
             )

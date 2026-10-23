@@ -156,8 +156,10 @@ their own numbers; the full benchmark runs only at the merge gate and at release
 ask a developer to run the full set.
 List `routes` for every task whose acceptance mentions a visual result in the viewer, pipeline
 tasks too: the app pages (e.g. "/", "/viewer/demo") the tester screenshots and looks at; [] only
-for tasks with nothing to see. The tester signs in first, so pages behind the login are fine; to
-see the login page itself use "/?signed-out". A route must show the task's own output: for
+for tasks with nothing to see. A backend task may say "the viewer must not break" with no
+routes; a criterion that names a page path ("/viewer/<run>", "/inspections") needs routes. The
+tester signs in first, so pages behind the login are fine; to see the login page itself use
+"/?signed-out". A route must show the task's own output: for
 pipeline tasks the viewer serves the quick benchmark output, so routes are "/viewer/<video>" for
 videos in that run; a task with `runs_before_task` writes new runs into the runs dir, so its
 "/viewer/<run>" routes name runs it creates (e.g. "<video>-<suffix>"), never one listed in
@@ -167,6 +169,16 @@ no browser): never require a developer to produce, attach or commit a screenshot
 criteria as what the page must show ("/viewer/demo shows a black canvas with points and no error
 banner"); the tester judges them from its own screenshots of `routes`, and a missing screenshot
 fails the task.
+Parts (owner, 2026-10-23: fewer, bigger tasks): a task whose goal lists more than ~4 build
+items is built in 2-3 `parts` inside the same task (never new backlog tasks), in build order,
+each a coherent slice a developer finishes in one or two rounds: `title` (a few words), `plan`
+(this part's steps and files), `acceptance_criteria` (3-7, checkable from the diff and the
+checks, as above; the tests of this part included) and `routes` (pages this part changes; []
+otherwise). The tester accepts a part before the next one starts; the developer is told which
+part it is on and which parts are done. The top-level `plan` is then the overview of the whole
+task and the top-level `acceptance_criteria` (and `routes`) are the whole task's final state,
+checked in the last part together with that part's own: put the Owner additions and "ruff,
+mypy, pytest pass" there. A task with up to ~4 build items: `parts: []`, plan it as one piece.
 A task with `previous_work` already has commits on its devteam/<id> branch: the developer
 continues on that branch (dev merged in), so plan only what is still missing; say in the plan
 that the earlier work is there. Tasks whose `depends_on` are not all done never reach you.
@@ -223,7 +235,17 @@ removes or weakens an assertion (looser threshold, fewer cases, an exact value m
 or replaces a fixed expected value with one computed by the code under test; that fails the
 task whatever else passes. Updating an expected value to a new fixed literal that the
 criteria require is not weakening.
-Write `feedback` for the developer in English: concrete, actionable, empty if passed.
+A <plan> that says "part k of n": the brain planned this task in parts; the earlier parts were
+accepted already and the diff still shows the whole branch. Judge only this part's
+<acceptance_criteria>; never fail it for later parts not being there yet.
+Write `feedback` for the developer in English: concrete, actionable, empty if passed. A
+send-back must be fixable in ONE round: for every unmet criterion name the exact place (file and
+line in the diff, or the component with its CSS selector or i18n key) and what it must become.
+Above all for cosmetic points seen only in screenshots (a truncated text, a chip or badge on
+rows that must not have one, spacing, a wrong colour token): say which screenshot, which element
+(selector or visible text), which file / selector to change and the expected result; never a
+vague "adjust the layout" or "fix the truncation" (U2 was sent back three times on small UI
+points, 2026-10-23).
 Write `summary` and `how_to_try` for the owner in simple Russian: what changed in plain
 words (no jargon), and exact commands to try it."""
 
@@ -313,6 +335,23 @@ class RealAgents:
                             "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
                             "licence_notes": {"type": "string"},
                             "routes": {"type": "array", "items": {"type": "string"}},
+                            "parts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "title": {"type": "string"},
+                                        "plan": {"type": "string"},
+                                        "acceptance_criteria": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                        },
+                                        "routes": {"type": "array", "items": {"type": "string"}},
+                                    },
+                                    "required": ["title", "plan", "acceptance_criteria", "routes"],
+                                    "additionalProperties": False,
+                                },
+                            },
                         },
                         "required": [
                             "task_id",
@@ -321,6 +360,7 @@ class RealAgents:
                             "acceptance_criteria",
                             "licence_notes",
                             "routes",
+                            "parts",
                         ],
                         "additionalProperties": False,
                     },
@@ -363,6 +403,15 @@ class RealAgents:
                 "plan": a["plan"] + "\n\nLicences: " + a["licence_notes"],
                 "criteria": a["acceptance_criteria"],
                 "routes": a["routes"],
+                "parts": [
+                    {
+                        "title": x["title"],
+                        "plan": x["plan"],
+                        "criteria": x["acceptance_criteria"],
+                        "routes": x["routes"],
+                    }
+                    for x in a.get("parts") or []
+                ],
             }
             for a in out["assignments"]
         ]
