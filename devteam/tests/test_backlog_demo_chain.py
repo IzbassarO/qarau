@@ -9,7 +9,7 @@ import pytest
 import yaml
 from conftest import CFG, HERE, real_backlog
 from test_deps import msgs, recording, run
-from test_fixes import make, statuses
+from test_safety import make, statuses
 
 from devteam.graph import outside_paths
 
@@ -69,6 +69,12 @@ def test_later_tasks_say_why_and_acc1_replaces_p7():
         assert by[tid].get("blocked_reason", "").startswith("LATER (owner 2026-10-22)"), tid
     assert by["ACC1"]["depends_on"] == ["P5a-2"] and "Replaces P7" in by["ACC1"]["goal"]
     assert by["A7"]["branch"] == "devteam/A7"  # earlier work is never lost
+    # the splits of 2026-10-19/21 survive the move (from test_run2, test_supervisor; #65)
+    assert by["O1"]["depends_on"] == ["O1a"] and by["A7"]["depends_on"] == ["A7a"]
+    assert "U2" in by["A8"]["depends_on"]  # no new viewer features before upload
+    assert "P4a-2" not in by and by["P4a-2b"]["depends_on"] == ["P4a-2a-run"]
+    for tid in ("UX-kk", "UX-390"):  # web/ polish waits for the v2 design, no dependency
+        assert not by[tid].get("depends_on")
 
 
 @pytest.mark.backlog

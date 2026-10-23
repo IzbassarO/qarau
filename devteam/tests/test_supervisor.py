@@ -1,6 +1,7 @@
 """Owner, 2026-10-17 (PR 1): supervisor limits, loop detection, dev merged before each round,
 plans inside the developer's folders, stop / resume one task, dashboard from the current run,
-prompt caching, `writable` data folders, the A7 split and the backlog order."""
+prompt caching, `writable` data folders; CPU work as progress, a blocked streak pauses one
+developer, loop detection by criterion number, routes and Owner additions in plans, Codex."""
 
 import copy
 import json
@@ -15,17 +16,24 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from conftest import CFG, HERE, git, real_backlog, remote_of
+from conftest import CFG, HERE, git, remote_of, team_for
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from devteam import cli, costs
+from devteam import cli, costs, procs
 from devteam import continuous as C
 from devteam import dashboard as D
 from devteam import graph as GR
 from devteam import supervise as SV
 from devteam.agents import FakeAgents
-from devteam.graph import PlanError, Team, build_graph, outside_paths, validate_plan
-from devteam.real import RealAgents, llm_call
+from devteam.graph import (
+    PlanError,
+    Team,
+    build_graph,
+    outside_paths,
+    owner_additions,
+    validate_plan,
+)
+from devteam.real import RealAgents, llm_call, parse_codex
 from devteam.supervise import TaskHalted
 
 STREAM = (HERE / "tests" / "claude-stream.jsonl").read_text()  # real claude 2.1.302 output
@@ -494,49 +502,363 @@ def test_writable_data_folder_may_only_grow(repo, change):
         assert t["status"] == "done"
 
 
-# --- 5, 6, 10: the real backlog -----------------------------------------------------------------
-# Kerege's status commits (`backlog: A9-fix done (#41)`) go straight to dev, so these tests check
-# structure and queue order only, never a status Kerege changes (that turned dev CI red at 778e072).
-@pytest.mark.backlog
-def test_real_backlog_split_a7_p3e_and_order():
-    tasks = real_backlog()
-    by = {t["id"]: t for t in tasks}
-    for t in tasks:  # every dependency exists
-        assert set(t.get("depends_on") or []) <= set(by), t["id"]
-    assert by["A7a"]["area"] == "core" and "backend/" in by["A7a"]["goal"]
-    assert by["A7"]["depends_on"] == ["A7a"] and by["A7"]["branch"] == "devteam/A7"
-    assert by["P3e"]["writable"] == ["data/runs"]
-    assert not {"P4a-2a-code", "P4a-2a-run"} & set(by["S1"].get("depends_on") or [])
-    assert by["U2"]["area"] == "app" and by["U2"]["depends_on"] == ["B1"]  # owner 2026-10-22
-    assert by["D2"]["area"] == "core" and by["D2"]["depends_on"] == ["S1", "U2"]
-    assert "U2" in by["A8"]["depends_on"]  # no new viewer features before upload
+# --- 3. supervisor: progress, per-task limits, output tokens --------------------------------
+def test_round_watch_counts_cpu_work_as_progress():
+    lim = {**SV.DEFAULTS, "max_idle_min": 1, "max_round_min": 10}
+    counter = SimpleNamespace(feed=lambda chunk: 0)
+    w = SV.RoundWatch(counter, 0, lim)
+    assert w(b"", 0, {1: 0.0}) == ""
+    assert w(b"", 59, {1: 1.0}) == ""
+    assert w(b"", 61, {1: 60.0}) == ""  # COLMAP at full speed, no output: working
+    assert w(b"", 100, None) == ""  # between CPU samples
+    assert w(b"", 120, {1: 60.5}) == ""  # 59 s since the last progress: not yet
+    assert "no progress for 1 min" in w(b"", 122, {1: 60.5})
+    w = SV.RoundWatch(counter, 0, lim)
+    assert w(b'{"type":"x"}\n', 70, {1: 0.0}) == "" and w(b"", 125, None) == ""  # output counts
+    # a child that started since the last sample counts with all its CPU
+    w = SV.RoundWatch(counter, 0, lim)
+    w(b"", 0, {1: 0.0})
+    assert w(b"", 61, {1: 0.0, 2: 5.0}) == "" and w.active_at == 61
+    assert "the round ran 10 min (limit 10 min per round" in w(b"x", 600, None)
 
-    def order(area, ids):
-        return [t["id"] for t in tasks if t["area"] == area and t["id"] in ids]
 
-    # owner, 2026-10-22: done tasks first, then the demo chain (S1, D1), then LATER
-    core = ["P3e", "P4a-1b", "S1", "D1", "P5a-1", "P5a-2", "A7a", "O1a"]
-    assert order("core", core) == core
-    app = ["A9-fix", "A5-fix", "U2", "O1", "A8"]  # the historic violations first
-    assert order("app", app) == app
-    assert by["P4a-1b"]["area"] == "core" and "MODAL_TOKEN_ID" in by["P4a-1b"]["goal"]
-    assert "no real Modal call" in by["P4a-1b"]["goal"]
-    # P4a-2 split (owner, 2026-10-21): code by Kerege, the first paid run by the owner only
-    assert "P4a-2" not in by
-    code, run, prior = by["P4a-2a-code"], by["P4a-2a-run"], by["P4a-2b"]
-    assert "No real Modal call" in code["goal"] and "--allow-paid-gpu" in code["goal"]
-    assert "not Kerege" in run["title"] and run["owner_only"]
-    assert not run.get("depends_on")  # unblock_ready would hand a blocked task to Kerege
-    assert "P4a-2a-code" in run["goal"]
-    assert run["pr"].endswith("/pull/58") and run["done_at"] == "2026-10-21"  # the owner ran it
-    assert prior["depends_on"] == ["P4a-2a-run"] and "Small only" in prior["goal"]
-    assert by["P4c"]["depends_on"] == ["P4a-2a-run", "A7"]
-    for t in (code, run):  # Modal's ADR is 0019 (0018 is the design tokens, #52)
-        text = t["goal"] + t["licence"]
-        assert "ADR 0019" in text and "0018" not in text, t["id"]
-    sheet = by["P5a-2"]["goal"]
-    assert "letter = 215.9 x 279.4 mm (the default" in sheet and "a4 = 210 x 297 mm" in sheet
-    assert "1440x900" in by["UX1a"]["goal"] and "tokens.json" in by["UX1a"]["goal"]
-    assert "390" not in by["UX1a"]["goal"]  # no viewport Kerege cannot shoot yet
-    # A7a's own criteria-shaped goal stays inside dev_pipeline's folders
-    assert outside_paths([by["A7a"]["goal"]], "dev_pipeline", CFG, by["A7a"]) == []
+def test_a_task_sets_its_own_round_limit():
+    cfg = {"supervisor": {"max_round_min": 60}}
+    assert SV.limits(cfg)["max_round_min"] == 60 and SV.limits(cfg)["max_idle_min"] == 20
+    p3e = {"id": "P3e", "supervisor": {"max_round_min": 180}}  # a task with its own limit
+    assert SV.limits(cfg, p3e)["max_round_min"] == 180
+    assert SV.limits(cfg, p3e)["max_tokens_per_task"] == SV.DEFAULTS["max_tokens_per_task"]
+
+
+def test_cpu_times_of_a_step():
+    assert procs._cpu_s("0:01.50") == 1.5  # BSD
+    assert procs._cpu_s("00:01:02") == 62  # procps
+    assert procs._cpu_s("1-00:00:01") == 86401
+    busy = "import time\nt = time.time()\nwhile time.time() - t < 3: pass"
+    p = subprocess.Popen([sys.executable, "-c", busy], start_new_session=True)
+    try:
+        time.sleep(1.5)
+        cpu = procs.cpu_times(p.pid, "no-marker")
+        assert p.pid in cpu and cpu[p.pid] > 0.5
+    finally:
+        p.kill()
+        p.wait()
+
+
+@pytest.mark.parametrize("busy", [True, False])
+def test_a_step_doing_cpu_work_is_not_killed_an_idle_one_is(repo, monkeypatch, busy):
+    monkeypatch.setattr(GR, "CPU_EVERY_S", 0.3)
+    monkeypatch.setattr(SV, "CPU_ACTIVE_S", 0.1)
+    team, _ = make(repo)
+    lim = {**SV.DEFAULTS, "max_idle_min": 1.5 / 60}  # 1.5 s without progress
+    watch = SV.RoundWatch(SimpleNamespace(feed=lambda chunk: 0), 0, lim)
+    loop = "import time\nt = time.time()\nwhile time.time() - t < 4: pass"
+    cmd = [sys.executable, "-c", loop] if busy else ["sleep", "4"]
+    if busy:
+        r = team.run_proc(cmd, cwd=str(repo), timeout=30, watch=watch)
+        assert r["ok"]
+    else:
+        with pytest.raises(TaskHalted, match="no progress for 0 min"):
+            team.run_proc(cmd, cwd=str(repo), timeout=30, watch=watch)
+
+
+FAKE_CLAUDE_OUT = """#!{py}
+import json, sys, time
+sys.stdin.read()
+print(json.dumps({{"type": "system", "subtype": "init", "session_id": "sess-1"}}), flush=True)
+for mid in ("m1", "m2"):  # usage as of each message's start: 3 output tokens
+    u = {{"input_tokens": 2000, "output_tokens": 3}}
+    print(json.dumps({{"type": "assistant", "message": {{"id": mid, "usage": u}}}}), flush=True)
+time.sleep(60)
+"""
+
+
+def test_a_killed_claude_round_records_output_tokens_from_its_transcript(
+    repo, tmp_path, monkeypatch
+):
+    """P3e: 5,597,007 in / 0 out in the report; the transcript had 27,543 output tokens."""
+    bindir, home = tmp_path / "bin", tmp_path / "claude-home"
+    bindir.mkdir()
+    (bindir / "claude").write_text(FAKE_CLAUDE_OUT.format(py=sys.executable))
+    (bindir / "claude").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{bindir.parent}:{__import__('os').environ['PATH']}")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    proj = home / "projects" / "-tmp-wt-T-001"
+    proj.mkdir(parents=True)
+    rows = [  # final counts; m0 is from an earlier round of the resumed session
+        {
+            "type": "assistant",
+            "message": {"id": i, "usage": {"input_tokens": 2000, "output_tokens": o}},
+        }
+        for i, o in (("m0", 999), ("m1", 400), ("m2", 300))
+    ]
+    (proj / "sess-1.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    team, _ = make(repo, supervisor={"max_tokens_per_round": 3000})
+    team.secrets = {"CLAUDE_CODE_OAUTH_TOKEN": "oauth-0123456789"}
+    s = {
+        "task": {"id": "T-001", "title": "t", "goal": "g"},
+        "assignee": "dev_pipeline",
+        "plan": "p",
+        "criteria": ["c"],
+        "worktree": str(repo),
+    }
+    with pytest.raises(TaskHalted, match="this round used"):
+        RealAgents().develop(team, s)
+    (row,) = costs.subscription_rows(team.home, costs._today())
+    assert (row[5], row[6]) == (4000, 700)
+
+
+def test_codex_counter_keeps_input_and_output_apart(tmp_path):
+    day = tmp_path / "sessions" / "2026" / "10" / "18"
+    day.mkdir(parents=True)
+    rollout = day / "rollout-2026-10-18T10-00-00-th-1.jsonl"
+
+    def count(i, o):
+        u = {"input_tokens": i, "output_tokens": o}
+        e = {"payload": {"type": "token_count", "info": {"total_token_usage": u}}}
+        with open(rollout, "a") as f:
+            f.write(json.dumps(e) + "\n")
+
+    count(1000, 10)
+    c = SV.CodexTokens("th-1", home=tmp_path)  # resumed: this round starts at 1000 / 10
+    count(4000, 90)
+    assert c.feed(b"") == 3080 and c.usage() == {"in": 3000, "out": 80}
+
+
+# --- 5. a blocked streak pauses one developer, not the run ------------------------------------
+class BlockCore(Fast):
+    """The tester fails every dev_pipeline task; dev_app's pass at once."""
+
+    def judge(self, team, s, checks):
+        v = super().judge(team, s, checks)
+        if s["assignee"] == "dev_app":
+            v.update(passed=True, feedback="")
+            v["criteria"] = [{**c, "met": True} for c in v["criteria"]]
+        return v
+
+
+def test_two_blocked_in_a_row_pause_that_developer_the_others_go_on(repo):
+    team, graph = make(repo, BlockCore(), max_fix_loops=0)
+    data = yaml.safe_load(team.backlog_path.read_text())
+    data["tasks"] += [
+        {"id": "T-004", "area": "core", "title": "core 4", "goal": "g", "status": "todo"},
+        {"id": "T-005", "area": "app", "title": "app 5", "goal": "g", "status": "todo"},
+        {"id": "T-006", "area": "app", "title": "app 6", "goal": "g", "status": "todo"},
+    ]
+    team.backlog_path.write_text(yaml.safe_dump(data, sort_keys=False))
+    s = C.Continuous(team, graph).run()
+    st = {t["id"]: t["status"] for t in team.load_backlog()}
+    assert st == {
+        "T-001": "blocked",
+        "T-002": "done",
+        "T-003": "blocked",
+        "T-004": "todo",  # dev_pipeline paused before it
+        "T-005": "done",
+        "T-006": "done",  # dev_app kept going
+    }
+    assert s["stop_reason"] == (
+        "no developer can take a task: dev_pipeline paused: 2 of its tasks in a row ended "
+        "blocked (T-001, T-003); no plannable task left for the others"
+    )
+    assert "dev_pipeline paused" in (team.home / "events.log").read_text()
+
+
+# --- 2. routes show the task's own output ---------------------------------------------------
+TODO = [
+    {"id": "T-001", "area": "core", "writable": ["data/runs"], "runs_before_task": ["room"]},
+    {"id": "T-003", "area": "core"},
+    {"id": "T-002", "area": "app"},
+]
+
+
+def route_plan(tid, dev, routes):
+    return {"task_id": tid, "assignee": dev, "plan": "p", "criteria": ["c"], "routes": routes}
+
+
+def test_a_task_that_writes_runs_must_route_to_runs_it_makes():
+    with pytest.raises(PlanError, match=r"/viewer/room shows run 'room', which was in data/runs"):
+        validate_plan([route_plan("T-001", "dev_pipeline", ["/", "/viewer/room"])], TODO, CFG)
+    (a,) = validate_plan(
+        [route_plan("T-001", "dev_pipeline", ["/", "/viewer/room-2026-10-20"])], TODO, CFG
+    )
+    assert a["routes"] == ["/", "/viewer/room-2026-10-20"]
+
+
+def test_a_pipeline_task_routes_only_to_its_quick_benchmark_videos():
+    quick = CFG["gates"]["benchmark"]["quick_only"]
+    with pytest.raises(PlanError, match="serve its quick benchmark output"):
+        validate_plan([route_plan("T-003", "dev_pipeline", ["/viewer/aegviidu"])], TODO, CFG)
+    validate_plan([route_plan("T-003", "dev_pipeline", [f"/viewer/{quick[0]}"])], TODO, CFG)
+    validate_plan(
+        [route_plan("T-002", "dev_app", ["/viewer/anything"])], TODO, CFG
+    )  # runs_dir as is
+
+
+def test_runs_before_task_come_from_the_kept_start_snapshot(repo):
+    team, _ = make(repo)
+    for run in ("room", "old-run"):
+        (repo / "data" / "runs" / run / "web").mkdir(parents=True)
+        (repo / "data" / "runs" / run / "web" / "manifest.json").write_text("{}")
+    task = {"id": "T-001", "writable": ["data/runs"]}
+    assert team.runs_before_task(task) == ["old-run", "room"]
+    (repo / "data" / "runs" / "room-2026-10-20" / "web").mkdir(parents=True)
+    (repo / "data" / "runs" / "room-2026-10-20" / "web" / "manifest.json").write_text("{}")
+    assert team.runs_before_task(task) == ["old-run", "room"]  # made by the task: not "before"
+
+
+def test_a_blocked_task_keeps_its_start_snapshot(repo):
+    team, graph = make(repo, max_fix_loops=0)
+    data = yaml.safe_load(team.backlog_path.read_text())
+    data["tasks"][0]["writable"] = ["data/runs"]
+    team.backlog_path.write_text(yaml.safe_dump(data, sort_keys=False))
+    (repo / "data" / "runs").mkdir(parents=True)
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})
+    assert {t["id"]: t["status"] for t in team.load_backlog()}["T-001"] == "blocked"
+    assert (team.home / "data-snap" / "T-001.json").exists()
+
+
+class RewordingTester(Fast):
+    """Fails criterion 1 every round, worded differently each time (P3e, 2026-10-19)."""
+
+    rounds = 0
+
+    def judge(self, team, s, checks):
+        RewordingTester.rounds += 1
+        crit = [
+            {
+                "number": 1,
+                "criterion": f"wording {RewordingTester.rounds}",
+                "met": False,
+                "note": "",
+            }
+        ]
+        return {"passed": False, "feedback": f"fix it ({RewordingTester.rounds})",
+                "criteria": crit, "summary": "", "how_to_try": ""}  # fmt: skip
+
+
+def test_the_same_criterion_twice_blocks_whatever_the_wording(repo):
+    team, graph = make(repo, RewordingTester(), max_fix_loops=3)
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})
+    t = {t["id"]: t for t in team.load_backlog()}["T-001"]
+    assert t["status"] == "blocked" and "twice in a row" in t["blocked_reason"]
+
+
+# --- 3. Owner additions reach the plan word for word ---------------------------------------------
+GOAL = """web/ only.
+
+
+Owner additions (2026-10-21):
+
+- The side panel shows at least 12 inspections at 1440x900 without scrolling it.
+
+- No "Example" badge next to the "Example inspection" link.
+
+"""
+
+
+def plan_with(*criteria: str) -> list[dict]:
+    return [{"task_id": "T-002", "assignee": "dev_app", "plan": "p", "criteria": list(criteria),
+             "routes": []}]  # fmt: skip
+
+
+def test_owner_additions_are_parsed_from_the_goal():
+    assert owner_additions(GOAL) == [
+        "The side panel shows at least 12 inspections at 1440x900 without scrolling it.",
+        'No "Example" badge next to the "Example inspection" link.',
+    ]
+    assert owner_additions("no additions here\n- a bullet of the goal itself") == []
+
+
+def test_a_plan_that_drops_an_owner_addition_is_rejected():
+    todo = [{"id": "T-002", "area": "app", "title": "t", "goal": GOAL}]
+    first = "The side panel shows at least 12 inspections at 1440x900 without scrolling it."
+    with pytest.raises(PlanError) as e:
+        validate_plan(plan_with("Vitest green", first), todo, CFG)
+    assert "drop 1 of the task's Owner additions" in str(e.value) and "Example" in str(e.value)
+    ok = plan_with(  # case and line breaks may differ; extra words around it are fine
+        "Vitest green",
+        "the side panel shows at least 12 inspections at 1440x900\nwithout scrolling it.",
+        'No "Example" badge next to the "Example inspection" link. Checked in en/ru/kk.',
+    )
+    assert validate_plan(ok, todo, CFG)[0]["criteria"] == ok[0]["criteria"]
+
+
+def test_the_brain_never_plans_an_owner_only_task(repo):
+    team, graph = make(repo)
+    team.update_task("T-001", owner_only=True)
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})
+    by = {t["id"]: t for t in team.load_backlog()}
+    assert by["T-001"]["status"] == "todo" and by["T-002"]["status"] == "done"
+    assert "skipping owner-only tasks" in (team.home / "events.log").read_text()
+
+
+# Real `codex exec --json` output (codex-cli 0.162.1), trimmed.
+CODEX_OK = """{"type":"thread.started","thread_id":"01a13f6c-eace"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"working"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"ls"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"DONE"}}
+{"type":"turn.completed","usage":{"input_tokens":29513,"cached_input_tokens":26752,"output_tokens":58}}
+"""
+CODEX_FAILED = """{"type":"thread.started","thread_id":"01a13f6d"}
+{"type":"turn.started"}
+{"type":"error","message":"status 400: model not supported"}
+{"type":"turn.failed","error":{"message":"usage limit reached"}}
+"""
+
+
+def test_parse_codex():
+    ok = parse_codex(CODEX_OK, True, "", "")
+    assert ok == {
+        "session": "01a13f6c-eace",
+        "summary": "DONE",
+        "error": False,
+        "usage": {"in": 29513, "out": 58, "usd": 0.0},
+    }
+    bad = parse_codex(CODEX_FAILED, False, "", "")
+    assert bad["error"] and bad["summary"] == "usage limit reached"
+    crashed = parse_codex("", False, "boom", "old")
+    assert crashed["error"] and crashed["summary"] == "boom" and crashed["session"] == "old"
+
+
+def test_codex_developer_runs_resumes_and_logs_load(repo, tmp_path, monkeypatch):
+    """A stand-in `codex` on PATH: records its argv and stdin, answers like the real one."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "codex").write_text(
+        "#!/bin/sh\n"
+        f'echo "$@" >> {tmp_path}/argv\n'
+        f"cat > {tmp_path}/stdin\n"
+        f'[ -n "$OPENAI_API_KEY" ] && echo leaked > {tmp_path}/key\n'
+        f"cat <<'EOF'\n{CODEX_OK}EOF\n"
+    )
+    (bindir / "codex").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-pass")
+    team = team_for(repo)
+    s = {
+        "task": {"id": "A1a", "title": "Shell", "goal": "g"},
+        "assignee": "dev_app",
+        "plan": "p",
+        "criteria": ["c"],
+        "worktree": str(repo),
+    }
+    out = RealAgents().develop(team, s)
+    assert out == {"session": "01a13f6c-eace", "summary": "DONE", "tokens": 29513 + 58}
+    argv = (tmp_path / "argv").read_text().splitlines()
+    scratch = team.home / "scratch" / "A1a"  # outside the worktree, writable in the sandbox
+    assert argv[0] == f"exec --json --sandbox workspace-write -C {repo} --add-dir {scratch} -"
+    assert "Task A1a: Shell" in (tmp_path / "stdin").read_text()
+    assert f"goes ONLY to\n  {scratch}" in (tmp_path / "stdin").read_text()
+    assert "quick set" not in (tmp_path / "stdin").read_text()  # web dev: no benchmark lines
+    assert not (tmp_path / "key").exists()  # ChatGPT login only, never the API key
+
+    RealAgents().develop(team, {**s, "session": out["session"], "feedback": "fix the label"})
+    argv = (tmp_path / "argv").read_text().splitlines()
+    assert argv[1].endswith("resume 01a13f6c-eace -")
+    assert "fix the label" in (tmp_path / "stdin").read_text()
+
+    rows = costs.subscription_rows(team.home, costs._today())
+    assert [(r[0], r[1], r[2], r[3], r[5], r[6]) for r in rows] == [
+        ("A1a", "dev_app", "codex (subscription)", 2, 59026, 116)
+    ]

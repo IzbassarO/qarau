@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 from conftest import CFG, git, real_backlog, remote_of
-from test_fixes import Quick, dev_backlog, make, p, statuses
+from test_safety import Quick, dev_backlog, make, p, statuses
 
 from devteam import gates as G
 from devteam.graph import validate_plan
@@ -156,7 +156,7 @@ def test_dev_screenshots_use_devs_cached_benchmark(repo, tmp_path):
     shots, problems = G.dev_screenshots(team, s, ["/viewer/notre-dame"])
     assert [Path(x).name for x in shots] == ["dev-viewer-notre-dame.png"] and problems == []
     assert (tmp_path / "runs").read_text().strip() == str(cache)
-    # dev_app: its "before" is the page built from dev (test_run4), not a benchmark cache
+    # dev_app: its "before" is the page built from dev (test_screenshots), not a benchmark cache
     s["assignee"] = "dev_app"
     team.cfg["developers"]["dev_app"]["screenshots"] = None
     assert G.dev_screenshots(team, s, ["/"]) == ([], [])  # no screenshots config: nothing
