@@ -1,7 +1,3 @@
-# Qarau backlog, read by Kerege (devteam/devteam). Per-task fields: id, area, title, goal, status,
-# owner, depends_on, run, branch, pr, done_at, blocked_reason, owner_only, writable, licence, quick_only,
-# supervisor. Statuses: todo | in_progress | blocked | done | dropped | later.
-# Comments die at the first status commit (Kerege re-dumps the file): `notes` is the durable record.
 notes: 'Demo chain (owner, 2026-10-22). Product first, then metres: website + deploy before scale-from-sheet;
 
   until a ScaleReference exists every area is reported as "scale not set". Automatic defect detection
@@ -768,7 +764,6 @@ tasks:
   branch: devteam/A5-fix
   pr: https://github.com/IzbassarO/qarau/pull/43
   done_at: '2026-10-18'
-# DEMO CHAIN — the brain's queue, in this order (owner 2026-10-22)
 - id: B1
   area: core
   title: Backend data model, roles and CRUD
@@ -837,7 +832,9 @@ tasks:
     '
   licence: SQLAlchemy, Alembic, FastAPI, Pydantic (MIT); psycopg (LGPL-3.0, dynamic use only); PostGIS
     only as a separate unmodified server (ADR 0010).
-  status: todo
+  status: in_progress
+  owner: dev_pipeline
+  run: run-20261022-232844
 - id: U2
   area: app
   title: Upload a video in the web app
@@ -1487,7 +1484,6 @@ tasks:
   status: todo
   depends_on:
   - RPT1
-# LATER — off the demo chain, not planned by the brain
 - id: P5a-1
   area: core
   title: Metric scale from a measured distance, and gravity
