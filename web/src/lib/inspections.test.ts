@@ -8,6 +8,7 @@ import {
   UNASSIGNED_SITE_ID,
   type RunSummary,
 } from './inspections';
+import catalog from '../test/fixtures/run-catalog.json';
 
 afterEach(() => {
   sessionStorage.clear();
@@ -193,4 +194,75 @@ it.each(['uploaded', 'queued', 'running', 'done', 'failed'] as const)(
 it('maps legacy completed to done and unfamiliar states to unknown', () => {
   expect(inspectionStatus('completed')).toBe('done');
   expect(inspectionStatus('future_state')).toBe('unknown');
+});
+
+it.each(['html', '404'] as const)(
+  'lists the actual legacy catalog when CRUD is absent (%s)',
+  async (kind) => {
+    const fetch = vi.fn(async (url: string) => {
+      if (url === '/api/inspections')
+        return kind === 'html'
+          ? new Response('<!doctype html><html></html>', {
+              headers: { 'Content-Type': 'text/html' },
+            })
+          : new Response('', { status: 404 });
+      if (url === '/api/runs') return Response.json(catalog);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const sites = await listInspections();
+    expect(sites).toHaveLength(1);
+    expect(sites[0].id).toBe('qarau:unassigned');
+    expect(sites[0].inspections.map(({ id, status }) => [id, status])).toEqual([
+      ['catalog-upload', 'uploaded'],
+      ['catalog-failed', 'failed'],
+      ['catalog-export', 'unknown'],
+    ]);
+    expect(sites[0].inspections[2]).toMatchObject({
+      title: 'Legacy export',
+      runId: 'catalog-export',
+      source: 'survey.mp4',
+      legacyRun: { run_id: 'catalog-export' },
+    });
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections', '/api/runs']);
+  },
+);
+
+it.each([401, 403, 500, 503])(
+  'never hides HTTP %i by falling back to the run catalog',
+  async (status) => {
+    const fetch = vi.fn().mockResolvedValue(new Response('', { status }));
+    vi.stubGlobal('fetch', fetch);
+    await expect(listInspections()).rejects.toThrow(String(status));
+    expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/inspections', {
+      signal: undefined,
+      headers: {},
+    });
+  },
+);
+
+it('keeps a malformed inspection response visible and never substitutes legacy runs', async () => {
+  const fetch = vi.fn().mockResolvedValue(Response.json({ inspections: [] }));
+  vi.stubGlobal('fetch', fetch);
+  await expect(listInspections()).rejects.toThrow('Invalid inspections response');
+  expect(fetch).toHaveBeenCalledOnce();
+});
+
+it('keeps real inspection statuses visible when site names are unavailable', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) =>
+      url === '/api/sites'
+        ? new Response('', { status: 404 })
+        : Response.json([
+            { id: 7, site_id: 1, status: 'uploaded', created_at: '2026-10-23T12:00:00Z' },
+          ]),
+    ),
+  );
+  const sites = await listInspections();
+  expect(sites[0]).toMatchObject({
+    id: '1',
+    name: '',
+    inspections: [{ id: '7', status: 'uploaded' }],
+  });
 });

@@ -221,3 +221,42 @@ it.each(['escape', 'close', 'unmount'])('aborts an active transfer on %s', async
   expect(signal?.aborted).toBe(true);
   if (action !== 'unmount') expect(onClose).toHaveBeenCalledOnce();
 });
+
+it.each(['en', 'ru', 'kk'] as const)(
+  'shows a calm unavailable state for the Vite catalog without inventing sites (%s)',
+  async (lang) => {
+    setLang(lang);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('<!doctype html><html></html>', {
+            headers: { 'Content-Type': 'text/html' },
+          }),
+      ),
+    );
+    render(<NewInspectionDialog onClose={() => {}} />);
+    const messages = {
+      en: ['Site selection is unavailable', 'Upload video'],
+      ru: ['Выбор площадки недоступен', 'Загрузить видео'],
+      kk: ['Алаңды таңдау қолжетімсіз', 'Бейнені жүктеу'],
+    };
+    expect(await screen.findByRole('option', { name: messages[lang][0] })).toBeTruthy();
+    expect((screen.getByRole('combobox') as HTMLSelectElement).disabled).toBe(true);
+    expect(screen.getAllByRole('option')).toHaveLength(1);
+    expect(
+      (screen.getByRole('button', { name: messages[lang][1] }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(upload.createInspection).not.toHaveBeenCalled();
+  },
+);
+
+it.each([401, 403, 503])('keeps site HTTP %i failures visible with Retry', async (status) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status })));
+  render(<NewInspectionDialog onClose={() => {}} />);
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    'Could not load sites. Check your connection and try again.',
+  );
+  expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+});

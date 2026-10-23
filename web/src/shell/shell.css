@@ -297,7 +297,6 @@
 }
 .inspection-status-chip {
   flex-shrink: 0;
-  max-width: 50%;
   padding: 0 var(--spacing-1);
   border: 1px solid var(--color-border);
   border-radius: var(--round-sm);
@@ -687,6 +686,12 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-3);
+  flex-wrap: wrap;
+}
+.upload-sites-error .shell-button {
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 .upload-progress {
   display: grid;

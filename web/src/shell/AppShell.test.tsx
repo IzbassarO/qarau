@@ -10,6 +10,7 @@ import { AppShell } from './AppShell';
 import { AuthProvider } from '../auth/AuthProvider';
 import { RequireAuth } from '../auth/RequireAuth';
 import { authHeader } from '../auth/auth';
+import catalog from '../test/fixtures/run-catalog.json';
 
 vi.mock('../viewer/ViewerScreen', () => ({
   ViewerScreen: ({ bundle, embedded }: { bundle: bundleApi.Bundle; embedded: boolean }) => (
@@ -392,4 +393,51 @@ it.each<Lang>(['en', 'ru', 'kk'])('opens /?new-inspection without an error in %s
   expect(screen.getByLabelText(LANGS[lang]['upload.site'])).toBeTruthy();
   expect(screen.getByLabelText(new RegExp(LANGS[lang]['upload.choose']))).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('lists legacy exported runs with visible status chips when inspection CRUD is absent', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) =>
+      url === '/api/runs'
+        ? Response.json(catalog)
+        : new Response('<!doctype html><html></html>', {
+            headers: { 'Content-Type': 'text/html' },
+          }),
+    ),
+  );
+  renderRoute('/');
+  const uploaded = await screen.findByRole('link', { name: /Walkdown upload/ });
+  expect(within(uploaded).getByText('Uploaded').className).toBe('inspection-status-chip uploaded');
+  expect(
+    within(screen.getByRole('link', { name: /Failed survey/ })).getByText('Failed'),
+  ).toBeTruthy();
+  expect(
+    within(screen.getByRole('link', { name: /Legacy export/ })).getByText('Status unavailable'),
+  ).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('opens a legacy exported map using its run id and keeps unreported processing states unknown', async () => {
+  const bundle = { ...createDemo('en').bundle, runId: 'catalog-export' };
+  const manifest = vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+  vi.spyOn(bundleApi, 'loadBundle').mockResolvedValue(bundle);
+  const fetch = vi.fn(async (url: string) =>
+    url === '/api/runs' ? Response.json(catalog) : new Response('', { status: 404 }),
+  );
+  vi.stubGlobal('fetch', fetch);
+  renderRoute('/inspections/catalog-export');
+  // A disabled detail query can still have old cache data from a previous API connection.
+  clients
+    .at(-1)!
+    .setQueryData(['inspection', 'catalog-export'], { status: 'done', runId: 'unrelated-run' });
+  expect((await screen.findByTestId('embedded-viewer')).getAttribute('data-run-id')).toBe(
+    'catalog-export',
+  );
+  expect(manifest).toHaveBeenCalledWith('catalog-export');
+  expect(screen.getByRole('heading', { name: 'Legacy export' })).toBeTruthy();
+  expect(screen.getAllByText('Unknown state')).toHaveLength(4);
+  expect(screen.queryByText('Completed')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections', '/api/runs']);
 });

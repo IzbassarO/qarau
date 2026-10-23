@@ -55,3 +55,21 @@ cancellation at each boundary, typed errors, dialog states, status chips and API
 Playwright: in-memory video against route mocks, progress to 100%, new uploaded sidebar
 entry; locale/theme coverage without screenshots. Run pnpm lint, typecheck, test and build.
 Kerege runs Playwright outside this sandbox; start no servers here.
+
+## Screenshot environment compatibility
+
+The orchestrator's screenshot command starts Vite with `QARAU_RUNS_DIR` and no API
+proxy. That middleware implements only the exported run catalog, so missing CRUD
+paths return the SPA HTML document. Detect absent routes (HTML or HTTP 404/405/501)
+separately from real network, authentication and server errors. Read the actual
+`/api/runs` catalog only when the inspection route is absent; preserve unknown
+statuses rather than infer successful processing from a viewer export. Legacy
+selections still open their map through their run id without calling CRUD detail.
+
+When sites are unavailable, keep the selector and file picker visible with a calm,
+translated availability explanation and a disabled upload action. Do not fabricate
+numeric site ids or attempt writes to a server that cannot supply sites. A backend
+with B1 enabled continues to load its real sites and supports the complete uploader.
+Actual auth/network/5xx errors still show Retry; its button cannot shrink or wrap.
+Add regressions for the exact HTML fallback, legacy chips, legacy map selection,
+capability versus failure distinctions, and all locale/theme combinations in e2e.

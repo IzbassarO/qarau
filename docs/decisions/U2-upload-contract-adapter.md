@@ -27,3 +27,15 @@ cannot be safely retried automatically because B1 has no idempotency key.
 If completion succeeded but its response was lost, retry confirms the matching run's
 uploaded/processing/terminal API state before attempting completion again. Another
 run's completion never counts as confirmation.
+
+The orchestrator serves screenshots with Vite's read-only run catalog, without
+FastAPI. The production client therefore distinguishes missing CRUD capabilities
+from transport/auth/server failures. Only an absent inspection endpoint permits
+reading the legacy run list. Unreported run statuses remain unknown, and a legacy
+viewer export remains viewable without claiming successful pipeline stages.
+
+Missing site management is an availability state in the dialog, with upload disabled
+and a translated explanation. It is not a connection failure. No fake sites or
+fallback ids are supplied: a numeric id must come from the actual site API before a
+write is enabled. Authentication failures and 5xx responses retain visible errors
+and Retry. No changes to backend routes or the orchestrator configuration are needed.

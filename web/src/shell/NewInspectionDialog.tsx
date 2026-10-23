@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useI18n, type Key } from '../i18n';
 import { listSites, type SiteOption } from '../lib/sites';
+import { ApiUnavailableError } from '../lib/api';
 import {
   createInspection,
   uploadFile,
@@ -34,7 +35,9 @@ export function NewInspectionDialog({
   const [file, setFile] = useState<File | null>(null);
   const [siteId, setSiteId] = useState('');
   const [sites, setSites] = useState<SiteOption[]>([]);
-  const [siteState, setSiteState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [siteState, setSiteState] = useState<'loading' | 'ready' | 'unavailable' | 'error'>(
+    'loading',
+  );
   const [siteAttempt, setSiteAttempt] = useState(0);
   const [error, setError] = useState<Key | null>(null);
   const [busy, setBusy] = useState(false);
@@ -60,8 +63,9 @@ export function NewInspectionDialog({
         setSites(result);
         setSiteState('ready');
       },
-      () => {
-        if (!request.signal.aborted) setSiteState('error');
+      (error: unknown) => {
+        if (!request.signal.aborted)
+          setSiteState(error instanceof ApiUnavailableError ? 'unavailable' : 'error');
       },
     );
     return () => request.abort();
@@ -177,7 +181,13 @@ export function NewInspectionDialog({
           }}
         >
           <option value="">
-            {t(siteState === 'loading' ? 'upload.sitesLoading' : 'upload.chooseSite')}
+            {t(
+              siteState === 'loading'
+                ? 'upload.sitesLoading'
+                : siteState === 'unavailable'
+                  ? 'upload.sitesUnavailable'
+                  : 'upload.chooseSite',
+            )}
           </option>
           {sites.map((site) => (
             <option key={site.id} value={site.id}>
@@ -193,6 +203,11 @@ export function NewInspectionDialog({
         {siteState === 'ready' && sites.length === 0 && (
           <p id="upload-sites-state" className="notice" role="status">
             {t('upload.sitesEmpty')}
+          </p>
+        )}
+        {siteState === 'unavailable' && (
+          <p id="upload-sites-state" className="notice" role="status">
+            {t('upload.catalogOnly')}
           </p>
         )}
         {siteState === 'error' && (

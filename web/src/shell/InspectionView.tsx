@@ -24,13 +24,14 @@ export function InspectionView({
   const detail = useQuery({
     queryKey: ['inspection', inspection.id],
     queryFn: ({ signal }) => getInspection(inspection.id, signal),
-    enabled: !demoBundle,
+    enabled: !demoBundle && !inspection.legacyRun,
     retry: false,
     refetchInterval: (query) =>
       ['done', 'failed'].includes(inspectionStatus(query.state.data?.status)) ? false : 3000,
   });
-  const status = inspectionStatus(detail.data?.status ?? inspection.status);
-  const runId = detail.data?.runId ?? inspection.runId;
+  const currentDetail = demoBundle || inspection.legacyRun ? undefined : detail.data;
+  const status = inspectionStatus(currentDetail?.status ?? inspection.status);
+  const runId = currentDetail?.runId ?? inspection.runId;
   const query = useQuery({
     queryKey: ['inspection-bundle', runId],
     queryFn: async () => {
@@ -42,13 +43,16 @@ export function InspectionView({
         throw error;
       }
     },
-    enabled: !demoBundle && status === 'done' && !!runId,
+    enabled: !demoBundle && !!runId && (status === 'done' || !!inspection.legacyRun),
     retry: false,
     staleTime: 60_000,
   });
   const bundle = demoBundle ?? query.data;
   const source = inspection.source ?? bundle?.manifest.source.name;
-  const steps = processingSteps(demoBundle ? run : detail.data, bundle?.manifest);
+  const steps = processingSteps(
+    demoBundle ? run : (inspection.legacyRun ?? currentDetail),
+    bundle?.manifest,
+  );
   const demoTitle = demoBundle
     ? t('demo.inspectionTitle')
     : inspection.title === inspection.id && /^\d+$/.test(inspection.id)
@@ -83,7 +87,7 @@ export function InspectionView({
         {demoBundle && <span className="demo-badge">{t('shell.demo')}</span>}
       </header>
       {demoBundle && <p className="demo-notice">{t('demo.notice')}</p>}
-      {detail.isError && !demoBundle && (
+      {detail.isError && !demoBundle && !inspection.legacyRun && (
         <div className="api-error" role="alert">
           <p>{t('inspection.detailError')}</p>
           <button className="shell-button" onClick={() => void detail.refetch()}>
@@ -101,7 +105,7 @@ export function InspectionView({
           <div className="inspection-viewer">
             <ViewerScreen bundle={bundle} embedded />
           </div>
-        ) : status !== 'done' || !runId ? (
+        ) : (!inspection.legacyRun && status !== 'done') || !runId ? (
           <p className="map-message" role="status">
             {t('processing.mapWaiting')}
           </p>

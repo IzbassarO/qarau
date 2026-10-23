@@ -3,6 +3,7 @@ import type { Source, Stats } from './bundle';
 import type { ProcessingRunPayload, ProcessingStagePayload } from './processing';
 import { authHeader } from '../auth/auth';
 import { listSites, type SiteOption } from './sites';
+import { ApiUnavailableError, readApi } from './api';
 
 export type InspectionStatus = 'uploaded' | 'queued' | 'running' | 'done' | 'failed' | 'unknown';
 
@@ -16,6 +17,8 @@ export interface InspectionSummary {
   createdAt: string | null;
   status: InspectionStatus;
   runId?: string;
+  /** Read-only exported run from a server without inspection CRUD. */
+  legacyRun?: RunSummary;
 }
 
 export interface Site {
@@ -125,12 +128,6 @@ interface InspectionRun {
   status: string;
 }
 
-async function readApi(path: string, signal?: AbortSignal): Promise<unknown> {
-  const response = await fetch(path, { signal, headers: authHeader() });
-  if (!response.ok) throw new Error(String(response.status));
-  return response.json();
-}
-
 function isInspection(value: unknown): value is InspectionPayload {
   if (!value || typeof value !== 'object') return false;
   const item = value as InspectionPayload;
@@ -192,11 +189,28 @@ export function groupInspectionsIntoSites(
 }
 
 export async function listInspections(signal?: AbortSignal): Promise<Site[]> {
-  const payload = await readApi('/api/inspections', signal);
+  let payload: unknown;
+  try {
+    payload = await readApi('/api/inspections', signal);
+  } catch (error) {
+    // Fall back only for an absent route, never for an auth, network or server failure.
+    if (!(error instanceof ApiUnavailableError)) throw error;
+    const runs = await fetchRuns(signal);
+    const groups = groupRunsIntoSites(runs);
+    for (const group of groups)
+      for (const inspection of group.inspections) {
+        inspection.legacyRun = runs.find((run) => run.run_id === inspection.id);
+        inspection.runId = inspection.id;
+      }
+    return groups;
+  }
   if (!Array.isArray(payload) || !payload.every(isInspection))
     throw new Error('Invalid inspections response');
   const [sites, inspections] = await Promise.all([
-    listSites(signal),
+    listSites(signal).catch((error: unknown) => {
+      if (error instanceof ApiUnavailableError) return [];
+      throw error;
+    }),
     Promise.all(payload.map((inspection) => withRun(inspection, signal))),
   ]);
   return groupInspectionsIntoSites(inspections, sites);
