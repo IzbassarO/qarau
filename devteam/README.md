@@ -229,6 +229,9 @@ then unattended (`run --continuous` overnight).
 - Dependencies: a task may list `depends_on: [ids]`. The brain never plans it until all of
   them are `done`; a `blocked` task whose dependencies are all done goes back to `todo` (pushed
   to `dev` like any status) when the last one merges, or at the next `devteam run`.
+  Status `later` (owner, 2026-10-22) parks a task off the demo chain: the brain never plans it,
+  done dependencies never move it to `todo`, `devteam resume` leaves it; it comes back only by a
+  PR into `dev` that sets `todo`. The dashboard lists them in a "Later" column.
 - Resume: a task whose `devteam/<id>` branch already exists (local or on the remote) and has
   commits `dev` lacks continues on that branch, with `dev` merged in (never rebased); the plan
   says so.

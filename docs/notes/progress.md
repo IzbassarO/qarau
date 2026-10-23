@@ -2,6 +2,21 @@
 
 Newest first. Keep it short.
 
+## 2026-10-22 — Backlog: demo chain first, metres and auto-detection LATER
+
+- **Owner decisions:** product first (website + deploy), then metres; until a ScaleReference exists
+  every area is "scale not set". Automatic defect detection (SAM, training, DEF2) is stopped until
+  Kubernetes. Manual marking, confirm/reject and the append-only decision log stay. Design v2 comes
+  from Claude Design (task DS1, blocked until the owner's files land). Every task's goal ends with
+  "Done when" checks.
+- **Backlog:** new chain B1 → U2 → S1 → DS1 → D1 → DEF1-api → UI-inspections → REV1-api → UI-evidence →
+  RPT1 → UI-mark → UI-report → D2 → COV1 (`devteam/backlog.yaml`, `notes` key holds the rules: YAML
+  comments die at the first status commit). New status `later` for the LATER section (P5a-1, P5a-2,
+  P7, P4a-2b, P4c, A7a, A7, O1a, O1, P5b, P6, UX-kk, UX-390, A8, ACC1): the brain never plans it,
+  dependencies never un-block it, `devteam resume` leaves it. P4a-2a-run → done (PR #58).
+- **Next:** owner merges the backlog PR, then `devteam rehearse` (PASS expected: B1), then one attended
+  real run of B1.
+
 ## 2026-10-22 — Kerege: lone-surrogate crash, crash isolation
 
 - **Crash 2026-10-21 20:29:** UX-dense's tester crashed with `'utf-8' codec can't encode

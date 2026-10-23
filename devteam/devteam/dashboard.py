@@ -736,6 +736,7 @@ def _queue(d: dict) -> str:
             [item(t, t.get("owner", "")) for t in tasks if t["status"] == "in_progress"],
         ),
         ("Todo, in order", [item(t, waits(t)) for t in tasks if t["status"] == "todo"]),
+        ("Later", [item(t, t.get("blocked_reason", "")) for t in tasks if t["status"] == "later"]),
         (
             "Blocked",
             [item(t, t.get("blocked_reason", "")) for t in tasks if t["status"] == "blocked"],
