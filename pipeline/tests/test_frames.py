@@ -32,7 +32,7 @@ def video(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 def test_frames_stage(video: Path, tmp_path: Path) -> None:
     m = frames.run(video, tmp_path)
-    fj = json.loads((tmp_path / "frames.json").read_text())
+    fj = json.loads((tmp_path / "frames/frames.json").read_text())
     fr = fj["frames"]
     # budget clamp(3 s * 6, 60, 300) = 60 keyframes; 1.5x candidates, capped at the 25 fps source
     assert m["frames_extracted"] == len(fr) == 75
@@ -423,7 +423,7 @@ def test_ranges() -> None:
 def test_frames_stage_writes_report(tmp_path: Path) -> None:
     v = clip(tmp_path / "t.mp4", "-pix_fmt", "yuv420p")
     m = frames.run(v, tmp_path / "out")
-    rep = json.loads((tmp_path / "out/quality_report.json").read_text())
+    rep = json.loads((tmp_path / "out/frames/quality_report.json").read_text())
     check_shape(rep)
     s = rep["summary"]
     # budget 60 (3 s), 1.5x candidates = all 90 source frames (30 fps)
@@ -431,7 +431,7 @@ def test_frames_stage_writes_report(tmp_path: Path) -> None:
     assert s["keyframes"] == m["keyframes"] <= rep["keyframe_selection"]["budget"] == 60
     assert rep["keyframe_selection"]["mode"] == "parallax"
     assert m["keyframe_mode"].startswith("parallax") and m["quality_verdict"] == s["verdict"]
-    fj = json.loads((tmp_path / "out/frames.json").read_text())["frames"]
+    fj = json.loads((tmp_path / "out/frames/frames.json").read_text())["frames"]
     assert sum(f["kept"] for f in fj) == m["keyframes"] >= 2
     assert all(f["drop_reason"] in (None, "blur", "exposure", "not_keyframe") for f in fj)
     fixed = frames.run(v, tmp_path / "fixed", keys=FIXED)

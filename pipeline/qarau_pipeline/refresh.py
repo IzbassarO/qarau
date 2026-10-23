@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import layout
 from .benchmark import MANIFEST, load_manifest, run_video
 from .interfaces import StageError
 
@@ -30,7 +31,7 @@ def _row(run: str, status: str) -> dict[str, Any]:
 
 
 def _ok(run: Path, m: dict[str, Any], time_s: float) -> dict[str, Any]:
-    stats = json.loads((run / "web/manifest.json").read_text())["stats"]
+    stats = json.loads(layout.manifest_path(run).read_text())["stats"]
     used, reg = m["images_in"], m["registered_images"]
     return {
         "run": run.name,

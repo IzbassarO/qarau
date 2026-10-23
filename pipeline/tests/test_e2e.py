@@ -18,7 +18,7 @@ CANDIDATES = [VIDEO, Path(__file__).resolve().parents[2] / "data/samples/notre_d
 
 def dense_links(run: Path) -> tuple[dict, np.ndarray]:
     """manifest.dense + points-with-at-least-one-frame mask."""
-    d = json.loads((run / "web/manifest.json").read_text())["dense"]
+    d = json.loads((run / "export/web/manifest.json").read_text())["dense"]
     fo = np.fromfile(run / d["frame_offsets"]["path"], "<u4")
     assert len(fo) == d["count"] + 1
     return d, np.diff(fo) > 0
@@ -60,19 +60,21 @@ def test_church_video_end_to_end(tmp_path: Path) -> None:
     if video is None:
         pytest.skip("sample video not present")
     main(["run", "--video", str(video), "--out", str(tmp_path)])
-    m = json.loads((tmp_path / "web/manifest.json").read_text())
+    m = json.loads((tmp_path / "export/web/manifest.json").read_text())
     assert m["stats"]["frames_registered"] > 20 and m["stats"]["points"] > 1000
-    assert (tmp_path / "cloud.laz").exists()
+    assert (tmp_path / "export/cloud.laz").exists()
     assert {s["name"] for s in json.loads((tmp_path / "run.json").read_text())} == {
         "frames",
         "reconstruction",
         "export",
     }
+    for step in ("probe", "frames", "sparse", "export"):
+        assert json.loads((tmp_path / step / "step.json").read_text())["status"] == "done"
     # the fake dense path on real footage: >= 95 % of dense points name a frame
     dense = tmp_path / "dense"
     main(["dense-remote", "--provider", "fake", "--frames", str(tmp_path / "frames"),
-          "--sparse", str(tmp_path / "colmap/sparse/0"), "--out", str(dense)])  # fmt: skip
-    main(["export", "--sparse", str(tmp_path / "colmap/sparse/0"), "--out", str(tmp_path),
+          "--sparse", str(tmp_path / "sparse/sparse/0"), "--out", str(dense)])  # fmt: skip
+    main(["export", "--sparse", str(tmp_path / "sparse/sparse/0"), "--out", str(tmp_path),
           "--dense", str(dense)])  # fmt: skip
     d, linked = dense_links(tmp_path)
     assert d["frame_links_source"] == "colmap_fusion" and linked.mean() >= 0.95
