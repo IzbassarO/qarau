@@ -11,7 +11,8 @@ base_branch: dev
 runs_dir: data/runs
 release_branch: main
 release_every_days: 7
-max_fix_loops: 3          # times a task is sent back (tester or gates), then "blocked"
+max_fix_loops: 3          # times a task (each part of it, when the brain planned parts) is sent
+                          # back (tester or gates), then "blocked"
 
 gates:
   ci_timeout_min: 40
@@ -70,10 +71,14 @@ continuous:
 # stops the others (A7 used 42.6 M tokens while blocked, P2b 17 M). Tokens = subscription tokens
 # of the developer (in + cached + out, as the dashboard shows them), counted live. Over a limit:
 # that step is killed, the task is blocked with the reason, the other developers keep going.
+# Raised 2026-10-23 (owner): since backlog #66 the tasks are 2-3x larger by design (fewer, bigger
+# tasks; the brain plans parts inside a task). Run cont-20261023-094355 blocked S1 at 8.2 M and
+# DEF1-api at 8.4 M per round (limit was 8 M) and U2 at 17 M per task (limit was 12 M) while U2
+# was otherwise green (653 tests, 16 screenshots).
 supervisor:
-  max_tokens_per_round: 8000000   # one developer round
-  max_tokens_per_task: 12000000   # all rounds of the task in this run (resume starts again)
-  max_round_min: 60               # longest round; a task may set its own (backlog `supervisor:`)
+  max_tokens_per_round: 16000000  # one developer round
+  max_tokens_per_task: 36000000   # all rounds of the task in this run (resume starts again)
+  max_round_min: 90               # longest round; a task may set its own (backlog `supervisor:`)
   max_idle_min: 20                # no output from the developer and no CPU work in its processes
 
 # provider: anthropic for now. Prices are $ per 1M tokens, used for the cost report.
@@ -137,7 +142,18 @@ developers:
     setup:                 # runs before every round: the Codex sandbox has no network
       - cd web && pnpm install --frozen-lockfile
     screenshots:           # pages from the plan's `routes`; the tester sees them
-      serve: cd web && QARAU_RUNS_DIR={runs_dir} pnpm exec vite --port 5198 --strictPort
+      # The real API (backend/ of the same checkout) on a fresh SQLite file ({db}), migrated and
+      # seeded (backend/app/seed.py: org "dev", users admin / engineer / viewer, no sites) for every
+      # screenshot session, on a free port ({api_port}); Vite proxies /api to it (QARAU_API_PROXY).
+      # Open dev mode (empty QARAU_API_TOKEN): the tester's login works with any password. Without a
+      # backend the pages showed "could not load sites" / "Status unavailable" (U2, 2026-10-23).
+      api: >-
+        cd backend && export QARAU_DATABASE_URL=sqlite:///{db} QARAU_RUNS_DIR={runs_dir}
+        QARAU_ENV=dev QARAU_DEV_ADMIN_TOKEN=dev-admin QARAU_DEV_ENGINEER_TOKEN=dev-engineer
+        QARAU_DEV_VIEWER_TOKEN=dev-viewer QARAU_API_TOKEN=""
+        && uv run --quiet alembic upgrade head && uv run --quiet python -m app.seed
+        && exec uv run --quiet uvicorn app.main:app --host 127.0.0.1 --port {api_port}
+      serve: cd web && QARAU_RUNS_DIR={runs_dir} QARAU_API_PROXY=http://127.0.0.1:{api_port} pnpm exec vite --port 5198 --strictPort
       url: http://localhost:5198
       shoot: cd web && node {shoot} {url} {png} {size} 2500 {theme} {lang}
       themes: [light, dark]  # {theme}: prefers-color-scheme, each viewport in both
