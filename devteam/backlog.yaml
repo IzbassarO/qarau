@@ -884,15 +884,12 @@ tasks:
     screenshots (ru, kk, en; light and dark) of the dialog mid-upload and of the list with the new inspection.
 
     '
-  status: blocked
+  status: todo
   depends_on:
   - B1
   owner: dev_app
   run: cont-20261023-094355-dev_app-1
   branch: devteam/U2
-  blocked_reason: 'supervisor: the task used 17.0 M subscription tokens (limit 12 M per task). Raise the
-    `supervisor` limits in devteam/config.yaml (or the task''s own `supervisor:` in backlog.yaml) or split
-    the task, then `devteam resume U2`'
 - id: S1
   area: core
   title: 'Inspection workflow: idempotent steps on a queue'
