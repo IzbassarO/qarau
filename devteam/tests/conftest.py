@@ -1,3 +1,4 @@
+import copy
 import os
 import shutil
 import subprocess
@@ -6,7 +7,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from devteam.agents import FakeAgents
 from devteam.gates import EMPTY_BENCH
+from devteam.graph import Team
 
 HERE = Path(__file__).parents[1]
 CFG = yaml.safe_load((HERE / "config.yaml").read_text())
@@ -55,6 +58,17 @@ def repo(tmp_path, monkeypatch):
 
 def remote_of(repo) -> str:
     return str(repo.parent / "remote.git")
+
+
+def team_for(repo, **cfg_over):
+    cfg = copy.deepcopy(CFG)
+    cfg.update(cfg_over)
+    return Team(repo, cfg, {}, FakeAgents(), fake=True, remote=remote_of(repo))
+
+
+@pytest.fixture
+def fast_poll(monkeypatch):
+    monkeypatch.setattr("devteam.graph.POLL_S", 0.1)
 
 
 @pytest.fixture(autouse=True)

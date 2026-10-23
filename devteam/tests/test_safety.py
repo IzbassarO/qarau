@@ -5,6 +5,7 @@ import copy
 import sqlite3
 import subprocess
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,8 +15,10 @@ import pytest
 import yaml
 from conftest import CFG, git, remote_of
 from langgraph.checkpoint.sqlite import SqliteSaver
+from rich.console import Console
 
 from devteam import costs
+from devteam import dashboard as D
 from devteam.agents import FakeAgents
 from devteam.graph import Team, Violation, build_graph, validate_plan
 from devteam.real import llm_call
@@ -666,3 +669,34 @@ def test_old_cost_db_is_migrated_once_even_by_racing_threads(tmp_path):
     assert errors == []
     cols = [r[1] for r in costs._db(tmp_path).execute("pragma table_info(usage)")]
     assert cols[-4:] == ["state", "secs", "cache_read", "cache_write"]
+
+
+# --- 5. stale cost reservations ---------------------------------------------------------------
+def test_a_reservation_left_open_past_two_hours_becomes_stale_at_its_worst_case(tmp_path):
+    rid = costs.reserve(tmp_path, 10.0, "brain", "m", "T-1", 0.75)
+    assert costs.mark_stale(tmp_path) == 0  # a call in flight now: left alone
+    assert costs.mark_stale(tmp_path, now=time.time() + 3 * 3600) == 1
+    db = costs._db(tmp_path)
+    assert db.execute("select state, usd from usage where rowid=?", (rid,)).fetchone() == (
+        "stale",
+        0.75,
+    )
+    db.close()
+    assert costs.spent_24h(tmp_path) == pytest.approx(0.75)  # money is never under-counted
+    costs.release(tmp_path, rid)  # only open reservations are released
+    assert costs.spent_24h(tmp_path) == pytest.approx(0.75)
+    (row,) = costs.day_rows(tmp_path, costs._today())
+    assert row[-1] == 1
+    console = Console(record=True, width=200)
+    costs.report(tmp_path, console)
+    assert "1 stale: billing unknown, counted at max" in console.export_text()
+
+
+def test_dashboard_and_report_label_stale_reservations(repo):
+    team, _ = make(repo)
+    costs.reserve(team.home, 10.0, "tester", "m", "T-001", 0.5)
+    costs.mark_stale(team.home, now=time.time() + 3 * 3600)
+    assert "1 stale: billing unknown, counted at max" in D.render(D.collect(team, None))
+    from devteam.report import write_report
+
+    assert "1 stale: billing unknown, counted at max" in write_report(team).read_text()

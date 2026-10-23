@@ -8,14 +8,17 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import CFG, git, remote_of
+from conftest import CFG, HERE, git, remote_of
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from devteam import dashboard as D
+from devteam import real as R
 from devteam import scope as SC
 from devteam.agents import FakeAgents
 from devteam.graph import Team, build_graph
 from devteam.report import write_report
+
+ROOT = HERE.parent
 
 
 class Fast(FakeAgents):
@@ -321,3 +324,23 @@ def test_briefs_say_what_each_developer_may_write_in_docs():
         "docs/notes/a.py", ["docs/notes/*.md"]
     )
     assert SC.folder("docs/notes/*.md") == "docs/notes/" and SC.folder("web/") == "web/"
+
+
+# --- 7. the frontend-design skill: pinned, licensed, protected, seen by Codex -------------------
+def test_frontend_design_skill_is_pinned_licensed_and_visible_to_codex():
+    skill = ROOT / ".claude" / "skills" / "frontend-design"
+    assert (skill / "SKILL.md").read_text().startswith("---\nname: frontend-design\n")
+    assert "Apache License" in (skill / "LICENSE.txt").read_text()
+    link = ROOT / ".agents" / "skills" / "frontend-design"  # where codex-cli reads skills
+    assert link.is_symlink() and link.resolve() == skill.resolve()
+    readme = (ROOT / ".claude" / "skills" / "README.md").read_text()
+    assert "dbd4588f9e1033efb41dad4bef2f7947c8993d44" in readme and "Apache-2.0" in readme
+    assert "DESIGN.md" in (ROOT / "AGENTS.md").read_text()
+    assert (ROOT / "docs" / "design" / "DESIGN.md").exists()
+
+
+def test_skills_are_protected_and_never_downloaded_by_agents():
+    for path in (".claude/skills/frontend-design/SKILL.md", ".agents/skills/x/SKILL.md"):
+        assert SC.is_protected(path, CFG)
+    assert "DESIGN.md" in R.design_rule(CFG["developers"]["dev_app"])
+    assert R.design_rule(CFG["developers"]["dev_pipeline"]) == ""
