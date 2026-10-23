@@ -29,13 +29,19 @@ for (const theme of ['light', 'dark'] as const) {
       const navigation = page.getByRole('navigation');
       await expect(navigation.locator('.inspection-status-chip')).toHaveCount(3);
       await expect(
-        navigation.getByRole('link', { name: /Walkdown upload/ }).getByText(t['status.uploaded']),
+        navigation
+          .getByRole('link', { name: /Walkdown upload/ })
+          .getByText(t['status.uploaded'], { exact: true }),
       ).toBeVisible();
       await expect(
-        navigation.getByRole('link', { name: /Failed survey/ }).getByText(t['status.failed']),
+        navigation
+          .getByRole('link', { name: /Failed survey/ })
+          .getByText(t['status.failed'], { exact: true }),
       ).toBeVisible();
       await expect(
-        navigation.getByRole('link', { name: /Legacy export/ }).getByText(t['status.unknown']),
+        navigation
+          .getByRole('link', { name: /Legacy export/ })
+          .getByText(t['status.unknown'], { exact: true }),
       ).toBeVisible();
       for (const chip of await navigation.locator('.inspection-status-chip').all())
         expect(await chip.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
