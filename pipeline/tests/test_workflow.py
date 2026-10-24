@@ -290,7 +290,6 @@ def relative(keys: list[str], prefix: str) -> list[str]:
     return [k[len(prefix) :] for k in keys]
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 def test_s1_run_with_storage_fills_the_five_prefixes_and_a_wiped_cache_is_refilled(
     s3: S3Storage, tmp_path: Path
 ) -> None:
