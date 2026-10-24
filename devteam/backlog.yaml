@@ -1459,10 +1459,12 @@ tasks:
 
     '
   licence: Caddy (Apache-2.0), Docker Compose. No paid service is created by Kerege.
-  status: todo
+  status: in_progress
   depends_on:
   - S1
   - U2
+  owner: dev_pipeline
+  run: cont-20261023-211635-dev_pipeline-4
 - id: COV1
   area: core
   title: 'Coverage: inspected_ok / finding / not_seen regions'
