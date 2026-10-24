@@ -14,6 +14,7 @@ import yaml
 from devteam import costs, procs
 from devteam import gates as G
 from devteam import supervise as SV
+from devteam.scope import REFERENCE_PNG, rewrite_allowed
 from devteam.supervise import TaskHalted
 
 TOOL_RETRY_S = 30  # a developer CLI that is gone (mid self-update) is looked up again once
@@ -238,6 +239,17 @@ criteria require is not weakening.
 A <plan> that says "part k of n": the brain planned this task in parts; the earlier parts were
 accepted already and the diff still shows the whole branch. Judge only this part's
 <acceptance_criteria>; never fail it for later parts not being there yet.
+Design (owner, 2026-10-24): design system v8 (docs/design/DESIGN.md and its reference screens)
+is the source of truth for the UI. Images listed as "reference" are those screens, light theme
+on top and dark below; evidence-phone is the phone (390x844) reference. Compare each of your
+screenshots with the matching reference: every colour, font or component that differs from it
+is a failure of the visual criteria; list each one in feedback (screenshot, element, what the
+reference shows: token, font or component). A difference only in spacing, alignment, size or
+responsive layout is allowed: never fail for it. Real data differs from the reference's sample
+data: judge the style, not the text. With no reference attached, judge against DESIGN.md.
+Files in <owner_approved_test_rewrites> are tests the owner allowed this task to rewrite (e.g.
+values pinned to the old design move to v8): such a change is not weakening, as long as each
+new expected value is a fixed literal the task's goal requires and no test is skipped.
 Write `feedback` for the developer in English: concrete, actionable, empty if passed. A
 send-back must be fixable in ONE round: for every unmet criterion name the exact place (file and
 line in the diff, or the component with its CSS selector or i18n key) and what it must become.
@@ -669,7 +681,10 @@ Rules:
         # The API takes at most 100 images and 32 MB per request: what does not fit (the dev-*
         # "before" shots come last, so they go first) is named as failed, never silently cut.
         shots, problems, size = [], list(s.get("screenshot_problems") or []), 0.0
-        for p in s.get("screenshots") or []:
+        taken = list(s.get("screenshots") or [])
+        refs = design_refs(team, s)
+        before = [p for p in taken if Path(p).name.startswith("dev-")]
+        for p in [*[p for p in taken if p not in before], *refs, *before]:
             size += Path(p).stat().st_size * 4 / 3  # base64
             if len(shots) < MAX_IMAGES and size <= MAX_IMAGE_BYTES:
                 shots.append(p)
@@ -728,9 +743,17 @@ Rules:
         }
         if shots:
             prompt = (
-                "Screenshots above (after the task; dev-* = before), in order: "
-                + ", ".join(Path(p).name for p in shots)
+                "Screenshots above (after the task; dev-* = before; reference = a design system v8 "
+                "reference screen, light theme on top and dark below), in order: "
+                + ", ".join(("reference " if p in refs else "") + Path(p).name for p in shots)
                 + "\n\n"
+                + prompt
+            )
+        if rewrite := rewrite_allowed(team.cfg, s["task"]["id"]):
+            prompt = (
+                "<owner_approved_test_rewrites>\n"
+                + "\n".join(rewrite)
+                + "\n</owner_approved_test_rewrites>\n\n"
                 + prompt
             )
         v = llm_call(
@@ -768,9 +791,22 @@ def design_rule(dev: dict) -> str:
     if not any(o.startswith("web/") for o in dev["owns"]):
         return ""
     return (
-        "\n- Any visual change in web/ follows docs/design/DESIGN.md (our rules, they win) and the "
-        "frontend-design skill (.claude/skills/frontend-design/SKILL.md)."
+        "\n- Design system v8 is the source of truth for the UI (owner, 2026-10-24): "
+        "docs/design/DESIGN.md, the reference screens docs/design/screens/*.png, "
+        "web/src/design/tokens.* and bundle.css. Never invent or change colours, fonts, components "
+        "or screen layout; adjust only alignment, spacing, sizes and responsive behaviour so a "
+        "screen fits real content and the viewport. Desktop (1440x900) and phone (390x844, "
+        "evidence-phone-light.png) layouts differ, but every function works on both. The tester "
+        "compares its screenshots with the reference screens."
     )
+
+
+def design_refs(team, s: dict) -> list[str]:
+    """Reference screens (design system v8) named in the task's goal, plan or criteria that exist
+    in the repository: the tester gets them next to its screenshots (owner, 2026-10-24)."""
+    text = "\n".join([s["task"].get("goal", ""), s.get("plan", ""), *s.get("criteria", [])])
+    found = dict.fromkeys(REFERENCE_PNG.findall(text))
+    return [str(team.root / p) for p in found if (team.root / p).is_file()]
 
 
 def docs_rule(dev: dict) -> str:

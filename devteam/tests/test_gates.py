@@ -764,7 +764,9 @@ def judge_with(monkeypatch, verdict: dict, **state) -> tuple[dict, dict]:
         return copy.deepcopy(verdict)
 
     monkeypatch.setattr(R, "llm_call", fake_llm_call)
-    team = SimpleNamespace(remote_name="origin", cfg=CFG, git=lambda *a, **k: "", redact=str)
+    team = SimpleNamespace(
+        remote_name="origin", cfg=CFG, git=lambda *a, **k: "", redact=str, root=HERE.parent
+    )
     s = {"task": {"id": "T-1", "title": "t"}, "plan": "p", "criteria": ["c"], "worktree": "."}
     return R.RealAgents().judge(team, {**s, **state}, []), seen
 
@@ -897,3 +899,26 @@ def test_mykolaiv_stays_ungated_by_the_owners_decision():
     why = cfg["per_video"]["mykolaiv"]["why"]
     assert "owner 2026-10-21" in why and "P3c" in why
     assert "gate again after P3" not in (HERE / "config.yaml").read_text()
+
+
+def test_the_tester_compares_screenshots_with_the_v8_reference_screens(monkeypatch, tmp_path):
+    """Owner 2026-10-24: design system v8 is the UI's source of truth; the tester gets the
+    reference screens the task names, after its own shots and before the dev-* ones."""
+    shot, before = tmp_path / "home-1440x900-light.png", tmp_path / "dev-home-1440x900-light.png"
+    shot.write_bytes(b"png")
+    before.write_bytes(b"png")
+    goal = "Match docs/design/screens/sign-in-light.png; docs/design/screens/missing-light.png."
+    task = {"id": "DS1", "title": "t", "goal": goal}
+    v, seen = judge_with(monkeypatch, PASS, task=task, screenshots=[str(before), str(shot)])
+    ref = str(HERE.parent / "docs" / "design" / "screens" / "sign-in-light.png")
+    assert seen["images"] == [str(shot), ref, str(before)]
+    assert "home-1440x900-light.png, reference sign-in-light.png, dev-home" in seen["prompt"]
+    assert "<owner_approved_test_rewrites>\nweb/src/design/tokens.test.ts" in seen["prompt"]
+    assert v["passed"] is True  # round 1: no test diff, the approved rewrite is not weakening
+    assert "every colour, font or component that differs" in R.TESTER_SYSTEM
+    assert "only in spacing, alignment, size" in R.TESTER_SYSTEM
+    # a task with no reference and no approved rewrite: neither block
+    v, seen = judge_with(monkeypatch, PASS, screenshots=[str(shot)])
+    assert seen["images"] == [str(shot)] and "owner_approved_test_rewrites" not in seen["prompt"]
+    assert "v8 is the source of truth" in R.design_rule(CFG["developers"]["dev_app"])
+    assert "390x844" in R.design_rule(CFG["developers"]["dev_app"])

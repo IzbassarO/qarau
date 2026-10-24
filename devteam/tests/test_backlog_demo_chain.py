@@ -58,8 +58,9 @@ def test_demo_chain_dependencies_are_the_owners_and_never_point_off_the_chain():
     for tid in CHAIN:
         assert not set(by[tid].get("depends_on") or []) & parked, tid
         assert not by[tid].get("owner_only"), tid  # Kerege plans all of them
-    assert "design files" in by["DS1"]["blocked_reason"]  # blocked until the owner's files land
-    assert by["DS1"]["writable"] == ["docs/design/"]
+    # Owner 2026-10-24: v8 landed and is the UI's source of truth; DS1 applies it and may not
+    # write docs/design/ (owner-only, config gates.protected).
+    assert "source of truth" in by["DS1"]["goal"] and "writable" not in by["DS1"]
 
 
 @pytest.mark.backlog

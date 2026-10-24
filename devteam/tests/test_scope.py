@@ -344,3 +344,26 @@ def test_skills_are_protected_and_never_downloaded_by_agents():
         assert SC.is_protected(path, CFG)
     assert "DESIGN.md" in R.design_rule(CFG["developers"]["dev_app"])
     assert R.design_rule(CFG["developers"]["dev_pipeline"]) == ""
+
+
+def test_owner_approved_test_rewrites_move_pinned_values_but_never_skip():
+    """Owner 2026-10-24: DS1 moves tests that pin the old look to the v8 values (config
+    gates.test_rewrite_allowed); docs/design/ (the v8 source of truth) is owner-only."""
+    ok = SC.rewrite_allowed(CFG, "DS1")
+    assert "web/src/design/tokens.test.ts" in ok and SC.rewrite_allowed(CFG, "UI-report") == []
+    p = "web/src/design/tokens.test.ts"
+    d = diff(
+        p,
+        minus=[
+            "  expect(contrast(a, b)).toBeGreaterThanOrEqual(3);",
+            "  expect(c).toBe('#5b9bff');",
+        ],
+        plus=["  expect(contrast(a, b)).toBeGreaterThanOrEqual(1.5);"],
+    )
+    assert len(SC.bypass(d, [p])) == 2  # looser threshold + a removed assertion
+    assert SC.bypass(d, [p], ok) == []
+    assert SC.bypass(diff(p, plus=["  it.skip('contrast', () => {"]), [p], ok) != []
+    other = "web/src/a.test.ts"  # the allowance covers only its own files
+    assert SC.bypass(diff(other, minus=["  expect(x).toBe(1)"]), [other], ok) != []
+    assert SC.is_protected("docs/design/DESIGN.md", CFG)
+    assert SC.is_protected("docs/design/screens/viewer-light.png", CFG)
