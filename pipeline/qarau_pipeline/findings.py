@@ -1,4 +1,4 @@
-"""Manual findings (DEF1-api, ADR 0022): an engineer marks a region of the map, this module
+"""Manual findings (DEF1-api, ADR 0023): an engineer marks a region of the map, this module
 selects the bundle points inside it, measures it in bundle units and picks the evidence frames.
 
 NumPy only, nothing heavy at import time: the API process imports this module per request.
@@ -18,6 +18,7 @@ from typing import Any
 import numpy as np
 
 from .cameras import project, rot_from_qvec
+from .layout import manifest_path
 
 PLANE_TOL_FRAC = 0.05  # default distance to the polygon's plane: 5 % of its largest extent
 N_EVIDENCE = 3
@@ -52,7 +53,7 @@ class Bundle:
 
 
 def load_bundle(run_dir: Path) -> Bundle:
-    man = json.loads((run_dir / "web/manifest.json").read_text())
+    man = json.loads(manifest_path(run_dir).read_text())  # paths inside are run-root relative
     pos = np.fromfile(run_dir / man["points"]["position"], "<f4").reshape(-1, 3).astype(float)
     off = np.fromfile(run_dir / man["tracks"]["point_offsets"], "<u4").astype(np.int64)
     ids = np.fromfile(run_dir / man["tracks"]["point_frames"], "<u2").astype(np.int64)
@@ -104,15 +105,22 @@ def polygon_area(uv: np.ndarray) -> float:
 
 
 def points_in_polygon(uv: np.ndarray, poly: np.ndarray) -> np.ndarray:
-    """Even-odd test of N points against one polygon (any shape, vertices in order)."""
+    """Even-odd test of N points against one polygon (any shape, vertices in order). Points on
+    an edge (within 1e-9 of the polygon's extent) count as inside: a polygon drawn through map
+    points keeps them instead of leaving them to floating-point noise."""
     x, y = uv[:, 0], uv[:, 1]
     inside = np.zeros(len(uv), bool)
+    on_edge = np.zeros(len(uv), bool)
+    eps = 1e-9 * max(float(np.ptp(poly, axis=0).max()), 1e-300)
     with np.errstate(divide="ignore", invalid="ignore"):
         for (x0, y0), (x1, y1) in zip(poly, np.roll(poly, -1, axis=0), strict=True):
             crosses = (y0 > y) != (y1 > y)
             xi = x0 + (y - y0) * (x1 - x0) / (y1 - y0)
             inside ^= crosses & (x < xi)
-    return inside
+            ex, ey = x1 - x0, y1 - y0
+            t = np.clip(((x - x0) * ex + (y - y0) * ey) / ((ex * ex + ey * ey) or 1.0), 0, 1)
+            on_edge |= np.hypot(x - x0 - t * ex, y - y0 - t * ey) <= eps
+    return inside | on_edge
 
 
 def clip_to_rect(poly: np.ndarray, width: float, height: float) -> np.ndarray:

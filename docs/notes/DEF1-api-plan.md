@@ -30,17 +30,17 @@ Date: 2026-10-23. Scope: `pipeline/`, `backend/`, `docs/`. No segmentation model
 3. **CLI** `python -m qarau_pipeline finding-evidence --run R --polygon JSON --out DIR`:
    PNGs of the 3 frames with the outline drawn (OpenCV) + `finding.json`.
 4. **Backend**: `qarau-pipeline` as a uv path dependency (`backend/pyproject.toml`,
-   `uv.lock`); migration v0002 (`finding`: `area_units` becomes a Float in bundle units²,
+   `uv.lock`); migration v0003 (`finding`: `area_units` becomes a Float in bundle units²,
    adds `comment`, `region`, `scale_source`; `observation`: `mask_path` nullable, adds
    `outline`); `backend/app/findings.py` with
    `POST /api/inspections/{id}/findings` (engineer), `GET /api/inspections/{id}/findings` and
    `GET /api/findings/{id}` (viewer), included in `main.py`.
 5. **Tests**: `pipeline/tests/test_findings.py` (synthetic 3×2 grid, 4 cameras, hand-written
    links; literal expectations), `pipeline/tests/test_findings_real.py` (notre-dame-p3e,
-   literal facade polygon, skipped when absent), `backend/tests/test_findings.py` (same
+   literal facade polygon, skipped when absent), `backend/tests/test_findings_api.py` (same
    fixture bundle in `tmp_path`, linked to inspection 1 through a `Run` row), OpenAPI and
    role lists updated.
-6. **Docs**: ADR 0022 (region formats, tolerance, frame ranking, scale rule, path dependency),
+6. **Docs**: ADR 0023 (region formats, tolerance, frame ranking, scale rule, path dependency),
    `docs/architecture.md` (findings API).
 7. **Checks**: ruff, mypy, pytest in both projects; quick benchmark before and after.
 

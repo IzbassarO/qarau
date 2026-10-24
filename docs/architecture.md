@@ -215,13 +215,13 @@ shown as a reconstruction. Dense points go through the same sanitize and far rul
 sparse ones (far ones are dropped and counted in `dense.dropped`), their link rows filtered
 in step. The sparse `points`/`tracks` arrays, `cloud.laz` and `cloud.ply` are unchanged.
 
-**Manual findings (`findings.py` in the pipeline, `backend/app/findings.py`, ADR 0022).**
+**Manual findings (`findings.py` in the pipeline, `backend/app/findings.py`, ADR 0023).**
 Until automatic detection returns, an engineer marks a finding through the API and the server
 does the geometry. `POST /api/inspections/{id}/findings` (engineer): `class` (corrosion, crack,
 leak, deformation, coating, other), `severity` (critical | watch), optional `comment`, and one
 region: `polygon` (≥ 3 `[x, y, z]` map vertices) or `point_indices` (bundle `points` indices).
 The server selects the bundle points inside the region (plane through the polygon, points within
-5 % of its extent, even-odd test), measures `area_units` (convex hull in the points' best-fit
+5 % of its extent, even-odd test with edges inclusive), measures `area_units` (convex hull in the points' best-fit
 plane, bundle units²) and attaches evidence: the 3 frames from the bundle's point → frame links
 that see the most selected points and are spread in viewpoint, each with the region projected as
 an `outline` polygon in pixels (an `observation`, confidence 1.0). `area_m2` is filled only when

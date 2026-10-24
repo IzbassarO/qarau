@@ -1,4 +1,4 @@
-# 0022 — Manual findings: region formats, area in bundle units, evidence frames by links
+# 0023 — Manual findings: region formats, area in bundle units, evidence frames by links
 
 - Status: accepted (dev team, DEF1-api)
 - Date: 2026-10-23
@@ -19,7 +19,8 @@ dense layer of ADR 0017 has the same CSR shape).
    `polygon` (≥ 3 `[x, y, z]` vertices in map coordinates) or `point_indices` (indices into the
    bundle's `points` layer), never both. The server turns a polygon into points: a plane is
    fitted through the vertices (SVD), the map points within a tolerance of that plane are
-   projected onto it and tested against the polygon (even-odd rule). Tolerance: 5 % of the
+   projected onto it and tested against the polygon (even-odd rule; a point on an edge counts
+   as inside, so a polygon drawn through map points keeps them). Tolerance: 5 % of the
    polygon's largest in-plane extent (`PLANE_TOL_FRAC`; a parameter of `select_points`, not of
    the API yet). A region that selects no point, a collinear polygon, out-of-range or repeated
    indices are 422. The finding stores both the region as marked (`region`) and the selected
@@ -47,10 +48,10 @@ dense layer of ADR 0017 has the same CSR shape).
    path dependency (`qarau-pipeline`, editable; `pipeline/pyproject.toml` gained a hatchling
    build backend and `py.typed`). The API still runs no pipeline stage; it reads a finished
    bundle. The CLI `finding-evidence` renders the same result with OpenCV for visual checks.
-5. **Which run.** The finding belongs to the inspection's exported run (`web/manifest.json`
-   present); several exported runs → the last by id, until runs carry a date. No exported run →
-   409 with a readable message.
-6. **Schema.** Migration 0002: `finding.area_units` becomes a Float (it was a unit label string
+5. **Which run.** The finding belongs to the inspection's exported run (a viewer manifest
+   under `export/web/`, or `web/` for a pre-S1 run: ADR 0022 layout); several exported runs →
+   the last by id, until runs carry a date. No exported run → 409 with a readable message.
+6. **Schema.** Migration 0003: `finding.area_units` becomes a Float (it was a unit label string
    in 0001 and the table was empty), plus `comment`, `region`, `scale_source`;
    `observation.mask_path` nullable plus `outline`. 0001 is unchanged.
 
@@ -58,7 +59,8 @@ dense layer of ADR 0017 has the same CSR shape).
 
 - Sparse bundles link a point to the ~7 frames that triangulated it, so "most selected points
   seen" is a vote over sparse observations; it still picks the frontal, well-spread frames on
-  real footage (notre-dame-p3e facade: frames 52, 140, 96). Dense bundles (ADR 0017) can be
+  real footage (notre-dame-p3e facade: frames 52, 140, 96; renders in
+  `data/findings-check/notre-dame-p3e/` from `tests/test_findings_real.py`). Dense bundles (ADR 0017) can be
   wired in by reading `dense.*` instead of `points`/`tracks` when the UI marks on dense points.
 - The outline is the hull of the whole region, clipped: parts hidden behind other geometry are
   still outlined (no occlusion test). The engineer sees the frame and judges; strong radial

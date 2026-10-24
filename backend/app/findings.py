@@ -1,4 +1,4 @@
-"""Manual findings (DEF1-api, ADR 0022). An engineer marks a region of the map; the server
+"""Manual findings (DEF1-api, ADR 0023). An engineer marks a region of the map; the server
 selects the bundle points inside it, measures it and attaches the 3 best evidence frames.
 
 POST /api/inspections/{id}/findings  (engineer) -> 201 FindingOut
@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from .crud import Db, Engineer, Viewer, audit, get_or_404
 from .models import Finding, Inspection, Observation, Run, ScaleReference, Severity
+from .runs import manifest_file
 from .settings import Settings, get_settings
 
 router = APIRouter(prefix="/api")
@@ -91,10 +92,10 @@ def exported_run(db: Session, settings: Settings, inspection_id: int) -> Run:
     """The inspection's run that has a viewer bundle; 409 when there is none."""
     # ponytail: several exported runs -> the last by id; pick by request when runs get a date
     runs = db.scalars(select(Run).where(Run.inspection_id == inspection_id).order_by(Run.id))
-    ready = [r for r in runs if (run_path(settings, r) / "web/manifest.json").is_file()]
+    ready = [r for r in runs if manifest_file(run_path(settings, r)) is not None]
     if not ready:
         raise HTTPException(
-            409, "inspection has no exported run (web/manifest.json) to mark findings on"
+            409, "inspection has no exported run (export/web/manifest.json) to mark findings on"
         )
     return ready[-1]
 

@@ -80,6 +80,23 @@ def test_select_points_keeps_the_grid_only(bundle: Bundle) -> None:
     assert select_points(bundle.positions, tilted).tolist() == [4, 5, 6, 7]
 
 
+FINE_GRID = np.array([[x / 10, y / 10, 0.0] for y in range(10) for x in range(10)])  # i = 10y + x
+SQUARE_045 = [[0, 0, 0], [0.45, 0, 0], [0.45, 0.45, 0], [0, 0.45, 0]]
+INSIDE_045 = [0, 1, 2, 3, 4, 10, 11, 12, 13, 14, 20, 21, 22, 23, 24, 30, 31, 32, 33, 34,
+              40, 41, 42, 43, 44]  # fmt: skip
+
+
+def test_square_polygon_on_the_fine_grid_selects_the_25_known_points() -> None:
+    assert select_points(FINE_GRID, SQUARE_045).tolist() == INSIDE_045
+    assert select_indices(len(FINE_GRID), INSIDE_045[::-1]).tolist() == INSIDE_045
+
+
+def test_unit_square_area_is_one() -> None:
+    square = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0.0], [0.5, 0.5, 0]])
+    assert region_area(square) == pytest.approx(1.0, abs=1e-6)
+    assert region_area(FINE_GRID[INSIDE_045]) == pytest.approx(0.16, abs=1e-6)  # 0.4 x 0.4
+
+
 @pytest.mark.parametrize(
     "bad",
     [[[0, 0, 0], [1, 1, 1]], [[0, 0, 0], [1, 0, 0], [2, 0, 0]], [[0, 0], [1, 0], [0, 1]]],

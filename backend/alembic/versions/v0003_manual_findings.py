@@ -1,10 +1,10 @@
 """manual findings
 
-Revision ID: 0002
-Revises: 0001
+Revision ID: 0003
+Revises: 0002
 Create Date: 2026-10-23
 
-DEF1-api (ADR 0022): a finding's area is a number in bundle units² (`area_units` was a unit
+DEF1-api (ADR 0023): a finding's area is a number in bundle units² (`area_units` was a unit
 label string in 0001; the table was empty before any finding route existed), plus the marked
 region, the engineer's comment and the scale source. An observation may carry an outline
 polygon instead of a raster mask.
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0002"
-down_revision: str | None = "0001"
+revision: str = "0003"
+down_revision: str | None = "0002"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

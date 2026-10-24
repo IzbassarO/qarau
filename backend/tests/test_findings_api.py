@@ -33,16 +33,19 @@ BODY: dict[str, Any] = {"class": "corrosion", "severity": "watch", "polygon": PO
                         "comment": "paint gone on the lower band"}  # fmt: skip
 
 
-def write_bundle(run: Path) -> None:
+def write_bundle(run: Path, prefix: str = "") -> None:
+    """Bundle under <run>/web; `prefix` ("export/") puts the array paths of the manifest under
+    the S1 layout, where `run` is the <run>/export dir and paths are relative to the run root."""
     (run / "web").mkdir(parents=True)
     np.array(POINTS, "<f4").tofile(run / "web/points.position.f32")
     np.cumsum([0] + [len(r) for r in LINKS]).astype("<u4").tofile(run / "web/po.u32")
     np.array([f for r in LINKS for f in r], "<u2").tofile(run / "web/pf.u16")
     frames = [{"i": i, "image": f"frames/{i:06d}.jpg", "registered": True, "camera": CAMERA,
                "pose": {"qvec": q, "tvec": t}} for i, (q, t) in enumerate(CAMS)]  # fmt: skip
-    man = {"version": 2, "points": {"count": len(POINTS), "position": "web/points.position.f32"},
-           "tracks": {"point_offsets": "web/po.u32", "point_frames": "web/pf.u16"},
-           "frames": frames}  # fmt: skip
+    man = {"version": 2, "frames": frames,
+           "points": {"count": len(POINTS), "position": f"{prefix}web/points.position.f32"},
+           "tracks": {"point_offsets": f"{prefix}web/po.u32",
+                      "point_frames": f"{prefix}web/pf.u16"}}  # fmt: skip
     (run / "web/manifest.json").write_text(json.dumps(man))
 
 
@@ -102,6 +105,17 @@ def test_post_with_fake_scale_reference_gives_m2(marked: TestClient, db_url: str
     assert f["scale"] == "manual: door height 2.0 m"
 
 
+def test_scale_2m_per_unit_turns_a_unit_square_into_4_m2(marked: TestClient, db_url: str) -> None:
+    add_scale(db_url, 2.0)
+    body = {"class": "coating", "severity": "watch", "point_indices": [0, 1, 4, 5]}  # unit square
+    r = marked.post("/api/inspections/1/findings", json=body, headers=ENG)
+    assert r.status_code == 201, r.text
+    f = r.json()
+    assert f["area_units"] == pytest.approx(1.0, abs=1e-6)
+    assert f["area_m2"] == pytest.approx(4.0, abs=1e-6)  # 1 unit² x (2.0 m/unit)²
+    assert f["scale"] == "manual: door height 2.0 m"
+
+
 def test_post_point_indices(marked: TestClient) -> None:
     body = {"class": "crack", "severity": "critical", "point_indices": [5, 0, 1, 4]}
     r = marked.post("/api/inspections/1/findings", json=body, headers=ENG)
@@ -147,6 +161,20 @@ def test_inspection_without_exported_run_is_409(client: TestClient) -> None:
     assert r.status_code == 409
     assert "no exported run" in r.json()["detail"]
     assert client.post("/api/inspections/99/findings", json=BODY, headers=ENG).status_code == 404
+
+
+def test_new_run_layout_export_web(client: TestClient, db_url: str, runs_root: Path) -> None:
+    """S1 runs (ADR 0022) keep the bundle under <run>/export/web; the manifest paths stay
+    relative to the run root, so the image URLs still point at /files/frames/…"""
+    write_bundle(runs_root / "new-run" / "export", prefix="export/")
+    with Session(engine_for(db_url)) as db:
+        db.add(Run(id="e" * 32, inspection_id=1, run_dir="new-run", status="done"))
+        db.commit()
+    r = client.post("/api/inspections/1/findings", json=BODY, headers=ENG)
+    assert r.status_code == 201, r.text
+    f = r.json()
+    assert f["run_id"] == "e" * 32 and f["point_indices"] == list(range(12))
+    assert f["evidence"][0]["image_url"] == "/api/runs/new-run/files/frames/000000.jpg"
 
 
 def test_get_routes_return_the_stored_finding(marked: TestClient) -> None:

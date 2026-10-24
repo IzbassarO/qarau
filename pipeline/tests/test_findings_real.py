@@ -1,7 +1,7 @@
 """Manual finding on real footage: a literal polygon over the chapel facade of the
 notre-dame-p3e run (found once by a plane fit of the facade's points in frame 42). Skipped when
 the run is absent. Renders the evidence frames with the outline (OpenCV) under
-QARAU_OUT_DIR (default <repo>/data/out/def1-notre-dame, gitignored) for a visual check."""
+QARAU_OUT_DIR (default <repo>/data/findings-check, gitignored) for a visual check."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from qarau_pipeline.findings import evidence_for, load_bundle, region_area, sele
 
 REPO = Path(__file__).resolve().parents[2]
 RUN = Path(os.environ.get("QARAU_RUNS_DIR", REPO / "data/runs")) / "notre-dame-p3e"
-OUT = Path(os.environ.get("QARAU_OUT_DIR", REPO / "data/out")) / "def1-notre-dame"
+OUT = Path(os.environ.get("QARAU_OUT_DIR", REPO / "data/findings-check")) / "notre-dame-p3e"
 FACADE = [[-0.076, -0.192, 0.009], [-0.708, -0.718, 0.812], [-1.313, -0.948, 0.185],
           [-0.681, -0.423, -0.618]]  # fmt: skip
 
@@ -39,6 +39,7 @@ def test_facade_polygon_gives_three_frames_with_outlines_on_the_wall() -> None:
     for e in ev:
         cam = bundle.cameras[e["frame"]]
         outline = np.array(e["outline"])
+        # >= 3 outline vertices, every one inside the image
         assert len(outline) >= 3
         assert (outline[:, 0] >= 0).all() and (outline[:, 0] <= cam.width).all()
         assert (outline[:, 1] >= 0).all() and (outline[:, 1] <= cam.height).all()

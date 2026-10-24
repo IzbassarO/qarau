@@ -108,7 +108,7 @@ class Run(Base):
 
 
 class Finding(Base):
-    """A defect region on a run's map (manual marking: ADR 0022). Area is measured in bundle
+    """A defect region on a run's map (manual marking: ADR 0023). Area is measured in bundle
     units²; `area_m2` is filled only from a ScaleReference, named in `scale_source`."""
 
     __tablename__ = "finding"

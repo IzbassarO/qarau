@@ -12,7 +12,7 @@ dependencies = [
   "scipy>=1.14",
 ]
 
-# A real package, so backend/ can depend on it (uv path source, editable; ADR 0022).
+# A real package, so backend/ can depend on it (uv path source, editable; ADR 0023).
 # hatchling (MIT) finds the qarau_pipeline/ directory by the project name.
 [build-system]
 requires = ["hatchling"]
