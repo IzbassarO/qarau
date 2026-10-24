@@ -34,6 +34,8 @@ WRITE_ROUTES = [
         {"class": "corrosion", "severity": "watch", "point_indices": [0]},
         "engineer",
     ),
+    ("POST", "/api/inspections/1/runs", {}, "engineer"),
+    ("POST", "/api/inspections/1/runs/r1/steps/sparse/rerun", None, "engineer"),
 ]
 READ_ROUTES = [
     ("GET", "/api/organizations", "viewer"),

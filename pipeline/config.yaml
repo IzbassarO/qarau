@@ -1,5 +1,12 @@
 # Pipeline settings. Relative paths are relative to this file.
 
+workflow:
+  # Steps of an inspection run (S1, ADR 0022): probe -> frames -> sparse -> export, each a
+  # no-op once its <run>/<step>/step.json says done. `dense: true` appends a dense step that
+  # runs the FAKE provider only (synthetic points marked fake); a paid Modal run is never
+  # started from the workflow (ADR 0019: `dense-remote --provider modal --allow-paid-gpu`).
+  dense: false
+
 dense:
   # Frame links kept per dense point, best first (ADR 0017). Bounds the bundle: links cost
   # 4 bytes each, so 8 per point add at most 32 bytes per dense point (+ 4 for the offset).

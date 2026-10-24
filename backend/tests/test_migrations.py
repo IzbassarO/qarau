@@ -1,4 +1,5 @@
 import pytest
+import sqlalchemy as sa
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
@@ -42,8 +43,57 @@ FORBIDDEN_SQL = [
 ]
 
 
+RUN_COLUMNS = ["created_at", "current_step", "error", "id", "inspection_id", "progress",
+               "rq_job_id", "run_dir", "status", "steps"]  # fmt: skip
+
+
 def test_upgrade_head_creates_exactly_these_tables(db_url: str) -> None:
-    assert sorted(inspect(engine_for(db_url)).get_table_names()) == EXPECTED_TABLES
+    insp = inspect(engine_for(db_url))
+    assert sorted(insp.get_table_names()) == EXPECTED_TABLES
+    cols = {c["name"]: c for c in insp.get_columns("run")}
+    assert sorted(cols) == RUN_COLUMNS
+    assert isinstance(cols["progress"]["type"], sa.Integer)
+    assert not cols["steps"]["nullable"]
+
+
+def test_v0002_upgrades_an_existing_run_and_downgrades(db_url: str) -> None:
+    """A run written under 0001 gets created_at from the server default, an empty step list and
+    an integer progress; downgrade removes the new columns again."""
+    from conftest import alembic_config, drop_everything
+
+    from alembic import command
+
+    engine = engine_for(db_url)
+    drop_everything(db_url)
+    command.upgrade(alembic_config(db_url), "0001")
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO organization (id, name) VALUES (1, 'o')"))
+        conn.execute(text("INSERT INTO site (id, org_id, name) VALUES (1, 1, 's')"))
+        conn.execute(
+            text(
+                "INSERT INTO inspection (id, site_id, mode, status, created_at) "
+                "VALUES (1, 1, 'quick_scan', 'created', CURRENT_TIMESTAMP)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO run (id, inspection_id, run_dir, status, progress) "
+                "VALUES ('r1', 1, 'r1', 'uploaded', 0.0)"
+            )
+        )
+    command.upgrade(alembic_config(db_url), "head")
+    with Session(engine) as db:
+        run = db.get(Run, "r1")
+        assert run is not None
+        assert (run.status, run.progress, run.current_step, run.error, run.rq_job_id) == (
+            "uploaded", 0, None, None, None
+        )  # fmt: skip
+        assert run.steps == [] and run.created_at is not None
+    command.downgrade(alembic_config(db_url), "0001")
+    insp = inspect(engine)
+    cols = {c["name"]: c for c in insp.get_columns("run")}
+    assert sorted(cols) == ["id", "inspection_id", "progress", "run_dir", "status"]
+    assert isinstance(cols["progress"]["type"], sa.Float)
 
 
 def seed_one_decision_and_audit_row(db_url: str) -> None:

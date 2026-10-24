@@ -20,7 +20,7 @@ import cv2
 import numpy as np
 
 from . import keyframes as kf
-from . import quality
+from . import layout, quality
 from .interfaces import StageError
 from .probe import VideoInfo, probe_video
 
@@ -40,6 +40,14 @@ HDR_HABLE = (
 HDR_COLORSPACE = "colorspace=all=bt709:iall=bt2020:itrc=bt2020-10:format=yuv420p"
 NO_ZSCALE = ("ffmpeg has no zscale filter (libzimg): HDR converted with colorspace "
              "BT.2020->BT.709 without tone mapping, bright highlights may clip")  # fmt: skip
+
+
+def ffmpeg_version() -> str:
+    try:
+        out = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True).stdout
+        return out.split()[2]
+    except (OSError, IndexError):
+        return "unknown"
 
 
 @functools.cache
@@ -199,7 +207,7 @@ def run(
                  "budget_capped": capped, "parallax_frac_used": theta}  # fmt: skip
     rep = quality.report(video.name, info.duration_s, times, blur, greys, tracks, len(chosen),
                          selection)  # fmt: skip
-    (out / "quality_report.json").write_text(json.dumps(rep, indent=1))
+    layout.quality_report(out).write_text(json.dumps(rep, indent=1))
     frames = [
         {"i": i, "file": f"frames/{f.name}", "t": round(times[i], 4), "blur": round(blur[i], 2),
          "exposure": expo[i], "kept": reasons[i] is None, "drop_reason": reasons[i]}
@@ -216,7 +224,7 @@ def run(
         "rotation_deg": info.rotation_deg,
         "is_hdr": info.is_hdr,
     }
-    (out / "frames.json").write_text(json.dumps({"source": source, "frames": frames}, indent=1))
+    layout.frames_json(out).write_text(json.dumps({"source": source, "frames": frames}, indent=1))
     return {
         "frames_extracted": len(files), "frames_dropped": dropped, "keyframes": len(chosen),
         "keyframe_mode": f"{asked}; used {theta:.2g}" if theta else asked,
@@ -242,5 +250,5 @@ def from_images(images: Path, out: Path) -> dict[str, Any]:
     source = {"kind": "images", "name": images.name, "duration_s": float(len(fr) - 1),
               "fps": 1.0, "width": w, "height": h}  # fmt: skip
     frames = [{k: f[k] for k in ("i", "file", "t", "blur", "kept", "drop_reason")} for f in fr]
-    (out / "frames.json").write_text(json.dumps({"source": source, "frames": frames}, indent=1))
+    layout.frames_json(out).write_text(json.dumps({"source": source, "frames": frames}, indent=1))
     return {"frames_extracted": len(fr), "frames_dropped": 0}

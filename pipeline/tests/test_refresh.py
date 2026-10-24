@@ -108,7 +108,7 @@ def test_new_runs_next_to_old_ones(env: dict[str, Any]) -> None:
     r = res["b"]
     assert r["status"] == "ok" and r["run"] == "b-p3e"
     assert r["keyframes"] == 8 and r["registered_pct"] == 75.0 and r["time_s"] >= 0
-    m = json.loads((env["runs"] / "b-p3e/web/manifest.json").read_text())
+    m = json.loads((env["runs"] / "b-p3e/export/web/manifest.json").read_text())
     assert m["run_id"] == "b-p3e"  # export named it: built under its final name
     assert r["points"] == m["stats"]["points"] > 0 and r["far_points"] == m["stats"]["far_points"]
     assert "| b | b-p3e | 75.0 |" in refresh.markdown(res)
@@ -118,7 +118,7 @@ def test_created_at_is_utc_iso(env: dict[str, Any]) -> None:
     """(c) created_at written at export: parseable, UTC, recent."""
     t0 = datetime.now(UTC).replace(microsecond=0)
     go(env, only=["a"])
-    m = json.loads((env["runs"] / "a-p3e/web/manifest.json").read_text())
+    m = json.loads((env["runs"] / "a-p3e/export/web/manifest.json").read_text())
     created = datetime.fromisoformat(m["created_at"])
     assert created.utcoffset() == timedelta(0)
     assert t0 <= created <= datetime.now(UTC)  # taken at export, not copied
@@ -197,7 +197,8 @@ def test_dense_never_invoked(env: dict[str, Any], monkeypatch: pytest.MonkeyPatc
     res = go(env)
     assert all(r["status"] == "ok" for r in res.values())
     for n in ("a", "b"):
-        assert "dense" not in json.loads((env["runs"] / f"{n}-p3e/web/manifest.json").read_text())
+        m = json.loads((env["runs"] / f"{n}-p3e/export/web/manifest.json").read_text())
+        assert "dense" not in m
 
 
 def test_child_command_is_sparse_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -16,6 +16,7 @@ import laspy
 import numpy as np
 import pycolmap
 
+from . import layout
 from .cameras import project, rot_from_qvec  # also imported from here by visibility, projection
 from .interfaces import DensePoints, stage_seconds
 
@@ -111,7 +112,7 @@ def frames_from_images(images: Path, out: Path) -> list[dict[str, Any]]:
 
 
 def frames_from_json(out: Path) -> list[dict[str, Any]]:
-    fr = json.loads((out / "frames.json").read_text())["frames"]
+    fr = json.loads(layout.frames_json(out).read_text())["frames"]
     return [
         {"i": f["i"], "name": Path(f["file"]).name, "file": f["file"], "t": f["t"],
          "kept": f["kept"], "drop_reason": f["drop_reason"], "blur": f["blur"]}
@@ -217,7 +218,9 @@ def export_bundle(
     dense: DensePoints | None = None,
 ) -> dict[str, Any]:
     t0 = time.perf_counter()
-    web = out / "web"
+    exp = layout.export_dir(out)  # <run>/export (or the run root of a legacy run, ADR 0022)
+    web = exp / "web"
+    web_rel = web.relative_to(out).as_posix()  # manifest paths stay relative to the run root
     (web / "thumbs").mkdir(parents=True, exist_ok=True)
     F = len(frames)
     assert F < NEVER
@@ -286,7 +289,7 @@ def export_bundle(
     num_obs = np.minimum(counts, 255).astype(np.uint8)
 
     def w(name: str, arr: np.ndarray, dtype: str) -> str:
-        rel = f"web/{name}"
+        rel = f"{web_rel}/{name}"
         np.ascontiguousarray(arr, dtype=dtype).tofile(out / rel)
         return rel
 
@@ -295,7 +298,7 @@ def export_bundle(
     for f in frames:
         i = f["i"]
         e: dict[str, Any] = {
-            "i": i, "t": f["t"], "image": f["file"], "thumb": f"web/thumbs/{i:06d}.jpg",
+            "i": i, "t": f["t"], "image": f["file"], "thumb": f"{web_rel}/thumbs/{i:06d}.jpg",
             "kept": f["kept"], "drop_reason": f["drop_reason"], "blur": f["blur"],
             "registered": False,
         }  # fmt: skip
@@ -376,7 +379,7 @@ def export_bundle(
         extra = {"dense_points": d["count"], "dense_linked_points": d["linked_points"],
                  "frame_links_source": d["frame_links_source"]}  # fmt: skip
 
-    write_laz_ply(out, xyz_a, rgb)
+    write_laz_ply(exp, xyz_a, rgb)
     manifest["stats"]["processing_s"]["export"] = round(time.perf_counter() - t0, 2)
     (web / "manifest.json").write_text(json.dumps(manifest))
 
