@@ -11,8 +11,12 @@ dependencies = [
     "alembic>=1.13",
     "psycopg[binary]>=3.2",
     "boto3>=1.35",
+    "qarau-pipeline",  # findings geometry (ADR 0023); the API never runs a pipeline stage
     "rq>=2.0",  # BSD-2-Clause; redis-py client (MIT) speaks to Valkey (ADR 0012)
 ]
+
+[tool.uv.sources]
+qarau-pipeline = { path = "../pipeline", editable = true }
 
 [dependency-groups]
 dev = [

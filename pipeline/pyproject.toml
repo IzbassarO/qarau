@@ -12,6 +12,12 @@ dependencies = [
   "scipy>=1.14",
 ]
 
+# A real package, so backend/ can depend on it (uv path source, editable; ADR 0023).
+# hatchling (MIT) finds the qarau_pipeline/ directory by the project name.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project.optional-dependencies]
 modal = ["modal==1.6.2"]  # ADR 0019: real dense GPU runs only (uv sync --extra modal)
 

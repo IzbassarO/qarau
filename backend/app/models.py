@@ -108,25 +108,33 @@ class Run(Base):
 
 
 class Finding(Base):
+    """A defect region on a run's map (manual marking: ADR 0023). Area is measured in bundle
+    units²; `area_m2` is filled only from a ScaleReference, named in `scale_source`."""
+
     __tablename__ = "finding"
     id: Mapped[int] = mapped_column(primary_key=True)
     run_id: Mapped[str] = mapped_column(sa.ForeignKey("run.id"))
     class_: Mapped[str] = mapped_column("class", sa.String(64))
     severity: Mapped[Severity] = mapped_column(enum_type(Severity))
     status: Mapped[str] = mapped_column(sa.String(32), default="proposed")
+    comment: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    region: Mapped[Any | None] = mapped_column(sa.JSON, nullable=True)  # as marked: polygon | idx
+    area_units: Mapped[float] = mapped_column(sa.Float, default=0.0)  # bundle units²
     area_m2: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
-    area_units: Mapped[str] = mapped_column(sa.String(16), default="rel")
-    points: Mapped[Any] = mapped_column(sa.JSON, default=list)
+    scale_source: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
+    points: Mapped[Any] = mapped_column(sa.JSON, default=list)  # bundle point indices
 
 
 class Observation(Base):
-    """A Finding seen in one frame."""
+    """A Finding seen in one frame: a raster mask (model output) or an outline polygon in
+    pixels (manual region projected into the frame)."""
 
     __tablename__ = "observation"
     id: Mapped[int] = mapped_column(primary_key=True)
     finding_id: Mapped[int] = mapped_column(sa.ForeignKey("finding.id"))
     frame_id: Mapped[int] = mapped_column(sa.Integer)
-    mask_path: Mapped[str] = mapped_column(sa.String(500))
+    mask_path: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
+    outline: Mapped[Any | None] = mapped_column(sa.JSON, nullable=True)  # [[u, v], ...]
     confidence: Mapped[float] = mapped_column(sa.Float)
 
 
