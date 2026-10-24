@@ -40,6 +40,17 @@ class Verdict(enum.StrEnum):
     reclass = "reclass"
 
 
+class FindingClass(enum.StrEnum):
+    """API vocabulary for `finding.class` (stored as a plain string)."""
+
+    corrosion = "corrosion"
+    crack = "crack"
+    leak = "leak"
+    deformation = "deformation"
+    coating = "coating"
+    other = "other"
+
+
 def now() -> datetime:
     return datetime.now(UTC)
 
@@ -139,7 +150,9 @@ class Observation(Base):
 
 
 class Decision(Base):
-    """Append-only (trigger in migration 0001). Our future training data: never edited."""
+    """Append-only (trigger in migration 0001). Our future training data: never edited.
+    `new_class` / `new_severity` are set by a `reclass` verdict only (migration 0004); the
+    finding's effective state is replayed from its decisions (app/decisions.py)."""
 
     __tablename__ = "decision"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -147,6 +160,8 @@ class Decision(Base):
     user_id: Mapped[int] = mapped_column(sa.ForeignKey("user.id"))
     verdict: Mapped[Verdict] = mapped_column(enum_type(Verdict))
     comment: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    new_class: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    new_severity: Mapped[Severity | None] = mapped_column(enum_type(Severity), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=now)
 
 
