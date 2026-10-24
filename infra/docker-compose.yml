@@ -38,6 +38,44 @@ services:
       timeout: 3s
       retries: 10
 
+  # Job queue: Valkey (BSD-3-Clause), Redis-protocol compatible, never a redis image (ADR 0012).
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    command: ["valkey-server", "--save", "60", "1", "--appendonly", "yes"]
+    ports:
+      - "${VALKEY_PORT:-6379}:6379"
+    volumes:
+      - valkeydata:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Pipeline worker: `rq worker qarau` running the workflow steps (S1, ADR 0022). Reads the
+  # uploaded videos and writes every step's output under the shared runs dir.
+  worker:
+    build:
+      context: ./worker
+      additional_contexts:
+        pipeline: ../pipeline
+        backend: ../backend
+    image: qarau/worker:dev
+    platform: linux/amd64
+    environment:
+      VALKEY_URL: redis://valkey:6379/0
+      QARAU_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      QARAU_RUNS_DIR: /data/runs
+      QARAU_PIPELINE_DIR: /app/pipeline
+    volumes:
+      - ../data/runs:/data/runs
+    depends_on:
+      valkey:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:
   s3data:
+  valkeydata:

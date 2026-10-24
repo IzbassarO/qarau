@@ -14,10 +14,10 @@ import json
 import os
 from pathlib import Path
 
-DEFAULTS = {
-    "max_tokens_per_round": 8_000_000,
-    "max_tokens_per_task": 12_000_000,
-    "max_round_min": 60,
+DEFAULTS = {  # config.yaml -> supervisor is the source; these are its values of 2026-10-23
+    "max_tokens_per_round": 16_000_000,
+    "max_tokens_per_task": 36_000_000,
+    "max_round_min": 90,
     "max_idle_min": 20,
 }
 CPU_ACTIVE_S = 3.0  # CPU seconds the round's processes use per sample (60 s) to count as working

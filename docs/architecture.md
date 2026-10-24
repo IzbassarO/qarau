@@ -31,13 +31,81 @@ the run catalog. Its versioned JSON, coordinate-frame caveat, site resolution,
 file layout, development API and FastAPI routes (task A7a) are documented
 in [Region of interest — version 1](notes/roi-format.md).
 
+## Workflow steps
+
+One inspection run is a sequence of **steps** (`pipeline/qarau_pipeline/workflow.py`, ADR
+0022): `probe → frames (+ quality report) → sparse (COLMAP) → export [→ dense]`. `dense` is
+listed only when `pipeline/config.yaml` → `workflow.dense` is true (default false) and then uses
+the fake provider only; a paid Modal run is never started from the workflow (ADR 0019).
+
+**Contract.** A step is a plain callable `step(ctx) -> StepResult`.
+
+- `StepContext`: `run_dir` (the run directory), `config` (config.yaml sections +
+  `<run>/workflow.json`, what `run` was called with), `force`, `log`.
+- `StepResult`: `status` (`ok` | `skipped` | `failed`), `outputs` (paths relative to the run
+  dir), `metrics`, `error`.
+- A step reads its inputs from the run dir (the probe document, `frames/frames.json`, the sparse
+  model …) and writes its outputs under **`<run>/<step>/`**. It needs no network, no queue and no
+  database; `run_steps` and `python -m qarau_pipeline step <name> --run <dir>` are the only
+  callers.
+- **Done marker.** When a step finishes, the runner writes `<run>/<step>/step.json` atomically
+  (temp file + `os.replace`) with `name`, `status` (`done` | `failed`), `started_at`,
+  `finished_at`, `duration_s`, `error`, `outputs`, `metrics`. A step whose marker says `done` is
+  a **no-op** unless `force`; otherwise `<run>/<step>/` is **cleared** before the body runs, so a
+  process killed mid-step leaves **no** marker and the next run redoes exactly that step from
+  scratch. A step never writes outside its own folder (the uploaded video, `run.json`, `log.txt`
+  and `workflow.json` at the run root belong to the run).
+- `run_steps(run_dir, steps, from_step=None, force=False, on_event=…)` runs a slice in order
+  and calls `on_event(name, "start" | "end", result)` around each step; it knows nothing about
+  queues. `from_step` with `force` is the "rerun this step and the ones after it" operation.
+
+**Runner.** Today the runner is **RQ on Valkey** (ADR 0012; `backend/app/workflow.py`): the job
+`run_inspection(run_id, from_step)` spawns one `python -m qarau_pipeline step …` child per step
+in the pipeline environment (the API environment never imports pycolmap) and, after every
+transition, writes `Run.status` (`queued | running | done | failed`), `current_step`, `progress`
+(finished steps / total, integer 0-100), `error`, `rq_job_id` and `Run.steps`, a JSON list with
+one `{name, status (pending | running | done | failed), started_at, finished_at, duration_s,
+error}` per step in workflow order (the shape `web/src/lib/processing.ts` parses), to Postgres,
+each write in its own short transaction. Because the steps carry their own done markers,
+re-queueing a run after a worker crash redoes only the unfinished step. **Temporal (or any other
+orchestrator) can replace the RQ runner later without touching a step**: the step contract above
+is the whole interface.
+
+API (`backend/app/inspections.py`): `POST /api/inspections/{id}/runs` (engineer) queues the
+inspection's newest run (the one B1's upload created; body `{run_id?, force?}`, 409 while
+queued/running unless `force`, the escape after a crashed worker), `GET /api/inspections/{id}`
+(viewer) returns the inspection with `run_id, progress, current_step, error, steps[]`, and
+`POST /api/inspections/{id}/runs/{run_id}/steps/{step}/rerun` (engineer, 404 for an unknown
+step) queues `from_step` with force for that step and the ones after it; earlier finished steps
+keep their markers and their entries. Infra: `infra/docker-compose.yml` services `valkey`
+(`valkey/valkey`, BSD-3) and `worker` (`infra/worker/Dockerfile`, `rq worker qarau`, mounts
+`data/runs`); both the worker and the API (`make api`) read the queue address from `VALKEY_URL`
+(`backend/app/settings.py` `valkey_url`, default `redis://localhost:6379/0`: the redis-py client
+speaks the Redis protocol to Valkey, hence the scheme) and the worker also `qarau_pipeline_dir`.
+
+**Run directory** (`pipeline/qarau_pipeline/layout.py`):
+
+```
+<run>/video.<ext>                 uploaded input (B1)        <run>/workflow.json  run parameters
+<run>/probe/probe.json            + step.json                <run>/run.json       stage metrics (legacy names)
+<run>/frames/000000.jpg …, manifest.json, frames.json, quality_report.json, step.json
+<run>/sparse/database.db, masks/, sparse/0/*.bin             + step.json
+<run>/export/web/manifest.json + typed arrays + thumbs/, cloud.laz, cloud.ply   + step.json
+<run>/dense/fused.ply (+ .vis)    + step.json                <run>/log.txt        step output
+```
+
+Manifest paths stay relative to the run root (`export/web/points.position.f32`), which the API
+(`/api/runs/{id}/files/{path}`) and the web app follow unchanged. Runs made before S1 keep
+`frames.json`, `quality_report.json`, `colmap/` and `web/` at the run root; every `layout`
+helper falls back to those paths when they exist, so old runs stay readable and re-exportable.
+
 ## Stage contracts
 
-Each stage reads inputs from storage by key and writes outputs under
-`inspections/<inspection_id>/<stage>/`. A stage records `status`, `started_at`,
-`finished_at`, `tool_version`, `params` and `metrics` in the `stage_runs` table. Re-running
-a stage overwrites its own folder only. This makes every result reproducible and every
-failure local.
+Each stage reads inputs from the run dir and writes outputs under `<run>/<step>/` (above). A
+stage records `status`, `started_at`, `finished_at`, `tool_version`, `params` and `metrics` in
+`<run>/run.json` (stage names `frames`, `reconstruction`, `export`) and the worker mirrors the
+step state to `Run.steps`. Re-running a stage overwrites its own folder only. This
+makes every result reproducible and every failure local.
 
 | Stage | Inputs | Outputs |
 | --- | --- | --- |
@@ -102,7 +170,7 @@ and moving them out of slow parts raised orono's reprojection 0.57 → 0.67 px.
 (`keyframe_mode`, `keyframe_selection.parallax_frac_used`) and in the report.
 
 **Footage quality report (frames stage, `quality.py`).** From the same candidates and
-tracks, `<run>/quality_report.json` (the table's `quality` row; version 2, full format:
+tracks, `<run>/frames/quality_report.json` (the table's `quality` row; version 2, full format:
 `docs/notes/quality-report.md`): `version`; `summary` {`frames_total`, `keyframes`,
 `issues_count`, `verdict` `ok` / `reshoot_recommended`}; `issues[]` {`kind`, `start_s`,
 `end_s`, `frames` (flagged `frames.json` indices), `severity` `info` / `warn` (≥ 15 % of the

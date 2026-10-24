@@ -17,6 +17,7 @@ from typing import Any
 import cv2
 import numpy as np
 
+from . import layout
 from .export import project, rot_from_qvec
 from .interfaces import StageError, run_stage
 
@@ -75,7 +76,7 @@ def _auto_voxel(pos: np.ndarray) -> float:
 
 def run_project(run: Path, scale: float | None = None, **over: Any) -> dict[str, Any]:
     P = {**PARAMS, **over}
-    mpath = run / "web/manifest.json"
+    mpath = layout.manifest_path(run)
     man = json.loads(mpath.read_text())
     obs_doc = json.loads((run / "segmentation/observations.json").read_text())
     obs = obs_doc["observations"]

@@ -783,6 +783,121 @@ def test_a_plan_that_drops_an_owner_addition_is_rejected():
     assert validate_plan(ok, todo, CFG)[0]["criteria"] == ok[0]["criteria"]
 
 
+# --- 4. routes: the viewer in a backend criterion is not a page to screenshot ------------------
+def test_a_backend_task_may_mention_the_viewer_without_routes_a_page_path_needs_them():
+    todo = [{"id": "T-001", "area": "core"}, {"id": "T-002", "area": "app"}]
+    backend = [
+        "The shared dev token keeps working for /api/runs: the viewer must not break",
+        "/openapi.json lists every new route; GET /api/inspections/{id} returns the status",
+        "ruff / mypy / pytest pass",
+    ]
+    (a,) = validate_plan([plan("T-001", "dev_pipeline", backend)], todo, CFG)  # B1, S1, DEF1-api
+    assert a["routes"] == []
+    with pytest.raises(PlanError, match=r"name '/viewer/room' but list no routes"):
+        validate_plan([plan("T-001", "dev_pipeline", ["/viewer/room shows points"])], todo, CFG)
+    with pytest.raises(PlanError, match=r"name 'viewer' but list no routes"):
+        validate_plan([plan("T-002", "dev_app", ["the viewer lists the runs"])], todo, CFG)
+    with pytest.raises(PlanError, match=r"name '/\?signed-out' but list no routes"):
+        validate_plan([plan("T-002", "dev_app", ['"/?signed-out" shows the form'])], todo, CFG)
+    assert GR.PAGE_PATH.search("web/src/x.ts, data/runs/<run>/video.mp4, ru/kk/en, a / b") is None
+
+
+# --- 5. parts: a big task is built in 2-3 parts inside the task, each accepted by the tester ----
+PARTS = [
+    {"title": "the fps option", "plan": "add --fps", "criteria": ["--fps exists"], "routes": []},
+    {"title": "the frame cap", "plan": "add --max-frames", "criteria": ["--max-frames exists"],
+     "routes": []},
+]  # fmt: skip
+
+
+def parts_plan(**over):
+    p = {"task_id": "T-001", "assignee": "dev_pipeline", "plan": "overview", "routes": [],
+         "criteria": ["ruff passes"], "parts": copy.deepcopy(PARTS)}  # fmt: skip
+    return {**p, **over}
+
+
+def test_parts_are_validated_and_the_task_criteria_belong_to_the_last_part():
+    todo = [{"id": "T-001", "area": "core", "goal": "g\n\nOwner additions (2026-10-23):\n- No "
+             "frame is read twice.\n"}]  # fmt: skip
+    with pytest.raises(PlanError, match="drop 1 of the task's Owner additions"):
+        validate_plan([parts_plan()], todo, CFG)
+    parts = copy.deepcopy(PARTS)
+    parts[1]["criteria"].append("No frame is read twice.")  # in any part is fine
+    (a,) = validate_plan([parts_plan(parts=parts)], todo, CFG)
+    assert [s["criteria"] for s in a["stages"]] == [
+        ["--fps exists"],
+        ["--max-frames exists", "No frame is read twice.", "ruff passes"],
+    ]
+    assert a["stage"] == 0 and a["criteria"] == ["--fps exists"] and a["overview"] == "overview"
+    assert "part 1 of 2: the fps option" in a["plan"] and "Later parts" in a["plan"]
+    assert "Overview of the whole task:\noverview" in a["plan"]
+    assert "Part 1: add --fps" in a["plan"]
+    parts[0]["criteria"] = ["/viewer/room shows the frames"]
+    with pytest.raises(PlanError, match=r"T-001 \(part 1\): the criteria name '/viewer/room'"):
+        validate_plan([parts_plan(parts=parts)], todo, CFG)
+    parts[0]["criteria"] = []  # the last part gets the task's criteria, the others need their own
+    with pytest.raises(PlanError, match=r"must not be empty \(in every part\)"):
+        validate_plan([parts_plan(parts=parts)], todo, CFG)
+    with pytest.raises(PlanError, match="4 parts; plan at most 3"):
+        validate_plan([parts_plan(parts=copy.deepcopy(PARTS) * 2)], todo, CFG)
+    (one,) = validate_plan([parts_plan(parts=[])], [{"id": "T-001", "area": "core"}], CFG)
+    assert len(one["stages"]) == 1 and one["plan"] == "overview"  # no parts: as before
+
+
+class PartsBrain(Fast):
+    """The brain plans T-001 in two parts; develop records what each round was told. The fake
+    tester fails round 1 and passes from round 2 on."""
+
+    seen: list = []
+
+    def plan(self, team, todo, feedback=None, devs=None):
+        out = super().plan(team, todo, feedback, devs)
+        return [parts_plan(assignee=p["assignee"]) if p["task_id"] == "T-001" else p for p in out]
+
+    def develop(self, team, s):
+        if s["task"]["id"] == "T-001":
+            PartsBrain.seen.append(
+                {k: s.get(k) for k in ("stage", "plan", "criteria", "feedback", "rounds")}
+            )
+        return super().develop(team, s)
+
+
+def test_a_task_planned_in_parts_is_built_part_by_part_and_merged_once(repo):
+    PartsBrain.seen.clear()
+    team, graph = make(repo, PartsBrain())
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})
+    assert statuses(team)["T-001"] == "done"
+    seen = PartsBrain.seen
+    assert [(x["stage"], x["rounds"]) for x in seen] == [(0, 0), (0, 1), (1, 2)]
+    assert seen[1]["feedback"] == "stub file must say round 2"  # part 1 sent back once
+    assert seen[2]["feedback"] == "" and seen[2]["criteria"] == ["--max-frames exists",
+                                                                 "ruff passes"]  # fmt: skip
+    assert "You are on part 2 of 2: the frame cap" in seen[2]["plan"]
+    assert "Parts already done and accepted" in seen[2]["plan"]
+    assert "  1. the fps option" in seen[2]["plan"] and "Later parts" not in seen[2]["plan"]
+    log = (team.home / "events.log").read_text()
+    assert "part 1/2 accepted; part 2 next: the frame cap" in log
+    assert "building part 1/2: the fps option" in log and "building part 2/2" in log
+    assert "plan with 1 criteria in part 1 (3 in 2 parts)" in log
+    packet = (team.home / "packets" / "T-001.md").read_text()
+    assert "sent back: 0 (part 2/2)" in packet  # send-backs count per part
+    assert "## Parts\n\n- [x] part 1: the fps option\n- [x] part 2: the frame cap" in packet
+    assert "## Acceptance criteria (part 2)" in packet
+    prs = [p for p in team.gh.prs.values() if p["head"] == team.branch_for("T-001")]
+    assert len(prs) == 1 and prs[0]["number"] in team.gh.merged  # one PR, after the last part
+
+
+def test_a_new_part_starts_a_fresh_session_with_the_full_brief(repo):
+    team = team_for(repo)
+    dev = team.cfg["developers"]["dev_pipeline"]
+    s = {"task": {"id": "T-001", "title": "t", "goal": "g"}, "assignee": "dev_pipeline",
+         "plan": "You are on part 2 of 2: x", "criteria": ["c"], "session": "old",
+         "feedback": "", "worktree": str(repo)}  # fmt: skip
+    prompt = RealAgents()._prompt(team, s, dev)
+    assert prompt.startswith("You are dev_pipeline") and "part 2 of 2" in prompt
+    assert "sent your work back" not in prompt
+
+
 def test_the_brain_never_plans_an_owner_only_task(repo):
     team, graph = make(repo)
     team.update_task("T-001", owner_only=True)

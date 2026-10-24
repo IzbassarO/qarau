@@ -8,6 +8,7 @@ NEW_PATHS = [
     "/api/inspections",
     "/api/inspections/{inspection_id}",
     "/api/inspections/{inspection_id}/runs",
+    "/api/inspections/{inspection_id}/runs/{run_id}/steps/{step}/rerun",
     "/api/inspections/{inspection_id}/video",
     "/api/inspections/{inspection_id}/video/chunks",
     "/api/inspections/{inspection_id}/video/complete",
@@ -22,7 +23,8 @@ EXPECTED_OPERATIONS = {
     "/api/sites": {"get", "post"},
     "/api/inspections": {"get", "post"},
     "/api/inspections/{inspection_id}": {"get"},
-    "/api/inspections/{inspection_id}/runs": {"get"},
+    "/api/inspections/{inspection_id}/runs": {"get", "post"},
+    "/api/inspections/{inspection_id}/runs/{run_id}/steps/{step}/rerun": {"post"},
     "/api/inspections/{inspection_id}/video": {"post"},
     "/api/inspections/{inspection_id}/video/chunks": {"get", "put"},
     "/api/inspections/{inspection_id}/video/complete": {"post"},
@@ -45,3 +47,8 @@ def test_openapi_lists_every_new_route_with_a_role() -> None:
             continue
         for method, op in ops.items():
             assert "Role:" in op.get("description", ""), f"{method.upper()} {path}"
+    # The inspection status carries the step list in the shape the web app parses.
+    step = spec["components"]["schemas"]["StepOut"]["properties"]
+    assert set(step) == {"name", "status", "started_at", "finished_at", "duration_s", "error"}
+    insp = spec["components"]["schemas"]["InspectionStatus"]["properties"]
+    assert {"status", "run_id", "progress", "current_step", "error", "steps"} <= set(insp)

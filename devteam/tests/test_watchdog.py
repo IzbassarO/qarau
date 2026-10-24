@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
+import yaml
 from conftest import CFG, git, remote_of
 from test_continuous import Fast, make
 
@@ -190,6 +191,26 @@ def test_rehearse_runs_the_first_todo_task_of_each_developer(repo, monkeypatch):
     assert "`devteam run --fake --only T-001,T-002` on a fresh fake state" in out.stdout
     assert "rehearse: PASS" in out.stdout and "T-001 done, T-002 done" in out.stdout
     assert not git(repo, "tag", "-l")  # no fake release tag in the (shared) repo
+
+
+def test_rehearse_uses_the_fixture_backlog_when_nothing_is_plannable(repo, monkeypatch):
+    """2026-10-23: every todo task waited on S1, DEF1-api or U2, blocked by limits, so rehearse
+    refused; the machinery is rehearsed on tests/backlog.yaml then."""
+    path = repo / "devteam" / "backlog.yaml"
+    data = yaml.safe_load(path.read_text())
+    for t in data["tasks"]:
+        t["status"] = "blocked"
+    data["tasks"].append({"id": "T-004", "area": "core", "title": "waits", "goal": "g",
+                          "status": "todo", "depends_on": ["T-001"]})  # fmt: skip
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    git(repo, "commit", "-qam", "every task blocked or waiting")
+    monkeypatch.setenv("KEREGE_REPO", str(repo))
+    out = subprocess.run([*DRIVER, "rehearse"], capture_output=True, text=True, timeout=600)
+    assert out.returncode == 0, out.stdout[-2000:] + out.stderr[-2000:]
+    assert "nothing plannable in devteam/backlog.yaml; using" in out.stdout
+    assert "`devteam run --fake --only T-001,T-002` on a fresh fake state" in out.stdout
+    assert "rehearse: PASS" in out.stdout and "T-001 done, T-002 done" in out.stdout
+    assert yaml.safe_load(path.read_text()) == data  # the real backlog is not touched
 
 
 def test_rehearse_fails_on_a_crash_even_when_the_resume_recovered(repo, monkeypatch):

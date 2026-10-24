@@ -154,6 +154,49 @@ def test_a_task_that_writes_runs_is_screenshot_on_runs_dir(repo, tmp_path):
     assert "$QARAU_RUNS_DIR" not in R.writable_rule(team, other["task"])
 
 
+# --- 4. web pages are shot against the real API on SQLite (U2 saw "could not load sites") -------
+def test_dev_app_screenshots_start_the_api_on_a_fresh_sqlite_first_and_stop_it_after(
+    repo, tmp_path
+):
+    seen = tmp_path / "serve.txt"
+    devs = web_shots(tmp_path, "touch {png}")
+    sc = devs["dev_app"]["screenshots"]
+    serve = "exec python3 -m http.server {api_port} --bind 127.0.0.1"
+    sc["api"] = f"echo {{db}} > {tmp_path}/db.txt && {serve}"
+    sc["serve"] = f"echo {{api_port}} > {seen} && {sc['serve']}"
+    team, _ = make(repo, developers=devs)
+    db = team.home / "api" / "T-002.sqlite"
+    db.parent.mkdir()
+    db.write_text("from the last round")
+    s = {"task": {"id": "T-002"}, "assignee": "dev_app", "worktree": str(repo)}
+    shots, problems = G.screenshots(team, s, ["/"])
+    assert problems == [] and len(shots) == 1
+    assert (tmp_path / "db.txt").read_text().strip() == str(db) and not db.exists()  # fresh
+    api_port = int(seen.read_text())  # the same free port for the API and Vite's proxy
+    assert api_port != int(sc["url"].rsplit(":", 1)[1])
+    assert not team._procs  # both servers stopped and unregistered
+    probe = socket.socket()
+    assert probe.connect_ex(("127.0.0.1", api_port)) != 0  # the API port is free again
+    probe.close()
+    sc["api"] = "exit 3"  # an API that dies is a named problem, never a page shot without it
+    shots, problems = G.screenshots(team, s, ["/"])
+    assert shots == [] and problems == ["api exited with 3: exit 3"]
+
+
+def test_config_runs_the_real_api_seeded_on_sqlite_behind_vite_for_dev_app():
+    cfg = yaml.safe_load((HERE / "config.yaml").read_text())
+    app, pipe = (cfg["developers"][d]["screenshots"] for d in ("dev_app", "dev_pipeline"))
+    assert "sqlite:///{db}" in app["api"] and "alembic upgrade head" in app["api"]
+    assert "python -m app.seed" in app["api"] and "--port {api_port}" in app["api"]
+    assert 'QARAU_API_TOKEN=""' in app["api"]  # open dev mode: any password signs the tester in
+    assert "QARAU_API_PROXY=http://127.0.0.1:{api_port}" in app["serve"]
+    assert "api" not in pipe  # pipeline tasks show runs through Vite's own /api/runs middleware
+    seed = (HERE.parent / "backend" / "app" / "seed.py").read_text()
+    for var in ("QARAU_DEV_ADMIN_TOKEN", "QARAU_DEV_ENGINEER_TOKEN", "QARAU_DEV_VIEWER_TOKEN"):
+        assert var in app["api"] and var.lower() in seed.lower().replace("_", "_")
+    assert "QARAU_API_PROXY" in (HERE.parent / "web" / "vite.config.ts").read_text()
+
+
 def test_config_commands_use_the_runs_dir_setting():
     cfg = yaml.safe_load((HERE / "config.yaml").read_text())  # CFG stubs the e2e command
     assert cfg["runs_dir"] == "data/runs"

@@ -28,6 +28,8 @@ WRITE_ROUTES = [
         "engineer",
     ),
     ("POST", "/api/users", {"org_id": 1, "name": "aidana", "role": "engineer"}, "admin"),
+    ("POST", "/api/inspections/1/runs", {}, "engineer"),
+    ("POST", "/api/inspections/1/runs/r1/steps/sparse/rerun", None, "engineer"),
 ]
 READ_ROUTES = [
     ("GET", "/api/organizations", "viewer"),

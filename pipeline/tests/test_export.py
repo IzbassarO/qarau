@@ -80,7 +80,7 @@ def run_export(tmp_path: Path, far: float | None = None):
         "height": 480,
     }
     metrics = export_bundle(rec, frames, out, src, "run")
-    m = json.loads((out / "web/manifest.json").read_text())
+    m = json.loads((out / "export/web/manifest.json").read_text())
     return out, m, truth, rec, metrics
 
 
@@ -152,8 +152,8 @@ def test_outputs_exist(bundle) -> None:
     out, *_ = bundle
     import laspy
 
-    las = laspy.read(out / "cloud.laz")
-    assert len(las.x) == N and (out / "cloud.ply").stat().st_size > 0
+    las = laspy.read(out / "export/cloud.laz")
+    assert len(las.x) == N and (out / "export/cloud.ply").stat().st_size > 0
 
 
 def test_manifest_records_when_it_was_exported(bundle) -> None:
@@ -166,7 +166,7 @@ def test_manifest_records_when_it_was_exported(bundle) -> None:
 
 def test_reexport_drops_findings(bundle, tmp_path: Path) -> None:
     out, m, _, rec, _ = bundle
-    mp = out / "web/manifest.json"
+    mp = out / "export/web/manifest.json"
     mp.write_text(json.dumps({**m, "version": 2, "findings": "findings/findings.json"}))
     frames = [{"i": i, "name": f"f{i}.jpg", "file": f"frames/{i:06d}.jpg", "t": 0.0,
                "kept": i != 2, "drop_reason": None, "blur": 1.0} for i in range(F)]  # fmt: skip
@@ -233,7 +233,7 @@ def test_dropped_points_in_metadata(bundle) -> None:
 def test_export_bundle_survives_far_point(tmp_path: Path) -> None:
     """The mykolaiv crash: a far point used to overflow the LAS int32 coordinates."""
     out, m, *_ = run_export(tmp_path, far=1e12)
-    assert len(laspy.read(out / "cloud.laz").x) == m["points"]["count"]
+    assert len(laspy.read(out / "export/cloud.laz").x) == m["points"]["count"]
     s = m["stats"]
     assert s["points"] + s["far_points"] + sum(s["dropped_points"].values()) == N
     assert s["far_points"] == 1  # 1 of 40 is > 1 %: not a sanitize outlier, still kept out
@@ -254,7 +254,7 @@ def test_far_layer_own_arrays(tmp_path: Path) -> None:
     pos = np.fromfile(out / m["points"]["position"], "<f4").reshape(-1, 3)
     assert np.allclose(pos, aligned[1:], atol=1e-4)
     assert len(np.fromfile(out / m["tracks"]["point_offsets"], "<u4")) == N
-    assert len(laspy.read(out / "cloud.laz").x) == N - 1
+    assert len(laspy.read(out / "export/cloud.laz").x) == N - 1
 
 
 def test_no_far_points_in_a_compact_scene(bundle) -> None:
@@ -290,7 +290,7 @@ def export_dense(tmp_path: Path, extra: np.ndarray):
     out.mkdir()
     dp = dense_points(truth, extra)
     metrics = export_bundle(rec, frames, out, {"kind": "images"}, "run", dp)
-    return out, json.loads((out / "web/manifest.json").read_text()), dp, metrics
+    return out, json.loads((out / "export/web/manifest.json").read_text()), dp, metrics
 
 
 def test_dense_links_in_bundle(tmp_path: Path) -> None:
