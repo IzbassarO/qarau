@@ -1243,15 +1243,12 @@ tasks:
     both routes; ruff, mypy, pytest pass.
 
     '
-  status: blocked
+  status: todo
   depends_on:
   - DEF1-api
   owner: dev_pipeline
   run: cont-20261024-035848-dev_pipeline-1
   branch: devteam/REV1-api
-  blocked_reason: 'CRASHED in develop at real.py:449: claude failed: You''ve reached your Fable limit.
-    Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message,
-    to continue.. Fix it, then `devteam resume REV1-api`'
 - id: UI-evidence
   area: app
   title: Evidence panel with decisions
