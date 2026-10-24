@@ -1,5 +1,5 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
-import tokens from '../design/tokens.json';
+import tokens from '../design/tokens.json' with { type: 'json' };
 
 /** Rotation matrix (row-major 3x3) of a COLMAP quaternion [w, x, y, z]. */
 export function quatToMat3([w, x, y, z]: number[]): number[] {

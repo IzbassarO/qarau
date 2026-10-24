@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import type { Vector3 } from 'three';
 import type { Bundle } from '../lib/bundle';
-import tokens from '../design/tokens.json';
+import tokens from '../design/tokens.json' with { type: 'json' };
 import { computeMinimapTransform, viewConePolygon } from './minimap';
 
 // Fixed canvas backing resolution; v8 has no separate minimap layout token.

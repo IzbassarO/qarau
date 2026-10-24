@@ -41,7 +41,7 @@ import {
 import { defaultViewState, initialFraming } from './defaults';
 import { clampCamera, clampPosition, estimateGround, estimateSurfaceNormal } from './constraints';
 import { hasRgb, type Bundle } from '../lib/bundle';
-import tokens from '../design/tokens.json';
+import tokens from '../design/tokens.json' with { type: 'json' };
 import {
   colmapPoseToThree,
   csrSlice,
