@@ -59,11 +59,11 @@ def test_scope_and_protected_paths_follow_the_config():
     paths = ["web/src/a.ts", "backend/app/roi.py", "docs/notes/x.md", "devteam/backlog.yaml"]
     paths += ["docs/decisions/0020-x.md", "docs/design/v.md", "docs/notes/x.py", "docs/notes/a.png"]
     assert SC.check_paths(paths, CFG, "dev_app", {}) == {
-        "protected": ["devteam/backlog.yaml"],
+        # docs/design/ is design system v8, owner-only (owner, 2026-10-24)
+        "protected": ["devteam/backlog.yaml", "docs/design/v.md"],
         # dev_app: web/ plus markdown in docs/decisions/ and docs/notes/
         "out_of_scope": [
             "backend/app/roi.py",
-            "docs/design/v.md",
             "docs/notes/a.png",
             "docs/notes/x.py",
         ],  # fmt: skip
@@ -285,7 +285,7 @@ def test_web_developer_keeps_markdown_plans_other_docs_are_reverted_not_failed(r
         def develop(self, team, s):
             wt = Path(s["worktree"])
             for p in ("docs/notes/t-002-plan.md", "docs/decisions/0099-x.md",
-                      "docs/design/spec.md", "docs/notes/tool.py"):  # fmt: skip
+                      "docs/plan/spec.md", "docs/notes/tool.py"):  # fmt: skip
                 (wt / p).parent.mkdir(parents=True, exist_ok=True)
                 (wt / p).write_text("# x\n")
             return super().develop(team, s)
@@ -295,7 +295,7 @@ def test_web_developer_keeps_markdown_plans_other_docs_are_reverted_not_failed(r
     assert task(team, "T-002")["status"] == "done"
     files = git(repo, "diff", "--name-only", "dev", team.branch_for("T-002"))
     assert "docs/notes/t-002-plan.md" in files and "docs/decisions/0099-x.md" in files
-    assert "docs/design/spec.md" not in files and "docs/notes/tool.py" not in files
+    assert "docs/plan/spec.md" not in files and "docs/notes/tool.py" not in files
     assert team.violations(time.strftime("%Y-%m-%d")) == []
 
 

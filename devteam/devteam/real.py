@@ -481,8 +481,8 @@ Acceptance criteria (all must be visibly met in your diff, with tests):
 Rules:
 - Edit only {", ".join(dev["owns"])}. Anything else is reverted automatically, and changing
   another developer's folders or a protected file (devteam/, .github/, backlog.yaml,
-  CLAUDE.md, AGENTS.md, .claude/, .agents/, the benchmark video set, lint and gate configs)
-  ends the task at once: if the task needs them, say so in your summary instead.
+  CLAUDE.md, AGENTS.md, .claude/, .agents/, docs/design/, the benchmark video set, lint and
+  gate configs) ends the task at once: if the task needs them, say so in your summary instead.
   {docs_rule(dev)}
 - Never download or install skills, plugins or tools (no skill installer, no network fetch of
   agent instructions): use only what the repository already has.{design_rule(dev)}
