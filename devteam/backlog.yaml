@@ -1230,9 +1230,11 @@ tasks:
     both routes; ruff, mypy, pytest pass.
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - DEF1-api
+  owner: dev_pipeline
+  run: cont-20261023-211635-dev_pipeline-3
 - id: UI-evidence
   area: app
   title: Evidence panel with decisions
