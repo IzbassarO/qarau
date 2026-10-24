@@ -33,10 +33,10 @@ def check_storage() -> str:
     try:
         boto3.client(
             "s3",
-            endpoint_url=s.s3_endpoint,
-            aws_access_key_id=s.s3_access_key,
-            aws_secret_access_key=s.s3_secret_key,
-            region_name="us-east-1",
+            endpoint_url=s.qarau_s3_endpoint,
+            aws_access_key_id=s.qarau_s3_access_key,
+            aws_secret_access_key=s.qarau_s3_secret_key,
+            region_name=s.qarau_s3_region,
             config=Config(
                 connect_timeout=TIMEOUT_S, read_timeout=TIMEOUT_S, retries={"max_attempts": 0}
             ),

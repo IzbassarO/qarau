@@ -99,6 +99,75 @@ Manifest paths stay relative to the run root (`export/web/points.position.f32`),
 `frames.json`, `quality_report.json`, `colmap/` and `web/` at the run root; every `layout`
 helper falls back to those paths when they exist, so old runs stay readable and re-exportable.
 
+## Storage: S3 is the system of record, `data/runs` is a cache
+
+(ADR 0024; `pipeline/qarau_pipeline/storage.py`, `backend/app/storage.py`.) Every run artefact
+lives in one S3-compatible bucket, one prefix per inspection, five **kinds**:
+
+```
+<org>/<site>/<inspection>/video/<filename>        the uploaded video, immutable
+<org>/<site>/<inspection>/frames/…                 000000.jpg …, manifest.json, frames.json,
+                                                   quality_report.json, step.json
+<org>/<site>/<inspection>/sparse/…                 database.db, masks/, sparse/0/*.bin, step.json
+<org>/<site>/<inspection>/dense/…                  fused.ply (+ .vis), step.json
+<org>/<site>/<inspection>/bundle/…                 web/manifest.json + typed arrays + thumbs/,
+                                                   cloud.laz, cloud.ply, step.json
+```
+
+`<org>`, `<site>` and `<inspection>` are the catalog ids (`1/1/1`). A run outside the catalog
+(the CLI, the benchmark, `refresh`) uses org `_local`, site `_local` and the run directory name
+as inspection (`_local/_local/notre-dame`). The key of a run-relative path is a fixed mapping
+(`layout.KIND_DIRS`): `export/web/manifest.json → bundle/web/manifest.json`, `frames/000012.jpg →
+frames/000012.jpg`, `sparse/… → sparse/…`, `dense/… → dense/…`; nothing else of the run dir
+(`probe/`, `run.json`, `log.txt`, `workflow.json`) is stored: `probe` is recomputed in under a
+second from the video, the rest is bookkeeping of one machine.
+
+**Immutable and rebuilt.** The **video** is written once: `put` refuses to overwrite a key under
+`video/`, the pipeline uploads it only when the prefix is empty, and a second upload with the same
+file name for the same inspection is a 409. **Frames** are the evidence every finding links to
+and are never touched by a later step; only a forced rerun of the `frames` step (new parameters)
+replaces them. **sparse**, **dense** and **bundle** are derived and rebuilt freely: a rerun of a
+step replaces its whole prefix (objects it no longer produces are deleted), so storage always
+mirrors the step's last run, and the dense step re-uploads the bundle it re-exported.
+
+**The cache.** `QARAU_RUNS_DIR/<run>` is the pipeline's working copy. Before a step runs,
+`run_step` pulls the kinds it reads (`frames` needs `video`; `sparse` needs `frames`; `export` and
+`dense` need `frames` and `sparse`) and its own kind whenever the local dir lacks a `done` marker;
+after the marker is written it pushes the kinds it made (`frames → frames/`, `sparse → sparse/`,
+`export → bundle/`, `dense → dense/ + bundle/`, `probe → video/`, once). The marker travels with
+the kind, so `rm -rf data/runs/<run>` followed by a re-queue downloads every finished step and
+reruns only `probe`; a push that fails marks the step `failed` (an output that never reached
+storage does not count as done). The worker passes the run's prefix on the command line
+(`python -m qarau_pipeline step <name> --run DIR --prefix 1/1/1`), so it survives a wiped cache;
+`run` and `step` without `--prefix` use `_local/_local/<run>`. With **`QARAU_S3_BUCKET` unset
+nothing is pulled or pushed and boto3 is never called**: the local-only mode of the benchmark and
+the tests.
+
+**Configuration** (`infra/.env.example`): `QARAU_S3_ENDPOINT` (empty for AWS S3),
+`QARAU_S3_BUCKET` (empty = off), `QARAU_S3_ACCESS_KEY`, `QARAU_S3_SECRET_KEY`, `QARAU_S3_REGION`.
+The same five variables drive the pipeline worker and the API; dev points them at the compose
+`s3` service (Versity, ADR 0006), the cloud at the provider's S3, on-prem at the customer's
+gateway. The client uses path-style addressing and SigV4, which every S3-compatible server
+accepts. The bucket is created if missing.
+
+**Serving** (`backend/app/runs.py`). `GET /api/runs/{id}/manifest.json` and
+`GET /api/runs/{id}/files/{path}` keep their paths, roles (viewer) and shapes in every mode:
+
+1. the file is in the local cache → served from disk as before;
+2. otherwise, `QARAU_FILES_MODE=stream` (default) → the API streams the object from the bucket
+   (`Cache-Control: public, max-age=3600`, media type by extension);
+3. `QARAU_FILES_MODE=redirect` → `302 Location: <signed URL>`, valid `QARAU_SIGNED_URL_TTL_S`
+   seconds (default 300). The browser then fetches the bucket directly, so the **bucket must
+   allow CORS from the web origin**; that is why `stream` is the default and the web viewer needs
+   no change for either mode.
+
+A run id is mapped to its prefix through the catalog (`Run → Inspection → Site.org_id`) or, for
+an id without a `run` row, to `_local/_local/<id>`; the path is turned into a key only through
+`KIND_DIRS` and never with an empty, `.` or `..` part, so traversal stays rejected without a
+local directory to resolve against. `GET /api/runs` (the legacy catalog) still lists only the
+cache; the inspections API is the catalog of record. Legacy runs with `web/` at the root have no
+storage copy and are served from the cache only.
+
 ## Stage contracts
 
 Each stage reads inputs from the run dir and writes outputs under `<run>/<step>/` (above). A

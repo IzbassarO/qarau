@@ -16,6 +16,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# Storage kind (ADR 0024, storage.py) -> the run sub-dir it mirrors. `video` is the run-root
+# `video.<ext>` and is handled apart. A legacy run (web/ at the root) has no storage copy.
+KIND_DIRS = {"frames": "frames", "sparse": "sparse", "dense": "dense", "bundle": "export"}
+KIND_STEPS = {"frames": "frames", "sparse": "sparse", "dense": "dense", "bundle": "export"}
+
+
+def kind_dir(run: Path, kind: str) -> Path:
+    return run / KIND_DIRS[kind]
+
 
 def _pick(new: Path, legacy: Path) -> Path:
     return legacy if legacy.exists() and not new.exists() else new

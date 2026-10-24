@@ -8,6 +8,11 @@ RQ runner in backend/ (and Temporal later) only calls `python -m qarau_pipeline 
 
 Product steps: probe -> frames (+ quality report) -> sparse (COLMAP) -> export [-> dense, only
 when config.yaml `workflow.dense` is true; fake provider only, never a paid run].
+
+Storage (ADR 0024): with `QARAU_S3_BUCKET` set, the run dir is a cache of
+`<org>/<site>/<inspection>/{video,frames,sparse,dense,bundle}/` in S3. Before a step runs, the
+kinds it reads and its own kind are downloaded when the local dir has no done marker (a wiped
+cache is refilled, not recomputed); after its marker is written, the kinds it made are uploaded.
 """
 
 from __future__ import annotations
@@ -26,10 +31,16 @@ import yaml
 
 from . import layout
 from .interfaces import StageError
+from .storage import Storage, local_prefix, storage_from_env
 
 CONFIG = Path(__file__).resolve().parent.parent / "config.yaml"
 MARKER = "step.json"
 WORKFLOW_JSON = "workflow.json"  # `run` records its input and parameters here for later `step`s
+# Storage kinds a step reads (pulled on a cache miss) and the kinds it writes (pushed when done).
+READS = {"probe": ("video",), "frames": ("video",), "sparse": ("frames",),
+         "export": ("frames", "sparse"), "dense": ("frames", "sparse")}  # fmt: skip
+WRITES = {"probe": ("video",), "frames": ("frames",), "sparse": ("sparse",),
+          "export": ("bundle",), "dense": ("dense", "bundle")}  # fmt: skip
 
 Log = Callable[[str], None]
 OnEvent = Callable[[str, str, "StepResult | None"], None]
@@ -41,6 +52,18 @@ class StepContext:
     config: dict[str, Any] = field(default_factory=dict)
     force: bool = False
     log: Log = print
+    storage: Storage | None = None  # None: local files only (benchmark, tests)
+    prefix: str = ""  # <org>/<site>/<inspection> in the bucket
+
+
+def make_context(
+    run_dir: Path, config: dict[str, Any] | None = None, force: bool = False, log: Log = print
+) -> StepContext:
+    """A context with the storage from the environment (if any) and the run's prefix:
+    config['storage_prefix'] (the worker passes the catalog ids) or `_local/_local/<run>`."""
+    cfg = config or {}
+    prefix = cfg.get("storage_prefix") or local_prefix(run_dir.name)
+    return StepContext(run_dir, cfg, force, log, storage_from_env(), prefix)
 
 
 @dataclass
@@ -96,7 +119,12 @@ def write_marker(run_dir: Path, name: str, doc: dict[str, Any]) -> None:
 def run_step(step: Step, ctx: StepContext) -> StepResult:
     """One step: skipped when its marker says done (unless ctx.force); otherwise `<run>/<step>/`
     is cleared (a half-written output of a killed process never leaks into the redo), the body
-    runs, and the marker records done or failed. A crash between the two leaves no marker."""
+    runs, and the marker records done or failed. A crash between the two leaves no marker.
+    With storage: inputs and the step's own kind are pulled first, outputs pushed after."""
+    if ctx.storage is not None:
+        own = tuple(k for k in WRITES.get(step.name, ()) if k != "video")
+        for kind in READS.get(step.name, ()) + own:
+            pull(ctx, kind)
     old = read_marker(ctx.run_dir, step.name)
     if old is not None and old.get("status") == "done" and not ctx.force:
         return StepResult("skipped", list(old.get("outputs", [])), dict(old.get("metrics", {})))
@@ -107,21 +135,81 @@ def run_step(step: Step, ctx: StepContext) -> StepResult:
         res = step.fn(ctx)
     except Exception as e:  # noqa: BLE001 - recorded in the marker; the caller decides
         res = StepResult("failed", error=f"{type(e).__name__}: {e}")
-    write_marker(
-        ctx.run_dir,
-        step.name,
-        {
-            "name": step.name,
-            "status": "failed" if res.status == "failed" else "done",
-            "started_at": started,
-            "finished_at": _now(),
-            "duration_s": round(time.perf_counter() - t0, 2),
-            "error": res.error,
-            "outputs": res.outputs,
-            "metrics": res.metrics,
-        },
-    )
+
+    def marker(r: StepResult) -> None:
+        write_marker(
+            ctx.run_dir,
+            step.name,
+            {
+                "name": step.name,
+                "status": "failed" if r.status == "failed" else "done",
+                "started_at": started,
+                "finished_at": _now(),
+                "duration_s": round(time.perf_counter() - t0, 2),
+                "error": r.error,
+                "outputs": r.outputs,
+                "metrics": r.metrics,
+            },
+        )
+
+    marker(res)  # written first, so the pushed kind carries its done marker
+    if res.status != "failed" and ctx.storage is not None:
+        try:
+            for kind in WRITES.get(step.name, ()):
+                push(ctx, kind)
+        except Exception as e:  # noqa: BLE001 - an output that never reached storage is a failure
+            res = StepResult("failed", error=f"upload: {type(e).__name__}: {e}")
+            marker(res)
     return res
+
+
+# ---------------------------------------------------------------- storage: pull and push
+
+
+def _video_ext(key: str) -> str:
+    return Path(key).suffix.lstrip(".").lower() or "bin"
+
+
+def pull(ctx: StepContext, kind: str) -> None:
+    """Download `kind` into the run dir when the cache lacks it: the video when none is here,
+    a step's kind when its done marker is missing (the marker comes along, so the step is then
+    skipped). No objects in storage: nothing to do."""
+    st, run, prefix = ctx.storage, ctx.run_dir, f"{ctx.prefix}/{kind}/"
+    assert st is not None
+    if kind == "video":
+        if find_video(ctx) is None and (keys := st.list(prefix)):
+            st.get(keys[0], run / f"video.{_video_ext(keys[0])}")
+            ctx.log(f"storage: pulled {keys[0]}")
+        return
+    if is_done(run, layout.KIND_STEPS[kind]):
+        return
+    keys = st.list(prefix)
+    for key in keys:
+        st.get(key, layout.kind_dir(run, kind) / key[len(prefix) :])
+    if keys:
+        ctx.log(f"storage: pulled {len(keys)} objects from {prefix}")
+
+
+def push(ctx: StepContext, kind: str) -> None:
+    """Upload the run's `kind`. The video goes up once (immutable); a rebuilt kind replaces its
+    prefix, so no stale object survives a rerun."""
+    st, run, prefix = ctx.storage, ctx.run_dir, f"{ctx.prefix}/{kind}/"
+    assert st is not None
+    if kind == "video":
+        video = find_video(ctx)
+        if video is not None and not st.list(prefix):
+            st.put(prefix + video.name, video)
+            ctx.log(f"storage: pushed {prefix}{video.name}")
+        return
+    d = layout.kind_dir(run, kind)
+    old, new = set(st.list(prefix)), set()
+    for f in sorted(p for p in d.rglob("*") if p.is_file()):
+        key = prefix + f.relative_to(d).as_posix()
+        st.put(key, f)
+        new.add(key)
+    for key in old - new:
+        st.delete(key)
+    ctx.log(f"storage: pushed {len(new)} objects to {prefix}")
 
 
 def run_steps(
@@ -141,7 +229,7 @@ def run_steps(
         if from_step not in names:
             raise StageError(f"unknown step {from_step!r}; steps: {', '.join(names)}")
         steps = steps[names.index(from_step) :]
-    ctx = StepContext(run_dir, config or {}, force, log)
+    ctx = make_context(run_dir, config, force, log)
     results: dict[str, StepResult] = {}
     for step in steps:
         if on_event:
@@ -200,11 +288,13 @@ def _rel(run: Path, p: Path) -> str:
 
 
 def find_video(ctx: StepContext) -> Path | None:
-    """config['video'] (absolute, or relative to the run dir) or the uploaded <run>/video.<ext>."""
+    """config['video'] (absolute, or relative to the run dir) or the uploaded <run>/video.<ext>.
+    A configured path that is gone (a moved sample) falls back to the pulled <run>/video.<ext>."""
     v = ctx.config.get("video")
     if v:
-        p = Path(v)
-        return p if p.is_absolute() else ctx.run_dir / p
+        p = Path(v) if Path(v).is_absolute() else ctx.run_dir / v
+        if p.is_file() or ctx.storage is None:
+            return p
     hits = sorted(p for p in ctx.run_dir.glob("video.*") if p.is_file() and p.suffix != ".part")
     return hits[0] if hits else None
 

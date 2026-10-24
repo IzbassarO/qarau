@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from .db import engine_for
 from .models import Inspection, Run
 from .settings import get_settings
+from .storage import prefix_of
 
 log = logging.getLogger(__name__)
 QUEUE = "qarau"
@@ -42,8 +43,9 @@ class StepRunner(Protocol):
         """Step names in order (`python -m qarau_pipeline step --list`)."""
         ...
 
-    def run(self, run_dir: Path, name: str, force: bool) -> StepDoc:
-        """Run one step; return its step.json (status done | failed, timestamps, error)."""
+    def run(self, run_dir: Path, name: str, force: bool, prefix: str) -> StepDoc:
+        """Run one step; return its step.json (status done | failed, timestamps, error).
+        `prefix` is the run's storage prefix <org>/<site>/<inspection> (ADR 0024)."""
         ...
 
 
@@ -64,8 +66,10 @@ class SubprocessRunner:
         names: list[str] = json.loads(out)
         return names
 
-    def run(self, run_dir: Path, name: str, force: bool) -> StepDoc:
-        cmd = self._cmd(name, "--run", str(run_dir), *(["--force"] if force else []))
+    def run(self, run_dir: Path, name: str, force: bool, prefix: str) -> StepDoc:
+        cmd = self._cmd(name, "--run", str(run_dir), "--prefix", prefix,
+                        *(["--force"] if force else []))  # fmt: skip
+        run_dir.mkdir(parents=True, exist_ok=True)  # a wiped cache dir: the step refills it
         with (run_dir / "log.txt").open("a") as f:
             f.write(f"\n$ {' '.join(cmd)}\n")
             f.flush()
@@ -154,6 +158,7 @@ def run_inspection(run_id: str, from_step: str | None = None) -> str:
         if run is None:
             raise RuntimeError(f"run {run_id} not found")
         run_dir = Path(get_settings().qarau_runs_dir).resolve() / run.run_dir
+        prefix = prefix_of(db, run)
         old = {s["name"]: dict(s) for s in run.steps}
     names = runner.names()
     if from_step is not None and from_step not in names:
@@ -169,7 +174,7 @@ def run_inspection(run_id: str, from_step: str | None = None) -> str:
         _set_step(run_id, name, status="running", started_at=_now())
         _set_run(run_id, current_step=name)
         try:
-            doc = runner.run(run_dir, name, force)
+            doc = runner.run(run_dir, name, force, prefix)
         except Exception as e:  # noqa: BLE001 - a runner crash is this step's failure
             log.exception("step %s of run %s crashed", name, run_id)
             doc = {"status": "failed", "error": f"{type(e).__name__}: {e}"}

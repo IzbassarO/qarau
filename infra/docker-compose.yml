@@ -53,7 +53,8 @@ services:
       retries: 10
 
   # Pipeline worker: `rq worker qarau` running the workflow steps (S1, ADR 0022). Reads the
-  # uploaded videos and writes every step's output under the shared runs dir.
+  # uploaded videos and writes every step's output under the shared runs dir, which is only a
+  # cache of the `s3` service when QARAU_S3_BUCKET is set (ADR 0024).
   worker:
     build:
       context: ./worker
@@ -67,12 +68,19 @@ services:
       QARAU_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       QARAU_RUNS_DIR: /data/runs
       QARAU_PIPELINE_DIR: /app/pipeline
+      QARAU_S3_ENDPOINT: http://s3:7070
+      QARAU_S3_BUCKET: ${QARAU_S3_BUCKET:-}
+      QARAU_S3_ACCESS_KEY: ${QARAU_S3_ACCESS_KEY:-${S3_ACCESS_KEY}}
+      QARAU_S3_SECRET_KEY: ${QARAU_S3_SECRET_KEY:-${S3_SECRET_KEY}}
+      QARAU_S3_REGION: ${QARAU_S3_REGION:-us-east-1}
     volumes:
       - ../data/runs:/data/runs
     depends_on:
       valkey:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      s3:
         condition: service_healthy
 
 volumes:

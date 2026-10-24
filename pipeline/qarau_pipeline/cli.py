@@ -15,8 +15,8 @@ from .interfaces import StageError
 from .keyframes import MODES
 from .segmentation import GroundedSam2, ManualMasks, SamApiSegmenter, parse_prompt, segment_stage
 from .workflow import (
-    StepContext,
     export_run,
+    make_context,
     product_steps,
     run_config,
     run_step,
@@ -88,7 +88,7 @@ def cmd_run(a: argparse.Namespace) -> None:
 def cmd_step(a: argparse.Namespace) -> None:
     """Exactly one step of a run (the queue worker's entry point); exit 1 when it fails."""
     run = Path(a.run).resolve() if a.run else None
-    cfg = run_config(run)
+    cfg = run_config(run, storage_prefix=a.prefix)
     steps = product_steps(cfg)
     if a.list:
         print(json.dumps([s.name for s in steps]))
@@ -98,7 +98,7 @@ def cmd_step(a: argparse.Namespace) -> None:
     step = next((s for s in steps if s.name == a.name), None)
     if step is None:
         raise StageError(f"unknown step {a.name!r}; steps: {', '.join(s.name for s in steps)}")
-    res = run_step(step, StepContext(run, cfg, a.force))
+    res = run_step(step, make_context(run, cfg, a.force))
     print(f"step {a.name}: {res.status}" + (f" ({res.error})" if res.error else ""))
     if res.status == "failed":
         sys.exit(1)
@@ -246,6 +246,8 @@ def main(argv: list[str] | None = None) -> None:
     st.add_argument("--run", help="run dir: <run>/video.<ext> or <run>/workflow.json names the "
                     "input")  # fmt: skip
     st.add_argument("--force", action="store_true", help="redo the step even if step.json is done")
+    st.add_argument("--prefix", help="storage prefix <org>/<site>/<inspection> (ADR 0024); "
+                    "default _local/_local/<run dir name>")  # fmt: skip
     st.add_argument("--list", action="store_true", help="print the step names as JSON and exit")
     st.set_defaults(fn=cmd_step)
     e = sub.add_parser("export", help="COLMAP model -> LAZ/PLY + viewer bundle")

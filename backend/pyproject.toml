@@ -26,6 +26,7 @@ dev = [
     "mypy>=1.11",
     "boto3-stubs[s3]>=1.35",
     "fakeredis>=2.26",  # BSD-3-Clause; in-memory Valkey/Redis stand-in for the queue tests
+    "moto[s3]>=5",  # Apache-2.0; in-memory S3 stand-in for the storage tests
 ]
 
 [tool.ruff]
