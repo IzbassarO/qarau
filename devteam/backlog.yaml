@@ -1230,14 +1230,12 @@ tasks:
     both routes; ruff, mypy, pytest pass.
 
     '
-  status: blocked
+  status: todo
   depends_on:
   - DEF1-api
   owner: dev_pipeline
   run: cont-20261023-211635-dev_pipeline-3
   branch: devteam/REV1-api
-  blocked_reason: 'CRASHED in develop at real.py:449: claude failed: You''ve hit your session limit ·
-    resets 1:50am (America/New_York). Fix it, then `devteam resume REV1-api`'
 - id: UI-evidence
   area: app
   title: Evidence panel with decisions
