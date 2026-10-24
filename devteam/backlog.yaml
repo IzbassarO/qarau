@@ -1234,7 +1234,8 @@ tasks:
   depends_on:
   - DEF1-api
   owner: dev_pipeline
-  run: cont-20261023-211635-dev_pipeline-3
+  run: cont-20261024-035848-dev_pipeline-1
+  branch: devteam/REV1-api
 - id: UI-evidence
   area: app
   title: Evidence panel with decisions
@@ -1460,6 +1461,9 @@ tasks:
   depends_on:
   - S1
   - U2
+  owner: dev_pipeline
+  run: cont-20261023-211635-dev_pipeline-4
+  branch: devteam/D2
 - id: COV1
   area: core
   title: 'Coverage: inspected_ok / finding / not_seen regions'
