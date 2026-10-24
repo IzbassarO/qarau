@@ -10,6 +10,7 @@ dependencies = [
   "laspy[lazrs]>=2.5",
   "pyyaml>=6.0.3",
   "scipy>=1.14",
+  "boto3>=1.35",  # Apache-2.0; S3-compatible object storage (storage.py, ADR 0024)
 ]
 
 # A real package, so backend/ can depend on it (uv path source, editable; ADR 0023).
@@ -22,7 +23,7 @@ build-backend = "hatchling.build"
 modal = ["modal==1.6.2"]  # ADR 0019: real dense GPU runs only (uv sync --extra modal)
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "moto[s3]>=5"]  # moto: Apache-2.0, fake S3
 ml = [
     "torch>=2.14.1",
     "torchvision>=0.29.1",

@@ -32,6 +32,7 @@ class FakeRunner:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, bool]] = []
+        self.prefixes: set[str] = set()
         self.fail: dict[str, str] = {}
         self.gate: dict[str, threading.Event] = {}
         self.entered: dict[str, threading.Event] = {}
@@ -39,8 +40,9 @@ class FakeRunner:
     def names(self) -> list[str]:
         return list(NAMES)
 
-    def run(self, run_dir: Path, name: str, force: bool) -> dict[str, Any]:
+    def run(self, run_dir: Path, name: str, force: bool, prefix: str) -> dict[str, Any]:
         self.calls.append((name, force))
+        self.prefixes.add(prefix)
         if name in self.entered:
             self.entered[name].set()
         if name in self.gate:
@@ -159,6 +161,7 @@ def test_run_goes_queued_running_done(client: TestClient, runner: FakeRunner, wo
     assert log.seen == ["queued", "running", "done"]
     assert runner.calls == [("probe", False), ("frames", False), ("sparse", False),
                             ("export", False)]  # fmt: skip
+    assert runner.prefixes == {"1/1/1"}  # org 1 / site 1 / inspection 1: the storage prefix
     assert (body["progress"], body["current_step"], body["error"]) == (100, None, None)
     assert step_view(body) == [(n, "done") for n in NAMES]
     assert all(set(s) == {"name", "status", "started_at", "finished_at", "duration_s", "error"}
@@ -333,11 +336,12 @@ def test_subprocess_runner_reads_the_marker_or_reports_the_exit(tmp_path: Path) 
     run_dir.mkdir()
     r = workflow.SubprocessRunner(pipeline)
     assert r.names() == ["probe", "frames"]
-    doc = r.run(run_dir, "probe", force=True)
+    doc = r.run(run_dir, "probe", force=True, prefix="7/8/9")
     assert (doc["status"], doc["duration_s"], doc["force"]) == ("done", 1.0, True)
-    doc = r.run(run_dir, "frames", force=False)
+    doc = r.run(run_dir, "frames", force=False, prefix="7/8/9")
     assert doc == {"status": "failed", "error": "step process exit 1: ERROR: boom"}
     log = (run_dir / "log.txt").read_text()
     assert "step probe --run" in log and "--force" in log and "ERROR: boom" in log
+    assert "--prefix 7/8/9" in log
     assert get_settings().qarau_pipeline_dir == "../pipeline"
     assert get_settings().valkey_url == "redis://localhost:6379/0"

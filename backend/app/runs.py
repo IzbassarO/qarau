@@ -1,33 +1,49 @@
+"""Exported runs for the viewer. A run is served from its local cache dir under QARAU_RUNS_DIR
+when the file is there, else from object storage (ADR 0024): streamed through the API, or a 302
+to a short-lived signed URL when QARAU_FILES_MODE=redirect. Paths, roles and shapes are the same
+in every mode, so the web app needs no change."""
+
 import json
+import mimetypes
 import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
+from qarau_pipeline.storage import key_for
 
 from .auth import require_role
+from .crud import Db
 from .settings import get_settings
+from .storage import prefix_for_run_id, storage
 
 router = APIRouter(prefix="/api/runs", dependencies=[Depends(require_role("viewer"))])
 RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 CACHE = {"Cache-Control": "public, max-age=3600"}
+MANIFEST = "export/web/manifest.json"
 
 
-def run_dir(run_id: str) -> Path:
+def local_dir(run_id: str) -> Path | None:
+    """The run's cache dir, or None when it is not there (the run may still be in storage)."""
     if not RUN_ID.fullmatch(run_id):
         raise HTTPException(404, "run not found")
     root = Path(get_settings().qarau_runs_dir).resolve()
     d = (root / run_id).resolve()
-    if not d.is_relative_to(root) or not d.is_dir():
+    return d if d.is_relative_to(root) and d.is_dir() else None
+
+
+def run_dir(run_id: str) -> Path:
+    d = local_dir(run_id)
+    if d is None:
         raise HTTPException(404, "run not found")
     return d
 
 
 def manifest_file(d: Path) -> Path | None:
     """<run>/export/web/manifest.json (ADR 0022), or <run>/web/manifest.json for older runs."""
-    for rel in ("export/web/manifest.json", "web/manifest.json"):
+    for rel in (MANIFEST, "web/manifest.json"):
         if (d / rel).is_file():
             return d / rel
     return None
@@ -48,6 +64,23 @@ def exported_at(d: Path) -> str:
     return datetime.fromtimestamp(t, UTC).isoformat(timespec="seconds")
 
 
+def from_storage(db: Db, run_id: str, rel: str) -> Response:
+    """Cache miss: the object for the run-relative path `rel`, streamed or as a 302."""
+    st = storage()
+    key = key_for(prefix_for_run_id(db, run_id), rel) if st is not None else None
+    if st is None or key is None:
+        raise HTTPException(404, "file not found")
+    s = get_settings()
+    if s.qarau_files_mode == "redirect":
+        return RedirectResponse(st.signed_url(key, s.qarau_signed_url_ttl_s), status_code=302)
+    try:
+        chunks = st.stream(key)
+    except KeyError as e:
+        raise HTTPException(404, "file not found") from e
+    media = mimetypes.guess_type(rel)[0] or "application/octet-stream"
+    return StreamingResponse(chunks, media_type=media, headers=CACHE)
+
+
 @router.get("", description="Role: viewer. Exported pipeline runs found under QARAU_RUNS_DIR.")
 def list_runs() -> list[dict[str, Any]]:
     root = Path(get_settings().qarau_runs_dir)
@@ -66,16 +99,29 @@ def list_runs() -> list[dict[str, Any]]:
     return out
 
 
-@router.get("/{run_id}/manifest.json", description="Role: viewer. The run's viewer manifest.")
-def manifest(run_id: str) -> dict[str, Any]:
-    return read_manifest(run_dir(run_id))
+@router.get(
+    "/{run_id}/manifest.json",
+    response_model=dict[str, Any],
+    description="Role: viewer. The run's viewer manifest (from the cache, or from storage: "
+    "streamed, or a 302 to a signed URL with QARAU_FILES_MODE=redirect).",
+)
+def manifest(run_id: str, db: Db) -> Any:
+    d = local_dir(run_id)
+    if d is not None and manifest_file(d) is not None:
+        return read_manifest(d)
+    return from_storage(db, run_id, MANIFEST)
 
 
-@router.get("/{run_id}/files/{path:path}", description="Role: viewer. A file of the run.")
-def run_file(run_id: str, path: str) -> FileResponse:
-    d = run_dir(run_id)
-    f = (d / path).resolve()
-    if not f.is_relative_to(d) or not f.is_file():
-        raise HTTPException(404, "file not found")
-    # Typed arrays (.f32, .u8, ...) have no registered type, so they come back as octet-stream.
-    return FileResponse(f, headers=CACHE)
+@router.get(
+    "/{run_id}/files/{path:path}",
+    description="Role: viewer. A file of the run (from the cache, or from storage: streamed, "
+    "or a 302 to a signed URL with QARAU_FILES_MODE=redirect).",
+)
+def run_file(run_id: str, path: str, db: Db) -> Response:
+    d = local_dir(run_id)
+    if d is not None:
+        f = (d / path).resolve()
+        if f.is_relative_to(d) and f.is_file():
+            # Typed arrays (.f32, .u8, ...) have no registered type: octet-stream.
+            return FileResponse(f, headers=CACHE)
+    return from_storage(db, run_id, path)

@@ -7,6 +7,8 @@ POST  /api/inspections/{id}/video/complete   {upload_id, sha256}  -> {run_id, fi
 
 Bytes go to <QARAU_RUNS_DIR>/<run_id>/video.<ext>.part; `complete` verifies size + sha256 and
 renames it to video.<ext>. The .part file's size is the truth for next_offset; the row mirrors it.
+With object storage configured (ADR 0024), `complete` first stores the video, immutable, at
+<org>/<site>/<inspection>/video/<filename>; the local file stays as the pipeline's cache copy.
 """
 
 import hashlib
@@ -16,11 +18,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+from qarau_pipeline.storage import artifact_key
 from sqlalchemy.orm import Session
 
 from .crud import Db, Engineer, Viewer, audit, get_or_404
 from .models import Inspection, Run, VideoUpload, new_id
 from .settings import Settings, get_settings
+from .storage import prefix_of, storage
 
 router = APIRouter(prefix="/api/inspections/{inspection_id}/video")
 Cfg = Annotated[Settings, Depends(get_settings)]
@@ -72,6 +76,29 @@ def get_upload(db: Session, inspection_id: int, upload_id: int) -> tuple[VideoUp
 
 def part_size(part: Path) -> int:
     return part.stat().st_size if part.exists() else 0
+
+
+def video_key(db: Session, run: Run, up: VideoUpload) -> str:
+    """<org>/<site>/<inspection>/video/<filename>: the file's own name only, never a path."""
+    name = PurePosixPath(up.filename).name
+    if name in ("", ".", ".."):
+        name = f"video.{up.ext}"
+    org, site, insp = prefix_of(db, run).split("/")
+    return artifact_key(org, site, insp, "video", name)
+
+
+def store_video(db: Session, run: Run, up: VideoUpload, part: Path) -> None:
+    """Put the verified upload into storage (when configured) before it becomes the run's video.
+    An object already there means a second video for this inspection: refused, videos are
+    immutable and one inspection has one capture (ADR 0024)."""
+    st = storage()
+    if st is None:
+        return
+    key = video_key(db, run, up)
+    if st.exists(key):
+        raise HTTPException(409, f"a video named {key.rsplit('/', 1)[1]!r} is already stored "
+                                 "for this inspection")  # fmt: skip
+    st.put(key, part)
 
 
 @router.post(
@@ -141,7 +168,9 @@ def next_offset(inspection_id: int, upload_id: int, db: Db, _: Viewer, settings:
 @router.post(
     "/complete",
     description="Role: engineer. Finish an upload: the size and sha256 must match, then the "
-    "file becomes <run>/video.<ext>. On a mismatch: 422, the partial file is kept.",
+    "file becomes <run>/video.<ext> (and, with object storage, "
+    "<org>/<site>/<inspection>/video/<filename>; 409 if that object exists). On a mismatch: "
+    "422, the partial file is kept.",
 )
 def complete_upload(
     inspection_id: int, body: CompleteIn, db: Db, who: Engineer, request: Request, settings: Cfg
@@ -159,6 +188,7 @@ def complete_upload(
             digest.update(chunk)
     if digest.hexdigest() != body.sha256:
         raise HTTPException(422, "sha256 mismatch; partial file kept, re-upload the bad chunks")
+    store_video(db, run, up, part)  # a failed put leaves the .part file: complete can be retried
     final = part.with_name(f"video.{up.ext}")
     part.rename(final)
     up.sha256, up.status, up.next_offset = body.sha256, "complete", up.size

@@ -1,18 +1,29 @@
 """Workflow steps: idempotence by step.json, force, crash recovery, from_step, the layout
-helpers' legacy fallback, the step list from config.yaml. Fake in-process steps count calls."""
+helpers' legacy fallback, the step list from config.yaml. Fake in-process steps count calls.
+Storage (ADR 0024): an S1 run on a synthetic video against moto's S3 fills the five prefixes, a
+wiped cache is refilled from storage, and without a bucket boto3 is never touched."""
 
 import json
+import shutil
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import cv2
 import pytest
+import synth
+from moto import mock_aws
 
 from qarau_pipeline import layout, workflow
 from qarau_pipeline.cli import main
 from qarau_pipeline.interfaces import StageError
+from qarau_pipeline.storage import S3Storage, storage_from_env
 from qarau_pipeline.workflow import Step, StepContext, StepResult, run_step, run_steps
 
 NAMES = ["probe", "frames", "sparse", "export"]
+S3_ENV = {"QARAU_S3_BUCKET": "qarau-test", "QARAU_S3_ENDPOINT": "", "QARAU_S3_REGION": "us-east-1",
+          "QARAU_S3_ACCESS_KEY": "testing", "QARAU_S3_SECRET_KEY": "testing"}  # fmt: skip
+DENSE_MANIFEST = '{"version": 2, "dense": 1}'
 
 
 class Counting:
@@ -207,3 +218,179 @@ def test_run_config_merges_workflow_json(tmp_path: Path) -> None:
     assert workflow.find_video(StepContext(tmp_path)) is None  # an unfinished upload is not input
     (tmp_path / "video.mov").write_bytes(b"")
     assert workflow.find_video(StepContext(tmp_path)) == tmp_path / "video.mov"
+
+
+# ---------------------------------------------------------------- storage (ADR 0024)
+
+
+@pytest.fixture
+def s3(monkeypatch: pytest.MonkeyPatch) -> Iterator[S3Storage]:
+    """moto's S3 for the whole test; QARAU_S3_* set, so make_context attaches the storage."""
+    for k, v in S3_ENV.items():
+        monkeypatch.setenv(k, v)
+    with mock_aws():
+        s = storage_from_env()
+        assert s is not None
+        yield s
+
+
+def synth_video(path: Path, n: int = 24) -> Path:
+    """tests/synth.py's sideways camera over a scene with depth, as a 6 fps mp4."""
+    w = cv2.VideoWriter(str(path), cv2.VideoWriter.fourcc(*"mp4v"), synth.FPS, (synth.W, synth.H))
+    for img in synth.translate(n):
+        w.write(cv2.cvtColor(img, cv2.COLOR_GRAY2BGR))
+    w.release()
+    assert path.stat().st_size > 0
+    return path
+
+
+class Heavy:
+    """Stand-ins for the COLMAP, export and dense bodies (the storage sync is in run_step, the
+    same for every body): each reads its inputs from the cache and writes the files the real
+    step would. `calls` counts the runs."""
+
+    def __init__(self) -> None:
+        self.calls = {"sparse": 0, "export": 0, "dense": 0}
+
+    def sparse(self, ctx: StepContext) -> StepResult:
+        self.calls["sparse"] += 1
+        fj = json.loads(layout.frames_json(ctx.run_dir).read_text())  # the cache miss path
+        model = layout.sparse_model(ctx.run_dir)
+        model.mkdir(parents=True)
+        (model / "points3D.bin").write_bytes(b"\0" * 64)
+        (layout.sparse_dir(ctx.run_dir) / "database.db").write_bytes(b"SQLite format 3\0")
+        return StepResult("ok", ["sparse"], {"frames": len(fj["frames"])})
+
+    def export(self, ctx: StepContext) -> StepResult:
+        self.calls["export"] += 1
+        assert (layout.sparse_model(ctx.run_dir) / "points3D.bin").is_file()
+        web = layout.export_dir(ctx.run_dir) / "web"
+        web.mkdir(parents=True, exist_ok=True)
+        (web / "manifest.json").write_text('{"version": 2}')
+        (web / "points.position.f32").write_bytes(b"\0" * 12)
+        (layout.export_dir(ctx.run_dir) / "cloud.laz").write_bytes(b"LASF")
+        return StepResult("ok", ["export"], {})
+
+    def dense(self, ctx: StepContext) -> StepResult:
+        self.calls["dense"] += 1
+        assert (layout.sparse_model(ctx.run_dir) / "points3D.bin").is_file()
+        layout.dense_dir(ctx.run_dir).mkdir(exist_ok=True)
+        (layout.dense_dir(ctx.run_dir) / "fused.ply").write_bytes(b"ply\n")
+        (layout.export_dir(ctx.run_dir) / "web/manifest.json").write_text(DENSE_MANIFEST)
+        return StepResult("ok", ["dense"], {})
+
+    def steps(self) -> list[Step]:
+        real = {s.name: s for s in workflow.product_steps({"workflow": {"dense": True}})}
+        return [real["probe"], real["frames"], Step("sparse", self.sparse),
+                Step("export", self.export), Step("dense", self.dense)]  # fmt: skip
+
+
+def relative(keys: list[str], prefix: str) -> list[str]:
+    assert all(k.startswith(prefix) for k in keys)
+    return [k[len(prefix) :] for k in keys]
+
+
+def test_s1_run_with_storage_fills_the_five_prefixes_and_a_wiped_cache_is_refilled(
+    s3: S3Storage, tmp_path: Path
+) -> None:
+    video = synth_video(tmp_path / "synth.mp4")
+    run = tmp_path / "runs" / "syn-1"
+    run.mkdir(parents=True)
+    h = Heavy()
+    cfg = {"video": str(video), "keyframes": "fixed", "workflow": {"dense": True}}
+    res = run_steps(run, h.steps(), config=cfg)
+    assert [r.status for r in res.values()] == ["ok"] * 5
+    p = "_local/_local/syn-1/"  # a run outside the catalog: org _local, site _local, run name
+    assert s3.list(p + "video/") == [p + "video/synth.mp4"]
+    frames = relative(s3.list(p + "frames/"), p + "frames/")
+    assert {
+        "000000.jpg",
+        "frames.json",
+        "manifest.json",
+        "quality_report.json",
+        "step.json",
+    } <= set(frames)
+    assert relative(s3.list(p + "sparse/"), p + "sparse/") == [
+        "database.db",
+        "sparse/0/points3D.bin",
+        "step.json",
+    ]
+    assert relative(s3.list(p + "dense/"), p + "dense/") == ["fused.ply", "step.json"]
+    assert relative(s3.list(p + "bundle/"), p + "bundle/") == [
+        "cloud.laz",
+        "step.json",
+        "web/manifest.json",
+        "web/points.position.f32",
+    ]
+    # The dense step re-exported the bundle: storage holds the new manifest.
+    assert b"".join(s3.stream(p + "bundle/web/manifest.json")) == DENSE_MANIFEST.encode()
+    n_frames = len(json.loads((run / "frames/frames.json").read_text())["frames"])
+    assert n_frames > 1
+
+    # Cache miss: the frames dir is gone; a forced rerun from sparse downloads it first.
+    shutil.rmtree(run / "frames")
+    res = run_steps(run, h.steps(), from_step="sparse", force=True, config=cfg)
+    assert [r.status for r in res.values()] == ["ok"] * 3 and h.calls["sparse"] == 2
+    assert workflow.is_done(run, "frames")
+    assert len(json.loads((run / "frames/frames.json").read_text())["frames"]) == n_frames
+    assert len(list((run / "frames").glob("*.jpg"))) == n_frames
+
+    # The whole cache is gone (and so is the sample video): every stored step is restored, not
+    # recomputed; only probe (local, sub-second) runs again, on the video pulled from storage.
+    shutil.rmtree(run)
+    video.unlink()
+    run.mkdir()
+    before = dict(h.calls)
+    res = run_steps(run, h.steps(), config=cfg)
+    assert [r.status for r in res.values()] == ["ok", "skipped", "skipped", "skipped", "skipped"]
+    assert h.calls == before
+    assert (run / "video.mp4").is_file() and (run / "export/web/manifest.json").is_file()
+    assert (run / "dense/fused.ply").is_file() and (run / "sparse/sparse/0/points3D.bin").is_file()
+    assert s3.list(p + "video/") == [p + "video/synth.mp4"]  # still exactly one video object
+
+
+def test_rebuilt_kind_replaces_its_prefix(s3: S3Storage, tmp_path: Path) -> None:
+    """A rerun of a step deletes the objects it no longer produces; the video is never re-put."""
+    (tmp_path / "video.mp4").write_bytes(b"v")
+    body_calls: list[str] = []
+
+    def body(ctx: StepContext) -> StepResult:
+        body_calls.append("x")
+        d = ctx.run_dir / "sparse"
+        d.mkdir(exist_ok=True)
+        (d / f"model-{len(body_calls)}.bin").write_bytes(b"m")
+        return StepResult("ok", ["sparse"], {})
+
+    ctx = workflow.make_context(tmp_path)
+    assert ctx.storage is not None and ctx.prefix == f"_local/_local/{tmp_path.name}"
+    run_step(Step("probe", lambda c: StepResult("ok")), ctx)
+    run_step(Step("sparse", body), ctx)
+    p = f"_local/_local/{tmp_path.name}/"
+    assert s3.list(p + "sparse/") == [p + "sparse/model-1.bin", p + "sparse/step.json"]
+    run_step(Step("sparse", body), workflow.make_context(tmp_path, force=True))
+    assert s3.list(p + "sparse/") == [p + "sparse/model-2.bin", p + "sparse/step.json"]
+    run_step(Step("probe", lambda c: StepResult("ok")), workflow.make_context(tmp_path, force=True))
+    assert s3.list(p + "video/") == [p + "video/video.mp4"]
+
+
+def test_failed_upload_marks_the_step_failed(s3: S3Storage, tmp_path: Path) -> None:
+    class Broken(S3Storage):
+        def put(self, key: str, data: Path | bytes) -> None:
+            raise OSError("storage down")
+
+    ctx = StepContext(tmp_path, storage=Broken("qarau-test"), prefix="_local/_local/r")
+    (tmp_path / "video.mp4").write_bytes(b"v")
+    res = run_step(Step("probe", lambda c: StepResult("ok")), ctx)
+    assert res.status == "failed" and res.error == "upload: OSError: storage down"
+    assert marker(tmp_path, "probe")["status"] == "failed"
+
+
+def test_without_a_bucket_boto3_is_never_touched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("QARAU_S3_BUCKET", raising=False)
+    monkeypatch.setattr("boto3.client", lambda *a, **k: pytest.fail("boto3.client called"))
+    c = Counting()
+    res = run_steps(tmp_path, c.steps())
+    assert [r.status for r in res.values()] == ["ok"] * 4
+    assert workflow.make_context(tmp_path).storage is None

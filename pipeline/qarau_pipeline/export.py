@@ -382,9 +382,25 @@ def export_bundle(
     write_laz_ply(exp, xyz_a, rgb)
     manifest["stats"]["processing_s"]["export"] = round(time.perf_counter() - t0, 2)
     (web / "manifest.json").write_text(json.dumps(manifest))
+    write_dev_manifest_copy(out, web)
 
     check = check_projection(rec, out, manifest, reg, pids)
     return {**manifest["stats"], **extra, "reproj_check_px": check}
+
+
+def write_dev_manifest_copy(out: Path, web: Path) -> None:
+    """A byte-identical copy of the manifest at the pre-S1 path `<run>/web/manifest.json`.
+
+    The web app's dev-only stand-in for the API (`web/vite-dev-runs.ts`, used for screenshots
+    and e2e runs without a backend) and the e2e specs still look for the manifest there; the
+    paths inside are relative to the run root, so the arrays load through `files/export/web/…`.
+    The API and `layout` never read the copy while `export/web/manifest.json` exists (ADR 0022
+    treats a run as legacy only when the root manifest is the only one), and it is not part of
+    the stored bundle (ADR 0024). A legacy run (web == out/web) needs no copy."""
+    if web == out / "web":
+        return
+    (out / "web").mkdir(exist_ok=True)
+    shutil.copyfile(web / "manifest.json", out / "web" / "manifest.json")
 
 
 def write_laz_ply(out: Path, xyz: np.ndarray, rgb: np.ndarray) -> None:

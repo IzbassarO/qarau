@@ -23,6 +23,7 @@ from app.main import app
 from app.models import Base, Inspection, Mode, Role, Site
 from app.seed import seed_dev_users
 from app.settings import get_settings
+from app.storage import storage
 from app.workflow import QUEUE
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -51,7 +52,9 @@ def db_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     monkeypatch.setenv("QARAU_DATABASE_URL", url)
     monkeypatch.setenv("QARAU_RUNS_DIR", str(tmp_path / "runs"))
     monkeypatch.setenv("QARAU_API_TOKEN", SHARED_TOKEN)
+    monkeypatch.delenv("QARAU_S3_BUCKET", raising=False)  # local files only unless a test opts in
     get_settings.cache_clear()
+    storage.cache_clear()
     engine_for.cache_clear()
     auth._verified.clear()
     drop_everything(url)
@@ -59,6 +62,7 @@ def db_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     yield url
     app.dependency_overrides.clear()
     get_settings.cache_clear()
+    storage.cache_clear()
     engine_for(url).dispose()
     engine_for.cache_clear()
 

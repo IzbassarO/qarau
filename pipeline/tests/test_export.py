@@ -164,6 +164,20 @@ def test_manifest_records_when_it_was_exported(bundle) -> None:
     assert t.tzinfo is not None and abs(datetime.now(UTC) - t) < timedelta(minutes=5)
 
 
+def test_root_manifest_copy_for_the_dev_middleware(bundle) -> None:
+    """S1 layout: `web/manifest.json` at the run root is a byte-identical copy of the bundle's
+    manifest (the Vite dev stand-in reads it there), and the run still counts as the new layout."""
+    from qarau_pipeline import layout
+
+    out, m, *_ = bundle
+    copy, real = out / "web/manifest.json", out / "export/web/manifest.json"
+    assert copy.read_bytes() == real.read_bytes()
+    assert m["points"]["position"] == "export/web/points.position.f32"  # paths from the run root
+    assert layout.export_dir(out) == out / "export"
+    assert layout.manifest_path(out) == out / "export/web/manifest.json"
+    assert sorted(p.name for p in (out / "web").iterdir()) == ["manifest.json"]
+
+
 def test_reexport_drops_findings(bundle, tmp_path: Path) -> None:
     out, m, _, rec, _ = bundle
     mp = out / "export/web/manifest.json"
