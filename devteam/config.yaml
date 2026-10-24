@@ -23,6 +23,18 @@ gates:
     - web/eslint.config.*
     - .gitleaks*
     - .pre-commit-config.yaml
+    - docs/design/*   # design system v8, the UI's source of truth (owner, 2026-10-24): owner only
+  # Owner-approved test rewrites, per task. Owner decision 2026-10-24: design system v8 is the
+  # source of truth, so DS1 moves tests that pin the old look (finding-inspected blue, #000 canvas,
+  # violet accent, IBM Plex Mono, 3:1 border/focus contrast, no sign-in gradient) to the v8 values.
+  # In these files the anti-bypass check ignores removed assertions and moved thresholds for that
+  # task only; skipping or focusing a test is still refused, and the tester is told it is approved.
+  test_rewrite_allowed:
+    DS1:
+      - web/src/design/tokens.test.ts
+      - web/src/design/noLiterals.test.ts
+      - web/src/viewer/engine.test.ts
+      - web/e2e/far-layer.spec.ts
   benchmark:
     when_paths: [pipeline/]   # run only when the change touches these
     # Contract (task P1): writes {out}/results.json, reads videos from {data} (read-only);

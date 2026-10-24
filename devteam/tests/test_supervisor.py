@@ -1028,3 +1028,15 @@ def test_claude_developer_passes_the_configured_model(repo, tmp_path, monkeypatc
         assert args[i + 1] == "claude-opus-5-5"
     (row,) = costs.subscription_rows(team.home, costs._today())
     assert row[2] == ("claude-opus-5-5" if model else "claude-code (subscription)")
+
+
+def test_a_v8_reference_screen_in_criteria_is_read_only_not_outside():
+    """Owner 2026-10-24: tasks name docs/design/screens/*.png to be matched; the planner must not
+    send them to a split for it, while editing docs/design/ stays outside every developer."""
+    t = {"id": "DS1"}
+    ref = ["Screens match docs/design/screens/sign-in-light.png in light and dark."]
+    ref += ["At 390x844 they follow docs/design/screens/evidence-phone-light.png."]
+    assert outside_paths(ref, "dev_app", CFG, t) == []
+    assert outside_paths(["docs/design/DESIGN.md is updated"], "dev_app", CFG, t) == [
+        "docs/design/DESIGN.md"
+    ]

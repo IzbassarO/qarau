@@ -1,5 +1,10 @@
 # 3D viewer and video ↔ map sync — specification
 
+> **Colours and look: `docs/design/DESIGN.md` (design system v8) wins.** This file describes how
+> the viewer behaves. Where it names a colour (black canvas, `#5B9BFF`, `#6B727D`, height-blue,
+> red/orange), use the v8 token with that role instead: `map-ground`, `critical`, `watch`,
+> `unseen`, `ok`, `map-grid`, `map-text` (owner, 2026-10-24).
+
 The 3D viewer is the core screen of the product. An engineer must be able to fly around
 the site like in Blender, and see exactly how the video became the map: which part of the
 object each moment of the video saw, and which video moments prove each point and each

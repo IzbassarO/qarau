@@ -145,13 +145,18 @@ then unattended (`run --continuous` overnight).
   like `docs/notes/*.md`; dev_pipeline `pipeline/`, `backend/`, `infra/`, `docs/`) or the task's
   `writable`; a path outside → `out_of_scope`, no retry, blocked as "needs a split". Protected
   paths (devteam/, .github/, backlog.yaml, CLAUDE.md, AGENTS.md, plus `gates.protected`:
-  benchmark video set, lint configs) → hard fail. A developer that even tries to write another
+  benchmark video set, lint configs, `docs/design/` = design system v8) → hard fail. A developer that even tries to write another
   developer's code folders or a protected path is stopped the same way at the end of its
   round (its own docs/ attempts are only reverted). Anti-bypass checks on the diff: new
   `test.skip` / `.only` / `xfail` / `pytest.mark.skip` (a skip only while a data file is
   missing is allowed), fewer assertions or tests, looser thresholds in tests, `.patch` /
   `.diff` files, code under docs/ → sent back with the reason (twice → blocked). Every
   violation goes to `.state/violations.jsonl`, "Needs your attention" and the daily report.
+- Owner-approved test rewrites (`gates.test_rewrite_allowed`, per task; owner 2026-10-24 for
+  DS1: tests that pin the old look move to the v8 values): in the listed test files, fewer
+  assertions and moved thresholds are not bypass findings for that task, and the tester gets
+  `<owner_approved_test_rewrites>` so it does not call them weakened. A skip or `.only` there is
+  still refused; other files are checked as always.
 - Test files between rounds (owner 2026-10-21; UX1b round 2 swapped its new e2e's fixed date
   for one the browser computed): after a send-back, the branch's test files are diffed against
   the HEAD the tester last judged. Fewer assertions there is a bypass finding; the judge also
@@ -256,7 +261,13 @@ then unattended (`run --continuous` overnight).
   never by the judge's wording (P3e was sent back 3 times for one criterion, 2026-10-19).
 - Skills: `.claude/skills/` (pinned, licence checked, `.claude/skills/README.md`); Codex reads
   them through symlinks in `.agents/skills/`. Both are protected; agents never download skills.
-  Web developers are told to follow `docs/design/DESIGN.md`, then the frontend-design skill.
+  Web developers are told that design system v8 (`docs/design/DESIGN.md`, the reference screens
+  in `docs/design/screens/`) is the UI's only source of truth (owner, 2026-10-24): never invent
+  or change colours, fonts, components or layout; only alignment, spacing, size and responsive
+  behaviour. Reference screens named in a task's goal, plan or criteria
+  (`docs/design/screens/<name>.png`) are attached to the tester after its own screenshots and
+  before `dev-*`; it fails a different colour, font or component and allows spacing or size
+  differences. Naming a reference screen in a criterion is read-only: no split for it.
 - Dependencies: a task may list `depends_on: [ids]`. The brain never plans it until all of
   them are `done`; a `blocked` task whose dependencies are all done goes back to `todo` (pushed
   to `dev` like any status) when the last one merges, or at the next `devteam run`.

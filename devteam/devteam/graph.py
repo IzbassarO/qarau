@@ -233,7 +233,10 @@ def outside_paths(criteria: list, dev: str, cfg: dict, task: dict) -> list[str]:
     return sorted(
         p
         for p in set(found)
-        if not SC.owned(p, mine) and not p.startswith(near) and not branch.fullmatch(p)
+        if not SC.owned(p, mine)
+        and not p.startswith(near)
+        and not branch.fullmatch(p)
+        and not SC.REFERENCE_PNG.fullmatch(p.rstrip("."))  # a v8 screen to match, read-only
     )
 
 
@@ -1443,7 +1446,8 @@ def build_graph(team: Team, checkpointer):
             return refuse(s, "protected", bad["protected"])
         if bad["out_of_scope"]:
             return refuse(s, "out_of_scope", bad["out_of_scope"])
-        findings = SC.bypass(team.git("diff", "-U0", span, cwd=wt), paths)
+        rewrite_ok = SC.rewrite_allowed(cfg, tid)  # owner-approved test rewrites (config)
+        findings = SC.bypass(team.git("diff", "-U0", span, cwd=wt), paths, rewrite_ok)
         # After a send-back: what this round did to the branch's own test files. Base -> HEAD
         # cannot show it (UX1b round 2 swapped its new e2e's fixed date for one computed in the
         # browser: all additions vs dev). ponytail: dev merged in between rounds shows here too
@@ -1453,7 +1457,7 @@ def build_graph(team: Team, checkpointer):
         if prev and prev != head and (tests := [p for p in paths if SC.TEST_FILE.search(p)]):
             test_changes = team.git("diff", f"{prev}..HEAD", "--", *tests, cwd=wt)
             round_diff = team.git("diff", "-U0", f"{prev}..HEAD", "--", *tests, cwd=wt)
-            weakened = [f"since the last round: {f}" for f in SC.bypass(round_diff, [])]
+            weakened = [f"since the last round: {f}" for f in SC.bypass(round_diff, [], rewrite_ok)]
             findings += weakened
         checks, shots, problems, dev_shots, e2e_failed = [], [], [], [], False
         if findings:  # no checks or judge: the change itself is refused

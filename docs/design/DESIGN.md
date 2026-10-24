@@ -1,10 +1,15 @@
 # Qarau design rules (v8)
 
-Rules for every visual change in `web/` (and the Tauri shell around it). They come first; the
-frontend-design skill (`.claude/skills/frontend-design/SKILL.md`, Anthropic, Apache-2.0) is the
-general method. Where the two disagree, these rules win: the skill itself says the brief's own
-words win. Where this file and `CLAUDE.md` (trust rules) disagree, `CLAUDE.md` wins; the known
-conflicts are listed under "Open decisions" at the end.
+**Design system v8 is the source of truth for the product UI** (owner, 2026-10-24): this file,
+the reference screens in `docs/design/screens/`, `web/src/design/tokens.*` and
+`web/src/design/bundle.css`. It is the only visual source; `CLAUDE.md` points here.
+
+- Agents never invent or change colours, fonts, components or screen layout.
+- Allowed adjustments: alignment, spacing, sizes and responsive behaviour, so a screen fits real
+  content and the viewport.
+- Phone and desktop layouts differ (see Responsive), but every function works on both.
+- The frontend-design skill (`.claude/skills/frontend-design/SKILL.md`) is not used to choose
+  colours, fonts, components or layout: v8 has made those choices.
 
 Source: the owner's design system v8 from Claude Design (2026-10-23), merged with the v1 rules
 (owner brief, 2026-10-19) that still hold. Files:
@@ -15,7 +20,7 @@ Source: the owner's design system v8 from Claude Design (2026-10-23), merged wit
 | Token values (JSON, platform-neutral) | `web/src/design/tokens.json` | `light` / `dark` / `shared` = what the app renders today (ADR 0018); `v8` = the new values, not wired yet |
 | v8 tokens as CSS custom properties, three themes | `web/src/design/tokens.css` | landed, not imported |
 | v8 component styles, prefix `qv-` | `web/src/design/bundle.css` | landed, not imported |
-| Reference screens | `docs/design/screens/<screen>-light.png` | inspections, viewer, finding, report, sign-in, upload, states, themes. Each file shows the light theme on top and the dark theme below it |
+| Reference screens | `docs/design/screens/<screen>-light.png` | inspections, viewer, finding, report, sign-in, upload, states, themes, evidence-phone. Each file shows the light theme on top and the dark theme below it |
 | The 3D viewer behaviour | `docs/design/viewer-3d.md` | current |
 
 Task DS1 wires `tokens.css` and `bundle.css` into `web/src/index.css` and retires the v1 values.
@@ -38,8 +43,7 @@ check findings for hours. The 3D viewer is the hero of the product; everything e
 1. One primary action per screen (`qv-btn`, the accent). Everything else is `qv-btn--secondary`
    or `qv-btn--quiet`.
 2. Every number carries a unit, and the report says once how accurate areas are (about 2 % with
-   a Letter sheet). No formulas in the product. Model confidence stays on the evidence panel
-   (`CLAUDE.md` trust rules; see "Open decisions").
+   a Letter sheet). No scores, confidence values or formulas anywhere in the product.
 3. Every finding shows frames with the mask outlined before it asks for a decision.
 4. Decisions are appended, never edited. Signing a report locks them; a new review is a new
    revision.
@@ -87,9 +91,9 @@ check findings for hours. The 3D viewer is the hero of the product; everything e
 | `*-soft` | a wash behind a chip in the report summary only |
 | `map-ground`, `map-grid`, `map-text` | the 3D map in every theme |
 
-**Product colours are reserved** (`CLAUDE.md`): red = finding `critical`, orange = `watch`,
-gray = `not_seen`, base blue = `inspected_ok` on the map. Never use them for decoration, for
-errors or for anything else, so a red pixel always means a critical finding. Never a red button,
+**Signal colours are reserved**: `critical` = finding `critical`, `watch` = finding `watch`,
+`unseen` = `not_seen`, `ok` = `inspected_ok`. Never use them for decoration, for errors or for
+anything else, so a red pixel always means a critical finding. Never a red button,
 a coloured page background or a badge for decoration. The report is always a white document, in
 every app theme.
 
@@ -98,10 +102,12 @@ every app theme.
 Three themes, Light, Dark and Midnight, from the same tokens (`[data-theme]` in `tokens.css`);
 every signal colour has a value per theme and stays at 4.5:1 or better on `surface`. Light is as
 complete as Dark. The theme follows `prefers-color-scheme` until a manual switch exists (a later
-feature; Midnight is reachable only through it). Contrast is at least WCAG AA in every theme;
-keyboard focus is always visible (`shadow-focus`); respect `prefers-reduced-motion`.
+feature; Midnight is reachable only through it). Text the engineer must read is at least 4.5:1
+in every theme. Borders and the focus halo use the v8 values as they are (owner decision,
+2026-10-24). Keyboard focus is always visible (`shadow-focus`); respect
+`prefers-reduced-motion`.
 
-The 3D viewer canvas keeps one colour in every theme; only the chrome around it changes theme.
+The 3D map is drawn on `map-ground` in every theme; only the chrome around it changes theme.
 
 ## The mark
 
@@ -136,7 +142,8 @@ Sizes: body 14/20, captions and labels 13/18, headings 16/22, titles 22/28, the 
 4 px grid: 4, 8, 12, 16, 20, 24, 32, 40, 48. Laptop 1280 first: sidebar 248 (collapsible from
 its header), top bar 48, rows 56, rails 40, side panel 460, timeline 108, dialogs 640 to 920,
 report document 794 (A4 at 96 dpi). Radii 6, 8, 12 and 16: the same radius for the same level
-of the layout, not one radius everywhere. Phone portrait (390) is read-only.
+of the layout, not one radius everywhere. Phone portrait (390) has its own layout and the same
+functions (see Responsive).
 
 Lists and tables show many rows without scrolling the whole page; left-aligned text, numbers
 right-aligned in columns; the run list shows name and date clearly, newest first.
@@ -152,13 +159,18 @@ document; `qv-send` for the sign-and-send sheet; `qv-hero` for the sign-in panel
 
 Components never use literal colours or sizes; `noLiterals.test.ts` enforces it for the shell
 and auth code. `bundle.css` as landed still carries a few `#fff` / `#111` literals, literal
-font sizes (12.5, 13.5, 15 px) and the sign-in gradient; DS1 replaces them with tokens when it
-wires the file in.
+font sizes (12.5, 13.5, 15 px) and the sign-in gradient's colours. DS1 moves each of them into a
+named token with the same value when it wires the file in: the values stay exactly as v8 has
+them; only where they are written changes.
 
 ## Forbidden
 
+- A colour, font, component or screen layout that is not in v8: agents never invent or change
+  them. Allowed: alignment, spacing, sizes and responsive behaviour, so a screen fits real
+  content and the viewport.
 - A colour or length literal in a component; a token used for a meaning it does not have.
-- Red, orange, gray or blue for anything but critical, watch, not seen, inspected OK.
+- `critical`, `watch`, `unseen` or `ok` for anything but critical, watch, not seen, inspected OK.
+- Scores, confidence values or formulas on screen or in the report.
 - Gradients (except the sign-in hero), glow, glassmorphism, backdrop blur, text shadows,
   tinted page backgrounds, decorative badges, emoji, AI-sparkle icons.
 - Uppercase labels, middle-dot joins, "Word — fragment" captions, monospace for ordinary
@@ -180,13 +192,17 @@ wires the file in.
 - Coverage shown: not-seen regions gray on the map and listed in the report.
 - Visible keyboard focus on every control; `prefers-reduced-motion` respected.
 - Russian, Kazakh and English through i18n; state copy reused word for word from States.
-- Before/after screenshots of every changed page at 1440x900, light and dark (see Process).
+- Every function works at 1440x900 and at 390x844 (see Responsive).
+- Before/after screenshots of every changed page at 1440x900 and 390x844, light and dark (see
+  Process).
 
 ## Reviewer checklist (yes/no)
 
-1. Does every colour, length, radius, shadow and font come from a token (no literals)?
+1. Do colours, fonts and components match the reference screen, with every value from a token
+   (no literals)? Differences only in spacing, alignment or size are allowed.
 2. Is there exactly one primary button on the screen?
-3. Do red, orange, gray and blue appear only for critical, watch, not seen and inspected OK?
+3. Do `critical`, `watch`, `unseen` and `ok` appear only for critical, watch, not seen and
+   inspected OK?
 4. Does every number carry a unit, and is nothing readable below 13 px?
 5. Is every text the engineer must read at 4.5:1 or better, in light and in dark?
 6. Are all strings in i18n (en/ru/kk) and do the Russian and Kazakh versions fit without
@@ -194,43 +210,62 @@ wires the file in.
 7. Are labels sentence case, buttons verbs, dates in the app format (`21 Oct, 10:12`)?
 8. Does every finding show frames with the mask before asking for a decision, and is the
    decision appended, never edited?
-9. Is keyboard focus visible on every control and is motion off under `prefers-reduced-motion`?
-10. Are there no gradients, glow, blur, tinted backgrounds, emoji or debug text, and is the
-    viewer canvas unchanged in both themes?
+9. Does every function work at 1440x900 and at 390x844, with focus visible and motion off
+   under `prefers-reduced-motion`?
+10. Are there no gradients (except the sign-in hero), glow, blur, tinted backgrounds, emoji,
+    confidence values or debug text, and is the map on `map-ground` in every theme?
 
 ## Process
 
 - No new features or behaviour changes in a design pass: the same pages, the same data, the
   same tests (updated only where the markup changed).
 - Before/after screenshots of each changed page come from the tester (`dev-*` = before), at
-  1440x900. Mobile-width screenshots come with a later Kerege change (multi-viewport
-  screenshots).
-- The reference screens in `screens/` are the target; a PR that restyles a page links the
-  matching screen in its description.
+  1440x900 and 390x844, in light and dark.
+- The reference screens in `screens/` are the target. The tester compares each screenshot with
+  the matching reference: a different colour, font or component fails; a difference only in
+  spacing, alignment or size is allowed. A PR that restyles a page links the matching screen in
+  its description.
 
-## Open decisions (owner)
+## Responsive
 
-v8 and `CLAUDE.md` disagree in four places. Until the owner decides, `CLAUDE.md` holds.
+Two layouts, one set of functions. A function reachable on the desktop is reachable on the
+phone, and the other way round; only the layout differs.
 
-1. **Inspected OK colour.** `CLAUDE.md`: base blue on the map. v8 defines no blue; `ok` is
-   green ("inspected and clean"). Today the viewer keeps `finding-inspected` blue (#5b9bff).
-2. **Model confidence.** `CLAUDE.md` trust rules show confidence with every finding; v8 rule 2
-   says "no scores, confidence values or formulas anywhere". Today confidence stays on the
-   evidence panel.
-3. **Viewer canvas.** `CLAUDE.md` and ADR 0018: black (#000000) in both themes; v8
-   `map-ground` is #131313. `tokens.test.ts` asserts #000000.
-4. **Sign-in gradient.** v8 allows one gradient on the sign-in hero; `noLiterals.test.ts`
-   rejects gradients in `src/auth`. Either the test gets an exception for the hero or the hero
-   loses the gradient.
-5. **Non-text contrast.** v8 says `line-strong` is "≥ 3:1 on surface", but it measures 1.51
-   (light), 2.14 (dark) and 1.89 (midnight) on `bg`. The `shadow-focus` halo measures 1.48 to
-   2.16 against `surface`. WCAG 1.4.11 asks 3:1 for input borders and focus indicators; the v1
-   values met it (`border-strong` 3.39 / 4.66, focus ring 6.52 / 6.94), and `tokens.test.ts`
-   checks it. DS1 needs either darker v8 values or a solid 2 px `accent` focus outline.
+| Width | Layout | Reference screens |
+| --- | --- | --- |
+| 1280 px and wider | desktop: sidebar 248, top bar 48, side panel 460, map full-bleed | `inspections`, `viewer`, `finding`, `report`, `sign-in`, `upload`, `states`, `themes` |
+| up to 767 px | phone, designed at 390 x 844: one column, a top bar with the mark, content as a conversation, an input bar at the bottom | `evidence-phone` |
+| 768 to 1279 px | the desktop layout with the sidebar collapsed (its header toggle); panels may overlay the map | no own screen: the desktop references, narrower |
 
-Two defects in the v8 export itself, for DS1 to fix when wiring `tokens.css`:
+- The phone layout follows `evidence-phone-light.png`. Sign in, the inspection list, upload with
+  its quick check and progress, the result with the map and the critical findings, and the input
+  bar all appear in that order. A finding card on the phone opens the same finding as on the
+  desktop: frames with the mask, size, status, confirm and reject.
+- Nothing is hidden on the phone because it does not fit: it moves, stacks or opens on tap.
+  Touch targets are at least 44 px.
+- E2e runs at two viewports, **1440x900** and **390x844**, and both must pass. The tester's
+  screenshots use the same two sizes.
+
+## Decided: follow v8 exactly (owner, 2026-10-24)
+
+Five points where v8 differed from the earlier rules. Each now stays as v8 has it; DS1 updates
+the tests that pinned the old values. This is an owner-approved change, not test weakening.
+
+1. **Contrast.** `line-strong` and the `shadow-focus` halo keep their v8 values, although they
+   measure under 3:1 (`line-strong` 1.51 light, 2.14 dark, 1.89 midnight on `bg`; the halo 1.48
+   to 2.16 on `surface`). Text keeps 4.5:1. The old v1 checks of 3:1 for `border-strong` and
+   `focus-ring` move to the v8 values.
+2. **Sign-in gradient.** The sign-in hero keeps its gradient, the one exception to "no
+   gradients". `noLiterals.test.ts` allows it for the hero only, with its colours as tokens.
+3. **Inspected-OK colour.** `inspected_ok` uses `ok`. The old `finding-inspected` blue
+   (#5b9bff) goes.
+4. **Confidence display.** No confidence values or scores on screen or in the report. A finding
+   explains itself in plain words; low confidence is said in words (`watch`, "estimated").
+5. **Canvas colour.** The 3D map is drawn on `map-ground` (#131313) in every theme. The old black
+   (#000000) goes.
+
+Two gaps in the v8 export, which DS1 closes without changing a value:
 
 - `.t-body-italic` and `.t-quote` lack `font-style: italic`, although `tokens.json` sets it.
 - Dark and Midnight apply only through `[data-theme]`; there is no
-  `prefers-color-scheme: dark` block, so the app must set `data-theme` itself to follow the
-  system.
+  `prefers-color-scheme: dark` block, so the app sets `data-theme` itself to follow the system.
