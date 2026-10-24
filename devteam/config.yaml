@@ -101,6 +101,7 @@ models:
 developers:
   dev_pipeline:
     tool: claude           # Claude Code headless, your subscription (CLAUDE_CODE_OAUTH_TOKEN)
+    model: claude-opus-5-5 # owner 2026-10-24: the subscription's Fable weekly limit is used up
     areas: [core]          # backlog tasks with this area may go to this developer
     owns: [pipeline/, backend/, infra/, docs/]   # enforced on the diff (scope gate)
     timeout_min: 90
