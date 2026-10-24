@@ -135,7 +135,8 @@ def create_decision(
     )
     db.add(decision)
     db.flush()
-    audit(db, who, request, "finding", finding_id, "decision.create")
+    # the route carries the finding id, object_id the decision id
+    audit(db, who, request, "decision", decision.id, "finding.decision")
     db.commit()
     user = db.get(User, who.user_id)
     return to_out(decision, user.name if user is not None else "")

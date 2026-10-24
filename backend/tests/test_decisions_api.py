@@ -157,10 +157,13 @@ def test_each_post_adds_exactly_one_audit_row(finding: TestClient) -> None:
     assert finding.post(URL, json=REJECT, headers=ENG).status_code == 201
     log = audit_rows(finding)
     assert len(log) == before + 2
-    entry = (2, "POST /api/findings/1/decisions", "finding", "1", "decision.create")
-    assert [
+    route = "POST /api/findings/1/decisions"
+    assert sorted(
         (e["user_id"], e["route"], e["object_type"], e["object_id"], e["action"]) for e in log[:2]
-    ] == [entry, entry]
+    ) == [
+        (2, route, "decision", "1", "finding.decision"),
+        (2, route, "decision", "2", "finding.decision"),
+    ]
     history(finding)  # reads add no audit row
     assert len(audit_rows(finding)) == before + 2
 

@@ -14,7 +14,7 @@ nowhere to put the new class or severity.
 ## Decision
 
 1. **Verdicts are rows, never fields.** `POST /api/findings/{id}/decisions` (engineer) inserts one
-   `decision` row and one `audit_log` row (`decision.create`) in one transaction. There is no
+   `decision` row and one `audit_log` row (`finding.decision`, object id = the decision id) in one transaction. There is no
    dedup (two identical POSTs are two rows: both happened), no PUT / PATCH / DELETE route (405) and
    the database trigger stays as the last line of defence. The user comes from the session and
    `created_at` from the server; the body cannot set them.

@@ -310,8 +310,8 @@ a row in `decision`, and only ever a new row. `POST /api/findings/{id}/decisions
 `verdict` `confirm` | `reject` | `reclass`; `comment` (required for reject and reclass); `new_class`
 and/or `new_severity`, carried by `reclass` only (at least one of them). The user comes from the
 bearer token and `created_at` from the server; the body cannot set them. Every POST inserts exactly
-one `decision` row and one `audit_log` row (`decision.create`, the user, the finding id) in the same
-transaction, with no dedup: the same body twice is two rows. 404 for an unknown finding, 422 for an
+one `decision` row and one `audit_log` row (action `finding.decision`, the user, the route with
+the finding id, `object_id` = the decision id) in the same transaction, with no dedup: the same body twice is two rows. 404 for an unknown finding, 422 for an
 inconsistent body. `GET /api/findings/{id}/decisions` (viewer) returns the whole history oldest
 first (`created_at`, then id): user name, verdict, comment, new class / severity, time. There is
 no PUT, PATCH or DELETE route (405), and the database refuses UPDATE and DELETE on `decision`
