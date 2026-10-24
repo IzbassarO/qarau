@@ -21,9 +21,8 @@ OUT = Path(os.environ.get("QARAU_OUT_DIR", REPO / "data/findings-check")) / "not
 FACADE = [[-0.076, -0.192, 0.009], [-0.708, -0.718, 0.812], [-1.313, -0.948, 0.185],
           [-0.681, -0.423, -0.618]]  # fmt: skip
 
-pytestmark = pytest.mark.skipif(
-    not (RUN / "web/manifest.json").is_file(), reason=f"{RUN} is absent"
-)
+MANIFEST = RUN / "web/manifest.json"
+pytestmark = pytest.mark.skipif(not MANIFEST.is_file(), reason="notre-dame-p3e run is absent")
 
 
 def test_facade_polygon_gives_three_frames_with_outlines_on_the_wall() -> None:
