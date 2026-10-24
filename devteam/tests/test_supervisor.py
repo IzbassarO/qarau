@@ -977,3 +977,66 @@ def test_codex_developer_runs_resumes_and_logs_load(repo, tmp_path, monkeypatch)
     assert [(r[0], r[1], r[2], r[3], r[5], r[6]) for r in rows] == [
         ("A1a", "dev_app", "codex (subscription)", 2, 59026, 116)
     ]
+
+
+CLAUDE_ARGV = """#!/bin/sh
+printf '%s\\n' "$@" > {argv}
+cat > /dev/null
+cat {out}
+"""
+
+
+@pytest.mark.parametrize("model", ["from-config", None])
+def test_claude_developer_passes_the_configured_model(repo, tmp_path, monkeypatch, model):
+    """Owner 2026-10-24: dev_pipeline runs on claude-opus-5-5 (Fable weekly limit used up)."""
+    assert CFG["developers"]["dev_pipeline"]["model"] == "claude-opus-5-5"
+    bindir, argv, out = tmp_path / "bin", tmp_path / "argv", tmp_path / "stream.jsonl"
+    bindir.mkdir()
+    events = [
+        {"type": "system", "subtype": "init", "session_id": "sess-m"},
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": "DONE",
+            "session_id": "sess-m",
+            "total_cost_usd": 0,
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        },
+    ]
+    out.write_text("".join(json.dumps(e) + "\n" for e in events))
+    (bindir / "claude").write_text(CLAUDE_ARGV.format(argv=argv, out=out))
+    (bindir / "claude").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+    team = team_for(repo)
+    if model is None:
+        del team.cfg["developers"]["dev_pipeline"]["model"]
+    team.secrets = {"CLAUDE_CODE_OAUTH_TOKEN": "oauth-0123456789"}
+    s = {
+        "task": {"id": "T-002", "title": "t", "goal": "g"},
+        "assignee": "dev_pipeline",
+        "plan": "p",
+        "criteria": ["c"],
+        "worktree": str(repo),
+    }
+    RealAgents().develop(team, s)
+    args = argv.read_text().splitlines()
+    if model is None:
+        assert "--model" not in args
+    else:
+        i = args.index("--model")
+        assert args[i + 1] == "claude-opus-5-5"
+    (row,) = costs.subscription_rows(team.home, costs._today())
+    assert row[2] == ("claude-opus-5-5" if model else "claude-code (subscription)")
+
+
+def test_a_v8_reference_screen_in_criteria_is_read_only_not_outside():
+    """Owner 2026-10-24: tasks name docs/design/screens/*.png to be matched; the planner must not
+    send them to a split for it, while editing docs/design/ stays outside every developer."""
+    t = {"id": "DS1"}
+    ref = ["Screens match docs/design/screens/sign-in-light.png in light and dark."]
+    ref += ["At 390x844 they follow docs/design/screens/evidence-phone-light.png."]
+    assert outside_paths(ref, "dev_app", CFG, t) == []
+    assert outside_paths(["docs/design/DESIGN.md is updated"], "dev_app", CFG, t) == [
+        "docs/design/DESIGN.md"
+    ]

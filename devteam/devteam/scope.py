@@ -23,6 +23,8 @@ PROTECTED = [
     ".claude/*",
     ".agents/*",
 ]  # fmt: skip  (skills: owner adds them)
+# Design system v8 reference screens: named in a task to be matched, never edited (owner-only).
+REFERENCE_PNG = re.compile(r"docs/design/screens/[\w.-]+\.png")
 DOCS = ("docs/",)  # another developer's docs/: reverted, not a reason to split the task
 CODE_EXT = (".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".sh", ".sql", ".toml", ".rs")
 PATCH_EXT = (".patch", ".diff", ".rej", ".orig")
@@ -130,8 +132,15 @@ def _looser(old: str, new: str) -> str:
     return ""
 
 
-def bypass(diff: str, paths: list[str]) -> list[str]:
-    """Findings in `git diff -U0 dev...HEAD` that would let gates pass without the work."""
+def rewrite_allowed(cfg: dict, tid: str) -> list[str]:
+    """Test files the owner allowed this task to rewrite (config gates.test_rewrite_allowed)."""
+    return list((cfg["gates"].get("test_rewrite_allowed") or {}).get(tid) or [])
+
+
+def bypass(diff: str, paths: list[str], rewrite_ok: list[str] | tuple = ()) -> list[str]:
+    """Findings in `git diff -U0 dev...HEAD` that would let gates pass without the work.
+    `rewrite_ok`: owner-approved test files whose pinned values move (removed assertions and
+    moved thresholds there are not findings); skipping or focusing a test is still one."""
     found: list[str] = []
     for p in paths:
         if p.endswith(PATCH_EXT):
@@ -145,6 +154,8 @@ def bypass(diff: str, paths: list[str]) -> list[str]:
             for line in plus:
                 if SKIP.search(line) and not DATA_SKIP.search(line):
                     found.append(f"skips or focuses a test in {path}: {line.strip()[:120]}")
+            if path in rewrite_ok:
+                continue
             removed_asserts += sum(bool(ASSERT.search(x)) for x in minus)
             added_asserts += sum(bool(ASSERT.search(x)) for x in plus)
             removed_tests += sum(bool(TEST_DEF.search(x)) for x in minus)

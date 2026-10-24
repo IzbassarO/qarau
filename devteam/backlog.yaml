@@ -968,58 +968,69 @@ tasks:
   done_at: '2026-10-23'
 - id: DS1
   area: app
-  title: Design system v2 from Claude Design (tokens, bundle.css, DESIGN.md v2)
-  goal: 'Today tokens live in web/src/design/tokens.json (ADR 0018, light/dark sets, checked by tokens.test.ts
-    and
+  title: Apply design system v8 (tokens, bundle.css, fonts) to the shell and viewer chrome
+  goal: 'Owner decision 2026-10-24: design system v8 is the source of truth for the product UI (DESIGN.md,
 
-    noLiterals.test.ts) and docs/design/DESIGN.md v1 states the rules. The owner produces v2 in Claude
-    Design:
+    the reference screens, web/src/design/tokens.* and bundle.css). Never invent or change colours, fonts,
 
-    tokens.json, bundle.css and DESIGN.md v2. Until this task lands, dev_app builds on the current tokens.
+    components or layout; adjust only alignment, spacing, sizes and responsive behaviour.
 
+    Today the app renders the v1 tokens (ADR 0018); the v8 values sit unused in tokens.json (key v8),
 
-    Blocked until the owner''s files exist (owner-only input): the owner puts tokens.json + bundle.css
-    into
+    tokens.css and bundle.css. @fontsource/geologica, ibm-plex-sans, lora, jetbrains-mono are installed.
 
-    web/src/design/ and DESIGN.md v2 into docs/design/, then moves this task to todo.
+    Build (web/ only):
 
+    1. Wire v8: index.css takes every value from the v8 tokens, Light and Dark (data-theme follows
 
-    Build (web/ and docs/design/ only):
+    prefers-color-scheme: v8 tokens.css has no media block); import bundle.css; tokens.json keeps one
+    set
 
-    1. Replace the current tokens with the owner''s tokens.json; wire bundle.css into index.css (@theme)
-    so
+    of values, v8''s. Add font-style: italic to .t-body-italic and .t-quote; no other value changes.
 
-    every existing component takes its values from the new tokens; remove tokens no longer used; keep
-    the
+    2. Fonts self-hosted, as DESIGN.md Type says: Geologica 600, IBM Plex Sans 400/500/600 + italic, Lora
 
-    reserved product colours (red critical, orange watch, gray not_seen, base blue) exactly as DESIGN.md
-    v2 says.
+    italic, JetBrains Mono 400/500; IBM Plex Mono no longer imported; no CDN.
 
-    2. The shared components DESIGN.md v2 defines (button, input, table, status badge, panel, dialog)
-    as small
+    3. Apply v8 (qv- classes) to the app shell, sign-in, sidebar, dialogs and viewer chrome to match
 
-    React components in web/src/design/, used by the existing shell (login, sidebar, dialog) so they are
-    visible.
+    docs/design/screens/sign-in-light.png, docs/design/screens/inspections-light.png, docs/design/screens/upload-light.png,
 
-    3. tokens.test.ts / noLiterals.test.ts updated to the new file; an ADR for v2.
+    docs/design/screens/states-light.png, docs/design/screens/themes-light.png and docs/design/screens/viewer-light.png
+    in both themes
 
-    Not in this task: rebuilding any screen (the UI-* tasks do that), new features.
+    (light on top, dark below); at 390x844 per DESIGN.md Responsive and docs/design/screens/evidence-phone-light.png.
 
-    Done when: pnpm lint, typecheck, test and build pass; the existing e2e pass; no literal colour is
-    left in
+    4. Literals left in bundle.css (#fff, #111, 12.5/13.5/15 px, the sign-in gradient) become named tokens
 
-    web/src (noLiterals passes); tester screenshots of "/" and /viewer/notre-dame-p3e in light and dark,
-    ru/kk/en,
+    with the same values; noLiterals.test.ts allows the sign-in hero''s gradient only.
 
-    show the v2 palette and type.
+    5. Tests that pin the old look move to v8: #5b9bff -> ok, #000000 canvas -> map-ground #131313, violet
+
+    accent -> v8 accent, 3:1 border/focus contrast -> v8 values, IBM Plex Mono -> JetBrains Mono
+
+    (tokens.test.ts, noLiterals.test.ts, viewer/engine.test.ts, e2e/far-layer.spec.ts). Owner-approved,
+
+    not test weakening (config gates.test_rewrite_allowed); new expected values are fixed v8 literals.
+
+    6. playwright.config.ts: a 390x844 project next to 1440x900. An ADR for v8 (supersedes 0018''s values).
+
+    Not in this task: new screens or features (UI-* tasks), the Midnight theme switch.
+
+    Done when: pnpm lint, typecheck, test and build pass; e2e pass at 1440x900 and 390x844; no colour
+
+    literal outside the token files (noLiterals passes); tester screenshots of "/" and
+
+    /viewer/notre-dame-p3e at 1440x900 and 390x844, light and dark, ru/kk/en, match the reference layout:
+
+    same colours, fonts and components; only spacing and size may differ.
 
     '
-  licence: The owner's own design files; no new library.
-  status: blocked
-  writable:
-  - docs/design/
-  blocked_reason: 'waits for the owner''s design files: tokens.json + bundle.css in web/src/design/ and
-    DESIGN.md v2 in docs/design/; the owner moves it to todo when they exist'
+  licence: 'The owner''s design files (v8). Fonts: @fontsource/geologica, ibm-plex-sans, lora, jetbrains-mono
+    5.3.0, OFL-1.1 (commercial use allowed), already in web/package.json.'
+  status: in_progress
+  owner: dev_app
+  run: run-20261024-153339
 - id: D1
   area: core
   title: Storage layout on S3; data/runs is a cache
@@ -1150,17 +1161,17 @@ tasks:
   done_at: '2026-10-23'
 - id: UI-inspections
   area: app
-  title: Inspections list per DESIGN.md v2
+  title: Inspections list per DESIGN.md v8
   goal: 'Today the sidebar lists runs by site (Sidebar.tsx, InspectionView.tsx) from /api/runs in the
     v1 look. B1 and
 
     S1 give GET /api/inspections (object, date, status; findings count once DEF1-api exists); DS1 gives
-    the v2
+    the v8
 
     tokens and components.
 
 
-    Build (web/ only): the inspections list per DESIGN.md v2 as the start page: one row per inspection
+    Build (web/ only): the inspections list per DESIGN.md v8 as the start page: one row per inspection
     with
 
     object (site name), date, status badge (uploaded | queued | running | done | failed, from the API),
@@ -1183,6 +1194,10 @@ tasks:
     in light
 
     and dark, ru/kk/en, with one inspection in each status (fixture).
+
+    Reference: docs/design/screens/inspections-light.png (design system v8); match it, adjust only alignment
+    and size; phone layout per DESIGN.md Responsive (reference docs/design/screens/evidence-phone-light.png
+    at 390x844; same functions, layout may differ).
 
     '
   status: todo
@@ -1234,7 +1249,7 @@ tasks:
   depends_on:
   - DEF1-api
   owner: dev_pipeline
-  run: cont-20261024-035848-dev_pipeline-1
+  run: run-20261024-153339
   branch: devteam/REV1-api
 - id: UI-evidence
   area: app
@@ -1254,7 +1269,7 @@ tasks:
     panel with class, severity, status, area ("1.2 m²", or "<n> units · scale not set"), the 3 frames
     with the
 
-    outline drawn over them (SVG polygon from the API, no raster), confidence, and the decision log (user,
+    outline drawn over them (SVG polygon from the API, no raster), and the decision log (user,
 
     verdict, comment, time; oldest first; no edit or delete UI anywhere). Confirm / Reject / Reclass with
     a
@@ -1271,6 +1286,10 @@ tasks:
     mocked API; an e2e in the viewer on a fixture bundle with a mocked finding; i18n ru/kk/en; tester
 
     screenshots of /viewer/notre-dame-p3e with the panel open (light and dark, ru/kk/en).
+
+    Reference: docs/design/screens/finding-light.png (design system v8); match it, adjust only alignment
+    and size; phone layout per DESIGN.md Responsive (reference docs/design/screens/evidence-phone-light.png
+    at 390x844; same functions, layout may differ).
 
     '
   status: todo
@@ -1369,6 +1388,10 @@ tasks:
 
     dark, ru/kk/en).
 
+    Reference: docs/design/screens/viewer-light.png and docs/design/screens/finding-light.png (design
+    system v8); match it, adjust only alignment and size; phone layout per DESIGN.md Responsive (reference
+    docs/design/screens/evidence-phone-light.png at 390x844; same functions, layout may differ).
+
     '
   status: todo
   depends_on:
@@ -1379,7 +1402,7 @@ tasks:
   goal: 'Today there is no report in the web app. RPT1 gives GET /api/inspections/{id}/report.pdf?lang=
     (its hash in
 
-    the headers); DS1 gives the v2 look.
+    the headers); DS1 gives the v8 look.
 
 
     Build (web/ only): a report page per inspection (/inspections/:id/report): a summary of what the PDF
@@ -1403,6 +1426,10 @@ tasks:
     dark,
 
     ru/kk/en.
+
+    Reference: docs/design/screens/report-light.png (design system v8); match it, adjust only alignment
+    and size; phone layout per DESIGN.md Responsive (reference docs/design/screens/evidence-phone-light.png
+    at 390x844; same functions, layout may differ).
 
     '
   status: todo
@@ -1462,7 +1489,7 @@ tasks:
   - S1
   - U2
   owner: dev_pipeline
-  run: cont-20261023-211635-dev_pipeline-4
+  run: cont-20261024-035848-dev_pipeline-2
   branch: devteam/D2
 - id: COV1
   area: core

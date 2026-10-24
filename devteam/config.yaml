@@ -23,6 +23,18 @@ gates:
     - web/eslint.config.*
     - .gitleaks*
     - .pre-commit-config.yaml
+    - docs/design/*   # design system v8, the UI's source of truth (owner, 2026-10-24): owner only
+  # Owner-approved test rewrites, per task. Owner decision 2026-10-24: design system v8 is the
+  # source of truth, so DS1 moves tests that pin the old look (finding-inspected blue, #000 canvas,
+  # violet accent, IBM Plex Mono, 3:1 border/focus contrast, no sign-in gradient) to the v8 values.
+  # In these files the anti-bypass check ignores removed assertions and moved thresholds for that
+  # task only; skipping or focusing a test is still refused, and the tester is told it is approved.
+  test_rewrite_allowed:
+    DS1:
+      - web/src/design/tokens.test.ts
+      - web/src/design/noLiterals.test.ts
+      - web/src/viewer/engine.test.ts
+      - web/e2e/far-layer.spec.ts
   benchmark:
     when_paths: [pipeline/]   # run only when the change touches these
     # Contract (task P1): writes {out}/results.json, reads videos from {data} (read-only);
@@ -101,6 +113,7 @@ models:
 developers:
   dev_pipeline:
     tool: claude           # Claude Code headless, your subscription (CLAUDE_CODE_OAUTH_TOKEN)
+    model: claude-opus-5-5 # owner 2026-10-24: the subscription's Fable weekly limit is used up
     areas: [core]          # backlog tasks with this area may go to this developer
     owns: [pipeline/, backend/, infra/, docs/]   # enforced on the diff (scope gate)
     timeout_min: 90

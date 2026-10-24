@@ -28,6 +28,7 @@ scratch/
 *.h5
 *.db
 *.sqlite
+*.zip
 
 # --- OS / editors ---
 .DS_Store

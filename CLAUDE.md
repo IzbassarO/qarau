@@ -38,19 +38,21 @@ that site's baseline for Monitoring.
 Engineers will not trust a black box. Every output must be checkable.
 
 - **Every finding links to evidence**: the source frames (several angles when available)
-  with the segmentation mask drawn, model confidence, measured size, and a plain-language
-  reason for its risk class.
+  with the segmentation mask drawn, measured size, and a plain-language reason for its risk
+  class. Model confidence is stored with every observation but never shown as a number
+  (design system v8, owner 2026-10-24).
 - **Coverage is shown, not assumed.** Each region of the map is in exactly one state:
-  - `inspected_ok` — seen with adequate quality, nothing found (blue)
-  - `finding` — defect found; severity `critical` (red) or `watch` (orange)
-  - `not_seen` — not in any usable frame (gray)
-  Never present `not_seen` as OK. Reports must list not-seen areas.
+  - `inspected_ok` — seen with adequate quality, nothing found
+  - `finding` — defect found; severity `critical` or `watch`
+  - `not_seen` — not in any usable frame
+  Never present `not_seen` as OK. Reports must list not-seen areas. Colours: DESIGN.md.
 - **Footage quality is checked before analysis** (blur, motion, glare, distance, missing
   sides) and reported as "what to re-shoot".
 - **A human decides.** The system proposes; an engineer confirms or rejects each finding.
   Every decision is stored in the decision log (who, when, what, why). The decision log
   is our future training data — never lose it, never edit it in place.
-- **No silent model output.** If a stage fails or confidence is low, say so in the UI.
+- **No silent model output.** If a stage fails or confidence is low, say so in the UI, in
+  plain words.
 
 ## Architecture
 
@@ -143,19 +145,11 @@ previous Finding)`; `Decision (append-only: user, verdict, comment, time)`; `Rep
 Every customer's data is isolated (separate schema or database). Customer data for
 Kazakhstan stays on servers in Kazakhstan.
 
-## Viewer look (product, not decoration)
+## Look and UI
 
-- Black background, points coloured by height in shades of blue/white so terrain,
-  buildings and pipes read without texture.
-- Findings: red = critical, orange = watch. Not seen: gray. Inspected OK: the base blue.
-- Click a finding → evidence panel (frames with mask, confidence, size, reason, history,
-  confirm/reject). Layer toggles: terrain, structures, pipes, findings, coverage.
-- UI language: Russian, Kazakh, English (i18n from day one; no hard-coded strings).
-
-Full screen specs and interactive prototypes: `docs/design/` (start with
-`docs/design/viewer-3d.md` — the 3D viewer with video ↔ map sync is the core screen).
-Visual rules for every page (tokens, light/dark, density): `docs/design/DESIGN.md`, then the
-frontend-design skill in `.claude/skills/` (pinned, Apache-2.0). Agents never download skills.
+`docs/design/DESIGN.md` (design system v8, owner 2026-10-24) with its reference screens is the
+only visual source of truth: agents never invent or change colours, fonts, components or
+layout; `docs/design/viewer-3d.md` describes only how the 3D viewer behaves.
 
 ## How we work: you own the engineering
 
@@ -248,8 +242,8 @@ modes; security-sensitive defaults. Everything else — decide, document, contin
 | | Goal | Done when |
 | --- | --- | --- |
 | M0 | Repo, docs, dev environment | `docker compose up` starts Postgres + S3 storage + API health check |
-| M1 | Video → point cloud → web viewer | A phone video becomes a black-background point cloud viewable and rotatable in the browser |
-| M2 | Defects on the map | SAM 3.1 masks projected onto 3D points; click a red point → frames + mask + confidence |
+| M1 | Video → point cloud → web viewer | A phone video becomes a point cloud viewable and rotatable in the browser |
+| M2 | Defects on the map | SAM 3.1 masks projected onto 3D points; click a finding → frames + mask |
 | M3 | Quick Scan complete | Coverage states, quality check, measurement, ranked list, PDF report, decision log |
 | M4 | Monitoring | Baseline map, registration of a new video, change detection, per-point history; Tauri desktop build |
 | M5 | Pilot-ready | On-prem install in one command, roles/SSO, audit log, real customer footage |
