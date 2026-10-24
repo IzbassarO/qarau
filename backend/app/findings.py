@@ -7,9 +7,11 @@ GET  /api/findings/{id}              (viewer)   -> FindingOut
 
 Area is in bundle units²; `area_m2` is set only when the inspection has a ScaleReference with
 `m_per_unit` in its payload, otherwise it is null and `scale` says "not set".
+
+`status`, `class` and `severity` in every response are derived from the finding's decision log
+(app/decisions.py, REV1-api); the `finding` row keeps the values as proposed.
 """
 
-import enum
 from pathlib import Path
 from typing import Annotated
 
@@ -27,22 +29,22 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .crud import Db, Engineer, Viewer, audit, get_or_404
-from .models import Finding, Inspection, Observation, Run, ScaleReference, Severity
+from .decisions import state_of
+from .models import (
+    Finding,
+    FindingClass,
+    Inspection,
+    Observation,
+    Run,
+    ScaleReference,
+    Severity,
+)
 from .runs import manifest_file
 from .settings import Settings, get_settings
 
 router = APIRouter(prefix="/api")
 Cfg = Annotated[Settings, Depends(get_settings)]
 NOT_SET = "not set"
-
-
-class FindingClass(enum.StrEnum):
-    corrosion = "corrosion"
-    crack = "crack"
-    leak = "leak"
-    deformation = "deformation"
-    coating = "coating"
-    other = "other"
 
 
 class FindingIn(BaseModel):
@@ -130,13 +132,14 @@ def to_out(db: Session, finding: Finding, run: Run, bundle: Bundle) -> FindingOu
     obs = db.scalars(
         select(Observation).where(Observation.finding_id == finding.id).order_by(Observation.id)
     )
+    status, class_, severity = state_of(db, finding)
     return FindingOut(
         id=finding.id,
         inspection_id=run.inspection_id,
         run_id=run.id,
-        class_=FindingClass(finding.class_),
-        severity=finding.severity,
-        status=finding.status,
+        class_=FindingClass(class_),
+        severity=severity,
+        status=status,
         comment=finding.comment,
         area_units=finding.area_units,
         area_m2=finding.area_m2,

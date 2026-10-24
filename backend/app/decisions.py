@@ -5,7 +5,7 @@ GET  /api/findings/{id}/decisions  (viewer)   -> [DecisionOut], oldest first
 
 No PUT, PATCH or DELETE handler exists (FastAPI answers 405) and the database trigger refuses
 UPDATE and DELETE on `decision` (migration 0001). The finding's effective status, class and
-severity are replayed from its decisions (`current_state`); nothing is written back.
+severity are replayed from its decisions (`derive_finding_state`); nothing is written back.
 """
 
 from collections.abc import Sequence
@@ -63,10 +63,13 @@ def decisions_of(db: Session, finding_id: int) -> list[tuple[Decision, str]]:
     return [(d, name) for d, name in rows]
 
 
-def current_state(finding: Finding, decisions: Sequence[Decision]) -> tuple[str, str, Severity]:
-    """(status, class, severity) after replaying `decisions` oldest first: reject -> rejected;
-    confirm -> confirmed; reclass -> confirmed with the class and/or severity it carries (a
-    field it does not carry keeps its previous value). No decision: the detection values."""
+def derive_finding_state(
+    finding: Finding, decisions: Sequence[Decision]
+) -> tuple[str, str, Severity]:
+    """(status, class, severity) after replaying `decisions` oldest first. The status is that of
+    the latest decision: reject -> rejected; confirm and reclass -> confirmed. A reclass sets the
+    class and/or severity it carries (a field it does not carry keeps its previous value) and
+    later decisions keep them. No decision: the proposed values stored on the finding."""
     status, class_, severity = finding.status, finding.class_, finding.severity
     for d in decisions:
         status = "rejected" if d.verdict == Verdict.reject else "confirmed"
@@ -74,6 +77,16 @@ def current_state(finding: Finding, decisions: Sequence[Decision]) -> tuple[str,
             class_ = d.new_class or class_
             severity = d.new_severity or severity
     return status, class_, severity
+
+
+def state_of(db: Session, finding: Finding) -> tuple[str, str, Severity]:
+    """`derive_finding_state` over the finding's stored decisions."""
+    rows = db.scalars(
+        select(Decision)
+        .where(Decision.finding_id == finding.id)
+        .order_by(Decision.created_at, Decision.id)
+    ).all()
+    return derive_finding_state(finding, rows)
 
 
 def to_out(decision: Decision, user: str) -> DecisionOut:
@@ -111,6 +124,7 @@ def create_decision(
     finding_or_404(db, finding_id)
     if who.user_id is None:  # the shared token is read-only; never reached for a write
         raise HTTPException(403, "writes need a user token")
+    # Insert only, no dedup: the same body twice is two rows (both are evidence of a decision).
     decision = Decision(
         finding_id=finding_id,
         user_id=who.user_id,
@@ -121,7 +135,7 @@ def create_decision(
     )
     db.add(decision)
     db.flush()
-    audit(db, who, request, "finding", finding_id, f"decision.{body.verdict.value}")
+    audit(db, who, request, "finding", finding_id, "decision.create")
     db.commit()
     user = db.get(User, who.user_id)
     return to_out(decision, user.name if user is not None else "")
