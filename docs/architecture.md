@@ -98,6 +98,10 @@ Manifest paths stay relative to the run root (`export/web/points.position.f32`),
 (`/api/runs/{id}/files/{path}`) and the web app follow unchanged. Runs made before S1 keep
 `frames.json`, `quality_report.json`, `colmap/` and `web/` at the run root; every `layout`
 helper falls back to those paths when they exist, so old runs stay readable and re-exportable.
+The export also leaves a byte-identical copy of the manifest at the pre-S1 path
+`<run>/web/manifest.json` for the web app's dev-only stand-in for the API (`web/vite-dev-runs.ts`,
+screenshots and e2e without a backend), which still reads it there; the API and `layout` ignore
+the copy while `export/web/manifest.json` exists, and it is not part of the stored bundle.
 
 ## Storage: S3 is the system of record, `data/runs` is a cache
 

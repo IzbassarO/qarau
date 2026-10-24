@@ -179,5 +179,17 @@ def test_unauthenticated_requests_get_401(s3: Any, client: TestClient, runs_root
 
 
 def test_without_a_bucket_storage_is_off(client: TestClient, runs_root: Path) -> None:
+    """The pre-D1 path: a run in the cache is served from disk, S1 layout and legacy alike; a
+    run that is not there is a 404 (no storage to fall back to)."""
     assert storage() is None
     assert client.get("/api/runs/local-run/manifest.json", headers=VIEW).status_code == 404
+    write_cache(runs_root / "local-run")
+    r = client.get("/api/runs/local-run/manifest.json", headers=VIEW)
+    assert r.status_code == 200 and r.json() == json.loads(MANIFEST)
+    r = client.get("/api/runs/local-run/files/export/web/points.position.f32", headers=VIEW)
+    assert r.status_code == 200 and r.content == ARRAY
+    (runs_root / "legacy-run/web").mkdir(parents=True)
+    (runs_root / "legacy-run/web/manifest.json").write_bytes(MANIFEST)
+    r = client.get("/api/runs/legacy-run/manifest.json", headers=VIEW)
+    assert r.status_code == 200 and r.json() == json.loads(MANIFEST)
+    assert client.get("/api/runs/no-such-run/manifest.json", headers=VIEW).status_code == 404

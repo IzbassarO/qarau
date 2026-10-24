@@ -62,6 +62,12 @@ only writers; the viewer bundle (ADR 0003) is the only thing the web app reads.
   (DEF1) keep pointing at frame indices that may now mean other images. Until findings pin a
   frames version, a forced `frames` rerun on an inspection with findings is an engineer's
   decision, not an automatic one.
+- The web app's dev-only stand-in for the API (`web/vite-dev-runs.ts`) and the e2e specs still
+  read `<run>/web/manifest.json`, the pre-S1 path, so S1 runs showed "manifest.json not found"
+  there. The export now writes a byte-identical copy of the manifest at that path (array paths
+  are relative to the run root, so the arrays load through `files/export/web/…`). The copy is not
+  in any kind, so it is not stored and not restored after a cache wipe; the API never needs it.
+  The real fix, reading `export/web/manifest.json` first, belongs in `web/` (dev_app).
 - `GET /api/runs` lists only the cache. A run that exists only in storage is reachable by id
   (the inspections API knows it) but not in that legacy list; it is for the pre-B1 viewer flow.
 - Objects are listed on every step start (one `ListObjectsV2` per kind): negligible against a
