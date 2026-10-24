@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LANGS, setLang, type Lang } from '../i18n';
 import { createDemo } from '../fixtures/demo';
-import { groupRunsIntoSites, type Site } from '../lib/inspections';
+import { groupRunsIntoSites, listInspections, type Site } from '../lib/inspections';
 import { Sidebar } from './Sidebar';
 import { NewInspectionDialog } from './NewInspectionDialog';
 import { AuthProvider } from '../auth/AuthProvider';
@@ -35,7 +35,14 @@ function Harness({ groups = sites, demo = false }: { groups?: Site[]; demo?: boo
   );
 }
 
-beforeEach(() => setLang('en'));
+beforeEach(() => {
+  setLang('en');
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(Response.json([{ id: 1, org_id: 1, name: 'North site' }])),
+  );
+});
+afterEach(() => vi.unstubAllGlobals());
 
 describe('Sidebar', () => {
   it('keeps the example badge on the demo entry and out of the footer link', () => {
@@ -118,8 +125,55 @@ describe('Sidebar', () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'New inspection' }));
     expect(screen.getByRole('dialog', { name: 'New inspection' })).toBeTruthy();
-    expect(screen.getByText(/Video upload is not available yet/)).toBeTruthy();
+    expect(screen.getByLabelText('Site')).toBeTruthy();
+    expect(screen.getByLabelText(/Choose a video/)).toBeTruthy();
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
+});
+
+it('renders visible uploaded and failed status chips', () => {
+  render(
+    <Harness
+      groups={groupRunsIntoSites([
+        { run_id: 'uploaded-1', status: 'uploaded' },
+        { run_id: 'failed-1', status: 'failed' },
+      ])}
+    />,
+  );
+  expect(
+    within(screen.getByRole('link', { name: /uploaded-1/ })).getByText('Uploaded').className,
+  ).toBe('inspection-status-chip uploaded');
+  expect(within(screen.getByRole('link', { name: /failed-1/ })).getByText('Failed').className).toBe(
+    'inspection-status-chip failed',
+  );
+});
+
+it('shows an unfamiliar API status verbatim with neutral unknown styling', () => {
+  render(<Harness groups={groupRunsIntoSites([{ run_id: '7', status: 'awaiting_review' }])} />);
+  const entry = screen.getByRole('link', { name: /Inspection 7/ });
+  expect(within(entry).getByText('awaiting_review').className).toBe(
+    'inspection-status-chip unknown',
+  );
+  expect(within(entry).queryByText('Completed')).toBeNull();
+});
+
+it('lists the uploaded inspection returned by GET /api/inspections', async () => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url === '/api/inspections')
+      return Response.json([
+        { id: 7, site_id: 1, status: 'uploaded', created_at: '2026-10-23T12:00:00Z' },
+      ]);
+    if (url === '/api/sites') return Response.json([{ id: 1, org_id: 1, name: 'North site' }]);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Harness groups={await listInspections()} />);
+  const entry = screen.getByRole('link', { name: /Inspection 7/ });
+  expect(entry.getAttribute('href')).toBe('/inspections/7');
+  expect(within(entry).getByText('Uploaded').className).toBe('inspection-status-chip uploaded');
+  const siteButton = screen.getByRole('button', { name: /North site/ });
+  expect(within(siteButton).getByText('North site').textContent).toBe('North site');
+  expect(within(siteButton).getByText('1').textContent).toBe('1');
+  expect(fetch).toHaveBeenCalledWith('/api/inspections', expect.anything());
 });

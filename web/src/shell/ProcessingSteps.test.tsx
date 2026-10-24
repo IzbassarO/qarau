@@ -1,11 +1,15 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LANGS, setLang, type Lang } from '../i18n';
-import type { ProcessingStep } from '../lib/processing';
+import { processingSteps, type ProcessingStep } from '../lib/processing';
+import { getInspection } from '../lib/inspections';
 import { ProcessingSteps } from './ProcessingSteps';
 
 beforeEach(() => setLang('en'));
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 it.each([
   ['pending', 'Pending'],
@@ -108,4 +112,68 @@ it('updates running elapsed time and stops its timer when finished', () => {
 it('shows a localized empty state', () => {
   render(<ProcessingSteps steps={[]} />);
   expect(screen.getByText(LANGS.en['inspection.noStages'])).toBeTruthy();
+});
+
+it('renders the S1 step fixture returned by GET /api/inspections/{id}', async () => {
+  const fetch = vi.fn().mockResolvedValue(
+    Response.json({
+      id: 7,
+      site_id: 1,
+      mode: 'quick_scan',
+      status: 'running',
+      run_id: 'run-7',
+      steps: [
+        { name: 'probe', status: 'done', duration_s: 1 },
+        { name: 'frames', status: 'done', duration_s: 4.2 },
+        { name: 'sparse', status: 'running' },
+        { name: 'export', status: 'pending' },
+      ],
+    }),
+  );
+  vi.stubGlobal('fetch', fetch);
+  render(<ProcessingSteps steps={processingSteps(await getInspection('7'))} />);
+  expect(screen.getAllByRole('listitem').map((row) => row.getAttribute('data-state'))).toEqual([
+    'done',
+    'done',
+    'running',
+    'pending',
+  ]);
+  expect(screen.getByText('4.2 s')).toBeTruthy();
+  expect(screen.getByText('Video check')).toBeTruthy();
+  expect(screen.getByText('3D reconstruction')).toBeTruthy();
+  expect(screen.queryByText('Unknown stage')).toBeNull();
+  expect(fetch).toHaveBeenCalledWith('/api/inspections/7', expect.anything());
+});
+
+it.each<Lang>(['en', 'ru', 'kk'])(
+  'shows uploaded waiting for processing without invented steps (%s)',
+  (lang) => {
+    setLang(lang);
+    render(<ProcessingSteps steps={processingSteps({ status: 'uploaded' })} uploaded />);
+    expect(screen.getByText(LANGS[lang]['processing.uploadedWaiting'])).toBeTruthy();
+    expect(screen.queryByRole('listitem')).toBeNull();
+  },
+);
+
+it('shows the literal uploaded waiting state from GET /api/inspections/7 with no S1 steps', async () => {
+  const fetch = vi.fn().mockResolvedValue(
+    Response.json({
+      id: 7,
+      site_id: 1,
+      status: 'uploaded',
+      run_id: 'run-7',
+      steps: [],
+    }),
+  );
+  vi.stubGlobal('fetch', fetch);
+  const detail = await getInspection('7');
+  render(
+    <ProcessingSteps steps={processingSteps(detail)} uploaded={detail.status === 'uploaded'} />,
+  );
+  expect(screen.getByRole('status').textContent).toBe('Video uploaded, waiting for processing.');
+  expect(screen.queryByRole('listitem')).toBeNull();
+  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/inspections/7', {
+    signal: undefined,
+    headers: {},
+  });
 });

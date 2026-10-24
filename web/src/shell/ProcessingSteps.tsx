@@ -30,7 +30,13 @@ function StateIcon({ status }: { status: ProcessingStep['status'] }) {
   );
 }
 
-export function ProcessingSteps({ steps }: { steps: readonly ProcessingStep[] }) {
+export function ProcessingSteps({
+  steps,
+  uploaded = false,
+}: {
+  steps: readonly ProcessingStep[];
+  uploaded?: boolean;
+}) {
   const { t, lang } = useI18n();
   const [now, setNow] = useState(Date.now);
   const running = steps.some((step) => step.status === 'running');
@@ -47,7 +53,9 @@ export function ProcessingSteps({ steps }: { steps: readonly ProcessingStep[] })
         <span className="muted">{t('inspection.processingNote')}</span>
       </div>
       {steps.length === 0 ? (
-        <p className="muted">{t('inspection.noStages')}</p>
+        <p className="muted" role="status">
+          {t(uploaded ? 'processing.uploadedWaiting' : 'inspection.noStages')}
+        </p>
       ) : (
         <ol className="processing-steps" aria-label={t('inspection.processing')} aria-live="polite">
           {skipBlockedSteps(steps).map((step, index) => {

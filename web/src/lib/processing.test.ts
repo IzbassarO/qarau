@@ -3,6 +3,47 @@ import { LANGS } from '../i18n';
 import { errorMessage, processingSteps, stepDuration, type StageStatus } from './processing';
 
 describe('processingSteps', () => {
+  it('reads the exact S1 steps shape and names, preserving API order and errors', () => {
+    const steps = processingSteps({
+      status: 'running',
+      steps: [
+        { name: 'probe', status: 'done', duration_s: 1 },
+        { name: 'frames', status: 'done', duration_s: 4.2 },
+        {
+          name: 'sparse',
+          status: 'failed',
+          started_at: '2026-10-23T12:00:00Z',
+          finished_at: '2026-10-23T12:00:03Z',
+          duration_s: 3,
+          error: 'Reconstruction failed: too few registered frames',
+        },
+        { name: 'export', status: 'pending' },
+      ],
+    });
+    expect(steps.map(({ id, status }) => [id, status])).toEqual([
+      ['probe', 'done'],
+      ['frames', 'done'],
+      ['sparse', 'failed'],
+      ['export', 'skipped'],
+    ]);
+    expect(steps[2]).toMatchObject({
+      startedAt: '2026-10-23T12:00:00Z',
+      finishedAt: '2026-10-23T12:00:03Z',
+      durationSeconds: 3,
+      detail: 'Reconstruction failed: too few registered frames',
+    });
+  });
+
+  it('keeps an empty S1 step list empty and retains reported steps even while uploaded', () => {
+    expect(processingSteps({ status: 'uploaded', steps: [] })).toEqual([]);
+    expect(processingSteps({ status: 'queued', steps: [] })).toEqual([]);
+    expect(
+      processingSteps({ status: 'uploaded', steps: [{ name: 'probe', status: 'pending' }] }).map(
+        ({ id, status }) => [id, status],
+      ),
+    ).toEqual([['probe', 'pending']]);
+  });
+
   it('maps pipeline StageResult fields and puts stages in pipeline order without mutating the run', () => {
     const run = {
       stages: [

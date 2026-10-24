@@ -28,6 +28,7 @@ export interface ProcessingStagePayload {
 
 export interface ProcessingRunPayload {
   status?: string | null;
+  steps?: readonly ProcessingStagePayload[] | null;
   stages?: readonly ProcessingStagePayload[] | null;
   stats?: { processing_s?: Record<string, number> } | null;
 }
@@ -40,6 +41,8 @@ export const PROCESSING_STAGES = [
 ] as const satisfies readonly { id: string; label: Key }[];
 
 export function stageLabel(id: string): Key {
+  if (id === 'probe') return 'stage.probe';
+  if (id === 'sparse') return 'stage.reconstruction';
   return PROCESSING_STAGES.find((stage) => stage.id === id)?.label ?? 'processing.unknownStage';
 }
 
@@ -82,36 +85,44 @@ export function skipBlockedSteps(steps: readonly ProcessingStep[]): ProcessingSt
   });
 }
 
-/** The current API only supplies timings. Never infer success from a duration or a bundle. */
+/** S1 supplies steps; older exports supply stages/timings. Never infer success from timings. */
 export function processingSteps(
   run?: ProcessingRunPayload | null,
   manifest?: Pick<Manifest, 'stats'>,
 ): ProcessingStep[] {
   const payload = record(run);
+  const apiSteps = Array.isArray(payload.steps) ? payload.steps : undefined;
+  if (
+    !apiSteps &&
+    payload.status === 'uploaded' &&
+    (!Array.isArray(payload.stages) || payload.stages.length === 0)
+  )
+    return [];
   const timings = {
     ...record(manifest?.stats.processing_s),
     ...record(record(payload.stats).processing_s),
   };
-  const stages: ProcessingStep[] = (Array.isArray(payload.stages) ? payload.stages : []).map(
-    (value: unknown) => {
-      const stage = record(value);
-      const error = record(stage.error);
-      const id = text(stage.name) ?? '';
-      const known = PROCESSING_STAGES.some((item) => item.id === id);
-      const mappedStatus = known ? status(stage.status) : 'unknown';
-      return {
-        id,
-        status: mappedStatus,
-        startedAt: date(stage.started_at),
-        finishedAt: date(stage.finished_at),
-        durationSeconds: seconds(stage.duration_s) ?? seconds(timings[id]),
-        errorCode: text(stage.error_code) ?? text(error.code),
-        detail:
-          text(stage.detail) ?? text(error.detail) ?? text(error.message) ?? text(stage.error),
-        ...(mappedStatus === 'unknown' ? { reportedStatus: text(stage.status) } : {}),
-      };
-    },
-  );
+  const stages: ProcessingStep[] = (
+    apiSteps ?? (Array.isArray(payload.stages) ? payload.stages : [])
+  ).map((value: unknown) => {
+    const stage = record(value);
+    const error = record(stage.error);
+    const id = text(stage.name) ?? '';
+    const known = stageLabel(id) !== 'processing.unknownStage';
+    const mappedStatus = known ? status(stage.status) : 'unknown';
+    return {
+      id,
+      status: mappedStatus,
+      startedAt: date(stage.started_at),
+      finishedAt: date(stage.finished_at),
+      durationSeconds: seconds(stage.duration_s) ?? seconds(timings[id]),
+      errorCode: text(stage.error_code) ?? text(error.code),
+      detail: text(stage.detail) ?? text(error.detail) ?? text(error.message) ?? text(stage.error),
+      ...(mappedStatus === 'unknown' ? { reportedStatus: text(stage.status) } : {}),
+    };
+  });
+  // S1's list is authoritative, including an empty list before the worker starts.
+  if (apiSteps) return skipBlockedSteps(stages);
   const active = payload.status === 'queued' || payload.status === 'running';
   const ordered: ProcessingStep[] = PROCESSING_STAGES.flatMap(({ id }, index) => {
     const reported = stages.filter((stage) => stage.id === id);

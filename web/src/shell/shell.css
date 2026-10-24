@@ -284,7 +284,7 @@
   color: var(--color-text-muted);
   flex-shrink: 0;
 }
-.status-dot.completed {
+.status-dot.done {
   background: currentColor;
 }
 .status-dot.running {
@@ -294,6 +294,15 @@
   border-radius: 0;
   transform: rotate(45deg);
   background: currentColor;
+}
+.inspection-status-chip {
+  flex-shrink: 0;
+  padding: 0 var(--spacing-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--round-sm);
+  color: var(--color-text-muted);
+  font-size: var(--type-xs);
+  white-space: nowrap;
 }
 .sidebar-footer {
   display: flex;
@@ -655,6 +664,67 @@
 .upload-error,
 .selected-file {
   margin: var(--spacing-3) 0;
+}
+.upload-site {
+  display: grid;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-4);
+  font-size: var(--type-sm);
+}
+.upload-site select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--size-control);
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--round-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+}
+.upload-sites-error {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  flex-wrap: wrap;
+}
+.upload-sites-error .shell-button {
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.upload-progress {
+  display: grid;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-4);
+  font-size: var(--type-sm);
+  font-variant-numeric: tabular-nums;
+}
+.upload-progress progress {
+  appearance: none;
+  width: 100%;
+  height: var(--size-status-marker);
+  border: 0;
+  border-radius: var(--round-sm);
+  background: var(--color-surface-raised);
+  accent-color: var(--color-accent);
+  overflow: hidden;
+}
+.upload-progress progress::-webkit-progress-bar {
+  background: var(--color-surface-raised);
+}
+.upload-progress progress::-webkit-progress-value {
+  background: var(--color-accent);
+}
+.upload-progress progress::-moz-progress-bar {
+  background: var(--color-accent);
+}
+.upload-metrics {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  color: var(--color-text-muted);
 }
 .selected-file {
   font-size: var(--type-sm);

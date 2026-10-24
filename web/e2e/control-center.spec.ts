@@ -4,6 +4,12 @@ import ru from '../src/i18n/ru.json' with { type: 'json' };
 import kk from '../src/i18n/kk.json' with { type: 'json' };
 import tokens from '../src/design/tokens.json' with { type: 'json' };
 
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/sites', (route) =>
+    route.fulfill({ json: [{ id: 1, org_id: 1, name: 'North site' }] }),
+  );
+});
+
 for (const theme of ['light', 'dark'] as const) {
   for (const [lang, t] of Object.entries({ en, ru, kk })) {
     test(`home fits twelve dense inspection rows with readable dates: ${theme}, ${lang}`, async ({
@@ -16,18 +22,20 @@ for (const theme of ['light', 'dark'] as const) {
         sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
       }, lang);
       const runs = Array.from({ length: 16 }, (_, index) => ({
-        run_id: `survey-${index + 1}`,
+        id: index + 1,
+        site_id: 1,
+        status: 'uploaded',
         title: `${t['demo.inspectionTitle']} ${index + 1} — ${t['demo.siteName']}`,
         created_at: `2026-10-${String(index + 1).padStart(2, '0')}T12:00:00Z`,
       }));
-      await page.route('**/api/runs', (route) => route.fulfill({ json: runs }));
+      await page.route('**/api/inspections', (route) => route.fulfill({ json: runs }));
       await page.goto('/');
       await page.evaluate(() => document.fonts.ready);
       const rows = page.locator('.inspection-link');
       await expect(rows).toHaveCount(runs.length);
       expect(
         await rows.evaluateAll((links) => links.map((link) => link.getAttribute('href'))),
-      ).toEqual(runs.toReversed().map((run) => `/inspections/${run.run_id}`));
+      ).toEqual(runs.toReversed().map((run) => `/inspections/${run.id}`));
       const groups = page.locator('.sidebar-groups');
       const viewport = await groups.boundingBox();
       expect(viewport).not.toBeNull();
@@ -80,13 +88,14 @@ for (const theme of ['light', 'dark'] as const) {
         localStorage.setItem('qarau.lang', locale);
         sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
       }, lang);
-      await page.route('**/api/runs', (route) =>
+      await page.route('**/api/inspections', (route) =>
         route.fulfill({
           json: [
             {
-              run_id: 'tank-survey',
+              id: 1,
+              site_id: 1,
+              status: 'uploaded',
               title: t['demo.inspectionTitle'],
-              site: { id: 'tank-farm', name: t['demo.siteName'] },
               created_at: '2026-10-16T15:00:00Z',
             },
           ],
@@ -108,7 +117,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(navigation.getByRole('button', { name: t['inspection.new'] })).toBeVisible();
       await expect(
         navigation.getByRole('link', { name: new RegExp(t['demo.inspectionTitle']) }),
-      ).toHaveAttribute('href', '/inspections/tank-survey');
+      ).toHaveAttribute('href', '/inspections/1');
       await expect(navigation.getByRole('button', { name: t['auth.signOut'] })).toBeVisible();
       for (const label of await page
         .locator(
@@ -138,7 +147,7 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
       localStorage.setItem('qarau.lang', locale);
       sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
     }, lang);
-    await page.route('**/api/runs', (route) => route.fulfill({ status: 503, body: '' }));
+    await page.route('**/api/inspections', (route) => route.fulfill({ status: 503, body: '' }));
     await page.goto('/inspections/demo');
     await expect(page.getByRole('heading', { name: t['demo.inspectionTitle'] })).toBeVisible();
     await expect(
@@ -163,7 +172,8 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
       buffer: Buffer.from('not a video'),
     });
     await expect(dialog.getByRole('alert')).toHaveText(t['upload.invalidType']);
-    await expect(dialog.getByText(t['upload.unavailable'])).toBeVisible();
+    await expect(dialog.getByLabel(t['upload.site'])).toBeVisible();
+    await expect(dialog.getByRole('button', { name: t['upload.start'] })).toBeDisabled();
     await page.keyboard.press('Escape');
     await expect(dialog).not.toBeVisible();
 
@@ -186,17 +196,19 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
   });
 }
 
-test('home lists the real runs, not the demo', async ({ page }) => {
+test('home lists API inspections, not the demo', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('qarau.lang', 'en');
     sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
   });
-  await page.route('**/api/runs', (route) =>
+  await page.route('**/api/inspections', (route) =>
     route.fulfill({
       json: [
         {
-          run_id: 'notre-dame',
-          source: { name: 'notre_dame.webm' },
+          id: 1,
+          site_id: 1,
+          title: 'notre-dame',
+          status: 'uploaded',
           created_at: '2026-10-16T15:00:00Z',
         },
       ],
@@ -217,7 +229,7 @@ test('mobile sidebar collapses, opens and closes with navigation', async ({ page
     localStorage.setItem('qarau.lang', 'en');
     sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
   });
-  await page.route('**/api/runs', (route) => route.fulfill({ json: [] }));
+  await page.route('**/api/inspections', (route) => route.fulfill({ json: [] }));
   await page.goto('/inspections/demo');
   const navigation = page.getByRole('navigation');
   await expect(navigation).not.toBeVisible();
