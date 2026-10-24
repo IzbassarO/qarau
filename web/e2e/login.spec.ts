@@ -2,11 +2,19 @@ import { expect, test } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 import ru from '../src/i18n/ru.json' with { type: 'json' };
 import kk from '../src/i18n/kk.json' with { type: 'json' };
-import tokens from '../src/design/tokens.json' with { type: 'json' };
 
-function rgb(hex: string) {
-  return `rgb(${[1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16)).join(', ')})`;
-}
+const themeColors = {
+  light: {
+    bg: 'rgb(244, 244, 243)',
+    surface: 'rgb(255, 255, 255)',
+    accent: 'rgb(17, 17, 17)',
+  },
+  dark: {
+    bg: 'rgb(22, 22, 22)',
+    surface: 'rgb(30, 30, 30)',
+    accent: 'rgb(242, 242, 240)',
+  },
+};
 
 for (const theme of ['light', 'dark'] as const) {
   for (const [lang, t] of Object.entries({ en, ru, kk })) {
@@ -22,16 +30,16 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.getByRole('alert')).toHaveCount(0);
       await expect(page.locator('.login-page')).toHaveCSS(
         'background-color',
-        rgb(tokens[theme].bg),
+        themeColors[theme].bg,
       );
       await expect(page.locator('.login-card')).toHaveCSS(
         'background-color',
-        rgb(tokens[theme].surface),
+        themeColors[theme].surface,
       );
       await expect(page.locator('.shell-wordmark')).toHaveText(t['shell.product']);
       await expect(page.getByRole('button', { name: t['auth.signIn'] })).toHaveCSS(
         'background-color',
-        rgb(tokens[theme].accent),
+        themeColors[theme].accent,
       );
       const card = await page.locator('.login-card').boundingBox();
       expect(card).not.toBeNull();
@@ -78,11 +86,14 @@ test('rejects bad credentials, signs in, restores the session and signs out', as
   expect(await page.evaluate(() => sessionStorage.getItem('qarau.auth.session'))).toBeNull();
 });
 
-test('keeps the black point viewer public in the dev server', async ({ page }) => {
+test('keeps the point viewer public on map-ground in the dev server', async ({ page }) => {
   await page.goto('/viewer/demo');
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
   await expect(page.locator('canvas')).toBeVisible();
-  await expect(page.locator('canvas').locator('..')).toHaveCSS('background-color', 'rgb(0, 0, 0)');
+  await expect(page.locator('canvas').locator('..')).toHaveCSS(
+    'background-color',
+    'rgb(19, 19, 19)',
+  );
   await page.waitForFunction(() => window.__qarau?.pointsLoaded);
 });
 

@@ -52,6 +52,10 @@ async function layerState(page: Page) {
   });
 }
 
+test.beforeEach(async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+});
+
 for (const run of ['demo', 'notre-dame']) {
   test(`far points remain separate and opt-in: ${run}`, async ({ page }) => {
     test.skip(run !== 'demo' && !fs.existsSync(realManifestPath), 'needs a Notre-Dame bundle');
@@ -86,7 +90,7 @@ for (const run of ['demo', 'notre-dame']) {
     await expect(page.getByText(en['error.webgl'])).toHaveCount(0);
     await expect(page.locator('canvas').locator('..')).toHaveCSS(
       'background-color',
-      'rgb(0, 0, 0)',
+      'rgb(19, 19, 19)',
     );
     const toggle = page.getByRole('button', { name: en['viewer.show.farPoints'] });
     const before = await layerState(page);
@@ -104,7 +108,7 @@ for (const run of ['demo', 'notre-dame']) {
     expect(before).toMatchObject({
       available: true,
       visible: false,
-      color: '6b727d',
+      color: '6f6f6b',
       vertexColors: false,
     });
     await toggle.click();

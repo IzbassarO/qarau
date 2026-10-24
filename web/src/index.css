@@ -1,150 +1,94 @@
 @import 'tailwindcss';
-@import '@fontsource/ibm-plex-sans/400.css';
-@import '@fontsource/ibm-plex-sans/500.css';
-@import '@fontsource/ibm-plex-sans/600.css';
-@import '@fontsource/ibm-plex-mono/400.css';
+@import './design/tokens.css';
+@import './design/bundle.css';
 
-/* Dimensions are unitless pixels, shared with native clients. */
+/* Compatibility names for the existing shell and viewer, all resolved from v8. */
 :root {
-  color-scheme: light dark;
-  --type-xs: calc(var(--font-size-xs) * 1px);
-  --type-sm: calc(var(--font-size-sm) * 1px);
-  --type-md: calc(var(--font-size-md) * 1px);
-  --type-lg: calc(var(--font-size-lg) * 1px);
-  --type-xl: calc(var(--font-size-xl) * 1px);
-  --type-xxl: calc(var(--font-size-xxl) * 1px);
-  --spacing-1: calc(var(--space-1) * 1px);
-  --spacing-2: calc(var(--space-2) * 1px);
-  --spacing-3: calc(var(--space-3) * 1px);
-  --spacing-4: calc(var(--space-4) * 1px);
-  --spacing-5: calc(var(--space-5) * 1px);
-  --spacing-6: calc(var(--space-6) * 1px);
-  --round-sm: calc(var(--radius-sm) * 1px);
-  --round-md: calc(var(--radius-md) * 1px);
-  --round-lg: calc(var(--radius-lg) * 1px);
-  --size-sidebar: calc(var(--layout-sidebar) * 1px);
-  --size-sidebar-compact: calc(var(--layout-sidebar-compact) * 1px);
-  --size-topbar: calc(var(--layout-topbar) * 1px);
-  --size-login-card: calc(var(--layout-login-card) * 1px);
-  --size-dialog: calc(var(--layout-dialog) * 1px);
-  --size-content: calc(var(--layout-content) * 1px);
-  --size-text: calc(var(--layout-text) * 1px);
-  --size-control: calc(var(--layout-control) * 1px);
-  --size-control-small: calc(var(--layout-control-small) * 1px);
-  --size-inspection-row: calc(var(--layout-inspection-row) * 1px);
-  --size-icon: calc(var(--layout-icon) * 1px);
-  --size-step-icon: calc(var(--layout-step-icon) * 1px);
-  --size-status-marker: calc(var(--layout-status-marker) * 1px);
-  --size-viewer: calc(var(--layout-viewer) * 1px);
-  --size-viewer-compact: calc(var(--layout-viewer-compact) * 1px);
-  --size-map-placeholder: calc(var(--layout-map-placeholder) * 1px);
-  --size-upload-picker: calc(var(--layout-upload-picker) * 1px);
-  --size-viewer-tools: calc(var(--layout-viewer-tools) * 1px);
-  --size-viewer-panel: calc(var(--layout-viewer-panel) * 1px);
-  --size-minimap: calc(var(--layout-minimap) * 1px);
-  --size-frame-thumbnail: calc(var(--layout-frame-thumbnail) * 1px);
-  --size-focus-width: calc(var(--layout-focus-width) * 1px);
-  --color-finding-critical: #f0565c;
-  --color-finding-watch: #f2a33a;
-  --color-finding-not-seen: #6b727d;
-  --color-finding-inspected: #5b9bff;
-  --color-viewer-canvas: #000000;
-  --color-viewer-text: #b0b7c1;
-  --color-viewer-current: #eaf2ff;
-  --color-viewer-later: #2a3240;
-  --font-family: 'IBM Plex Sans', sans-serif;
-  --font-mono: 'IBM Plex Mono', monospace;
-  --font-size-xs: 12;
-  --font-size-sm: 13;
-  --font-size-md: 14;
-  --font-size-lg: 16;
-  --font-size-xl: 20;
-  --font-size-xxl: 24;
-  --font-weight-regular: 400;
-  --font-weight-medium: 500;
-  --font-weight-semibold: 600;
-  --font-line-height-tight: 1.25;
-  --font-line-height-body: 1.5;
-  --font-line-height-relaxed: 1.6;
-  --space-1: 4;
-  --space-2: 8;
-  --space-3: 12;
-  --space-4: 16;
-  --space-5: 24;
-  --space-6: 32;
-  --radius-sm: 4;
-  --radius-md: 5;
-  --radius-lg: 6;
-  --layout-sidebar: 280;
-  --layout-sidebar-compact: 240;
-  --layout-topbar: 64;
-  --layout-login-card: 440;
-  --layout-dialog: 480;
-  --layout-content: 1600;
-  --layout-text: 560;
-  --layout-control: 40;
-  --layout-control-small: 32;
-  --layout-inspection-row: 32;
-  --layout-icon: 20;
-  --layout-step-icon: 28;
-  --layout-status-marker: 8;
-  --layout-viewer: 640;
-  --layout-viewer-compact: 440;
-  --layout-map-placeholder: 320;
-  --layout-upload-picker: 160;
-  --layout-viewer-tools: 52;
-  --layout-viewer-panel: 360;
-  --layout-minimap: 180;
-  --layout-frame-thumbnail: 112;
-  --layout-focus-width: 2;
-  --color-bg: #f3f4f5;
-  --color-surface: #ffffff;
-  --color-surface-raised: #e9ebee;
-  --color-border: #c8cdd3;
-  --color-border-strong: #7d8590;
-  --color-text: #24282e;
-  --color-text-muted: #59616b;
-  --color-accent: #6550a2;
-  --color-accent-hover: #53418a;
-  --color-on-accent: #ffffff;
-  --color-focus-ring: #6550a2;
-  --color-error: #96385e;
-  --color-backdrop: #181a1db3;
+  color-scheme: light;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--line);
+  --color-border-strong: var(--line-strong);
+  --color-text: var(--ink);
+  --color-text-muted: var(--ink-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-on-accent: var(--on-accent);
+  --color-focus-ring: var(--accent);
+  --color-error: var(--ink);
+  --color-backdrop: var(--color-dialog-scrim);
+  --color-finding-critical: var(--critical);
+  --color-finding-watch: var(--watch);
+  --color-finding-not-seen: var(--unseen);
+  --color-finding-inspected: var(--ok);
+  --color-viewer-canvas: var(--map-ground);
+  --color-viewer-text: var(--map-text);
+  --color-viewer-current: var(--map-text);
+  --color-viewer-later: var(--map-grid);
+  --font-family: var(--font-sans);
+  --font-weight-regular: var(--t-body-weight);
+  --font-weight-medium: var(--t-label-weight);
+  --font-weight-semibold: var(--t-heading-weight);
+  --font-line-height-tight: calc(var(--t-heading-line-height) / var(--t-heading-size));
+  --font-line-height-body: calc(var(--t-body-line-height) / var(--t-body-size));
+  --font-line-height-relaxed: calc(var(--t-caption-line-height) / var(--t-caption-size));
+  --type-xs: var(--t-caption-size);
+  --type-sm: var(--t-label-size);
+  --type-md: var(--t-body-size);
+  --type-lg: var(--t-heading-size);
+  --type-xl: var(--t-title-size);
+  --type-xxl: var(--t-display-size);
+  --spacing-1: var(--space-1);
+  --spacing-2: var(--space-2);
+  --spacing-3: var(--space-3);
+  --spacing-4: var(--space-4);
+  --spacing-5: var(--space-5);
+  --spacing-6: var(--space-6);
+  --round-sm: var(--radius-sm);
+  --round-md: var(--radius-md);
+  --round-lg: var(--radius-lg);
+  --size-sidebar: var(--layout-sidebar);
+  --size-sidebar-compact: var(--layout-sidebar);
+  --size-topbar: var(--layout-topbar);
+  --size-login-card: var(--layout-side-panel);
+  --size-dialog: var(--layout-dialog-min);
+  --size-content: var(--layout-dialog-max);
+  --size-text: var(--layout-dialog-min);
+  --size-control: var(--layout-rail);
+  --size-control-small: var(--space-8);
+  --size-inspection-row: var(--space-8);
+  --size-icon: var(--space-5);
+  --size-step-icon: var(--space-8);
+  --size-status-marker: var(--space-2);
+  --size-viewer: var(--layout-dialog-min);
+  --size-viewer-compact: var(--layout-side-panel);
+  --size-map-placeholder: calc(var(--layout-timeline) * 3);
+  --size-upload-picker: calc(var(--space-12) * 4);
+  --size-viewer-tools: var(--layout-rail);
+  --size-viewer-panel: var(--layout-side-panel);
+  --size-minimap: calc(var(--space-12) * 4);
+  --size-frame-thumbnail: var(--layout-timeline);
+  --size-focus-width: calc(var(--space-3) / 4);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #181a1d;
-    --color-surface: #202327;
-    --color-surface-raised: #2a2e33;
-    --color-border: #494f58;
-    --color-border-strong: #7c858f;
-    --color-text: #eceef1;
-    --color-text-muted: #b0b7c1;
-    --color-accent: #b6a2e0;
-    --color-accent-hover: #c8b7ec;
-    --color-on-accent: #211a32;
-    --color-focus-ring: #b6a2e0;
-    --color-error: #eca5c0;
-    --color-backdrop: #181a1dcc;
-  }
+[data-theme='dark'] {
+  color-scheme: dark;
 }
 
-/* Compatibility names keep existing viewer utilities on the same palette. */
 @theme inline {
-  --color-bg: var(--color-bg);
-  --color-surface: var(--color-surface);
-  --color-raised: var(--color-surface-raised);
-  --color-line: var(--color-border);
-  --color-line-strong: var(--color-border-strong);
-  --color-ink: var(--color-text);
-  --color-ink-2: var(--color-text-muted);
-  --color-link: var(--color-accent);
-  --color-critical: var(--color-finding-critical);
-  --color-watch: var(--color-finding-watch);
-  --color-notseen: var(--color-finding-not-seen);
-  --color-inspected: var(--color-finding-inspected);
-  --font-sans: var(--font-family);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--surface-raised);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-muted);
+  --color-link: var(--accent);
+  --color-critical: var(--critical);
+  --color-watch: var(--watch);
+  --color-notseen: var(--unseen);
+  --color-inspected: var(--ok);
 }
 
 html,
@@ -155,19 +99,19 @@ body,
 }
 
 body {
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-family: var(--font-family);
-  font-size: calc(var(--font-size-md) * 1px);
-  line-height: var(--font-line-height-body);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--t-body-size);
+  line-height: var(--t-body-line-height);
   font-variant-numeric: tabular-nums;
 }
 
 input[type='range'] {
-  accent-color: var(--color-accent);
+  accent-color: var(--accent);
 }
 
 :focus-visible {
-  outline: calc(var(--layout-focus-width) * 1px) solid var(--color-focus-ring);
-  outline-offset: calc(var(--layout-focus-width) * 1px);
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }

@@ -2,7 +2,19 @@ import { expect, test } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 import ru from '../src/i18n/ru.json' with { type: 'json' };
 import kk from '../src/i18n/kk.json' with { type: 'json' };
-import tokens from '../src/design/tokens.json' with { type: 'json' };
+
+const themeColors = {
+  light: {
+    bg: 'rgb(244, 244, 243)',
+    surface: 'rgb(255, 255, 255)',
+    accent: 'rgb(17, 17, 17)',
+  },
+  dark: {
+    bg: 'rgb(22, 22, 22)',
+    surface: 'rgb(30, 30, 30)',
+    accent: 'rgb(242, 242, 240)',
+  },
+};
 
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/sites', (route) =>
@@ -44,7 +56,7 @@ for (const theme of ['light', 'dark'] as const) {
         const row = rows.nth(index);
         const box = await row.boundingBox();
         expect(box).not.toBeNull();
-        expect(box!.height).toBe(tokens.shared.layout['inspection-row']);
+        expect(box!.height).toBe(32);
         expect(box!.y).toBeGreaterThanOrEqual(viewport!.y);
         expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.y + viewport!.height);
         const run = runs[runs.length - 1 - index];
@@ -102,14 +114,12 @@ for (const theme of ['light', 'dark'] as const) {
         }),
       );
       await page.goto('/');
-      const rgb = (hex: string) =>
-        `rgb(${[1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16)).join(', ')})`;
-      await expect(page.locator('body')).toHaveCSS('background-color', rgb(tokens[theme].bg));
+      await expect(page.locator('body')).toHaveCSS('background-color', themeColors[theme].bg);
       const navigation = page.getByRole('navigation', { name: t['shell.sites'] });
       await expect(navigation).toBeVisible();
       await expect(page.locator('.sidebar-container')).toHaveCSS(
         'background-color',
-        rgb(tokens[theme].surface),
+        themeColors[theme].surface,
       );
       await expect(
         page.getByRole('main').getByRole('heading', { name: t['shell.emptyTitle'], exact: true }),
@@ -183,7 +193,7 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
     await page.waitForFunction(() => window.__qarau?.pointsLoaded);
     await expect(page.locator('canvas').locator('..')).toHaveCSS(
       'background-color',
-      'rgb(0, 0, 0)',
+      'rgb(19, 19, 19)',
     );
     await page.evaluate(() => document.fonts.ready);
     await page.evaluate(

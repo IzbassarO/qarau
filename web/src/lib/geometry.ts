@@ -1,4 +1,5 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
+import tokens from '../design/tokens.json';
 
 /** Rotation matrix (row-major 3x3) of a COLMAP quaternion [w, x, y, z]. */
 export function quatToMat3([w, x, y, z]: number[]): number[] {
@@ -73,7 +74,7 @@ export function cumulativeAssembled(firstSeen: Uint16Array, nFrames: number): Ui
   return c;
 }
 
-export const RAMP = ['#0E2A5C', '#2E6FD8', '#9CC3FF', '#EAF2FF'] as const;
+export const RAMP = tokens.map['height-ramp'];
 
 /** CPU reference of the shader's height ramp; t in [0, 1] -> [r, g, b] 0..255. */
 export function heightRamp(t: number): [number, number, number] {

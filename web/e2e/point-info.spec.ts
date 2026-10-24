@@ -44,9 +44,12 @@ test('Notre-Dame deep link opens point evidence and thumbnails seek the source f
         import('three').PointsMaterial
       >
     ).material.color.clone();
-    return { black: engine.renderer.getClearColor(color).getHex() === 0, selected: marker.visible };
+    return {
+      mapGround: engine.renderer.getClearColor(color).getHex() === 0x131313,
+      selected: marker.visible,
+    };
   });
-  expect(state).toEqual({ black: true, selected: true });
+  expect(state).toEqual({ mapGround: true, selected: true });
   expect(errors).toEqual([]);
 });
 
