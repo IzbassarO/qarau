@@ -1071,11 +1071,14 @@ tasks:
 
     '
   licence: boto3 (Apache-2.0), Versity S3 Gateway (Apache-2.0), moto (Apache-2.0) if used in tests.
-  status: in_progress
+  status: done
   depends_on:
   - S1
   owner: dev_pipeline
   run: cont-20261023-211635-dev_pipeline-2
+  branch: devteam/D1
+  pr: https://github.com/IzbassarO/qarau/pull/72
+  done_at: '2026-10-24'
 - id: DEF1-api
   area: core
   title: Manual finding with evidence frames
