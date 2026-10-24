@@ -1245,11 +1245,11 @@ tasks:
     both routes; ruff, mypy, pytest pass.
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - DEF1-api
   owner: dev_pipeline
-  run: cont-20261024-035848-dev_pipeline-1
+  run: run-20261024-153339
   branch: devteam/REV1-api
 - id: UI-evidence
   area: app
