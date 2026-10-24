@@ -78,11 +78,11 @@ discovers six upload tests; browser execution remains for Kerege. No server star
 
 ## Screenshot environment compatibility
 
-The orchestrator's screenshot command starts Vite with `QARAU_RUNS_DIR` and no API
-proxy. That middleware implements only the exported run catalog, so missing CRUD
+Vite without an API proxy uses `QARAU_RUNS_DIR` for its read-only run catalog.
+That middleware implements only the exported run catalog, so missing CRUD
 paths return the SPA HTML document. Detect absent routes (HTML or HTTP 404/405/501)
 separately from real network, authentication and server errors. Read the actual
-`/api/runs` catalog only when the inspection route is absent; preserve unknown
+`/api/runs` catalog when the inspection route is absent or the inspection table is empty; preserve unknown
 statuses rather than infer successful processing from a viewer export. Legacy
 selections still open their map through their run id without calling CRUD detail.
 
@@ -93,3 +93,36 @@ with B1 enabled continues to load its real sites and supports the complete uploa
 Actual auth/network/5xx errors still show Retry; its button cannot shrink or wrap.
 Add regressions for the exact HTML fallback, legacy chips, legacy map selection,
 capability versus failure distinctions, and all locale/theme combinations in e2e.
+
+## Tester follow-up: explicit assertions and populated root catalog
+
+Keep every existing assertion. Add separate dialog regressions with literal full
+messages for unsupported_type, too_large, network and server; strengthen the site
+request/selection and cancel assertions. Add compact Sidebar/ProcessingSteps tests
+for an uploaded inspection received from the API.
+
+The current screenshot configuration proxies to a freshly seeded API with an empty
+inspection table. A successful empty `/api/inspections` response currently prevents
+reading existing filesystem exports. When that list is empty, read `/api/runs` as
+well as when CRUD is absent. Reuse the legacy adapter, preserve unknown statuses,
+and do not read sites when there are no inspection/site associations to resolve.
+Auth/network/server failures and malformed responses must remain visible. Empty
+inspection and run catalogs stay empty; never supply artificial product data.
+
+Use a small JSON fixture with the actual read-only API shape (no title/status), a
+Vitest root-shell regression, and six dedicated Playwright root-list scenarios
+(ru/kk/en, light/dark). Preserve the existing absent-route e2e and upload tests.
+Run lint, typecheck, Vitest and build again. Kerege runs browsers/screenshots; no
+server is started here and no new dependency or model is introduced.
+
+Two existing upload retry tests could spend their polling deadline preparing a
+10 MiB file before the retry backoff began. Wait for the mocked chunk failure, then
+advance the fake clock explicitly; keep every original assertion and timeout.
+Also assert that the second-chunk retry sends nothing during the first 499 ms.
+Installed dependency licences were checked again locally: MIT / Apache-2.0.
+
+Follow-up verification: `pnpm lint && pnpm typecheck` and `pnpm test && pnpm build`
+pass (34 files, 673 Vitest tests, including keys/noLiterals). Playwright discovers
+19 catalog/upload scenarios, including six new root-list tests. No existing test
+assertion or timeout was removed or weakened. Browser execution and screenshots
+remain with Kerege; no server was started.

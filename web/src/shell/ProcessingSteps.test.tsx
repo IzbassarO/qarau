@@ -154,3 +154,26 @@ it.each<Lang>(['en', 'ru', 'kk'])(
     expect(screen.queryByRole('listitem')).toBeNull();
   },
 );
+
+it('shows the literal uploaded waiting state from GET /api/inspections/7 with no S1 steps', async () => {
+  const fetch = vi.fn().mockResolvedValue(
+    Response.json({
+      id: 7,
+      site_id: 1,
+      status: 'uploaded',
+      run_id: 'run-7',
+      steps: [],
+    }),
+  );
+  vi.stubGlobal('fetch', fetch);
+  const detail = await getInspection('7');
+  render(
+    <ProcessingSteps steps={processingSteps(detail)} uploaded={detail.status === 'uploaded'} />,
+  );
+  expect(screen.getByRole('status').textContent).toBe('Video uploaded, waiting for processing.');
+  expect(screen.queryByRole('listitem')).toBeNull();
+  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/inspections/7', {
+    signal: undefined,
+    headers: {},
+  });
+});

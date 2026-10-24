@@ -88,12 +88,24 @@ it('sends 10485760 bytes as exactly three chunks and completes with the full-fil
 
 it('resumes the failed second chunk from the server offset, with four PUTs total', async () => {
   vi.useFakeTimers();
+  let chunkFailed!: () => void;
+  const failure = new Promise<void>((resolve) => {
+    chunkFailed = resolve;
+  });
   let attempt = 0;
   const fetch = mockApi((offset, body) => {
-    if (++attempt === 2) throw new TypeError('offline');
+    if (++attempt === 2) {
+      chunkFailed();
+      throw new TypeError('offline');
+    }
     return Response.json({ next_offset: offset + body.size });
   });
   const result = uploadFile(7, video(), { chunkSize: 4_194_304 });
+  await failure;
+  await vi.advanceTimersByTimeAsync(499);
+  expect(puts(fetch)).toHaveLength(2);
+  expect(fetch).toHaveBeenCalledTimes(3);
+  await vi.advanceTimersByTimeAsync(1);
   await vi.waitFor(() => expect(puts(fetch)).toHaveLength(4));
   await expect(result).resolves.toEqual({ runId: 'run-1' });
   expect(
@@ -105,12 +117,21 @@ it('resumes the failed second chunk from the server offset, with four PUTs total
 
 it('uses the returned offset when a failed response hid successfully stored bytes', async () => {
   vi.useFakeTimers();
+  let chunkFailed!: () => void;
+  const failure = new Promise<void>((resolve) => {
+    chunkFailed = resolve;
+  });
   let attempt = 0;
   const fetch = mockApi((offset, body) => {
-    if (++attempt === 1) throw new TypeError('lost response');
+    if (++attempt === 1) {
+      chunkFailed();
+      throw new TypeError('lost response');
+    }
     return Response.json({ next_offset: offset + body.size });
   });
   const result = uploadFile(7, video());
+  await failure;
+  await vi.advanceTimersByTimeAsync(500);
   await vi.waitFor(() => expect(puts(fetch)).toHaveLength(3));
   await result;
   expect(

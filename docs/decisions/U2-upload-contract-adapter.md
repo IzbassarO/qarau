@@ -28,10 +28,11 @@ If completion succeeded but its response was lost, retry confirms the matching r
 uploaded/processing/terminal API state before attempting completion again. Another
 run's completion never counts as confirmation.
 
-The orchestrator serves screenshots with Vite's read-only run catalog, without
-FastAPI. The production client therefore distinguishes missing CRUD capabilities
-from transport/auth/server failures. Only an absent inspection endpoint permits
-reading the legacy run list. Unreported run statuses remain unknown, and a legacy
+Vite's read-only run catalog works without FastAPI, while the current screenshot
+API starts with a freshly seeded database. The client distinguishes missing CRUD capabilities
+from transport/auth/server failures. An absent inspection endpoint or an empty
+inspection table permits reading the legacy run list: a freshly seeded database
+can coexist with earlier filesystem exports. Unreported run statuses remain unknown, and a legacy
 viewer export remains viewable without claiming successful pipeline stages.
 
 Missing site management is an availability state in the dialog, with upload disabled

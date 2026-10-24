@@ -9,6 +9,7 @@ import {
   type RunSummary,
 } from './inspections';
 import catalog from '../test/fixtures/run-catalog.json';
+import legacyCatalog from '../test/fixtures/legacy-export-catalog.json';
 
 afterEach(() => {
   sessionStorage.clear();
@@ -311,4 +312,42 @@ it('keeps real inspection statuses visible when site names are unavailable', asy
     name: '',
     inspections: [{ id: '7', status: 'uploaded' }],
   });
+});
+
+it('lists existing read-only exports when the fresh inspection database is empty', async () => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url === '/api/inspections') return Response.json([]);
+    if (url === '/api/runs') return Response.json(legacyCatalog);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  const sites = await listInspections();
+  expect(sites).toHaveLength(1);
+  expect(sites[0].id).toBe('qarau:unassigned');
+  expect(sites[0].inspections.map(({ id, title, status }) => [id, title, status])).toEqual([
+    ['walkdown-2026-10-23', 'walkdown-2026-10-23', 'unknown'],
+    ['tank-survey-2026-10-22', 'tank-survey-2026-10-22', 'unknown'],
+  ]);
+  expect(sites[0].inspections[0]).toMatchObject({
+    runId: 'walkdown-2026-10-23',
+    source: 'walkdown.mp4',
+    legacyRun: { run_id: 'walkdown-2026-10-23' },
+  });
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections', '/api/runs']);
+});
+
+it('keeps genuinely empty inspection and export catalogs empty', async () => {
+  const fetch = vi.fn().mockImplementation(async () => Response.json([]));
+  vi.stubGlobal('fetch', fetch);
+  expect(await listInspections()).toEqual([]);
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections', '/api/runs']);
+});
+
+it('reports a catalog failure when an empty inspection table needs legacy exports', async () => {
+  const fetch = vi.fn(async (url: string) =>
+    url === '/api/inspections' ? Response.json([]) : new Response('', { status: 503 }),
+  );
+  vi.stubGlobal('fetch', fetch);
+  await expect(listInspections()).rejects.toThrow('503');
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections', '/api/runs']);
 });

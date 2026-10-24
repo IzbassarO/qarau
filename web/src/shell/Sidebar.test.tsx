@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LANGS, setLang, type Lang } from '../i18n';
 import { createDemo } from '../fixtures/demo';
-import { groupRunsIntoSites, type Site } from '../lib/inspections';
+import { groupRunsIntoSites, listInspections, type Site } from '../lib/inspections';
 import { Sidebar } from './Sidebar';
 import { NewInspectionDialog } from './NewInspectionDialog';
 import { AuthProvider } from '../auth/AuthProvider';
@@ -156,4 +156,24 @@ it('shows an unfamiliar API status verbatim with neutral unknown styling', () =>
     'inspection-status-chip unknown',
   );
   expect(within(entry).queryByText('Completed')).toBeNull();
+});
+
+it('lists the uploaded inspection returned by GET /api/inspections', async () => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url === '/api/inspections')
+      return Response.json([
+        { id: 7, site_id: 1, status: 'uploaded', created_at: '2026-10-23T12:00:00Z' },
+      ]);
+    if (url === '/api/sites') return Response.json([{ id: 1, org_id: 1, name: 'North site' }]);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Harness groups={await listInspections()} />);
+  const entry = screen.getByRole('link', { name: /Inspection 7/ });
+  expect(entry.getAttribute('href')).toBe('/inspections/7');
+  expect(within(entry).getByText('Uploaded').className).toBe('inspection-status-chip uploaded');
+  const siteButton = screen.getByRole('button', { name: /North site/ });
+  expect(within(siteButton).getByText('North site').textContent).toBe('North site');
+  expect(within(siteButton).getByText('1').textContent).toBe('1');
+  expect(fetch).toHaveBeenCalledWith('/api/inspections', expect.anything());
 });

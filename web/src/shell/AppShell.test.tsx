@@ -11,6 +11,7 @@ import { AuthProvider } from '../auth/AuthProvider';
 import { RequireAuth } from '../auth/RequireAuth';
 import { authHeader } from '../auth/auth';
 import catalog from '../test/fixtures/run-catalog.json';
+import legacyCatalog from '../test/fixtures/legacy-export-catalog.json';
 
 vi.mock('../viewer/ViewerScreen', () => ({
   ViewerScreen: ({ bundle, embedded }: { bundle: bundleApi.Bundle; embedded: boolean }) => (
@@ -476,6 +477,28 @@ it('opens a legacy exported map using its run id and keeps unreported processing
   expect(screen.getByRole('heading', { name: 'Legacy export' })).toBeTruthy();
   expect(screen.getAllByText('Unknown state')).toHaveLength(4);
   expect(screen.queryByText('Completed')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections', '/api/runs']);
+});
+
+it('populates the home sidebar from /api/runs when the API inspection table is empty', async () => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url === '/api/inspections') return Response.json([]);
+    if (url === '/api/runs') return Response.json(legacyCatalog);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  renderRoute('/');
+  const entry = await screen.findByRole('link', { name: /walkdown-2026-10-23/ });
+  expect(entry.getAttribute('href')).toBe('/inspections/walkdown-2026-10-23');
+  const navigation = within(screen.getByRole('navigation', { name: 'Sites & inspections' }));
+  expect(
+    navigation.getByRole('link', { name: /tank-survey-2026-10-22/ }).getAttribute('href'),
+  ).toBe('/inspections/tank-survey-2026-10-22');
+  expect(navigation.getAllByText('Status unavailable')).toHaveLength(2);
+  expect(navigation.queryByText('Your sites and inspections will appear here.')).toBeNull();
+  expect(navigation.queryByText('Completed')).toBeNull();
+  expect(navigation.getByRole('button', { name: 'New inspection' })).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
   expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections', '/api/runs']);
 });

@@ -27,12 +27,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function chooseVideo() {
+async function chooseVideo(size = 10_485_760) {
   await screen.findByRole('option', { name: 'North site' });
   fireEvent.change(screen.getByLabelText('Site'), { target: { value: '1' } });
   fireEvent.change(screen.getByLabelText(/Choose a video/), {
     target: {
-      files: [new File([new Uint8Array(10_485_760)], 'survey.mp4', { type: 'video/mp4' })],
+      files: [new File([new Uint8Array(size)], 'survey.mp4', { type: 'video/mp4' })],
     },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Upload video' }));
@@ -58,6 +58,11 @@ it('creates the inspection for the selected API site', async () => {
   render(<NewInspectionDialog onClose={() => {}} onUploaded={onUploaded} />);
   await screen.findByRole('option', { name: 'Tank farm' });
   fireEvent.change(screen.getByLabelText('Site'), { target: { value: '2' } });
+  expect((screen.getByLabelText('Site') as HTMLSelectElement).value).toBe('2');
+  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/sites', {
+    signal: expect.any(AbortSignal),
+    headers: {},
+  });
   fireEvent.change(screen.getByLabelText(/Choose a video/), {
     target: { files: [new File(['video'], 'survey.mp4', { type: 'video/mp4' })] },
   });
@@ -126,6 +131,9 @@ it('shows 4.0 MB / 10.0 MB, 40 % and MB/s during upload, then cancels', async ()
   fireEvent.click(screen.getByRole('button', { name: 'Cancel upload' }));
   expect(options?.signal?.aborted).toBe(true);
   expect(screen.getByRole('alert').textContent).toContain('Upload cancelled');
+  expect(screen.getByRole('alert').textContent).toBe(
+    'Upload cancelled. You can continue uploading this video or choose another file.',
+  );
   expect(onClose).not.toHaveBeenCalled();
 });
 
@@ -147,6 +155,59 @@ it.each([
   await chooseVideo();
   expect((await screen.findByRole('alert')).textContent).toBe(expected);
   if (code === 'network') expect(screen.getByRole('button', { name: 'Retry upload' })).toBeTruthy();
+});
+
+it('shows the literal unsupported_type message when creation is rejected with HTTP 415', async () => {
+  vi.mocked(upload.createInspection).mockRejectedValue(
+    new upload.UploadError('unsupported_type', 415),
+  );
+  const onUploaded = vi.fn();
+  render(<NewInspectionDialog onClose={() => {}} onUploaded={onUploaded} />);
+  await chooseVideo(5);
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    'Choose a video file. This file type is not supported.',
+  );
+  expect(upload.uploadFile).not.toHaveBeenCalled();
+  expect(onUploaded).not.toHaveBeenCalled();
+});
+
+it('shows the literal too_large message after an HTTP 413 upload rejection', async () => {
+  vi.mocked(upload.uploadFile).mockRejectedValue(new upload.UploadError('too_large', 413));
+  const onUploaded = vi.fn();
+  render(<NewInspectionDialog onClose={() => {}} onUploaded={onUploaded} />);
+  await chooseVideo(5);
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    'This video is too large. Choose a file up to 10 GB, or below the server’s upload limit.',
+  );
+  expect(screen.getByText('Selected video: survey.mp4')).toBeTruthy();
+  expect(onUploaded).not.toHaveBeenCalled();
+});
+
+it('shows the literal network message and Retry while keeping the selected site and video', async () => {
+  vi.mocked(upload.uploadFile).mockRejectedValue(new upload.UploadError('network'));
+  const onClose = vi.fn();
+  render(<NewInspectionDialog onClose={onClose} />);
+  await chooseVideo(5);
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    'Connection lost. Check your connection, then retry to continue the upload.',
+  );
+  expect(screen.getByRole('button', { name: 'Retry upload' }).textContent).toBe('Retry upload');
+  expect((screen.getByLabelText('Site') as HTMLSelectElement).value).toBe('1');
+  expect(screen.getByText('Selected video: survey.mp4')).toBeTruthy();
+  expect(onClose).not.toHaveBeenCalled();
+});
+
+it('shows the literal server message for HTTP 403 and does not close or select an inspection', async () => {
+  vi.mocked(upload.uploadFile).mockRejectedValue(new upload.UploadError('server', 403));
+  const onClose = vi.fn();
+  const onUploaded = vi.fn();
+  render(<NewInspectionDialog onClose={onClose} onUploaded={onUploaded} />);
+  await chooseVideo(5);
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    'The server could not accept the video. Check your access and try again, or contact your administrator.',
+  );
+  expect(onClose).not.toHaveBeenCalled();
+  expect(onUploaded).not.toHaveBeenCalled();
 });
 
 it('rejects oversized files before creating an inspection', () => {

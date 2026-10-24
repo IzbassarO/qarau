@@ -198,6 +198,17 @@ export function groupInspectionsIntoSites(
   return groups;
 }
 
+async function listLegacyInspections(signal?: AbortSignal): Promise<Site[]> {
+  const runs = await fetchRuns(signal);
+  const groups = groupRunsIntoSites(runs);
+  for (const group of groups)
+    for (const inspection of group.inspections) {
+      inspection.legacyRun = runs.find((run) => run.run_id === inspection.id);
+      inspection.runId = inspection.id;
+    }
+  return groups;
+}
+
 export async function listInspections(signal?: AbortSignal): Promise<Site[]> {
   let payload: unknown;
   try {
@@ -205,17 +216,12 @@ export async function listInspections(signal?: AbortSignal): Promise<Site[]> {
   } catch (error) {
     // Fall back only for an absent route, never for an auth, network or server failure.
     if (!(error instanceof ApiUnavailableError)) throw error;
-    const runs = await fetchRuns(signal);
-    const groups = groupRunsIntoSites(runs);
-    for (const group of groups)
-      for (const inspection of group.inspections) {
-        inspection.legacyRun = runs.find((run) => run.run_id === inspection.id);
-        inspection.runId = inspection.id;
-      }
-    return groups;
+    return listLegacyInspections(signal);
   }
   if (!Array.isArray(payload) || !payload.every(isInspection))
     throw new Error('Invalid inspections response');
+  // A fresh B1 database can coexist with older filesystem exports served by /api/runs.
+  if (payload.length === 0) return listLegacyInspections(signal);
   const [sites, inspections] = await Promise.all([
     listSites(signal).catch((error: unknown) => {
       if (error instanceof ApiUnavailableError) return [];
