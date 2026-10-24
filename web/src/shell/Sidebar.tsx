@@ -99,7 +99,7 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
                       )}
                     </span>
                     <span className={`inspection-status-chip ${inspection.status}`}>
-                      {t(`status.${inspection.status}`)}
+                      {inspection.reportedStatus ?? t(`status.${inspection.status}`)}
                     </span>
                   </NavLink>
                 </li>

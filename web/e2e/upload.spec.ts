@@ -11,7 +11,6 @@ for (const theme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: theme });
       await page.addInitScript((locale) => {
         localStorage.setItem('qarau.lang', locale);
-        sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
       }, lang);
       const inspection = {
         id: 41,
@@ -23,7 +22,12 @@ for (const theme of ['light', 'dark'] as const) {
       const offsets: number[] = [];
       let created = false;
       let uploaded = false;
+      let processing = false;
       let stored = 0;
+      let continueUpload!: () => void;
+      const chunkGate = new Promise<void>((resolve) => {
+        continueUpload = resolve;
+      });
       let finish!: () => void;
       const finishGate = new Promise<void>((resolve) => {
         finish = resolve;
@@ -32,7 +36,8 @@ for (const theme of ['light', 'dark'] as const) {
         const request = route.request();
         const url = new URL(request.url());
         expect(request.headers().authorization).toBe('Bearer test-api-value');
-        if (url.pathname === '/api/auth') return route.fulfill({ json: { role: 'engineer' } });
+        // Sign-in validates the bearer session through the existing read-only runs route.
+        if (url.pathname === '/api/runs') return route.fulfill({ json: [] });
         if (url.pathname === '/api/sites')
           return route.fulfill({ json: [{ id: 3, org_id: 1, name: 'North site' }] });
         if (url.pathname === '/api/inspections') {
@@ -43,7 +48,24 @@ for (const theme of ['light', 'dark'] as const) {
           }
           return route.fulfill({ json: created ? [inspection] : [] });
         }
-        if (url.pathname === '/api/inspections/41') return route.fulfill({ json: inspection });
+        if (url.pathname === '/api/inspections/41')
+          return route.fulfill({
+            json: {
+              ...inspection,
+              status: processing ? 'running' : 'created',
+              run_id: 'run-41',
+              progress: processing ? 50 : 0,
+              current_step: processing ? 'sparse' : null,
+              steps: processing
+                ? [
+                    { name: 'probe', status: 'done', duration_s: 1 },
+                    { name: 'frames', status: 'done', duration_s: 4.2 },
+                    { name: 'sparse', status: 'running' },
+                    { name: 'export', status: 'pending' },
+                  ]
+                : [],
+            },
+          });
         if (url.pathname === '/api/inspections/41/runs')
           return route.fulfill({
             json: [
@@ -57,14 +79,16 @@ for (const theme of ['light', 'dark'] as const) {
             ],
           });
         if (url.pathname === '/api/inspections/41/video') {
-          expect(request.postDataJSON()).toEqual({ name: 'tiny.mp4', size: 307_200 });
+          expect(request.postDataJSON()).toEqual({ name: 'fixture.mp4', size: 5_242_880 });
           return route.fulfill({ status: 201, json: { upload_id: 12, run_id: 'run-41' } });
         }
         if (url.pathname === '/api/inspections/41/video/chunks') {
           expect(url.searchParams.get('upload_id')).toBe('12');
           if (request.method() === 'PUT') {
-            offsets.push(Number(url.searchParams.get('offset')));
+            const offset = Number(url.searchParams.get('offset'));
+            offsets.push(offset);
             expect(request.headers()['content-type']).toBe('application/octet-stream');
+            if (offset === 4_194_304) await chunkGate;
             stored += request.postDataBuffer()!.length;
           }
           return route.fulfill({ json: { next_offset: stored } });
@@ -72,7 +96,7 @@ for (const theme of ['light', 'dark'] as const) {
         if (url.pathname === '/api/inspections/41/video/complete') {
           expect(request.postDataJSON()).toEqual({
             upload_id: 12,
-            sha256: '1aa95500ae5e4a46b5a00c5a36346e2a4b22714fdc7251cb70bbc83a128cba79',
+            sha256: 'e2925fdd17c83c77e9a4f957fd170b2a72b48ac55968943dcf962f2b853c88a9',
           });
           await finishGate;
           uploaded = true;
@@ -80,7 +104,7 @@ for (const theme of ['light', 'dark'] as const) {
             json: {
               run_id: 'run-41',
               file: 'video.mp4',
-              size: 307_200,
+              size: 5_242_880,
               sha256: request.postDataJSON().sha256,
             },
           });
@@ -88,17 +112,27 @@ for (const theme of ['light', 'dark'] as const) {
         throw new Error(`Unexpected upload request: ${request.method()} ${url.pathname}`);
       });
       await page.goto('/?new-inspection');
+      await page.getByLabel(t['auth.username']).fill('test-operator');
+      await page.getByLabel(t['auth.password']).fill('test-api-value');
+      await page.getByRole('button', { name: t['auth.signIn'], exact: true }).click();
       const dialog = page.getByRole('dialog', { name: t['inspection.new'] });
       await expect(dialog).toBeVisible();
       await expect(dialog.getByLabel(t['upload.site'])).toBeVisible();
       await expect(page.getByRole('alert')).toHaveCount(0);
       await dialog.getByLabel(t['upload.site']).selectOption('3');
       await dialog.locator('input[type="file"]').setInputFiles({
-        name: 'tiny.mp4',
+        name: 'fixture.mp4',
         mimeType: 'video/mp4',
-        buffer: Buffer.alloc(307_200, 7),
+        buffer: Buffer.alloc(5_242_880, 7),
       });
       await dialog.getByRole('button', { name: t['upload.start'] }).click();
+      await expect(dialog.getByRole('progressbar')).toHaveAttribute('value', '80');
+      await expect(dialog.getByText('80 %', { exact: true })).toBeVisible();
+      await expect(dialog.getByText(t['upload.sending'])).toBeVisible();
+      await expect(dialog.getByRole('button', { name: t['upload.cancel'] })).toBeVisible();
+      await expect(dialog.getByLabel(t['upload.site'])).toBeDisabled();
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      continueUpload();
       await expect(dialog.getByRole('progressbar')).toHaveAttribute('value', '100');
       await expect(dialog.getByText('100 %', { exact: true })).toBeVisible();
       await expect(dialog.getByText(t['upload.finishing'])).toBeVisible();
@@ -113,11 +147,20 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(entry).toHaveAttribute('aria-current', 'page');
       await expect(page.getByText(t['processing.uploadedWaiting'])).toBeVisible();
       await expect(page.getByRole('alert')).toHaveCount(0);
-      expect(offsets).toEqual([0]);
-      expect(stored).toBe(307_200);
+      expect(offsets).toEqual([0, 4_194_304]);
+      expect(stored).toBe(5_242_880);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
+      processing = true;
+      const steps = page.getByRole('list', { name: t['inspection.processing'] });
+      await expect(steps).toBeVisible();
+      await expect(steps.getByText(t['stage.probe'])).toBeVisible();
+      await expect(steps.getByText(t['stage.reconstruction'])).toBeVisible();
+      await expect(steps.locator('[data-state="done"]')).toHaveCount(2);
+      await expect(steps.locator('[data-state="running"]')).toHaveCount(1);
+      await expect(steps.locator('[data-state="pending"]')).toHaveCount(1);
+      await expect(page.getByRole('alert')).toHaveCount(0);
     });
   }
 }

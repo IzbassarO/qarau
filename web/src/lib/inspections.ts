@@ -16,6 +16,8 @@ export interface InspectionSummary {
   source: string | null;
   createdAt: string | null;
   status: InspectionStatus;
+  /** Preserve a newer server's unfamiliar state verbatim with unknown styling. */
+  reportedStatus?: string;
   runId?: string;
   /** Read-only exported run from a server without inspection CRUD. */
   legacyRun?: RunSummary;
@@ -79,6 +81,9 @@ export function groupRunsIntoSites(runs: readonly RunSummary[]): Site[] {
       createdAt:
         run.created_at && Number.isFinite(Date.parse(run.created_at)) ? run.created_at : null,
       status: inspectionStatus(run.status),
+      ...(run.status && inspectionStatus(run.status) === 'unknown'
+        ? { reportedStatus: run.status }
+        : {}),
     });
   }
   const newestFirst = (a: InspectionSummary, b: InspectionSummary) =>
@@ -140,7 +145,8 @@ async function withRun(
   inspection: InspectionPayload,
   signal?: AbortSignal,
 ): Promise<InspectionDetail> {
-  if (inspection.run_id) return { ...inspection, runId: inspection.run_id };
+  if (inspection.run_id && inspection.status !== 'created')
+    return { ...inspection, runId: inspection.run_id };
   // B1 completes Run.status, leaving Inspection.status at "created". S1 takes precedence.
   if (inspection.status !== 'created' && inspectionStatus(inspection.status) !== 'done')
     return inspection;
@@ -151,12 +157,16 @@ async function withRun(
   )
     throw new Error('Invalid inspection runs response');
   // UUID ordering is not chronology. Until the API identifies the current run, do not guess.
-  const run = runs.length === 1 ? (runs[0] as InspectionRun) : undefined;
+  const run: InspectionRun | undefined = inspection.run_id
+    ? runs.find((run: InspectionRun) => run.id === inspection.run_id)
+    : runs.length === 1
+      ? runs[0]
+      : undefined;
   return {
     ...inspection,
     status:
       inspection.status === 'created' ? (run?.status ?? inspection.status) : inspection.status,
-    runId: run?.id,
+    runId: inspection.run_id ?? run?.id,
   };
 }
 

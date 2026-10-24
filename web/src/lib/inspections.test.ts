@@ -159,6 +159,52 @@ it('does not guess the current run from UUID ordering when B1 has multiple runs'
   expect(await getInspection('7')).toMatchObject({ status: 'created', runId: undefined });
 });
 
+it('resolves the S1 latest run id while B1 still reports inspection status created', async () => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url === '/api/inspections/7')
+      return Response.json({
+        id: 7,
+        site_id: 1,
+        status: 'created',
+        run_id: 'a-latest',
+        steps: [],
+      });
+    if (url === '/api/inspections/7/runs')
+      return Response.json([
+        { id: 'a-latest', status: 'uploaded' },
+        { id: 'z-older', status: 'done' },
+      ]);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  expect(await getInspection('7')).toMatchObject({
+    status: 'uploaded',
+    runId: 'a-latest',
+    steps: [],
+  });
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+    '/api/inspections/7',
+    '/api/inspections/7/runs',
+  ]);
+});
+
+it('retains an unfamiliar status from the inspection API as display text', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) =>
+      Response.json(
+        url === '/api/sites'
+          ? [{ id: 1, org_id: 1, name: 'North site' }]
+          : [{ id: 7, site_id: 1, status: 'awaiting_review' }],
+      ),
+    ),
+  );
+  expect((await listInspections())[0].inspections[0]).toMatchObject({
+    status: 'unknown',
+    reportedStatus: 'awaiting_review',
+  });
+});
+
 it('reads inspection detail and stage fields from its own endpoint with auth', async () => {
   sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
   const fetch = vi.fn().mockResolvedValue(

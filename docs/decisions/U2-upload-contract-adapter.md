@@ -16,7 +16,7 @@ This cap can be replaced by server-advertised capabilities when available.
 
 B1 completes a Run while its Inspection remains `created`. For that legacy state only,
 read the inspection's runs and show its sole run's status from the API. S1 inspection
-statuses take precedence, including unfamiliar values, which stay visibly unknown.
+statuses take precedence, including unfamiliar values, shown verbatim with neutral unknown styling.
 The same run association locates the existing viewer bundle. Never show an uploaded
 video as processed or request a viewer bundle before processing is done.
 

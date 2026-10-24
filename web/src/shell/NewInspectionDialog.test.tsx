@@ -53,6 +53,22 @@ it('loads the site selector from GET /api/sites and requires a site and video', 
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
+it('creates the inspection for the selected API site', async () => {
+  const onUploaded = vi.fn();
+  render(<NewInspectionDialog onClose={() => {}} onUploaded={onUploaded} />);
+  await screen.findByRole('option', { name: 'Tank farm' });
+  fireEvent.change(screen.getByLabelText('Site'), { target: { value: '2' } });
+  fireEvent.change(screen.getByLabelText(/Choose a video/), {
+    target: { files: [new File(['video'], 'survey.mp4', { type: 'video/mp4' })] },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Upload video' }));
+  await waitFor(() => expect(onUploaded).toHaveBeenCalledWith(7));
+  expect(upload.createInspection).toHaveBeenCalledExactlyOnceWith(
+    { siteId: 2, filename: 'survey.mp4', size: 5, contentType: 'video/mp4' },
+    expect.any(AbortSignal),
+  );
+});
+
 it('rejects a non-video file with a visible translated message', () => {
   render(<NewInspectionDialog onClose={() => {}} />);
   fireEvent.change(screen.getByLabelText(/Choose a video/), {

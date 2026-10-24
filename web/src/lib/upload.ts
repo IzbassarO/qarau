@@ -235,7 +235,8 @@ export async function uploadFile(
     } catch (error) {
       checkAbort(signal);
       const retryable =
-        error instanceof UploadError && (error.code === 'network' || (error.status ?? 0) >= 500);
+        error instanceof UploadError &&
+        (error.code === 'network' || error.status === 409 || (error.status ?? 0) >= 500);
       if (!retryable || ++failures >= 3) throw error;
       await backoff(500 * 2 ** (failures - 1), signal);
       reconcile = true;

@@ -130,6 +130,7 @@
   "demo.inspectionTitle": "Tank farm survey",
   "demo.notice": "Example inspection with a sample map, images and processing steps. These are not inspection results.",
   "stage.ingest": "Video import",
+  "stage.probe": "Video check",
   "stage.frames": "Frame extraction & quality",
   "stage.reconstruction": "3D reconstruction",
   "stage.segmentation": "Defect segmentation",

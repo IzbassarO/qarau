@@ -93,7 +93,8 @@ it('refetches the inspection list, removes the dialog query and selects the uplo
     vi.fn(async (url: string) => {
       if (url === '/api/sites') return Response.json([{ id: 1, org_id: 1, name: 'North site' }]);
       if (url === '/api/inspections') return Response.json(uploaded ? [inspection] : []);
-      if (url === '/api/inspections/7') return Response.json(inspection);
+      if (url === '/api/inspections/7')
+        return Response.json({ ...inspection, run_id: 'run-7', steps: [] });
       if (url === '/api/inspections/7/runs')
         return Response.json([{ id: 'run-7', status: 'uploaded' }]);
       throw new Error(`Unexpected request: ${url}`);
@@ -250,6 +251,43 @@ it('keeps demo data out of real inspection routes', async () => {
   renderRoute('/inspections/not-a-run');
   expect(await screen.findByRole('heading', { name: 'Inspection not found' })).toBeTruthy();
   expect(screen.queryByText('Tank farm survey')).toBeNull();
+});
+
+it('shows S1 steps from inspection detail and keeps unfamiliar inspection statuses visible', async () => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url === '/api/sites') return Response.json([{ id: 1, org_id: 1, name: 'North site' }]);
+    const inspection = { id: 7, site_id: 1, status: 'awaiting_review' };
+    if (url === '/api/inspections') return Response.json([inspection]);
+    if (url === '/api/inspections/7')
+      return Response.json({
+        ...inspection,
+        run_id: 'run-7',
+        steps: [
+          { name: 'probe', status: 'done', duration_s: 1 },
+          { name: 'frames', status: 'done', duration_s: 4.2 },
+          { name: 'sparse', status: 'running' },
+          { name: 'export', status: 'pending' },
+        ],
+      });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  const manifest = vi.spyOn(bundleApi, 'loadManifest');
+  renderRoute('/inspections/7');
+  await screen.findByText('Video check');
+  const steps = await screen.findByRole('list', { name: 'Processing steps' });
+  expect(
+    within(steps)
+      .getAllByRole('listitem')
+      .map((row) => row.getAttribute('data-state')),
+  ).toEqual(['done', 'done', 'running', 'pending']);
+  expect(within(steps).getByText('Video check')).toBeTruthy();
+  expect(within(steps).getByText('3D reconstruction')).toBeTruthy();
+  expect(screen.getAllByText('awaiting_review')).toHaveLength(2);
+  expect(screen.queryByText('Completed')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(manifest).not.toHaveBeenCalled();
+  expect(fetch).toHaveBeenCalledWith('/api/inspections/7', expect.anything());
 });
 
 it('reports a backend authentication failure for a previously stored session', async () => {

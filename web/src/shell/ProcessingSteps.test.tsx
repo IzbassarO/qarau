@@ -114,17 +114,18 @@ it('shows a localized empty state', () => {
   expect(screen.getByText(LANGS.en['inspection.noStages'])).toBeTruthy();
 });
 
-it('renders the stage fixture returned by GET /api/inspections/{id}', async () => {
+it('renders the S1 step fixture returned by GET /api/inspections/{id}', async () => {
   const fetch = vi.fn().mockResolvedValue(
     Response.json({
       id: 7,
       site_id: 1,
       mode: 'quick_scan',
       status: 'running',
-      stages: [
-        { name: 'ingest', status: 'done', duration_s: 1 },
+      run_id: 'run-7',
+      steps: [
+        { name: 'probe', status: 'done', duration_s: 1 },
         { name: 'frames', status: 'done', duration_s: 4.2 },
-        { name: 'reconstruction', status: 'running' },
+        { name: 'sparse', status: 'running' },
         { name: 'export', status: 'pending' },
       ],
     }),
@@ -138,6 +139,9 @@ it('renders the stage fixture returned by GET /api/inspections/{id}', async () =
     'pending',
   ]);
   expect(screen.getByText('4.2 s')).toBeTruthy();
+  expect(screen.getByText('Video check')).toBeTruthy();
+  expect(screen.getByText('3D reconstruction')).toBeTruthy();
+  expect(screen.queryByText('Unknown stage')).toBeNull();
   expect(fetch).toHaveBeenCalledWith('/api/inspections/7', expect.anything());
 });
 

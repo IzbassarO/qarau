@@ -20,7 +20,7 @@
 
 ## Transfer and UI
 
-Use sequential 4 MiB chunks. A failed chunk (network or 5xx) gets at most three attempts
+Use sequential 4 MiB chunks. A failed chunk (network, 409 or 5xx) gets at most three attempts
 in total, with 500/1000 ms abortable backoff and an offset GET before each retry. Network
 exhaustion is `network`; persistent HTTP errors are `server`. Manual retry keeps the
 inspection and upload session and queries the offset again. Cancel/close/unmount abort
@@ -31,13 +31,13 @@ If a completion response is lost, manual retry checks the matching run's API sta
 before repeating B1's non-idempotent completion call.
 
 The list uses `GET /api/inspections` and site names. Detail uses
-`GET /api/inspections/{id}` and the existing stage parser. Until S1 supplies statuses,
+`GET /api/inspections/{id}` and the step parser with legacy stage support. Until S1 supplies statuses,
 B1's inspection stays `created`; read `GET /api/inspections/{id}/runs` to display its
 sole run's API status and locate a completed viewer bundle. Multiple runs without a
 current-run identifier stay unknown: UUID ordering does not identify the newest run.
 No inferred processing success. Statuses: uploaded, queued, running, done, failed;
 legacy completed maps to done,
-everything unfamiliar stays visibly unknown. Poll active inspections. No stages after
+everything unfamiliar is shown verbatim with neutral unknown styling. Poll active inspections. No steps after
 upload means “uploaded, waiting for processing”. Refetch and select the inspection after
 successful completion. `/?new-inspection` opens the dialog.
 
@@ -55,6 +55,26 @@ cancellation at each boundary, typed errors, dialog states, status chips and API
 Playwright: in-memory video against route mocks, progress to 100%, new uploaded sidebar
 entry; locale/theme coverage without screenshots. Run pnpm lint, typecheck, test and build.
 Kerege runs Playwright outside this sandbox; start no servers here.
+
+## Contract audit after the S1 merge
+
+Build on rounds 1–3. The current backend detail returns `steps`, including `probe`
+and `sparse`, rather than the legacy `stages` field. Parse the exact step list and
+preserve its names/order; keep legacy stage/timing support for exported runs.
+An S1 detail can have `run_id` while inspection status is still `created` after B1
+completion. Resolve that matching run's status instead of bypassing the B1 adapter.
+Keep unfamiliar inspection status text visible in the list and detail, with neutral
+unknown styling. Reconcile B1 chunk 409 offset conflicts through the offset GET,
+using the same bounded retry policy. Add regressions with the actual API shape,
+in-flight cancellation and offset conflicts. Update e2e to pause halfway through
+transfer in all six locale/theme combinations and verify S1 detail steps after upload.
+Verify installed package licences from local package metadata (MIT / Apache-2.0);
+no additional library or model is needed. Run lint, typecheck, Vitest and build;
+Kerege owns browser execution and tester screenshots.
+
+Audit verification: `pnpm lint && pnpm typecheck` and `pnpm test && pnpm build` pass
+(34 Vitest files, 663 tests, including i18n keys and design literal checks). Playwright
+discovers six upload tests; browser execution remains for Kerege. No server started.
 
 ## Screenshot environment compatibility
 

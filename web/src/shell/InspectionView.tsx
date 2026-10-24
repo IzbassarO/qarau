@@ -31,6 +31,7 @@ export function InspectionView({
   });
   const currentDetail = demoBundle || inspection.legacyRun ? undefined : detail.data;
   const status = inspectionStatus(currentDetail?.status ?? inspection.status);
+  const reportedStatus = currentDetail?.status ?? inspection.reportedStatus;
   const runId = currentDetail?.runId ?? inspection.runId;
   const query = useQuery({
     queryKey: ['inspection-bundle', runId],
@@ -50,7 +51,7 @@ export function InspectionView({
   const bundle = demoBundle ?? query.data;
   const source = inspection.source ?? bundle?.manifest.source.name;
   const steps = processingSteps(
-    demoBundle ? run : (inspection.legacyRun ?? currentDetail),
+    demoBundle ? run : (inspection.legacyRun ?? currentDetail ?? { status: inspection.status }),
     bundle?.manifest,
   );
   const demoTitle = demoBundle
@@ -80,7 +81,7 @@ export function InspectionView({
             {!demoBundle && source && <span className="inspection-source">{source}</span>}
             <span className={`status-label ${status}`}>
               <span className={`status-dot ${status}`} aria-hidden="true" />
-              {t(`status.${status}`)}
+              {status === 'unknown' && reportedStatus ? reportedStatus : t(`status.${status}`)}
             </span>
           </p>
         </div>

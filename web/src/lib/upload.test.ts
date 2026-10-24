@@ -1,12 +1,6 @@
 import { File as NodeFile } from 'node:buffer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  createInspection,
-  MAX_VIDEO_BYTES,
-  uploadFile,
-  type UploadSession,
-  type UploadProgress,
-} from './upload';
+import { createInspection, uploadFile, type UploadSession, type UploadProgress } from './upload';
 
 const video = (size = 10_485_760) =>
   new NodeFile([new Uint8Array(size)], 'survey.mp4', { type: 'video/mp4' }) as unknown as File;
@@ -124,6 +118,24 @@ it('uses the returned offset when a failed response hid successfully stored byte
   ).toEqual(['0', '4194304', '8388608']);
 });
 
+it('reconciles a B1 409 offset conflict and resumes from the exact server offset', async () => {
+  vi.useFakeTimers();
+  const fetch = mockApi();
+  fetch
+    .mockResolvedValueOnce(Response.json({ upload_id: 9, run_id: 'run-1' }))
+    .mockResolvedValueOnce(new Response(null, { status: 409 }))
+    .mockResolvedValueOnce(Response.json({ next_offset: 2 }));
+  const result = uploadFile(7, video(10), { chunkSize: 4 }).catch((error) => error);
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(6));
+  expect(await result).toEqual({ runId: 'run-1' });
+  expect(
+    puts(fetch).map(([url]) => new URL(url, 'http://localhost').searchParams.get('offset')),
+  ).toEqual(['0', '2', '6']);
+  expect(puts(fetch).map(([, init]) => (init.body as Blob).size)).toEqual([4, 4, 4]);
+  expect(fetch.mock.calls[2][0]).toBe('/api/inspections/7/video/chunks?upload_id=9');
+  expect(fetch.mock.calls[2][1]?.method).toBeUndefined();
+});
+
 it('reports progress [40, 80, 100] and speed from an injected moving-window clock', async () => {
   vi.useFakeTimers();
   vi.setSystemTime(0);
@@ -162,6 +174,27 @@ it('does not start a request for an already cancelled upload', async () => {
     code: 'cancelled',
   });
   expect(fetch).not.toHaveBeenCalled();
+});
+
+it('aborts an in-flight PUT and sends no subsequent PUT or completion', async () => {
+  const fetch = mockApi(
+    () =>
+      new Promise((_resolve, reject) =>
+        controller.signal.addEventListener('abort', () =>
+          reject(new DOMException('Aborted', 'AbortError')),
+        ),
+      ),
+  );
+  const controller = new AbortController();
+  const result = uploadFile(7, video(10), { chunkSize: 4, signal: controller.signal }).catch(
+    (error) => error,
+  );
+  await vi.waitFor(() => expect(puts(fetch)).toHaveLength(1));
+  expect(puts(fetch)[0][1]?.signal).toBe(controller.signal);
+  controller.abort();
+  expect(await result).toMatchObject({ code: 'cancelled' });
+  expect(puts(fetch)).toHaveLength(1);
+  expect(fetch).toHaveBeenCalledTimes(2);
 });
 
 it('cancels during retry backoff without an offset query or another PUT', async () => {
@@ -209,29 +242,28 @@ describe('typed upload errors', () => {
     expect(puts(fetch)).toHaveLength(1);
   });
 
-  it.each(['network', 'server'] as const)(
-    'stops after three failed chunk attempts with %s',
-    async (code) => {
-      vi.useFakeTimers();
-      const fetch = mockApi(() => {
-        if (code === 'network') throw new TypeError('offline');
-        return new Response(null, { status: 500 });
-      });
-      const result = uploadFile(7, video(), { chunkSize: 4_194_304 }).catch((error) => error);
-      await vi.waitFor(() => expect(puts(fetch)).toHaveLength(3), { timeout: 4000 });
-      expect(await result).toMatchObject({ code });
-      expect(
-        fetch.mock.calls.filter(
-          ([url, init]) => url.includes('/chunks?') && init?.method !== 'PUT',
-        ),
-      ).toHaveLength(2);
-      expect(fetch.mock.calls.some(([url]) => url.endsWith('/complete'))).toBe(false);
-    },
-  );
+  it.each([
+    ['network', 0],
+    ['server', 500],
+    ['server', 409],
+  ] as const)('stops after three failed chunk attempts with %s (HTTP %i)', async (code, status) => {
+    vi.useFakeTimers();
+    const fetch = mockApi(() => {
+      if (code === 'network') throw new TypeError('offline');
+      return new Response(null, { status });
+    });
+    const result = uploadFile(7, video(), { chunkSize: 4_194_304 }).catch((error) => error);
+    await vi.waitFor(() => expect(puts(fetch)).toHaveLength(3), { timeout: 4000 });
+    expect(await result).toMatchObject({ code });
+    expect(
+      fetch.mock.calls.filter(([url, init]) => url.includes('/chunks?') && init?.method !== 'PUT'),
+    ).toHaveLength(2);
+    expect(fetch.mock.calls.some(([url]) => url.endsWith('/complete'))).toBe(false);
+  });
 
   it('rejects a file above 10 GiB and unsupported types before any fetch', async () => {
     const fetch = mockApi();
-    const tooLarge = { size: MAX_VIDEO_BYTES + 1, type: 'video/mp4' } as File;
+    const tooLarge = { size: 10_737_418_241, type: 'video/mp4' } as File;
     await expect(uploadFile(7, tooLarge)).rejects.toMatchObject({ code: 'too_large' });
     await expect(
       createInspection({

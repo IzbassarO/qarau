@@ -148,3 +148,12 @@ it('renders visible uploaded and failed status chips', () => {
     'inspection-status-chip failed',
   );
 });
+
+it('shows an unfamiliar API status verbatim with neutral unknown styling', () => {
+  render(<Harness groups={groupRunsIntoSites([{ run_id: '7', status: 'awaiting_review' }])} />);
+  const entry = screen.getByRole('link', { name: /Inspection 7/ });
+  expect(within(entry).getByText('awaiting_review').className).toBe(
+    'inspection-status-chip unknown',
+  );
+  expect(within(entry).queryByText('Completed')).toBeNull();
+});
