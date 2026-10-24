@@ -1245,12 +1245,14 @@ tasks:
     both routes; ruff, mypy, pytest pass.
 
     '
-  status: in_progress
+  status: done
   depends_on:
   - DEF1-api
   owner: dev_pipeline
   run: run-20261024-153339
   branch: devteam/REV1-api
+  pr: https://github.com/IzbassarO/qarau/pull/76
+  done_at: '2026-10-24'
 - id: UI-evidence
   area: app
   title: Evidence panel with decisions

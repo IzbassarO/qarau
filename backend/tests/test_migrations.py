@@ -119,6 +119,48 @@ def seed_one_decision_and_audit_row(db_url: str) -> None:
         db.commit()
 
 
+DECISION_COLUMNS_0003 = ["comment", "created_at", "finding_id", "id", "user_id", "verdict"]
+DECISION_COLUMNS_0004 = sorted([*DECISION_COLUMNS_0003, "new_class", "new_severity"])
+
+
+def test_v0004_adds_reclass_columns_and_keeps_the_append_only_trigger(db_url: str) -> None:
+    """0004 adds `new_class` / `new_severity` to `decision` with plain ADD COLUMN; the 0001
+    trigger survives the upgrade and the downgrade (batch mode would have recreated the table)."""
+    from conftest import alembic_config
+
+    from alembic import command
+
+    engine = engine_for(db_url)
+    cols = {c["name"]: c for c in inspect(engine).get_columns("decision")}
+    assert sorted(cols) == DECISION_COLUMNS_0004
+    assert cols["new_class"]["nullable"] and cols["new_severity"]["nullable"]
+    seed_one_decision_and_audit_row(db_url)
+    with pytest.raises(DBAPIError, match="append-only"), engine.begin() as conn:
+        conn.execute(text("UPDATE decision SET new_class = 'crack'"))
+
+    command.downgrade(alembic_config(db_url), "0003")
+    assert (
+        sorted(c["name"] for c in inspect(engine).get_columns("decision")) == DECISION_COLUMNS_0003
+    )
+    with pytest.raises(DBAPIError, match="append-only"), engine.begin() as conn:
+        conn.execute(text("DELETE FROM decision"))
+
+    command.upgrade(alembic_config(db_url), "head")
+    assert (
+        sorted(c["name"] for c in inspect(engine).get_columns("decision")) == DECISION_COLUMNS_0004
+    )
+    with Session(engine) as db:
+        d = db.query(Decision).one()  # the 0003 row survived with null new_* columns
+        assert (d.verdict, d.comment, d.new_class, d.new_severity) == (
+            Verdict.confirm,
+            None,
+            None,
+            None,
+        )
+    with pytest.raises(DBAPIError, match="append-only"), engine.begin() as conn:
+        conn.execute(text("UPDATE decision SET comment = 'edited'"))
+
+
 @pytest.mark.parametrize("sql", FORBIDDEN_SQL)
 def test_decision_and_audit_log_are_append_only(db_url: str, sql: str) -> None:
     seed_one_decision_and_audit_row(db_url)

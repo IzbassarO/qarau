@@ -14,6 +14,7 @@ NEW_PATHS = [
     "/api/inspections/{inspection_id}/video/complete",
     "/api/inspections/{inspection_id}/findings",
     "/api/findings/{finding_id}",
+    "/api/findings/{finding_id}/decisions",
     "/api/users",
     "/api/audit-log",
     "/api/audit-log/{entry_id}",
@@ -32,6 +33,7 @@ EXPECTED_OPERATIONS = {
     "/api/inspections/{inspection_id}/video/complete": {"post"},
     "/api/inspections/{inspection_id}/findings": {"get", "post"},
     "/api/findings/{finding_id}": {"get"},
+    "/api/findings/{finding_id}/decisions": {"get", "post"},
     "/api/users": {"get", "post"},
     "/api/audit-log": {"get"},
     "/api/audit-log/{entry_id}": {"put", "patch", "delete"},
@@ -56,3 +58,16 @@ def test_openapi_lists_every_new_route_with_a_role() -> None:
     assert set(step) == {"name", "status", "started_at", "finished_at", "duration_s", "error"}
     insp = spec["components"]["schemas"]["InspectionStatus"]["properties"]
     assert {"status", "run_id", "progress", "current_step", "error", "steps"} <= set(insp)
+
+
+def test_openapi_decision_operations_declare_their_roles() -> None:
+    spec = TestClient(app).get("/openapi.json").json()
+    ops = spec["paths"]["/api/findings/{finding_id}/decisions"]
+    assert ops["post"]["description"].startswith("Role: engineer.")
+    assert ops["get"]["description"].startswith("Role: viewer.")
+    assert "201" in ops["post"]["responses"]
+    body = spec["components"]["schemas"]["DecisionIn"]["properties"]
+    assert set(body) == {"verdict", "comment", "new_class", "new_severity"}
+    out = spec["components"]["schemas"]["DecisionOut"]["properties"]
+    assert {"user", "verdict", "comment", "new_class", "new_severity", "created_at"} <= set(out)
+    assert spec["components"]["schemas"]["Verdict"]["enum"] == ["confirm", "reject", "reclass"]

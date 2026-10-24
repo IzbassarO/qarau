@@ -305,6 +305,28 @@ status, area and scale, point indices with xyz, and the evidence frames with out
 `image_url` (`/api/runs/<run>/files/frames/…`). `python -m qarau_pipeline finding-evidence --run R
 --polygon JSON --out O` renders the same frames with the outline drawn (OpenCV) for a visual check.
 
+**Decision log (`backend/app/decisions.py`, ADR 0025).** An engineer's verdict on a finding is
+a row in `decision`, and only ever a new row. `POST /api/findings/{id}/decisions` (engineer, 201):
+`verdict` `confirm` | `reject` | `reclass`; `comment` (required for reject and reclass); `new_class`
+and/or `new_severity`, carried by `reclass` only (at least one of them). The user comes from the
+bearer token and `created_at` from the server; the body cannot set them. Every POST inserts exactly
+one `decision` row and one `audit_log` row (action `finding.decision`, the user, the route with
+the finding id, `object_id` = the decision id) in the same transaction, with no dedup: the same body twice is two rows. 404 for an unknown finding, 422 for an
+inconsistent body. `GET /api/findings/{id}/decisions` (viewer) returns the whole history oldest
+first (`created_at`, then id): user name, verdict, comment, new class / severity, time. There is
+no PUT, PATCH or DELETE route (405), and the database refuses UPDATE and DELETE on `decision`
+through the trigger of migration 0001 (Postgres `qarau_append_only()`, SQLite `RAISE(ABORT)`), so
+a bug or a direct SQL session cannot edit the log either. Migration 0004 adds the two `reclass`
+columns with plain `ADD COLUMN`, never batch mode, so the trigger survives.
+
+*Derived status.* The `finding` row keeps the values as proposed (`status = proposed`, the class
+and severity given at marking). Every finding response (`GET /api/findings/{id}`, the inspection
+list) computes `status`, `class` and `severity` by replaying the finding's decisions oldest first
+(`derive_finding_state`): the status is that of the latest decision, `reject` → `rejected`,
+`confirm` or `reclass` → `confirmed`; a `reclass` sets the class and/or severity it carries and a
+field it does not carry keeps its previous value; later decisions keep the reclassified values.
+No decision → the proposed values. Nothing is written back to `finding` or to an earlier decision.
+
 ## Benchmark
 
 `python -m qarau_pipeline benchmark --data D --out O` runs every reference video in

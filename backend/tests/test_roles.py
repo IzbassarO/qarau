@@ -36,6 +36,7 @@ WRITE_ROUTES = [
     ),
     ("POST", "/api/inspections/1/runs", {}, "engineer"),
     ("POST", "/api/inspections/1/runs/r1/steps/sparse/rerun", None, "engineer"),
+    ("POST", "/api/findings/1/decisions", {"verdict": "confirm"}, "engineer"),
 ]
 READ_ROUTES = [
     ("GET", "/api/organizations", "viewer"),
@@ -46,6 +47,7 @@ READ_ROUTES = [
     ("GET", "/api/inspections/1/video/chunks?upload_id=1", "viewer"),
     ("GET", "/api/inspections/1/findings", "viewer"),
     ("GET", "/api/findings/1", "viewer"),
+    ("GET", "/api/findings/1/decisions", "viewer"),
     ("GET", "/api/users", "admin"),
     ("GET", "/api/audit-log", "admin"),
 ]
