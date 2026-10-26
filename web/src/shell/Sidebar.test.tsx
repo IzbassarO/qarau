@@ -52,7 +52,9 @@ describe('Sidebar', () => {
     expect(within(footerLink).queryByText('Example', { exact: true })).toBeNull();
     expect(footerLink.querySelector('.demo-badge')).toBeNull();
     const demoEntry = screen.getByRole('link', { name: /Tank farm survey/ });
-    expect(within(demoEntry).getByText('Example', { exact: true }).className).toBe('demo-badge');
+    expect(within(demoEntry).getByText('Example', { exact: true }).className).toBe(
+      'qv-caption demo-badge',
+    );
   });
 
   it.each<Lang>(['en', 'ru', 'kk'])(
@@ -72,6 +74,14 @@ describe('Sidebar', () => {
       ]);
       render(<Harness groups={groups} />);
       const links = screen.getAllByRole('link', { name: new RegExp(title) });
+      expect(screen.getByRole('navigation').className).toBe('qv-side shell-sidebar');
+      expect(screen.getByRole('button', { name: LANGS[lang]['inspection.new'] }).className).toBe(
+        'qv-btn qv-btn--block new-inspection',
+      );
+      expect(links[0].closest('ul')?.className).toBe('qv-nav');
+      expect(screen.getByRole('link', { name: LANGS[lang]['shell.home'] }).className).toBe(
+        'qv-side__org sidebar-brand',
+      );
       expect(links.map((link) => link.getAttribute('href'))).toEqual([
         '/inspections/newest',
         '/inspections/middle',
@@ -105,6 +115,8 @@ describe('Sidebar', () => {
     fireEvent.click(inspection);
     expect(inspection.getAttribute('aria-current')).toBe('page');
     expect(inspection.classList.contains('active')).toBe(true);
+    expect(inspection.className).toBe('inspection-link active');
+    expect(inspection.closest('ul')?.className).toBe('qv-nav');
     const next = screen.getByRole('link', { name: /South survey/ });
     fireEvent.click(next);
     expect(next.getAttribute('aria-current')).toBe('page');
@@ -143,9 +155,9 @@ it('renders visible uploaded and failed status chips', () => {
   );
   expect(
     within(screen.getByRole('link', { name: /uploaded-1/ })).getByText('Uploaded').className,
-  ).toBe('inspection-status-chip uploaded');
+  ).toBe('qv-status qv-status--muted qv-caption inspection-status-chip uploaded');
   expect(within(screen.getByRole('link', { name: /failed-1/ })).getByText('Failed').className).toBe(
-    'inspection-status-chip failed',
+    'qv-status qv-status--muted qv-caption inspection-status-chip failed',
   );
 });
 
@@ -153,7 +165,7 @@ it('shows an unfamiliar API status verbatim with neutral unknown styling', () =>
   render(<Harness groups={groupRunsIntoSites([{ run_id: '7', status: 'awaiting_review' }])} />);
   const entry = screen.getByRole('link', { name: /Inspection 7/ });
   expect(within(entry).getByText('awaiting_review').className).toBe(
-    'inspection-status-chip unknown',
+    'qv-status qv-status--muted qv-caption inspection-status-chip unknown',
   );
   expect(within(entry).queryByText('Completed')).toBeNull();
 });
@@ -171,7 +183,9 @@ it('lists the uploaded inspection returned by GET /api/inspections', async () =>
   render(<Harness groups={await listInspections()} />);
   const entry = screen.getByRole('link', { name: /Inspection 7/ });
   expect(entry.getAttribute('href')).toBe('/inspections/7');
-  expect(within(entry).getByText('Uploaded').className).toBe('inspection-status-chip uploaded');
+  expect(within(entry).getByText('Uploaded').className).toBe(
+    'qv-status qv-status--muted qv-caption inspection-status-chip uploaded',
+  );
   const siteButton = screen.getByRole('button', { name: /North site/ });
   expect(within(siteButton).getByText('North site').textContent).toBe('North site');
   expect(within(siteButton).getByText('1').textContent).toBe('1');

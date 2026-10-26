@@ -35,28 +35,35 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
   };
 
   return (
-    <nav className="shell-sidebar" aria-label={t('shell.sites')}>
-      <Link to="/" className="sidebar-brand" aria-label={t('shell.home')} onClick={onNavigate}>
+    <nav className="qv-side shell-sidebar" aria-label={t('shell.sites')}>
+      <Link
+        to="/"
+        className="qv-side__org sidebar-brand"
+        aria-label={t('shell.home')}
+        onClick={onNavigate}
+      >
         <Wordmark />
       </Link>
-      <button className="shell-button primary new-inspection" onClick={onNewInspection}>
+      <button className="qv-btn qv-btn--block new-inspection" onClick={onNewInspection}>
         <span aria-hidden="true">+</span> {t('inspection.new')}
       </button>
       <div className="sidebar-heading">
-        <h2>{t('shell.sites')}</h2>
-        {demo && <span className="demo-badge">{t('shell.demo')}</span>}
+        <h2 className="qv-label">{t('shell.sites')}</h2>
+        {demo && <span className="qv-caption demo-badge">{t('shell.demo')}</span>}
       </div>
       <div className="sidebar-groups">
         {loading && (
-          <p role="status" className="sidebar-note">
+          <p role="status" className="qv-caption sidebar-note">
             {t('shell.loading')}
           </p>
         )}
-        {!loading && sites.length === 0 && <p className="sidebar-note">{t('shell.noSites')}</p>}
+        {!loading && sites.length === 0 && (
+          <p className="qv-caption sidebar-note">{t('shell.noSites')}</p>
+        )}
         {sites.map((site, index) => (
           <section className="site-group" key={site.id}>
             <button
-              className="site-toggle"
+              className="qv-btn qv-btn--quiet site-toggle"
               onClick={() => toggle(site.id)}
               aria-expanded={!collapsed.has(site.id)}
               aria-controls={`site-inspections-${index}`}
@@ -69,9 +76,9 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
                   ? t('site.unassigned')
                   : site.name || t('site.unnamed')}
               </span>
-              <span className="site-count">{site.inspections.length}</span>
+              <span className="qv-caption site-count">{site.inspections.length}</span>
             </button>
-            <ul id={`site-inspections-${index}`} hidden={collapsed.has(site.id)}>
+            <ul className="qv-nav" id={`site-inspections-${index}`} hidden={collapsed.has(site.id)}>
               {site.inspections.map((inspection) => (
                 <li key={inspection.id}>
                   <NavLink
@@ -80,7 +87,6 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
                     onClick={onNavigate}
                     title={inspection.source ?? inspection.title}
                   >
-                    <span className={`status-dot ${inspection.status}`} aria-hidden="true" />
                     <span className="inspection-link-title">
                       <span className="inspection-link-label">
                         <span className="inspection-link-name" title={inspection.title}>
@@ -89,16 +95,21 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
                             : inspection.title}
                         </span>
                         {demo && inspection.id === 'demo' && (
-                          <span className="demo-badge">{t('shell.demo')}</span>
+                          <span className="qv-caption demo-badge">{t('shell.demo')}</span>
                         )}
                       </span>
                       {inspection.createdAt && (
-                        <time className="inspection-link-date" dateTime={inspection.createdAt}>
+                        <time
+                          className="qv-caption inspection-link-date"
+                          dateTime={inspection.createdAt}
+                        >
                           {shortDate(inspection.createdAt, lang)}
                         </time>
                       )}
                     </span>
-                    <span className={`inspection-status-chip ${inspection.status}`}>
+                    <span
+                      className={`qv-status qv-status--muted qv-caption inspection-status-chip ${inspection.status}`}
+                    >
                       {inspection.reportedStatus ?? t(`status.${inspection.status}`)}
                     </span>
                   </NavLink>
@@ -108,12 +119,16 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
           </section>
         ))}
       </div>
-      <footer className="sidebar-footer">
-        <Link to="/inspections/demo" onClick={onNavigate} className="demo-link">
+      <footer className="qv-side__foot sidebar-footer">
+        <Link
+          to="/inspections/demo"
+          onClick={onNavigate}
+          className="qv-btn qv-btn--quiet demo-link"
+        >
           {t('shell.openDemo')}
         </Link>
         <LanguageSwitch />
-        <button type="button" className="shell-button" onClick={signOut}>
+        <button type="button" className="qv-btn qv-btn--secondary" onClick={signOut}>
           {t('auth.signOut')}
         </button>
       </footer>

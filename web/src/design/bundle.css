@@ -17,34 +17,20 @@
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: 'tnum' 1;
 }
-.qv h1,
-.qv h2,
-.qv h3,
-.qv h4,
-.qv p,
-.qv ul,
-.qv ol,
-.qv dl,
-.qv dd,
-.qv figure {
+.qv :where(h1, h2, h3, h4, p, ul, ol, dl, dd, figure) {
   margin: 0;
 }
-.qv ul,
-.qv ol {
+.qv :where(ul, ol) {
   padding: 0;
   list-style: none;
 }
-.qv button,
-.qv input,
-.qv select,
-.qv textarea {
+.qv :where(button, input, select, textarea) {
   font: inherit;
 }
-.qv select,
-.qv textarea {
+.qv :where(select, textarea) {
   color: inherit;
 }
-.qv a {
+.qv :where(a) {
   color: inherit;
   text-decoration: none;
 }
@@ -637,6 +623,9 @@
   flex-direction: row;
   justify-content: space-between;
   padding: var(--space-3) var(--space-4);
+}
+.qv-drop:focus-within {
+  box-shadow: var(--shadow-focus);
 }
 .qv-check {
   display: grid;
@@ -1270,6 +1259,8 @@
   position: absolute;
   inset: 0;
   background: var(--color-dialog-scrim);
+}
+.qv-scrim:not(button) {
   backdrop-filter: blur(2px);
 }
 .qv-dialog {
@@ -1284,6 +1275,9 @@
   box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
+}
+.qv-dialog::backdrop {
+  background: var(--color-dialog-scrim);
 }
 .qv-dialog__head {
   display: flex;
@@ -3536,6 +3530,23 @@
   height: 100%;
   background: var(--ink);
   border-radius: 3px;
+}
+/* The upload uses a native progress element for its accessible value. */
+progress.qv-pbar {
+  appearance: none;
+  width: 100%;
+  border: 0;
+}
+progress.qv-pbar::-webkit-progress-bar {
+  background: var(--selection);
+}
+progress.qv-pbar::-webkit-progress-value {
+  background: var(--ink);
+  border-radius: inherit;
+}
+progress.qv-pbar::-moz-progress-bar {
+  background: var(--ink);
+  border-radius: inherit;
 }
 .qv-mw .qv-check {
   row-gap: 8px;

@@ -54,8 +54,8 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
   }, [sidebarOpen]);
 
   return (
-    <div className={`app-shell${sidebarOpen ? ' sidebar-open' : ''}`}>
-      <a className="skip-link" href="#inspection-main">
+    <div className={`qv qv-app app-shell${sidebarOpen ? ' sidebar-open' : ''}`}>
+      <a className="qv-btn skip-link" href="#inspection-main">
         {t('shell.skip')}
       </a>
       <div className="sidebar-container" id="inspection-sidebar">
@@ -72,15 +72,15 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
       </div>
       {sidebarOpen && (
         <button
-          className="sidebar-backdrop"
+          className="qv-scrim sidebar-backdrop"
           aria-label={t('shell.closeSidebar')}
           onClick={closeNavigation}
         />
       )}
-      <div className="shell-content">
-        <header className="shell-topbar">
+      <div className="qv-main shell-content">
+        <header className="qv-topbar shell-topbar">
           <button
-            className="shell-button icon-button sidebar-trigger"
+            className="qv-iconbtn icon-button sidebar-trigger"
             aria-label={t(sidebarOpen ? 'shell.closeSidebar' : 'shell.openSidebar')}
             aria-expanded={sidebarOpen}
             aria-controls="inspection-sidebar"
@@ -96,7 +96,7 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
               <path d="M3 5h14M3 10h14M3 15h14" />
             </svg>
           </button>
-          <div className="breadcrumb">
+          <div className="qv-topbar__title qv-caption breadcrumb">
             <span>{t('shell.controlCenter')}</span>
             {site && (
               <>
@@ -105,14 +105,14 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
               </>
             )}
           </div>
-          {showDemo && <span className="demo-badge">{t('shell.demo')}</span>}
+          {showDemo && <span className="qv-caption demo-badge">{t('shell.demo')}</span>}
         </header>
-        <main id="inspection-main" tabIndex={-1} className="shell-main">
+        <main id="inspection-main" tabIndex={-1} className="qv-page shell-main">
           {!showDemo && inspections.isError && (
-            <div className="api-error" role="alert">
+            <div className="qv-notice api-error" role="alert">
               <div>
-                <strong>{t('shell.connectionError')}</strong>
-                <p>
+                <strong className="qv-strong">{t('shell.connectionError')}</strong>
+                <p className="qv-caption">
                   {t(
                     inspections.error.message === '401'
                       ? 'shell.authError'
@@ -121,7 +121,7 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
                 </p>
               </div>
               <button
-                className="shell-button"
+                className="qv-btn qv-btn--secondary"
                 disabled={inspections.isFetching}
                 onClick={() => void inspections.refetch()}
               >
@@ -137,32 +137,36 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
               demoBundle={demoData?.bundle}
             />
           ) : id ? (
-            <div className="empty-state">
-              <h1>
-                {t(
-                  inspections.isPending
-                    ? 'shell.loading'
-                    : inspections.isError
-                      ? 'inspection.unavailable'
-                      : 'inspection.notFound',
-                )}
-              </h1>
-              <p>{t(inspections.isError ? 'shell.connectionHint' : 'inspection.selectOther')}</p>
+            <div className="qv-card">
+              <div className="qv-empty empty-state">
+                <h1 className="qv-heading">
+                  <b>
+                    {t(
+                      inspections.isPending
+                        ? 'shell.loading'
+                        : inspections.isError
+                          ? 'inspection.unavailable'
+                          : 'inspection.notFound',
+                    )}
+                  </b>
+                </h1>
+                <p>{t(inspections.isError ? 'shell.connectionHint' : 'inspection.selectOther')}</p>
+              </div>
             </div>
           ) : (
-            <div className="empty-state">
-              <div className="empty-symbol" aria-hidden="true">
-                <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.25">
-                  <path d="m24 6 16 9v18l-16 9-16-9V15zM8 15l16 9 16-9M24 24v18" />
-                  <circle cx="24" cy="24" r="4" fill="currentColor" />
-                </svg>
+            <div className="qv-card">
+              <div className="qv-card__head">
+                <p className="qv-caption">{t('shell.product')}</p>
               </div>
-              <p className="eyebrow">{t('shell.product')}</p>
-              <h1>{t('shell.emptyTitle')}</h1>
-              <p>{t('shell.emptyDescription')}</p>
-              <button className="shell-button primary" onClick={() => setDialogOpen(true)}>
-                <span aria-hidden="true">+</span> {t('inspection.new')}
-              </button>
+              <div className="qv-empty empty-state">
+                <h1 className="qv-heading">
+                  <b>{t('shell.emptyTitle')}</b>
+                </h1>
+                <p>{t('shell.emptyDescription')}</p>
+                <button className="qv-btn qv-btn--secondary" onClick={() => setDialogOpen(true)}>
+                  <span aria-hidden="true">+</span> {t('inspection.new')}
+                </button>
+              </div>
             </div>
           )}
         </main>

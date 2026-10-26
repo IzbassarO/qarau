@@ -34,50 +34,70 @@ export function LoginPage() {
   };
 
   return (
-    <main className="login-page">
-      <header className="login-header">
-        <LanguageSwitch />
-      </header>
-      <section className="login-card" aria-labelledby="login-title">
-        <Wordmark />
-        <h1 id="login-title">{t('auth.title')}</h1>
-        <p className="login-description">{t('auth.description')}</p>
-        <form onSubmit={(event) => void submit(event)} aria-label={t('auth.title')}>
-          <label htmlFor="login-username">{t('auth.username')}</label>
-          <input
-            id="login-username"
-            name="username"
-            autoComplete="username"
-            autoCapitalize="none"
-            spellCheck={false}
-            required
-            disabled={pending}
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-          />
-          <label htmlFor="login-password">{t('auth.password')}</label>
-          <input
-            id="login-password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            disabled={pending}
-            aria-describedby={error ? 'login-error' : undefined}
-            aria-invalid={error === 'auth.invalidCredentials' || undefined}
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-          {error && (
-            <p className="login-error" id="login-error" role="alert">
-              {t(error)}
-            </p>
-          )}
-          <button className="shell-button primary" type="submit" disabled={pending}>
-            {t(pending ? 'auth.signingIn' : 'auth.signIn')}
-          </button>
-        </form>
+    <main className="qv login-page">
+      <section className="qv-hero login-hero" aria-labelledby="login-hero-title">
+        <Wordmark hero />
+        <div className="login-hero-copy">
+          <h1 id="login-hero-title">{t('auth.heroTitle')}</h1>
+          <p className="sub">{t('auth.heroTagline')}</p>
+        </div>
       </section>
+      <div className="login-content">
+        <header className="login-header">
+          <LanguageSwitch />
+        </header>
+        <section className="qv-card login-card" aria-labelledby="login-title">
+          <h2 className="qv-title" id="login-title">
+            {t('auth.title')}
+          </h2>
+          <p className="qv-caption login-description">{t('auth.description')}</p>
+          <form
+            className="qv-form login-form"
+            onSubmit={(event) => void submit(event)}
+            aria-label={t('auth.title')}
+          >
+            <div className="qv-field">
+              <label htmlFor="login-username">{t('auth.username')}</label>
+              <input
+                className="qv-input"
+                id="login-username"
+                name="username"
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
+                required
+                disabled={pending}
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+              />
+            </div>
+            <div className="qv-field">
+              <label htmlFor="login-password">{t('auth.password')}</label>
+              <input
+                className="qv-input"
+                id="login-password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                disabled={pending}
+                aria-describedby={error ? 'login-error' : undefined}
+                aria-invalid={error === 'auth.invalidCredentials' || undefined}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </div>
+            {error && (
+              <p className="qv-notice login-error" id="login-error" role="alert">
+                {t(error)}
+              </p>
+            )}
+            <button className="qv-btn qv-btn--lg qv-btn--block" type="submit" disabled={pending}>
+              {t(pending ? 'auth.signingIn' : 'auth.signIn')}
+            </button>
+          </form>
+        </section>
+      </div>
     </main>
   );
 }

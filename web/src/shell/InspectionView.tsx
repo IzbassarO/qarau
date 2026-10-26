@@ -63,12 +63,12 @@ export function InspectionView({
     query.error instanceof BundleError ? (`error.${query.error.code}` as Key) : 'error.generic';
 
   return (
-    <article className="inspection-view">
-      <header className="inspection-heading">
+    <article className="qv-page__inner inspection-view">
+      <header className="qv-page__head inspection-heading">
         <div>
-          <p className="eyebrow">{t('shell.inspection')}</p>
-          <h1>{demoTitle}</h1>
-          <p className="inspection-meta">
+          <p className="qv-caption">{t('shell.inspection')}</p>
+          <h1 className="qv-title">{demoTitle}</h1>
+          <p className="qv-caption inspection-meta">
             {inspection.createdAt ? (
               <time dateTime={inspection.createdAt}>
                 {new Intl.DateTimeFormat(lang, { dateStyle: 'long', timeStyle: 'short' }).format(
@@ -79,46 +79,47 @@ export function InspectionView({
               t('inspection.dateUnknown')
             )}
             {!demoBundle && source && <span className="inspection-source">{source}</span>}
-            <span className={`status-label ${status}`}>
-              <span className={`status-dot ${status}`} aria-hidden="true" />
+            <span className={`qv-status qv-status--muted status-label ${status}`}>
               {status === 'unknown' && reportedStatus ? reportedStatus : t(`status.${status}`)}
             </span>
           </p>
         </div>
-        {demoBundle && <span className="demo-badge">{t('shell.demo')}</span>}
+        {demoBundle && <span className="qv-caption demo-badge">{t('shell.demo')}</span>}
       </header>
-      {demoBundle && <p className="demo-notice">{t('demo.notice')}</p>}
+      {demoBundle && <p className="qv-notice demo-notice">{t('demo.notice')}</p>}
       {detail.isError && !demoBundle && !inspection.legacyRun && (
-        <div className="api-error" role="alert">
+        <div className="qv-notice api-error" role="alert">
           <p>{t('inspection.detailError')}</p>
-          <button className="shell-button" onClick={() => void detail.refetch()}>
+          <button className="qv-btn qv-btn--secondary" onClick={() => void detail.refetch()}>
             {t('shell.retry')}
           </button>
         </div>
       )}
       <ProcessingSteps steps={steps} uploaded={status === 'uploaded'} />
-      <section aria-labelledby="inspection-map-title" className="inspection-map-section">
-        <div className="section-heading">
-          <h2 id="inspection-map-title">{t('inspection.mapAndVideo')}</h2>
-          <span className="muted">{t('inspection.framesNote')}</span>
+      <section aria-labelledby="inspection-map-title" className="qv-card inspection-map-section">
+        <div className="qv-card__head section-heading">
+          <h2 className="qv-heading" id="inspection-map-title">
+            {t('inspection.mapAndVideo')}
+          </h2>
+          <span className="qv-caption">{t('inspection.framesNote')}</span>
         </div>
         {bundle ? (
           <div className="inspection-viewer">
             <ViewerScreen bundle={bundle} embedded />
           </div>
         ) : (!inspection.legacyRun && status !== 'done') || !runId ? (
-          <p className="map-message" role="status">
+          <p className="qv-map qv-map__center map-message" role="status">
             {t('processing.mapWaiting')}
           </p>
         ) : query.isError ? (
-          <div className="map-message" role="alert">
+          <div className="qv-map qv-map__center map-message" role="alert">
             <p>{t(errorKey)}</p>
-            <button className="shell-button" onClick={() => void query.refetch()}>
+            <button className="qv-btn qv-btn--secondary" onClick={() => void query.refetch()}>
               {t('shell.retry')}
             </button>
           </div>
         ) : (
-          <p className="map-message" role="status">
+          <p className="qv-map qv-map__center map-message" role="status">
             {t('viewer.loading')}
           </p>
         )}

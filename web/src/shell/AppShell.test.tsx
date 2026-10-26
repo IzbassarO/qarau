@@ -63,6 +63,13 @@ it.each<Lang>(['en', 'ru', 'kk'])(
     renderRoute('/');
     await screen.findByText(LANGS[lang]['shell.noSites']);
     const main = within(screen.getByRole('main'));
+    expect(screen.getByRole('main').className).toBe('qv-page shell-main');
+    expect(screen.getByRole('main').closest('.qv-app')?.className).toBe('qv qv-app app-shell');
+    expect(main.getByRole('heading').className).toBe('qv-heading');
+    expect(main.getByRole('heading').parentElement?.className).toBe('qv-empty empty-state');
+    expect(main.getByRole('button', { name: LANGS[lang]['inspection.new'] }).className).toBe(
+      'qv-btn qv-btn--secondary',
+    );
     expect(main.getAllByText(LANGS[lang]['shell.emptyDescription'])).toHaveLength(1);
     const hint =
       lang === 'en'
@@ -163,6 +170,10 @@ it('shows a server error and retries without substituting demo inspections', asy
   vi.stubGlobal('fetch', fetch);
   renderRoute('/inspections/not-a-run');
   expect((await screen.findByRole('alert')).textContent).toContain('Could not load inspections');
+  expect(screen.getByRole('alert').className).toBe('qv-notice api-error');
+  expect(screen.getByRole('button', { name: 'Try again' }).className).toBe(
+    'qv-btn qv-btn--secondary',
+  );
   expect(screen.queryByText('Tank farm survey')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
@@ -239,6 +250,7 @@ it('lists the real inspections on home, not the demo', async () => {
   expect(within(room).getByRole('time').getAttribute('datetime')).toBe('2026-10-16T15:00:00Z');
   expect(room.getAttribute('href')).toBe('/inspections/2');
   expect(within(room).getByText('Failed')).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
   expect(screen.queryByText('Tank farm survey')).toBeNull();
   expect(screen.queryByTestId('embedded-viewer')).toBeNull();
   expect(fetch).toHaveBeenCalledWith('/api/inspections', expect.anything());
@@ -447,7 +459,9 @@ it('lists legacy exported runs with visible status chips when inspection CRUD is
   );
   renderRoute('/');
   const uploaded = await screen.findByRole('link', { name: /Walkdown upload/ });
-  expect(within(uploaded).getByText('Uploaded').className).toBe('inspection-status-chip uploaded');
+  expect(within(uploaded).getByText('Uploaded').className).toBe(
+    'qv-status qv-status--muted qv-caption inspection-status-chip uploaded',
+  );
   expect(
     within(screen.getByRole('link', { name: /Failed survey/ })).getByText('Failed'),
   ).toBeTruthy();

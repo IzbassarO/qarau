@@ -117,10 +117,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.locator('body')).toHaveCSS('background-color', themeColors[theme].bg);
       const navigation = page.getByRole('navigation', { name: t['shell.sites'] });
       await expect(navigation).toBeVisible();
-      await expect(page.locator('.sidebar-container')).toHaveCSS(
-        'background-color',
-        themeColors[theme].surface,
-      );
+      await expect(page.locator('.qv-side')).toHaveCSS('background-color', themeColors[theme].bg);
       await expect(
         page.getByRole('main').getByRole('heading', { name: t['shell.emptyTitle'], exact: true }),
       ).toBeVisible();
@@ -131,7 +128,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(navigation.getByRole('button', { name: t['auth.signOut'] })).toBeVisible();
       for (const label of await page
         .locator(
-          '.shell-button, .site-name, .inspection-link-title, .sidebar-heading h2, .empty-state h1',
+          '.qv-btn, .site-name, .inspection-link-title, .sidebar-heading h2, .empty-state h1',
         )
         .all()) {
         const size = await label.evaluate((element) => ({

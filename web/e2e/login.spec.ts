@@ -43,7 +43,12 @@ for (const theme of ['light', 'dark'] as const) {
       );
       const card = await page.locator('.login-card').boundingBox();
       expect(card).not.toBeNull();
-      expect(Math.abs(card!.x + card!.width / 2 - 720)).toBeLessThanOrEqual(1);
+      // v8: the form is centered in the right half of the 1440 px desktop layout.
+      expect(Math.abs(card!.x + card!.width / 2 - 1080)).toBeLessThanOrEqual(1);
+      await expect(page.locator('.qv-hero')).toBeVisible();
+      await expect(page.getByRole('button', { name: t['auth.signIn'] })).toHaveClass(
+        'qv-btn qv-btn--lg qv-btn--block',
+      );
       for (const control of await page.locator('.login-card input, .login-card button').all()) {
         expect(
           await control.evaluate((element) => element.scrollWidth <= element.clientWidth),
