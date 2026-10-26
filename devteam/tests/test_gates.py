@@ -912,7 +912,12 @@ def test_the_tester_compares_screenshots_with_the_v8_reference_screens(monkeypat
     v, seen = judge_with(monkeypatch, PASS, task=task, screenshots=[str(before), str(shot)])
     ref = str(HERE.parent / "docs" / "design" / "screens" / "sign-in-light.png")
     assert seen["images"] == [str(shot), ref, str(before)]
-    assert "home-1440x900-light.png, reference sign-in-light.png, dev-home" in seen["prompt"]
+    assert "each one comes right after its own label" in seen["prompt"]
+    assert [R.image_label(p).split(": ")[1].split(" (")[0] for p in seen["images"]] == [
+        "AFTER",
+        "REFERENCE v8",
+        "BEFORE",
+    ]
     assert "<owner_approved_test_rewrites>\nweb/src/design/tokens.test.ts" in seen["prompt"]
     assert v["passed"] is True  # round 1: no test diff, the approved rewrite is not weakening
     assert "every colour, font or component that differs" in R.TESTER_SYSTEM

@@ -470,6 +470,56 @@ def test_brain_and_tester_calls_cache_the_stable_prefix_and_log_hits(repo):
     assert "Prompt cache hits" in html and "99 % (9,000 tok)" in html
 
 
+def test_every_image_follows_its_own_label_and_labels_are_costed(repo, tmp_path, monkeypatch):
+    """DS1 (2026-10-26): with names listed once for dozens of images the tester read the v8
+    "after" shots as the dev-* "before" and blocked the task."""
+    team, _ = make(repo)
+    png = b"\x89PNG\r\n\x1a\n"
+    (tmp_path / "docs/design/screens").mkdir(parents=True)
+    paths = [tmp_path / "signed-out-1440x900-light-ru.png", tmp_path / "dev-root-390x844.png"]
+    paths.append(tmp_path / "docs/design/screens/sign-in-light.png")
+    for f in paths:
+        f.write_bytes(png)
+    reserved = []
+    real_reserve = costs.reserve
+    monkeypatch.setattr(costs, "reserve", lambda *a: reserved.append(a[-1]) or real_reserve(*a))
+    client = CachingClient()
+    llm_call(
+        team,
+        "tester",
+        "DS1",
+        "s",
+        "p",
+        {},
+        client=client,
+        images=[str(f) for f in paths],
+        context="ctx",
+    )
+    content = client.kw["messages"][0]["content"]
+    assert content[0]["text"] == "ctx" and "cache_control" in content[0]  # cached prefix first
+    assert content[-1] == {"type": "text", "text": "p"}
+    images = [n for n, b in enumerate(content) if b["type"] == "image"]
+    assert images == [2, 4, 6]
+    assert [content[n - 1] for n in images] == [
+        {
+            "type": "text",
+            "text": "Image signed-out-1440x900-light-ru.png: AFTER (task, the code under review)",
+        },
+        {"type": "text", "text": "Image dev-root-390x844.png: BEFORE (dev, without this task)"},
+        {
+            "type": "text",
+            "text": "Image sign-in-light.png: REFERENCE v8 (design system reference screen)",
+        },
+    ]
+    # the label bytes are in the reservation: a name 5 bytes longer reserves 5 tokens more
+    short, long_ = tmp_path / "a.png", tmp_path / "abcdef.png"
+    for f in (short, long_):
+        f.write_bytes(png)
+        llm_call(team, "tester", "DS1", "s", "p", {}, client=client, images=[str(f)])
+    m = CFG["models"]["tester"]
+    assert reserved[-1] - reserved[-2] == pytest.approx(5 * m["price_in"] * 2.0 / 1e6)
+
+
 # --- P3e: a task may add data under `writable`, never change what is there ---------------------
 class WritesRuns(Fast):
     def __init__(self, change):

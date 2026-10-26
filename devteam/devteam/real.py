@@ -47,6 +47,16 @@ def transient(e: Exception) -> bool:
     )  # a mid-stream error event arrives with HTTP 200, the kind is in the body
 
 
+def image_label(path: str) -> str:
+    """The text block right before an image: its file name and what it is."""
+    name = Path(path).name
+    if REFERENCE_PNG.search(Path(path).as_posix()):
+        return f"Image {name}: REFERENCE v8 (design system reference screen)"
+    if name.startswith("dev-"):
+        return f"Image {name}: BEFORE (dev, without this task)"
+    return f"Image {name}: AFTER (task, the code under review)"
+
+
 def llm_call(
     team,
     role: str,
@@ -64,13 +74,16 @@ def llm_call(
     (connection, timeout, 429, 5xx, overloaded) are retried here after RETRY_WAITS, each try
     with its own reservation; then the error is raised (`devteam resume` re-runs the node).
     Prompt caching: `system` and `context` (the stable part of the user turn: repository
-    rules, the task and its criteria) are cached; images and `prompt` come after them."""
+    rules, the task and its criteria) are cached; images and `prompt` come after them.
+    Each image follows its own text label (file name and role), so a judge with dozens of
+    images never maps them to names by position (DS1: "after" shots read as dev-* "before")."""
     system, context, prompt = map(procs.clean_text, (system, context, prompt))
+    labels = [image_label(i) for i in images]
     m = team.cfg["models"][role]
     if m["provider"] != "anthropic":
         raise NotImplementedError(f"provider {m['provider']!r} for {role}: only anthropic so far")
     # Every token is at least one byte, so UTF-8 bytes bound the input tokens from above.
-    est_in = len((system + context + prompt + json.dumps(schema)).encode())
+    est_in = len((system + context + prompt + json.dumps(schema) + "".join(labels)).encode())
     est_in += 1000 + 2500 * len(images)
     # worst case: every input token is a cache write
     max_usd = (est_in * m["price_in"] * CACHE_WRITE_X + max_tokens * m["price_out"]) / 1e6
@@ -81,17 +94,18 @@ def llm_call(
     if hasattr(client, "with_options"):
         client = client.with_options(max_retries=0)  # one reservation = one request
     content: list = [{"type": "text", "text": context, "cache_control": CACHE}] if context else []
-    content += [
-        {
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/png",
-                "data": base64.b64encode(Path(i).read_bytes()).decode(),
+    for i, label in zip(images, labels, strict=True):
+        content += [
+            {"type": "text", "text": label},
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": base64.b64encode(Path(i).read_bytes()).decode(),
+                },
             },
-        }
-        for i in images
-    ]
+        ]
     content.append({"type": "text", "text": prompt})
     for wait in (*RETRY_WAITS, None):
         rid = costs.reserve(
@@ -743,11 +757,11 @@ Rules:
         }
         if shots:
             prompt = (
-                "Screenshots above (after the task; dev-* = before; reference = a design system v8 "
-                "reference screen, light theme on top and dark below), in order: "
-                + ", ".join(("reference " if p in refs else "") + Path(p).name for p in shots)
-                + "\n\n"
-                + prompt
+                "Screenshots above: each one comes right after its own label, which names the file "
+                "and says AFTER (the task's code under review), BEFORE (dev, without the task) or "
+                "REFERENCE v8 (a design system reference screen, light theme on top and dark "
+                "below). Judge every criterion on the AFTER images; never take a BEFORE image for "
+                "the task's result.\n\n" + prompt
             )
         if rewrite := rewrite_allowed(team.cfg, s["task"]["id"]):
             prompt = (
