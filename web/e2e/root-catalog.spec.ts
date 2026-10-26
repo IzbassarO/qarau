@@ -66,6 +66,7 @@ for (const theme of ['light', 'dark'] as const) {
           expect(dateBox).not.toBeNull();
           expect(statusBox).not.toBeNull();
           expect(nameBox!.width).toBeGreaterThanOrEqual(190);
+          expect(Math.abs(dateBox!.x - nameBox!.x)).toBeLessThanOrEqual(1);
           expect(dateBox!.y).toBeGreaterThanOrEqual(nameBox!.y + nameBox!.height);
           expect(Math.abs(dateBox!.y - statusBox!.y)).toBeLessThanOrEqual(1);
           expect(dateBox!.x + dateBox!.width).toBeLessThanOrEqual(statusBox!.x);

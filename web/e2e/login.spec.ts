@@ -46,6 +46,20 @@ for (const theme of ['light', 'dark'] as const) {
       // v8: the form is centered in the right half of the 1440 px desktop layout.
       expect(Math.abs(card!.x + card!.width / 2 - 1080)).toBeLessThanOrEqual(1);
       await expect(page.locator('.qv-hero')).toBeVisible();
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      await expect(page.locator('.login-page')).toHaveCSS('display', 'grid');
+      await expect(page.locator('.login-page')).toHaveCSS('grid-template-columns', '720px 720px');
+      await expect(page.locator('.login-content')).toHaveCSS('place-items', 'center');
+      const hero = await page.locator('.qv-hero').boundingBox();
+      const content = await page.locator('.login-content').boundingBox();
+      expect(hero).not.toBeNull();
+      expect(content).not.toBeNull();
+      expect(hero!.x).toBe(0);
+      expect(hero!.width).toBe(720);
+      expect(content!.x).toBe(720);
+      expect(content!.width).toBe(720);
+      await expect(page.locator('.qv-hero .shell-wordmark')).toHaveCount(1);
+      await expect(page.locator('.login-card .shell-wordmark')).toHaveCount(0);
       await expect(page.getByRole('button', { name: t['auth.signIn'] })).toHaveClass(
         'qv-btn qv-btn--lg qv-btn--block',
       );
@@ -54,6 +68,31 @@ for (const theme of ['light', 'dark'] as const) {
           await control.evaluate((element) => element.scrollWidth <= element.clientWidth),
         ).toBe(true);
       }
+    });
+  }
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  for (const [lang, t] of Object.entries({ en, ru, kk })) {
+    test(`signed-out phone uses v8 ${theme} layout: ${lang}`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.emulateMedia({ colorScheme: theme });
+      await page.addInitScript((locale) => localStorage.setItem('qarau.lang', locale), lang);
+      await page.goto('/?signed-out');
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      await expect(page.locator('.login-page')).toHaveCSS('display', 'grid');
+      await expect(page.locator('.login-page')).toHaveCSS('grid-template-columns', '390px');
+      await expect(page.locator('.qv-hero')).toBeVisible();
+      await expect(page.locator('.qv-hero .shell-wordmark')).toHaveText(t['shell.product']);
+      await expect(page.locator('.login-card .shell-wordmark')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: t['auth.signIn'] })).toHaveCSS(
+        'background-color',
+        themeColors[theme].accent,
+      );
+      await expect(page.getByLabel(t['auth.username'])).toBeVisible();
+      await expect(page.getByLabel(t['auth.password'])).toBeVisible();
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
     });
   }
 }

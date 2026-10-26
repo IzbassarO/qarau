@@ -248,3 +248,24 @@ test('mobile sidebar collapses, opens and closes with navigation', async ({ page
     true,
   );
 });
+
+test('clips the skip-link shadow until keyboard focus and keeps the shortcut working', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('qarau.lang', 'en');
+    sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
+  });
+  await page.route('**/api/inspections', (route) => route.fulfill({ json: [] }));
+  await page.route('**/api/runs', (route) => route.fulfill({ json: [] }));
+  await page.goto('/');
+  const skip = page.getByRole('link', { name: 'Skip to inspection' });
+  await expect(skip).toHaveCSS('clip-path', 'inset(50%)');
+  await page.keyboard.press('Tab');
+  await expect(skip).toBeFocused();
+  await expect(skip).toHaveCSS('clip-path', 'none');
+  await expect(skip).toBeInViewport();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('main')).toBeFocused();
+  await expect(skip).toHaveCSS('clip-path', 'inset(50%)');
+});

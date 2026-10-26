@@ -146,7 +146,7 @@
 }
 .inspection-link-date {
   white-space: nowrap;
-  text-align: right;
+  text-align: left;
 }
 .inspection-link-meta {
   display: grid;
@@ -154,7 +154,7 @@
   align-items: center;
   gap: var(--space-2);
   max-width: 100%;
-  margin-left: auto;
+  margin-left: 0;
 }
 .demo-badge {
   flex: none;
@@ -356,9 +356,11 @@
   left: var(--space-4);
   z-index: 100;
   transform: translateY(-100%);
+  clip-path: inset(50%);
 }
 .skip-link:focus {
   transform: translateY(0);
+  clip-path: none;
 }
 @media (max-width: 1279px) {
   .app-shell {
