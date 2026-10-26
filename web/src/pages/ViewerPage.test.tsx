@@ -83,6 +83,33 @@ function renderDemo() {
   return renderViewer('demo');
 }
 
+it.each([
+  ['missing', 'The findings file listed in the bundle is missing. Re-run the projection stage.'],
+  [
+    'broken',
+    'The findings file could not be read (damaged or inconsistent with the map). Re-run the projection stage.',
+  ],
+] as const)(
+  'shows a %s findings warning outside the folded panels',
+  async (findingsError, message) => {
+    const bundle = { ...createDemo('en').bundle, runId: 'findings-failure', findingsError };
+    vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+    vi.spyOn(bundleApi, 'loadBundle').mockResolvedValue(bundle);
+    renderViewer('findings-failure');
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe(message);
+    expect(alert.className).toBe('qv-notice viewer-notice viewer-error');
+    expect(alert.closest('details')).toBeNull();
+    expect(document.querySelector('.viewer-panel-drawer')?.hasAttribute('open')).toBe(false);
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(
+      screen.getByLabelText(
+        'Interactive 3D map with point cloud and camera path. Two-finger drag or mouse drag: orbit. Shift: pan. Pinch or mouse wheel: zoom. Alt/Option: precision. 1: Orbit. F: Observer.',
+      ),
+    ).toBeTruthy();
+  },
+);
+
 it('opens in Orbit by default without an observer minimap or human figure', () => {
   const setSensitivity = vi.spyOn(ViewerEngine.prototype, 'setSensitivity');
   renderDemo();

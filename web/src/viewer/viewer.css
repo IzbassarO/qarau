@@ -5,7 +5,6 @@
   overflow: hidden;
 }
 .viewer-header,
-.viewer-modebar,
 .viewer-timeline-row,
 .viewer-inline,
 .viewer-section-heading,
@@ -77,14 +76,6 @@
   flex: 1;
   min-width: 0;
 }
-.viewer-modebar {
-  position: relative;
-  z-index: 20;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  padding: var(--spacing-2) var(--spacing-3);
-}
 .viewer-control,
 .viewer-select {
   min-height: var(--size-control-small);
@@ -107,15 +98,10 @@
   height: var(--size-icon);
 }
 .viewer-settings-panel {
-  position: absolute;
-  top: calc(100% + var(--spacing-2));
-  right: 0;
-  z-index: 30;
   display: flex;
   flex-direction: column;
   gap: var(--spacing-3);
-  width: var(--size-sidebar);
-  max-width: calc(100vw - var(--spacing-6));
+
   padding: var(--spacing-4);
 }
 .viewer-settings-field {
@@ -407,7 +393,7 @@
 .viewer-toggle:hover:enabled {
   background: var(--color-bg);
 }
-.viewer-toggle[aria-pressed='true'] .viewer-toggle[aria-pressed='true'] .viewer-label-stack {
+.viewer-label-stack {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-1);
@@ -533,7 +519,6 @@
 .viewer-page-link:hover {
   text-decoration: underline;
 }
-
 /* Fit the v8 full-bleed map, pills and foldable panels to live content. */
 .viewer-screen {
   width: 100%;
@@ -551,53 +536,12 @@
   position: relative;
   min-height: 0;
 }
-.viewer-modebar {
-  position: absolute;
-  top: var(--space-4);
-  left: var(--space-4);
-  right: var(--space-4);
-  z-index: 3;
-  padding: 0;
-  pointer-events: none;
-}
-.viewer-modebar > * {
-  pointer-events: auto;
-}
-.viewer-segments {
-  top: 0;
-}
-.viewer-settings {
-  margin-left: auto;
-  position: relative;
-}
 .viewer-settings-trigger {
   padding: 0 var(--space-3);
   min-height: 0;
 }
 .viewer-settings-panel {
-  max-height: calc(100dvh - var(--layout-timeline) * 2);
   overflow-y: auto;
-}
-.viewer-modebar > .viewer-inline {
-  position: absolute;
-  right: 0;
-  top: calc(var(--space-12) + var(--space-2));
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  max-width: 100%;
-}
-.viewer-tools-drawer,
-.viewer-panel-drawer {
-  position: absolute;
-  top: var(--space-4);
-  z-index: 4;
-}
-.viewer-tools-drawer {
-  left: var(--space-4);
-}
-.viewer-panel-drawer {
-  right: var(--space-4);
-  top: calc(var(--space-12) + var(--space-4));
 }
 .viewer-tools-drawer > summary,
 .viewer-panel-drawer > summary {
@@ -608,19 +552,12 @@
   display: none;
 }
 .viewer-toolbar {
-  top: calc(100% + var(--space-2));
-  left: 0;
-  width: auto;
   padding: var(--space-2);
-  max-height: calc(100dvh - var(--layout-timeline) * 2);
+
   overflow-y: auto;
 }
 .viewer-panel {
-  top: calc(100% + var(--space-2));
-  right: 0;
   width: var(--layout-side-panel);
-  max-width: calc(100vw - var(--space-8));
-  max-height: calc(100dvh - var(--layout-timeline) * 3);
 }
 .viewer-legend {
   top: auto;
@@ -685,23 +622,6 @@
   overflow-wrap: anywhere;
 }
 @media (max-width: 1279px) {
-  .viewer-segments {
-    position: relative;
-    left: auto;
-    transform: none;
-    margin-inline: auto;
-  }
-  .viewer-modebar {
-    top: calc(var(--space-12) + var(--space-4));
-    justify-content: center;
-    gap: var(--space-2);
-  }
-  .viewer-settings {
-    margin-left: 0;
-  }
-  .viewer-panel-drawer {
-    top: var(--space-4);
-  }
   .viewer-hint.orbit,
   .viewer-hint.observer {
     top: calc(var(--space-12) * 3);
@@ -728,33 +648,14 @@
     flex-basis: 100%;
     order: 2;
   }
-  .viewer-header .viewer-header > .grow {
-    display: none;
-  }
   .viewer-header .shell-languages {
     margin-left: auto;
-  }
-  .viewer-segments {
-    flex-wrap: wrap;
-    justify-content: center;
-    max-width: 100%;
   }
   .viewer-segments button {
     min-height: calc(var(--space-8) + var(--space-3));
     height: auto;
     padding-inline: var(--space-3);
     overflow-wrap: anywhere;
-  }
-  .viewer-modebar .viewer-inline {
-    position: static;
-  }
-  .viewer-modebar .viewer-settings-panel {
-    position: fixed;
-    top: calc(var(--layout-topbar) * 4);
-    left: var(--space-4);
-    right: var(--space-4);
-    width: auto;
-    max-width: none;
   }
   .viewer-tool,
   .viewer-play,
@@ -808,12 +709,8 @@
     min-height: var(--size-viewer-compact);
   }
 }
-
 .viewer-screen {
   container-type: inline-size;
-}
-.viewer-panel {
-  max-width: calc(100cqw - var(--space-8));
 }
 .viewer-panel .viewer-legend {
   position: relative;
@@ -840,15 +737,6 @@
 .viewer-workspace {
   container-type: size;
 }
-.viewer-panel {
-  max-height: calc(100cqh - var(--layout-timeline) * 2 - var(--space-4));
-}
-.viewer-toolbar {
-  max-height: calc(100cqh - var(--layout-timeline) * 2);
-}
-.viewer-settings-panel {
-  max-height: calc(100cqh - var(--layout-timeline) * 2 - var(--space-12));
-}
 
 @media (max-width: 767px) {
   /* The same six axis actions become a grid of 44 px touch targets. */
@@ -874,7 +762,6 @@
     max-height: calc(var(--space-8) * 4);
   }
 }
-
 .viewer-header .shell-wordmark {
   max-width: 100%;
 }
@@ -894,11 +781,110 @@
     min-height: calc(var(--space-8) + var(--space-3));
   }
 }
-.viewer-toolbar {
-  max-height: calc(100cqh - var(--layout-timeline) * 2 - var(--space-6));
-}
 @media (max-width: 767px) {
   .viewer-timeline-track {
     height: calc(var(--space-12) + var(--space-2));
+  }
+}
+
+/* Every dropdown is anchored below the shared control grid. Its height grows
+   with translated labels and Observer controls, so an open panel cannot cover
+   the summaries needed to switch panels. */
+.viewer-chrome {
+  position: absolute;
+  top: var(--space-4);
+  left: var(--space-4);
+  right: var(--space-4);
+  z-index: 4;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+.viewer-modebar {
+  display: contents;
+}
+.viewer-chrome > details,
+.viewer-modebar > * {
+  pointer-events: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.viewer-tools-drawer {
+  grid-area: 1 / 1;
+  justify-self: start;
+}
+.viewer-panel-drawer {
+  grid-area: 2 / 3;
+  justify-self: end;
+}
+.viewer-segments {
+  position: static;
+  transform: none;
+  grid-area: 1 / 2;
+  justify-self: center;
+  margin: 0;
+}
+.viewer-settings {
+  grid-area: 1 / 3;
+  justify-self: end;
+}
+.viewer-modebar > .viewer-inline {
+  grid-area: 2 / 2;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.viewer-chrome summary {
+  max-width: 100%;
+  height: auto;
+  min-height: var(--space-8);
+  padding: 0 var(--space-3);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.viewer-toolbar,
+.viewer-panel,
+.viewer-settings-panel {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  /* For these absolute children, 100% is the control grid's used height.
+     cqh is the surrounding workspace; reserve the timeline and outer spacing. */
+  max-height: calc(100cqh - 100% - var(--layout-timeline) * 2 - var(--space-6));
+  max-width: 100%;
+  overflow-y: auto;
+}
+.viewer-toolbar {
+  left: 0;
+}
+.viewer-panel,
+.viewer-settings-panel {
+  right: 0;
+}
+.viewer-settings-panel {
+  width: var(--layout-sidebar);
+}
+@media (max-width: 767px) {
+  .viewer-chrome {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .viewer-panel-drawer {
+    grid-area: 1 / 2;
+  }
+  .viewer-segments {
+    grid-area: 2 / 1 / auto / -1;
+  }
+  .viewer-settings {
+    grid-area: 3 / 2;
+  }
+  .viewer-modebar > .viewer-inline {
+    grid-area: 4 / 1 / auto / -1;
+  }
+  .viewer-chrome summary {
+    min-height: calc(var(--space-8) + var(--space-3));
+  }
+  .viewer-panel,
+  .viewer-settings-panel {
+    width: 100%;
   }
 }

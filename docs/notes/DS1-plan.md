@@ -81,3 +81,27 @@ Kerege executes e2e and screenshots; no local server or screenshots are started.
   Tailwind are MIT; Playwright is Apache-2.0. These permit commercial use. No
   dependency, model, tool or skill was added. The owner's design files are
   authorised for this task.
+
+## E2e return: folded viewer panels
+
+Kerege returned the first part 2 round before visual review: phone viewer chrome
+and A6 controls timed out, and the missing/broken findings warning was hidden.
+The open data panel could cover the phone Settings summary. The error message
+was also inside that folded panel, so it was invisible in the initial view.
+
+- Group the existing summaries and mode controls in one responsive overlay grid.
+  Anchor all three dropdowns below its actual height, including wrapped ru/kk
+  labels and Observer controls. Bound their scrolling area using the surrounding
+  workspace and reserve the timeline. Keep v8 components, palette and fonts.
+- Move findings failures to the existing notice area above the map. Add two
+  regression fixtures for missing and broken files, checking the exact messages,
+  a single alert outside any details element, a closed data panel and a usable map.
+- Keep every previous e2e assertion, threshold and expected value. Update the two
+  summary selectors to the shared wrapper; assert that both summaries are present
+  and add checks that open tool/data panels start below all header controls.
+- Local lint, typecheck, 720 unit tests (37 files) and build pass. Playwright
+  discovery still covers both viewport projects. Full e2e execution remains with
+  Kerege. A browser-only diagnostic without a server was rejected by the sandbox
+  at Chromium's Mach-port bootstrap; it exited and cleaned its temporary profile.
+  No listening server or screenshot capture was started. No dependency was added;
+  the commercial-use licences recorded above remain unchanged.

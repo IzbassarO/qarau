@@ -41,11 +41,12 @@ for (const theme of ['light', 'dark'] as const) {
         'font-family',
         '"JetBrains Mono", ui-monospace, Menlo, monospace',
       );
-      await fits(page.locator('.viewer-modebar button, .viewer-workspace > details > summary'));
+      await expect(page.locator('.viewer-chrome > details > summary')).toHaveCount(2);
+      await fits(page.locator('.viewer-modebar button, .viewer-chrome > details > summary'));
       // The initial pills and navigation modes have distinct hit targets in every language.
       for (const control of await page
         .locator(
-          '.viewer-segments button:enabled, .viewer-workspace > details > summary, .viewer-settings > summary',
+          '.viewer-segments button:enabled, .viewer-chrome > details > summary, .viewer-settings > summary',
         )
         .all()) {
         expect(
@@ -58,11 +59,27 @@ for (const theme of ['light', 'dark'] as const) {
         ).toBe(true);
       }
       await openTools(page);
+      expect(
+        await page.locator('.viewer-toolbar').evaluate((panel) => {
+          const top = panel.getBoundingClientRect().top;
+          return [...document.querySelectorAll('.viewer-chrome summary, .viewer-segments')].every(
+            (control) => control.getBoundingClientRect().bottom <= top,
+          );
+        }),
+      ).toBe(true);
       const reset = page.getByRole('button', { name: t['toolbar.reset'], exact: true });
       await reset.click();
       await closeTools(page);
       await openDetails(page);
       await expect(page.locator('.viewer-panel')).toBeVisible();
+      expect(
+        await page.locator('.viewer-panel').evaluate((panel) => {
+          const top = panel.getBoundingClientRect().top;
+          return [...document.querySelectorAll('.viewer-chrome summary, .viewer-segments')].every(
+            (control) => control.getBoundingClientRect().bottom <= top,
+          );
+        }),
+      ).toBe(true);
       const toggle = page.getByRole('button', { name: t['show.current'], exact: true });
       const wasPressed = await toggle.getAttribute('aria-pressed');
       await toggle.click();
