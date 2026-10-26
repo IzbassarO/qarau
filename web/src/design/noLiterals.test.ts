@@ -290,6 +290,15 @@ it('uses tokens throughout auth and shell CSS/TSX', () => {
   }
 });
 
+it('keeps font families and colour styling in the v8 bundle, outside shell layout CSS', () => {
+  const path = resolve(process.cwd(), 'src/shell/shell.css');
+  const css = withoutComments(readFileSync(path, 'utf8'), path);
+  expect(css).not.toMatch(/\bfont-family\s*:/i);
+  expect(css).not.toMatch(/(?:^|[;{}])\s*font\s*:/i);
+  expect(css).not.toMatch(/(?:^|[;{}])\s*(?:color|background(?:-[\w-]+)?|[\w-]*color)\s*:/i);
+  expect(colourLiterals(css, path)).toEqual([]);
+});
+
 it.each([
   ['css', '.a { color: #123456; }'],
   ['css', '.a { background: rgba(0, 0, 0, .5); }'],

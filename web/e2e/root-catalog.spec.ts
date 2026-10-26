@@ -43,6 +43,35 @@ for (const theme of ['light', 'dark'] as const) {
       ).toHaveAttribute('href', '/inspections/tank-survey-2026-10-22');
       await expect(navigation.locator('.inspection-status-chip.unknown')).toHaveCount(2);
       await expect(navigation.getByText(t['status.unknown'], { exact: true })).toHaveCount(2);
+      await page.evaluate(() => document.fonts.ready);
+      for (const row of await navigation.locator('.inspection-link').all()) {
+        const name = row.locator('.inspection-link-name');
+        const status = row.locator('.inspection-status-chip');
+        await expect(status).toHaveCSS('white-space', 'nowrap');
+        await expect(status).toHaveCSS('flex-shrink', '0');
+        await expect(name).toHaveCSS('text-overflow', 'ellipsis');
+        const rowBox = await row.boundingBox();
+        expect(rowBox).not.toBeNull();
+        expect(rowBox!.height).toBeLessThanOrEqual(40);
+        const statusSize = await status.evaluate((element) => ({
+          content: element.scrollWidth,
+          visible: element.clientWidth,
+        }));
+        expect(statusSize.content).toBeLessThanOrEqual(statusSize.visible);
+        if (lang === 'en' || lang === 'ru') {
+          const nameBox = await name.boundingBox();
+          const dateBox = await row.getByRole('time').boundingBox();
+          const statusBox = await status.boundingBox();
+          expect(nameBox).not.toBeNull();
+          expect(dateBox).not.toBeNull();
+          expect(statusBox).not.toBeNull();
+          expect(nameBox!.width).toBeGreaterThanOrEqual(190);
+          expect(dateBox!.y).toBeGreaterThanOrEqual(nameBox!.y + nameBox!.height);
+          expect(Math.abs(dateBox!.y - statusBox!.y)).toBeLessThanOrEqual(1);
+          expect(dateBox!.x + dateBox!.width).toBeLessThanOrEqual(statusBox!.x);
+          expect(statusBox!.x + statusBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
+        }
+      }
       await expect(navigation.getByText(t['status.done'], { exact: true })).toHaveCount(0);
       await expect(navigation.getByText(t['shell.noSites'], { exact: true })).toHaveCount(0);
       await expect(navigation.getByRole('button', { name: t['inspection.new'] })).toBeVisible();

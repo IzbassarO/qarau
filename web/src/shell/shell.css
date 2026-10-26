@@ -107,25 +107,30 @@
   display: none;
 }
 .qv-nav .inspection-link {
+  flex-wrap: wrap;
   height: auto;
   min-height: var(--space-8);
   gap: var(--space-2);
+  row-gap: 0;
   padding-inline: var(--space-2);
   min-width: 0;
 }
 .inspection-link-title {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: var(--space-2);
-  flex: 1;
+  flex: 1 1 auto;
+  width: calc(var(--space-8) * 2);
   min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .inspection-link-label {
   display: flex;
   align-items: center;
   gap: var(--space-1);
   min-width: 0;
+  flex: 1;
 }
 .inspection-link-name {
   display: block;
@@ -138,13 +143,22 @@
   white-space: nowrap;
   text-align: right;
 }
+.inspection-link-meta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  margin-left: auto;
+}
 .demo-badge {
   flex: none;
 }
 .inspection-status-chip {
-  max-width: 50%;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  flex: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .sidebar-footer {
   flex-shrink: 0;

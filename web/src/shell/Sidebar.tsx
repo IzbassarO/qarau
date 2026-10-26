@@ -98,6 +98,8 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
                           <span className="qv-caption demo-badge">{t('shell.demo')}</span>
                         )}
                       </span>
+                    </span>
+                    <span className="inspection-link-meta">
                       {inspection.createdAt && (
                         <time
                           className="qv-caption inspection-link-date"
@@ -106,11 +108,11 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
                           {shortDate(inspection.createdAt, lang)}
                         </time>
                       )}
-                    </span>
-                    <span
-                      className={`qv-status qv-status--muted qv-caption inspection-status-chip ${inspection.status}`}
-                    >
-                      {inspection.reportedStatus ?? t(`status.${inspection.status}`)}
+                      <span
+                        className={`qv-status qv-status--muted qv-caption inspection-status-chip ${inspection.status}`}
+                      >
+                        {inspection.reportedStatus ?? t(`status.${inspection.status}`)}
+                      </span>
                     </span>
                   </NavLink>
                 </li>
