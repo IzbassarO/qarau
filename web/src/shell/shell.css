@@ -125,6 +125,10 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* Unknown statuses can contain verbatim API text; keep the name on its own line. */
+.inspection-link:has(.inspection-status-chip.unknown) .inspection-link-title {
+  flex-basis: 100%;
+}
 .inspection-link-label {
   display: flex;
   align-items: center;
@@ -134,6 +138,7 @@
 }
 .inspection-link-name {
   display: block;
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
