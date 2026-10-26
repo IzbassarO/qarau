@@ -1,8 +1,15 @@
 # DS1 — design system v8 checklist
 
-Current round: part 1 of 2. Continue the six existing DS1 commits; do not rebuild
-completed work. The baseline audit on 2026-10-26 found no missing part 1 code.
-Part 2 starts only after the tester accepts part 1.
+Current round: part 2 of 2, following acceptance of part 1. Continue the six
+existing DS1 commits and preserve the accepted tokens, fonts and literal checks.
+The initial audit found the qv shell/dialogs already wired, with remaining gaps
+in viewer chrome, phone presentation, Playwright projects and the v8 ADR.
+
+Part 2 plan: reuse the existing qv components for the inspection catalog and
+viewer controls, fit the phone layout to the evidence-phone reference without
+adding features, adapt existing e2e interactions to collapsed navigation, pin
+both viewport fixtures, add ADR 0026, and run the required local checks.
+Kerege executes e2e and screenshots; no local server or screenshots are started.
 
 ## Build items 1–6
 
@@ -19,11 +26,18 @@ Part 2 starts only after the tester accepts part 1.
   `index.html`. The unused installed IBM Plex Mono dependency is not imported.
   `fonts.test.ts` covers these requirements; the production build emits local font
   assets, including Cyrillic and Cyrillic extended where supplied by the packages.
-- [ ] **3. Apply qv components and responsive chrome — part 2.** Prior commits
-  already apply qv classes to the shell, sign-in, sidebar and dialogs and include
-  responsive CSS. Their completeness and the viewer chrome still need the part 2
-  audit against the reference screens, in both themes and all three languages at
-  1440×900 and 390×844. This round makes no layout changes or screenshot claims.
+- [x] **3. Apply qv components and responsive chrome — part 2.** Retain the
+  inherited qv shell, sign-in, processing states and upload dialog. Present the
+  existing API inspection catalog as qv-list rows in the main area and cards on
+  phones, without inventing findings or review counts absent from the API. The
+  sidebar has its header collapse action and the phone topbar has the mark.
+  Phone sign-in uses the evidence-phone header and centered form. Viewer chrome
+  now uses qv-screen, qv-map, qv-modes, qv-pill, qv-float, qv-pop, qv-toggle,
+  qv-thumb, qv-heading and qv button components. Frames/layers, camera tools and
+  settings open on demand over the map, one panel at a time. Panels scroll inside
+  the map workspace. Phone axis controls use a grid with 44 px touch targets;
+  timeline controls wrap and the minimap scales. All new labels have en/ru/kk
+  translations. Tester visual comparison remains pending; no screenshot claim.
 - [x] **4. Name the former bundle literals.** White, dark ink, the 12.5/13.5/15 px
   font sizes and sign-in hero gradient reference named CSS tokens with matching
   JSON values. Their original values are preserved. `tokens.test.ts` pins those
@@ -35,25 +49,35 @@ Part 2 starts only after the tester accepts part 1.
   owner-approved border/focus values. Readable text retains its 4.5:1 checks.
   `viewer/engine.test.ts` expects clear colour `#131313`; `e2e/far-layer.spec.ts`
   expects the fixed light unseen colour `6f6f6b` and canvas `rgb(19, 19, 19)`.
-- [ ] **6. Playwright phone project and v8 ADR — part 2.** The current config
-  still uses only the 1440×900 default viewport, with `reuseExistingServer: false`.
-  Add the 390×844 project and an ADR superseding ADR 0018's values in part 2.
+- [x] **6. Playwright phone project and v8 ADR — part 2.** The desktop project
+  fixes 1440×900 and the phone project fixes 390×844. `playwright-config.test.ts`
+  asserts both literal configurations and retains `reuseExistingServer: false`.
+  ADR 0026 adopts v8 tokens, fonts and bundle.css and explicitly supersedes
+  ADR 0018's values.
 
-## Verification for this round
+## Verification for part 2
 
-- `cd web && pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed on
-  the inherited code: 37 test files, 715 tests, including the token, literal, font,
-  theme and viewer engine tests. Build succeeded with the existing large-chunk
-  advisory.
-- `cd web && pnpm exec playwright test --list` passed: 98 tests in 11 files.
-  This lists tests only; it does not establish an e2e pass. Per task instructions,
-  Kerege runs e2e and captures screenshots with its fresh server outside this
-  sandbox. No server was started in this round.
-- Installed Fontsource package metadata confirms Geologica, IBM Plex Sans, Lora
-  and JetBrains Mono 5.3.0 use OFL-1.1, permitting commercial use. No dependency,
-  model, tool or skill was added. The owner's design files are authorised for use
-  in this task.
-
-This round adds the missing task checklist and corrects the older part 1 note's
-phase count. Existing part 1 implementation and test expectations are unchanged.
-
+- Baseline `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed before
+  implementation: 37 test files and 715 tests. The build had only its existing
+  large-chunk advisory. No part 1 token/font/literal expectations were rewritten.
+- Final local checks: `pnpm lint`, `pnpm typecheck`, `pnpm test` (37 test files,
+  718 tests, including noLiterals, keys and fixed viewport fixtures) and
+  `pnpm build`. Production output contains the existing large-chunk advisory.
+- Component coverage exercises catalog selection, sidebar collapse/restore and
+  qv viewer mode/point-panel classes. Existing sign-in and upload component
+  assertions are retained. E2e follows collapsed navigation and foldable viewer
+  panels; desktop density assertions remain, while phone rows pin 44 px targets
+  and exercise scrolling through every entry. New viewer chrome checks cover both
+  themes and all three languages, font families, fixed map ground, control hit
+  targets, panel exclusivity, layer toggles and horizontal overflow.
+- `pnpm exec playwright test --list` discovers 208 tests in 12 files across the
+  desktop and phone projects. This is discovery, **not an e2e execution pass**.
+  The task explicitly assigns e2e execution and screenshots to Kerege outside
+  this sandbox. No new tests are skipped, and no server or screenshot capture
+  was started here. Final visual acceptance for `/`, `/?signed-out` and
+  `/viewer/notre-dame-p3e` remains with the tester.
+- Installed package metadata was checked: Fontsource Geologica, IBM Plex Sans,
+  Lora and JetBrains Mono 5.3.0 are OFL-1.1; React, Three.js, Vite, Vitest and
+  Tailwind are MIT; Playwright is Apache-2.0. These permit commercial use. No
+  dependency, model, tool or skill was added. The owner's design files are
+  authorised for this task.

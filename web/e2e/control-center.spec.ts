@@ -1,3 +1,4 @@
+import { openNavigation, closeNavigation } from './chrome';
 import { expect, test } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 import ru from '../src/i18n/ru.json' with { type: 'json' };
@@ -27,7 +28,6 @@ for (const theme of ['light', 'dark'] as const) {
     test(`home fits twelve dense inspection rows with readable dates: ${theme}, ${lang}`, async ({
       page,
     }) => {
-      await page.setViewportSize({ width: 1440, height: 900 });
       await page.emulateMedia({ colorScheme: theme });
       await page.addInitScript((locale) => {
         localStorage.setItem('qarau.lang', locale);
@@ -42,6 +42,7 @@ for (const theme of ['light', 'dark'] as const) {
       }));
       await page.route('**/api/inspections', (route) => route.fulfill({ json: runs }));
       await page.goto('/');
+      await openNavigation(page);
       await page.evaluate(() => document.fonts.ready);
       const rows = page.locator('.inspection-link');
       await expect(rows).toHaveCount(runs.length);
@@ -52,11 +53,13 @@ for (const theme of ['light', 'dark'] as const) {
       const viewport = await groups.boundingBox();
       expect(viewport).not.toBeNull();
       expect(await groups.evaluate((element) => element.scrollTop)).toBe(0);
-      for (let index = 0; index < 12; index++) {
+      const phone = page.viewportSize()!.width === 390;
+      for (let index = 0; index < (phone ? runs.length : 12); index++) {
         const row = rows.nth(index);
+        if (phone) await row.scrollIntoViewIfNeeded();
         const box = await row.boundingBox();
         expect(box).not.toBeNull();
-        expect(box!.height).toBe(32);
+        expect(box!.height).toBe(phone ? 44 : 32);
         expect(box!.y).toBeGreaterThanOrEqual(viewport!.y);
         expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.y + viewport!.height);
         const run = runs[runs.length - 1 - index];
@@ -114,13 +117,16 @@ for (const theme of ['light', 'dark'] as const) {
         }),
       );
       await page.goto('/');
+      await openNavigation(page);
       await expect(page.locator('body')).toHaveCSS('background-color', themeColors[theme].bg);
       const navigation = page.getByRole('navigation', { name: t['shell.sites'] });
       await expect(navigation).toBeVisible();
       await expect(page.locator('.qv-side')).toHaveCSS('background-color', themeColors[theme].bg);
+      await closeNavigation(page);
       await expect(
-        page.getByRole('main').getByRole('heading', { name: t['shell.emptyTitle'], exact: true }),
+        page.getByRole('main').getByRole('heading', { name: t['catalog.title'], exact: true }),
       ).toBeVisible();
+      await openNavigation(page);
       await expect(navigation.getByRole('button', { name: t['inspection.new'] })).toBeVisible();
       await expect(
         navigation.getByRole('link', { name: new RegExp(t['demo.inspectionTitle']) }),
@@ -139,6 +145,10 @@ for (const theme of ['light', 'dark'] as const) {
         }));
         expect(size.scrollWidth, JSON.stringify(size)).toBeLessThanOrEqual(size.clientWidth);
       }
+      await closeNavigation(page);
+      const catalog = page.getByRole('main').locator('.catalog-list');
+      await expect(catalog).toBeVisible();
+      await expect(catalog.locator('button.catalog-row')).toHaveCount(1);
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
@@ -164,6 +174,7 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
     for (const [index, state] of ['done', 'done', 'failed', 'skipped'].entries())
       await expect(steps.locator('li').nth(index)).toHaveAttribute('data-state', state);
     await expect(steps.getByText(t['processing.status.skipped'])).toBeVisible();
+    await openNavigation(page);
     await expect(
       page
         .getByRole('navigation')
@@ -222,6 +233,7 @@ test('home lists API inspections, not the demo', async ({ page }) => {
     }),
   );
   await page.goto('/');
+  await openNavigation(page);
   const navigation = page.getByRole('navigation');
   const inspection = navigation.getByRole('link', { name: /^notre-dame/ });
   await expect(inspection.locator('.inspection-link-name')).toHaveText('notre-dame');
@@ -259,6 +271,7 @@ test('clips the skip-link shadow until keyboard focus and keeps the shortcut wor
   await page.route('**/api/inspections', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/runs', (route) => route.fulfill({ json: [] }));
   await page.goto('/');
+  await closeNavigation(page);
   const skip = page.getByRole('link', { name: 'Skip to inspection' });
   await expect(skip).toHaveCSS('clip-path', 'inset(50%)');
   await page.keyboard.press('Tab');

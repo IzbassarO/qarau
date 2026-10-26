@@ -1,3 +1,4 @@
+import { openDetails } from './chrome';
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
@@ -92,6 +93,7 @@ for (const run of ['demo', 'notre-dame']) {
       'background-color',
       'rgb(19, 19, 19)',
     );
+    await openDetails(page);
     const toggle = page.getByRole('button', { name: en['viewer.show.farPoints'] });
     const before = await layerState(page);
     if (manifest) {
@@ -151,6 +153,7 @@ test('valid synthetic far arrays show the opt-in toggle without a warning', asyn
     objectCount: manifest.points.count,
     farCount: manifest.far.count,
   });
+  await openDetails(page);
   const toggle = page.getByRole('button', { name: en['viewer.show.farPoints'] });
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await toggle.click();

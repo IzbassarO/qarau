@@ -19,9 +19,17 @@ interface SidebarProps {
   onNavigate: () => void;
   demo?: boolean;
   loading?: boolean;
+  onCollapse?: () => void;
 }
 
-export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: SidebarProps) {
+export function Sidebar({
+  sites,
+  onNewInspection,
+  onNavigate,
+  onCollapse,
+  demo,
+  loading,
+}: SidebarProps) {
   const { t, lang } = useI18n();
   const { signOut } = useAuth();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -36,14 +44,35 @@ export function Sidebar({ sites, onNewInspection, onNavigate, demo, loading }: S
 
   return (
     <nav className="qv-side shell-sidebar" aria-label={t('shell.sites')}>
-      <Link
-        to="/"
-        className="qv-side__org sidebar-brand"
-        aria-label={t('shell.home')}
-        onClick={onNavigate}
-      >
-        <Wordmark />
-      </Link>
+      <div className="sidebar-brand-row">
+        <Link
+          to="/"
+          className="qv-side__org sidebar-brand"
+          aria-label={t('shell.home')}
+          onClick={onNavigate}
+        >
+          <Wordmark />
+        </Link>
+        {onCollapse && (
+          <button
+            type="button"
+            className="qv-iconbtn qv-side__collapse"
+            aria-label={t('shell.closeSidebar')}
+            onClick={onCollapse}
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 20 20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <rect x="3" y="4" width="14" height="12" rx="2" />
+              <path d="M8 4v12m5-9-3 3 3 3" />
+            </svg>
+          </button>
+        )}
+      </div>
       <button className="qv-btn qv-btn--block new-inspection" onClick={onNewInspection}>
         <span aria-hidden="true">+</span> {t('inspection.new')}
       </button>

@@ -8,6 +8,9 @@ beforeEach(() => setLang('en'));
 it('shows Orbit active by default, enables Observer and keeps Walk unavailable', () => {
   const onObserver = vi.fn();
   render(<ModeSwitch onOrbit={vi.fn()} onObserver={onObserver} />);
+  expect(screen.getByRole('group', { name: 'Navigation mode' }).className).toBe(
+    'qv-modes viewer-segments',
+  );
   expect(screen.getByRole('button', { name: 'Orbit' }).getAttribute('aria-pressed')).toBe('true');
   const observer = screen.getByRole('button', { name: 'Observer' }) as HTMLButtonElement;
   expect(observer.disabled).toBe(false);

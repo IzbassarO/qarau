@@ -52,6 +52,52 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it('collapses navigation from its header and restores it with the topbar control', () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([])));
+  renderRoute('/inspections/demo');
+  const nav = screen.getByRole('navigation');
+  const collapse = within(nav).getByRole('button', { name: 'Close sites' });
+  expect(collapse.className).toBe('qv-iconbtn qv-side__collapse');
+  fireEvent.click(collapse);
+  expect(nav.closest('.qv-app')?.className).toBe('qv qv-app app-shell sidebar-collapsed');
+  fireEvent.click(screen.getByRole('button', { name: 'Open sites' }));
+  expect(nav.closest('.qv-app')?.className).toBe(
+    'qv qv-app app-shell sidebar-open sidebar-collapsed',
+  );
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(nav.closest('.qv-app')?.className).toBe('qv qv-app app-shell sidebar-collapsed');
+});
+
+it('presents the API inspection catalog with v8 rows and opens the selected inspection', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (url === '/api/sites') return Response.json([{ id: 1, org_id: 1, name: 'North site' }]);
+      const item = {
+        id: 7,
+        site_id: 1,
+        title: 'North wall',
+        status: 'uploaded',
+        created_at: '2026-10-23T12:00:00Z',
+      };
+      return Response.json(url === '/api/inspections' ? [item] : item);
+    }),
+  );
+  renderRoute('/');
+  const main = within(screen.getByRole('main'));
+  const row = await main.findByRole('button', { name: /North wall/ });
+  expect(row.className).toBe('qv-row catalog-row');
+  expect(row.parentElement?.className).toBe('qv-list catalog-list');
+  expect(main.getByRole('heading', { name: 'Inspections' }).className).toBe('qv-title');
+  expect(within(row).getByRole('time').getAttribute('datetime')).toBe('2026-10-23T12:00:00Z');
+  expect(within(row).getByText('Uploaded').className).toBe('qv-status qv-status--muted');
+  fireEvent.click(row);
+  expect(await main.findByRole('heading', { name: 'North wall' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /North wall/ }).getAttribute('aria-current')).toBe(
+    'page',
+  );
+});
+
 it.each<Lang>(['en', 'ru', 'kk'])(
   'shows the empty inspection hint exactly once (%s)',
   async (lang) => {

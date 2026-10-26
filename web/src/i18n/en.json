@@ -277,5 +277,10 @@
   "processing.mapWaiting": "The 3D map will be available after processing.",
   "inspection.detailError": "Could not load inspection progress. Check your connection and try again.",
   "upload.sitesUnavailable": "Site selection is unavailable",
-  "upload.catalogOnly": "You can view existing inspections here. To upload a video, use a workspace with site management and uploads enabled."
+  "upload.catalogOnly": "You can view existing inspections here. To upload a video, use a workspace with site management and uploads enabled.",
+  "catalog.title": "Inspections",
+  "catalog.object": "Object",
+  "catalog.shot": "Shot",
+  "catalog.status": "Status",
+  "viewer.details": "Frames and layers"
 }

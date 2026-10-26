@@ -1,3 +1,4 @@
+import { openTools, closeTools, openDetails } from './chrome';
 /* eslint-disable @typescript-eslint/no-explicit-any -- test hook on window */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -48,20 +49,26 @@ for (const run of runs) {
     // through-camera on a rolled frame (synthetic-findings rolls every 8th frame by 30 deg)
     if (run === 'synthetic-findings') {
       await slider.fill('59');
+      await openTools(page);
       await page.getByRole('button', { name: 'Смотреть глазами камеры' }).click();
+      await closeTools(page);
       await page.waitForTimeout(1200);
       await page.screenshot({ path: `${OUT}/${run}-3a-camera-rolled.png` });
       await slider.fill(String(Math.floor(max / 2)));
     }
 
     // view through the current camera
+    await openTools(page);
     await page.getByRole('button', { name: 'Смотреть глазами камеры' }).click();
+    await closeTools(page);
     await page.waitForTimeout(1200);
     await page.screenshot({ path: `${OUT}/${run}-3-camera.png` });
 
     // click a point at the canvas centre region: try a few positions until one is picked
     const box = (await page.locator('canvas').boundingBox())!;
+    await openTools(page);
     await page.getByRole('button', { name: 'Сбросить вид' }).click();
+    await closeTools(page);
     await page.waitForTimeout(800);
     for (const [fx, fy] of [
       [0.5, 0.5],
@@ -77,6 +84,7 @@ for (const run of runs) {
     await page.screenshot({ path: `${OUT}/${run}-4-picked.png` });
 
     // findings (v2 bundles): list, selection, ticks, timecodes, jump
+    await openDetails(page);
     const items = page.getByTestId('finding-item');
     if ((await items.count()) > 0) {
       await slider.fill('100');

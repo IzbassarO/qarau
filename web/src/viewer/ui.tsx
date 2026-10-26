@@ -36,7 +36,7 @@ export function ToolButton({
       aria-label={label}
       title={label}
       aria-pressed={pressed}
-      className="viewer-tool"
+      className="qv-iconbtn viewer-tool"
     >
       {children}
     </button>
@@ -78,7 +78,7 @@ export function ModeSwitch({
     <div
       role="group"
       aria-label={t('viewer.mode.label')}
-      className="viewer-segments"
+      className="qv-modes viewer-segments"
       onKeyDown={(event) => {
         if (event.ctrlKey || event.metaKey || event.altKey) return;
         if (event.key.toLowerCase() === 'f' || event.code === 'KeyF') {
@@ -140,8 +140,8 @@ export function NavigationSettings({
   const { t } = useI18n();
   const sensitivityId = useId();
   return (
-    <details className="relative">
-      <summary className="viewer-settings-trigger">
+    <details name="viewer-panels" className="viewer-settings">
+      <summary className="qv-pill viewer-settings-trigger">
         <svg
           width="15"
           height="15"
@@ -155,7 +155,7 @@ export function NavigationSettings({
         </svg>
         {t('viewer.settings.title')}
       </summary>
-      <div className="viewer-settings-panel">
+      <div className="qv-float viewer-settings-panel">
         <div className="viewer-settings-field">
           <div className="viewer-settings-label">
             <label htmlFor={sensitivityId}>{t('viewer.settings.sensitivity')}</label>
@@ -179,7 +179,7 @@ export function NavigationSettings({
             <select
               value={boostKey}
               onChange={(event) => onBoostKeyChange(event.target.value as ObserverBoostKey)}
-              className="viewer-select"
+              className="qv-select viewer-select"
             >
               <option value="control">{t('viewer.settings.control')}</option>
               <option value="alt">{t('viewer.settings.alt')}</option>
@@ -225,18 +225,16 @@ export function Toggle({
       aria-pressed={on}
       title={title}
       onClick={() => onChange(!on)}
-      className="viewer-toggle"
+      className="qv-toggle viewer-toggle"
     >
-      <span className="viewer-toggle-track">
-        <span className="viewer-toggle-thumb" />
-      </span>
+      <span className="qv-toggle__track viewer-toggle-track" aria-hidden="true" />
       <span>{children}</span>
     </button>
   );
 }
 
 export const H2 = ({ children }: { children: ReactNode }) => (
-  <h2 className="viewer-heading">{children}</h2>
+  <h2 className="qv-heading viewer-heading">{children}</h2>
 );
 
 export const Row = ({ k, v }: { k: ReactNode; v: ReactNode }) => (

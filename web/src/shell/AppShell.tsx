@@ -4,9 +4,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useI18n } from '../i18n';
 import { createDemo } from '../fixtures/demo';
 import { useInspections } from '../lib/inspections';
-import { Sidebar } from './Sidebar';
+import { Sidebar, shortDate } from './Sidebar';
 import { InspectionView } from './InspectionView';
 import { NewInspectionDialog } from './NewInspectionDialog';
+import { Wordmark } from './ShellIdentity';
 import './shell.css';
 
 export function AppShell({ demo = false }: { demo?: boolean }) {
@@ -16,6 +17,7 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { t, lang } = useI18n();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(() => searchParams.has('new-inspection'));
   // The demo lives only at /inspections/demo, never mixed into API inspections.
   const showDemo = demo;
@@ -54,7 +56,9 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
   }, [sidebarOpen]);
 
   return (
-    <div className={`qv qv-app app-shell${sidebarOpen ? ' sidebar-open' : ''}`}>
+    <div
+      className={`qv qv-app app-shell${sidebarOpen ? ' sidebar-open' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}
+    >
       <a className="qv-btn skip-link" href="#inspection-main">
         {t('shell.skip')}
       </a>
@@ -64,6 +68,10 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
           demo={showDemo}
           loading={!showDemo && inspections.isPending}
           onNavigate={closeNavigation}
+          onCollapse={() => {
+            setSidebarCollapsed(true);
+            closeNavigation();
+          }}
           onNewInspection={() => {
             closeNavigation();
             setDialogOpen(true);
@@ -79,6 +87,9 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
       )}
       <div className="qv-main shell-content">
         <header className="qv-topbar shell-topbar">
+          <span className="shell-phone-brand">
+            <Wordmark />
+          </span>
           <button
             className="qv-iconbtn icon-button sidebar-trigger"
             aria-label={t(sidebarOpen ? 'shell.closeSidebar' : 'shell.openSidebar')}
@@ -153,6 +164,53 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
                 <p>{t(inspections.isError ? 'shell.connectionHint' : 'inspection.selectOther')}</p>
               </div>
             </div>
+          ) : sites.some((site) => site.inspections.length > 0) ? (
+            <section className="qv-page__inner inspection-catalog" aria-labelledby="catalog-title">
+              <header className="qv-page__head catalog-heading">
+                <div>
+                  <h1 className="qv-title" id="catalog-title">
+                    {t('catalog.title')}
+                  </h1>
+                  <p className="qv-caption">{t('shell.emptyDescription')}</p>
+                </div>
+                <button className="qv-btn qv-btn--secondary" onClick={() => setDialogOpen(true)}>
+                  {t('inspection.new')}
+                </button>
+              </header>
+              <div className="qv-list catalog-list">
+                <div className="qv-row qv-row--head catalog-row" aria-hidden="true">
+                  <span>{t('catalog.object')}</span>
+                  <span>{t('catalog.shot')}</span>
+                  <span>{t('catalog.status')}</span>
+                </div>
+                {sites
+                  .flatMap((site) => site.inspections)
+                  .map((inspection) => (
+                    <button
+                      type="button"
+                      className="qv-row catalog-row"
+                      key={inspection.id}
+                      onClick={() => navigate(`/inspections/${encodeURIComponent(inspection.id)}`)}
+                    >
+                      <span className="qv-row__name">
+                        {inspection.title === inspection.id && /^\d+$/.test(inspection.id)
+                          ? `${t('shell.inspection')} ${inspection.id}`
+                          : inspection.title}
+                      </span>
+                      {inspection.createdAt ? (
+                        <time className="qv-caption" dateTime={inspection.createdAt}>
+                          {shortDate(inspection.createdAt, lang)}
+                        </time>
+                      ) : (
+                        <span className="qv-caption">{t('inspection.dateUnknown')}</span>
+                      )}
+                      <span className="qv-status qv-status--muted">
+                        {inspection.reportedStatus ?? t(`status.${inspection.status}`)}
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            </section>
           ) : (
             <div className="qv-card">
               <div className="qv-card__head">

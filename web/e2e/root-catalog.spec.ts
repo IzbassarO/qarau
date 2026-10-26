@@ -1,3 +1,4 @@
+import { openNavigation } from './chrome';
 import { expect, test } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 import ru from '../src/i18n/ru.json' with { type: 'json' };
@@ -28,6 +29,7 @@ for (const theme of ['light', 'dark'] as const) {
       });
 
       await page.goto('/');
+      await openNavigation(page);
       const navigation = page.getByRole('navigation', { name: t['shell.sites'] });
       await expect(navigation.locator('.inspection-link')).toHaveCount(2);
       await expect(navigation.locator('.inspection-link-name')).toHaveText([
@@ -52,7 +54,8 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(name).toHaveCSS('text-overflow', 'ellipsis');
         const rowBox = await row.boundingBox();
         expect(rowBox).not.toBeNull();
-        expect(rowBox!.height).toBeLessThanOrEqual(40);
+        if (page.viewportSize()!.width === 390) expect(rowBox!.height).toBe(44);
+        else expect(rowBox!.height).toBeLessThanOrEqual(40);
         const statusSize = await status.evaluate((element) => ({
           content: element.scrollWidth,
           visible: element.clientWidth,

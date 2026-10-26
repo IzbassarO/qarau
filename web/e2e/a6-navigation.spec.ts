@@ -1,3 +1,4 @@
+import { openTools } from './chrome';
 import { expect, test } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 
@@ -27,6 +28,7 @@ for (const run of ['notre-dame', 'room', 'aegviidu']) {
     const observer = modes.getByRole('button', { name: en['viewer.mode.observer'], exact: true });
     await expect(observer).toBeEnabled();
     await expect(observer).toHaveAttribute('aria-pressed', 'false');
+    await openTools(page);
     for (const label of [
       'toolbar.top',
       'toolbar.front',
@@ -86,6 +88,7 @@ for (const run of ['notre-dame', 'room', 'aegviidu']) {
     await expect(
       modes.getByRole('button', { name: en['viewer.mode.orbit'], exact: true }),
     ).toHaveAttribute('aria-pressed', 'true');
+    await openTools(page);
     await page.getByRole('button', { name: en['toolbar.alignSurface'], exact: true }).click();
     await expect(page.getByRole('status')).toHaveText(en['canvas.alignHint']);
     await page.keyboard.press('Escape');

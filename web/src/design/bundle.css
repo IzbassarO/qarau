@@ -4105,3 +4105,28 @@ progress.qv-pbar::-moz-progress-bar {
   font-family: var(--font-display);
   font-weight: 600;
 }
+
+/* Fit the exported phone sign-in, header and recent-inspection surfaces. */
+@media (max-width: 767px) {
+  .login-hero {
+    background: var(--surface);
+    color: var(--ink);
+  }
+
+  .login-hero .qv-mark--hero {
+    background: var(--ink);
+    color: var(--on-accent);
+  }
+
+  .login-card {
+    background: var(--color-transparent);
+  }
+
+  .catalog-list {
+    background: var(--color-transparent);
+  }
+
+  .catalog-row {
+    background: var(--surface);
+  }
+}

@@ -1,3 +1,4 @@
+import { openNavigation } from './chrome';
 import { expect, test } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 import ru from '../src/i18n/ru.json' with { type: 'json' };
@@ -34,7 +35,7 @@ for (const theme of ['light', 'dark'] as const) {
       );
       await expect(page.locator('.login-card')).toHaveCSS(
         'background-color',
-        themeColors[theme].surface,
+        page.viewportSize()!.width === 1440 ? themeColors[theme].surface : 'rgba(0, 0, 0, 0)',
       );
       await expect(page.locator('.shell-wordmark')).toHaveText(t['shell.product']);
       await expect(page.getByRole('button', { name: t['auth.signIn'] })).toHaveCSS(
@@ -43,21 +44,29 @@ for (const theme of ['light', 'dark'] as const) {
       );
       const card = await page.locator('.login-card').boundingBox();
       expect(card).not.toBeNull();
-      // v8: the form is centered in the right half of the 1440 px desktop layout.
-      expect(Math.abs(card!.x + card!.width / 2 - 1080)).toBeLessThanOrEqual(1);
-      await expect(page.locator('.qv-hero')).toBeVisible();
-      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-      await expect(page.locator('.login-page')).toHaveCSS('display', 'grid');
-      await expect(page.locator('.login-page')).toHaveCSS('grid-template-columns', '720px 720px');
-      await expect(page.locator('.login-content')).toHaveCSS('place-items', 'center');
-      const hero = await page.locator('.qv-hero').boundingBox();
-      const content = await page.locator('.login-content').boundingBox();
-      expect(hero).not.toBeNull();
-      expect(content).not.toBeNull();
-      expect(hero!.x).toBe(0);
-      expect(hero!.width).toBe(720);
-      expect(content!.x).toBe(720);
-      expect(content!.width).toBe(720);
+      if (page.viewportSize()!.width === 1440) {
+        // v8: the form is centered in the right half of the 1440 px desktop layout.
+        expect(Math.abs(card!.x + card!.width / 2 - 1080)).toBeLessThanOrEqual(1);
+        await expect(page.locator('.qv-hero')).toBeVisible();
+        await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+        await expect(page.locator('.login-page')).toHaveCSS('display', 'grid');
+        await expect(page.locator('.login-page')).toHaveCSS('grid-template-columns', '720px 720px');
+        await expect(page.locator('.login-content')).toHaveCSS('place-items', 'center');
+        const hero = await page.locator('.qv-hero').boundingBox();
+        const content = await page.locator('.login-content').boundingBox();
+        expect(hero).not.toBeNull();
+        expect(content).not.toBeNull();
+        expect(hero!.x).toBe(0);
+        expect(hero!.width).toBe(720);
+        expect(content!.x).toBe(720);
+        expect(content!.width).toBe(720);
+      } else {
+        expect(Math.abs(card!.x + card!.width / 2 - 195)).toBeLessThanOrEqual(1);
+        await expect(page.locator('.login-page')).toHaveCSS('grid-template-columns', '390px');
+        await expect(page.locator('.login-hero')).toHaveCSS('height', '56px');
+        await expect(page.locator('.login-hero-copy')).not.toBeVisible();
+        await expect(page.locator('.login-card')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+      }
       await expect(page.locator('.qv-hero .shell-wordmark')).toHaveCount(1);
       await expect(page.locator('.login-card .shell-wordmark')).toHaveCount(0);
       await expect(page.getByRole('button', { name: t['auth.signIn'] })).toHaveClass(
@@ -118,11 +127,13 @@ test('rejects bad credentials, signs in, restores the session and signs out', as
   accepted = true;
   await page.getByLabel('Password').fill('test-api-value');
   await page.getByRole('button', { name: 'Sign in' }).click();
+  await openNavigation(page);
   await expect(page.getByRole('navigation')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Inspection not found' })).toBeVisible();
   await expect(page).toHaveURL(/\/inspections\/private-run$/);
   expect(await page.evaluate(() => localStorage.getItem('qarau.auth.session'))).toBeNull();
   await page.reload();
+  await openNavigation(page);
   await expect(page.getByRole('navigation')).toBeVisible();
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
