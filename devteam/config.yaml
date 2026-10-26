@@ -35,6 +35,8 @@ gates:
       - web/src/design/noLiterals.test.ts
       - web/src/viewer/engine.test.ts
       - web/e2e/far-layer.spec.ts
+      # owner, 2026-10-26: the v1 centred-card assertions become v8 split-layout ones
+      - web/e2e/login.spec.ts
   benchmark:
     when_paths: [pipeline/]   # run only when the change touches these
     # Contract (task P1): writes {out}/results.json, reads videos from {data} (read-only);
