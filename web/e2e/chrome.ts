@@ -2,8 +2,11 @@ import type { Page } from '@playwright/test';
 
 /** Follow the same collapsed-navigation controls as a phone/tablet user. */
 export async function openNavigation(page: Page) {
-  if (!(await page.getByRole('navigation').isVisible()))
-    await page.locator('.sidebar-trigger').click();
+  const navigation = page.getByRole('navigation', { includeHidden: true });
+  // Sign-in is asynchronous. Wait for the shell before deciding whether its
+  // navigation needs opening; the desktop trigger stays hidden by design.
+  await navigation.waitFor({ state: 'attached' });
+  if (!(await navigation.isVisible())) await page.locator('.sidebar-trigger').click();
 }
 
 export async function closeNavigation(page: Page) {

@@ -1,4 +1,4 @@
-import { useId, type MouseEvent, type ReactNode } from 'react';
+import { useId, type MouseEvent, type ReactNode, type Ref } from 'react';
 import { useI18n } from '../i18n';
 import { LanguageSwitch, Wordmark } from '../shell/ShellIdentity';
 import { MAX_SENSITIVITY, MIN_SENSITIVITY, type ObserverBoostKey } from './settings';
@@ -19,11 +19,13 @@ export function DenseToggle({
 }
 
 export function ToolButton({
+  ref,
   label,
   onClick,
   pressed,
   children,
 }: {
+  ref?: Ref<HTMLButtonElement>;
   label: string;
   onClick: (event: MouseEvent<HTMLButtonElement>) => void;
   pressed?: boolean;
@@ -31,6 +33,7 @@ export function ToolButton({
 }) {
   return (
     <button
+      ref={ref}
       type="button"
       onClick={onClick}
       aria-label={label}
@@ -43,10 +46,18 @@ export function ToolButton({
   );
 }
 
-export function PointInfoTool({ active, onClick }: { active: boolean; onClick: () => void }) {
+export function PointInfoTool({
+  ref,
+  active,
+  onClick,
+}: {
+  ref?: Ref<HTMLButtonElement>;
+  active: boolean;
+  onClick: () => void;
+}) {
   const { t } = useI18n();
   return (
-    <ToolButton label={t('pointInfo.tool')} pressed={active} onClick={onClick}>
+    <ToolButton ref={ref} label={t('pointInfo.tool')} pressed={active} onClick={onClick}>
       <svg
         width="18"
         height="18"

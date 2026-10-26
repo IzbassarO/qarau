@@ -216,6 +216,8 @@ it('opens ?point=0 with the info tool, evidence panel and selected-point marker,
   renderViewer('demo', '?point=0');
   const tool = screen.getByRole('button', { name: LANGS.en['pointInfo.tool'] });
   expect(tool.getAttribute('aria-pressed')).toBe('true');
+  const tools = tool.closest('details') as HTMLDetailsElement;
+  expect(tools.open).toBe(false);
   const panel = screen.getByRole('region', { name: LANGS.en['pointInfo.title'] });
   expect(within(panel).getByText(`${bundle.position[0].toFixed(3)} model units`)).toBeTruthy();
   expect(within(panel).getAllByText(LANGS.en['pointInfo.needsScale'])).toHaveLength(2);
@@ -239,6 +241,8 @@ it('opens ?point=0 with the info tool, evidence panel and selected-point marker,
   fireEvent.click(within(panel).getByRole('button', { name: LANGS.en['pointInfo.close'] }));
   expect(screen.queryByRole('region', { name: LANGS.en['pointInfo.title'] })).toBeNull();
   expect(tool.getAttribute('aria-pressed')).toBe('false');
+  expect(tools.open).toBe(true);
+  expect(document.activeElement).toBe(tool);
   expect(engine.scene.getObjectByName('selected-point')!.visible).toBe(false);
 });
 

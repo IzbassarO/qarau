@@ -105,3 +105,23 @@ was also inside that folded panel, so it was invisible in the initial view.
   at Chromium's Mach-port bootstrap; it exited and cleaned its temporary profile.
   No listening server or screenshot capture was started. No dependency was added;
   the commercial-use licences recorded above remain unchanged.
+
+## E2e return: Point info dismissal and sign-in synchronisation
+
+Kerege's next run finished with 205 passes and three failures: Point info's
+post-dismissal button was inaccessible on desktop and phone, and the desktop
+sign-in/session test failed. The earlier panel-layout and findings-alert checks
+passed in that run.
+
+- Closing point evidence now reopens its originating tools drawer and focuses
+  the Point info button. Picking state and mode still reset; the control remains
+  reachable with `aria-pressed="false"`. The existing unit test retains every
+  assertion and additionally checks the reopened drawer and restored focus.
+- The shared e2e navigation helper waits for the signed-in shell to attach before
+  deciding whether navigation is collapsed. This removes its race with the
+  asynchronous sign-in request: a desktop run must not attempt to click the
+  intentionally hidden sidebar trigger while the login form is still mounted.
+- No e2e spec assertion, expected value, threshold or timeout changed. No new
+  dependency or visual value was introduced. Local lint, typecheck, all 720 unit
+  tests (37 files) and build pass. Kerege must rerun the full browser suite;
+  the sandbox restriction remains, and no local server or screenshots were started.

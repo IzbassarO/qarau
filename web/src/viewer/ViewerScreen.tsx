@@ -103,6 +103,8 @@ export function ViewerScreen({
   const frames = m.frames;
   const isImages = m.source.kind === 'images';
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const toolsRef = useRef<HTMLDetailsElement>(null);
+  const pointInfoToolRef = useRef<HTMLButtonElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
   const gizmoRef = useRef<AxisGizmoHandle>(null);
   const minimapRef = useRef<MinimapHandle>(null);
@@ -307,6 +309,10 @@ export function ViewerScreen({
   const closePointInfo = () => {
     setPicked(null);
     setPointInfoMode(false);
+    // The evidence panel closes the named tools drawer when it opens. Return
+    // to the originating control after dismissing it, including keyboard focus.
+    if (toolsRef.current) toolsRef.current.open = true;
+    pointInfoToolRef.current?.focus();
   };
   const seekPointFrame = (timeSec: number, frameId: number) => {
     const index = frames.findIndex((frame) => frame.i === frameId && frameTime(frame) === timeSec);
@@ -366,7 +372,7 @@ export function ViewerScreen({
 
       <div className="qv-screen__main viewer-workspace">
         <div className="viewer-chrome">
-          <details name="viewer-panels" className="viewer-tools-drawer">
+          <details ref={toolsRef} name="viewer-panels" className="viewer-tools-drawer">
             <summary className="qv-pill">{t('toolbar.label')}</summary>
             <div
               role="toolbar"
@@ -416,6 +422,7 @@ export function ViewerScreen({
                 )}
               </ToolButton>
               <PointInfoTool
+                ref={pointInfoToolRef}
                 active={pointInfoMode}
                 onClick={() => {
                   if (pointInfoMode) closePointInfo();
