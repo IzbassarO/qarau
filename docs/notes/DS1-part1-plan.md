@@ -1,8 +1,11 @@
 # DS1 part 1 — v8 tokens, theme and fonts
 
 Scope: wire the existing v8 values in `web/`. Shell/component markup, phone layout,
-the Playwright phone project and the v8 ADR remain for parts 2 and 3. No screenshots
+the Playwright phone project and the v8 ADR remain for part 2. No screenshots
 or local e2e server: Kerege runs those checks from a clean checkout.
+
+The current six-item checklist and baseline verification are recorded in
+[DS1-plan.md](DS1-plan.md).
 
 1. Flatten `tokens.json` to its v8 set and import `tokens.css` and `bundle.css`.
    Map existing CSS compatibility names to the v8 properties without retaining v1
