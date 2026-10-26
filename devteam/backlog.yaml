@@ -1028,16 +1028,10 @@ tasks:
     '
   licence: 'The owner''s design files (v8). Fonts: @fontsource/geologica, ibm-plex-sans, lora, jetbrains-mono
     5.3.0, OFL-1.1 (commercial use allowed), already in web/package.json.'
-  status: blocked
+  status: todo
   owner: dev_app
   run: run-20261024-153339
   branch: devteam/DS1
-  blocked_reason: 'tester: The attached screenshots of ''/'' and ''/?signed-out'' (the post-change set,
-    not the dev-* set) still render the v1 design: a purple accent (#6550a2 in light, #b6a2e0 in dark),
-    a single centred login card with the ''Qarau Vision'' wordmark inside the card, no .qv-hero dark left
-    panel, and a sidebar with bordered status chips and truncated run names. The v8 reference shows a
-    split sign-in with a dark hero on the left and a black button (inverted in dark), and a sidebar with
-    the logo mark and a '
 - id: D1
   area: core
   title: Storage layout on S3; data/runs is a cache
