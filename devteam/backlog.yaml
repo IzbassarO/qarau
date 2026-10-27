@@ -1357,11 +1357,17 @@ tasks:
 
     '
   licence: WeasyPrint (BSD-3-Clause) or ReportLab (BSD-3-Clause); IBM Plex fonts (OFL-1.1).
-  status: in_progress
+  status: blocked
   depends_on:
   - REV1-api
   owner: dev_pipeline
   run: run-20261026-223632
+  branch: devteam/RPT1
+  blocked_reason: 'the tester sent it back twice in a row for the same reason, so no new round was started:
+    Criterion 1 fails: the task and plan require an HTML template (report/templates/report.html.j2 plus
+    report.css) rendered with Jinja2 and WeasyPrint. The diff builds the PDF with ReportLab in render.py
+    and has no template file. The ADR argues for ReportLab only because Pango is missing on the dev Mac,
+    which is not a reason to drop the planned design. The task text allows ReportLab, but this plan an'
 - id: UI-mark
   area: app
   title: Mark a region on the 3D map as a finding
