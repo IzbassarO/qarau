@@ -32,6 +32,7 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
       let retried = false;
       let listReads = 0;
       const posts: string[] = [];
+      const findingsRequests: string[] = [];
       const { manifest, files } = readDenseFixture();
       await page.route('**/api/**', (route) => {
         const request = route.request();
@@ -48,6 +49,11 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
                 inspection.id === 101 && retried ? { ...inspection, status: 'queued' } : inspection,
               ),
           });
+        }
+        if (path === '/api/inspections/102/findings') {
+          expect(request.method()).toBe('GET');
+          findingsRequests.push(path);
+          return route.fulfill({ json: [] });
         }
         if (path === '/api/inspections/101')
           return route.fulfill({
@@ -156,6 +162,7 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
       await main.getByRole('button', { name: t['list.openMap'] }).click();
       await expect(page).toHaveURL('/viewer/inspection-done');
       await page.waitForFunction(() => window.__qarau?.pointsLoaded);
+      await expect.poll(() => findingsRequests).toEqual(['/api/inspections/102/findings']);
       await expect(page.getByRole('alert')).toHaveCount(0);
     });
 
