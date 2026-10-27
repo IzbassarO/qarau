@@ -98,6 +98,31 @@ function renderDemo() {
   return renderViewer('demo');
 }
 
+it('publishes production readiness after geometry loads and clears it on unmount', async () => {
+  vi.stubEnv('DEV', false);
+  try {
+    const bundle = { ...createDemo('en').bundle, runId: 'production-readiness' };
+    vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+    let finish!: (value: bundleApi.Bundle) => void;
+    vi.spyOn(bundleApi, 'loadBundle').mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([])));
+    const view = renderViewer('production-readiness');
+    expect(window.__qarau).toBeUndefined();
+    await waitFor(() => expect(bundleApi.loadBundle).toHaveBeenCalled());
+    await act(async () => finish(bundle));
+    expect(window.__qarau).toEqual({ pointsLoaded: true });
+    expect(document.querySelector('.viewer-point-canvas')).not.toBeNull();
+    view.unmount();
+    expect(window.__qarau).toBeUndefined();
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 it.each([
   ['missing', 'The findings file listed in the bundle is missing. Re-run the projection stage.'],
   [

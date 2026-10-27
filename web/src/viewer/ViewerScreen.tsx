@@ -49,11 +49,11 @@ declare global {
   interface Window {
     __qarau?: {
       pointsLoaded: boolean;
-      fps: number;
+      fps?: number;
       engine?: ViewerEngine;
-      bench: (on: boolean) => void;
-      denseLayer: () => { available: boolean; visible: boolean; count: number };
-      densePointScreen: (index: number) => { x: number; y: number } | null;
+      bench?: (on: boolean) => void;
+      denseLayer?: () => { available: boolean; visible: boolean; count: number };
+      densePointScreen?: (index: number) => { x: number; y: number } | null;
     };
   }
 }
@@ -229,6 +229,9 @@ export function ViewerScreen({
     const ro = new ResizeObserver(() => eng.resize());
     ro.observe(canvas);
     eng.resize();
+    // Readiness also belongs to compiled previews; engine debug access stays dev-only.
+    window.__qarau = { pointsLoaded: true };
+    let fpsTimer: ReturnType<typeof setInterval> | undefined;
     if (import.meta.env.DEV) {
       window.__qarau = {
         pointsLoaded: true,
@@ -254,17 +257,14 @@ export function ViewerScreen({
           return p.visible ? { x: p.x, y: p.y } : null;
         },
       };
-      const q = setInterval(() => window.__qarau && (window.__qarau.fps = eng.fps), 500);
-      return () => {
-        clearInterval(q);
-        ro.disconnect();
-        eng.dispose();
-        delete window.__qarau;
-      };
+      fpsTimer = setInterval(() => window.__qarau && (window.__qarau.fps = eng.fps), 500);
     }
+    const readiness = window.__qarau;
     return () => {
+      clearInterval(fpsTimer);
       ro.disconnect();
       eng.dispose();
+      if (window.__qarau === readiness) delete window.__qarau;
     };
   }, [sourceBundle, initialMode]);
 
