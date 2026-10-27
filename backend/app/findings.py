@@ -171,6 +171,17 @@ def create_finding(
     inspection_id: int, body: FindingIn, db: Db, who: Engineer, request: Request, settings: Cfg
 ) -> FindingOut:
     get_or_404(db, Inspection, inspection_id)
+    finding, run, bundle = mark_finding(db, settings, inspection_id, body)
+    audit(db, who, request, "finding", finding.id, "create")
+    db.commit()
+    return to_out(db, finding, run, bundle)
+
+
+def mark_finding(
+    db: Session, settings: Settings, inspection_id: int, body: FindingIn
+) -> tuple[Finding, Run, Bundle]:
+    """Select, measure and store a manual finding with its evidence frames (not committed).
+    The API route and the dev seed (app/seed.py) both create findings only through this."""
     run = exported_run(db, settings, inspection_id)
     bundle = bundle_of(settings, run)
     try:
@@ -203,9 +214,7 @@ def create_finding(
                 finding_id=finding.id, frame_id=ev["frame"], outline=ev["outline"], confidence=1.0
             )
         )
-    audit(db, who, request, "finding", finding.id, "create")
-    db.commit()
-    return to_out(db, finding, run, bundle)
+    return finding, run, bundle
 
 
 @router.get(

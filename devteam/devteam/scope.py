@@ -5,7 +5,7 @@ web developer needed backend/ and shipped the backend as a .patch file under doc
   task's `writable`; a path in another developer's folders means the task needs a split.
 - protected: paths no agent may change at all (devteam/, CI, the rules, gate configs).
 - bypass: diff patterns that make gates pass without doing the work (skipped or focused tests,
-  fewer assertions, looser thresholds, patch files, code parked under docs/).
+  retries, fewer assertions, looser thresholds, patch files, code parked under docs/).
 """
 
 import fnmatch
@@ -38,6 +38,12 @@ SKIP = re.compile(
     r"\s*\(|pytest\.mark\.(skip|skipif|xfail)\b|\bpytest\.(skip|xfail)\s*\(|@unittest\.skip"
     r"|test\.fixme\b"
 )
+# Retries set by the code itself: Kerege retries a failing e2e test once (--retries=1) and lists
+# it as flaky; more retries would turn a test that keeps failing into a pass (owner, 2026-10-27)
+RETRY = re.compile(
+    r"(?<![.\w])(retries|retry)\s*:|--retries\b|\breruns\s*=|--reruns\b|pytest\.mark\.flaky\b"
+)
+TEST_CONFIG = re.compile(r"(^|/)(playwright|vitest|vite)\.config\.[cm]?[jt]s$|(^|/)conftest\.py$")
 # a skip only while local test data is missing (CI has no data/): e2e on real bundles (A5)
 DATA_SKIP = re.compile(r"\b(skip|skipif)\s*\(.*\b(existsSync|exists|is_file|isfile)\s*\(")
 ASSERT = re.compile(
@@ -150,6 +156,10 @@ def bypass(diff: str, paths: list[str], rewrite_ok: list[str] | tuple = ()) -> l
     removed_asserts = added_asserts = removed_tests = added_tests = 0
     for path, minus, plus in _hunks(diff):
         is_test = bool(TEST_FILE.search(path))
+        if is_test or TEST_CONFIG.search(path):
+            for line in plus:
+                if RETRY.search(line):
+                    found.append(f"sets test retries in {path}: {line.strip()[:120]}")
         if is_test:
             for line in plus:
                 if SKIP.search(line) and not DATA_SKIP.search(line):

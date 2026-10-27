@@ -2,6 +2,19 @@
 
 Newest first. Keep it short.
 
+## 2026-10-27 — Kerege e2e stability, demo seed, UI-evidence split
+
+- **e2e:** Kerege runs Playwright with `--workers=3 --retries=1` (timeout 30 min). Fails then
+  passes on retry = flaky: not blocking, listed in the packet / PR, `.state/flaky.jsonl` and the
+  daily report. Fails twice = blocks; the developer gets the head of `error-context.md`. Retries
+  set in code or test config are a bypass finding.
+- **Seed:** `python -m app.seed` (dev only) adds "Demo site": an inspection on run notre-dame-p3e
+  and one manual finding (3 evidence frames) made by `findings.mark_finding`, the code of
+  POST /api/inspections/{id}/findings. No decisions; area in units, "scale not set".
+- **Backlog:** UI-evidence (read-only panel, real API, no bundled finding; branch continues, still
+  blocked) → UI-evidence-b (decisions) → UI-evidence-c (phone, ru/kk/en, full e2e) → UI-mark.
+- **Next:** owner merges, then `devteam resume UI-evidence`.
+
 ## 2026-10-22 — Backlog: demo chain first, metres and auto-detection LATER
 
 - **Owner decisions:** product first (website + deploy), then metres; until a ScaleReference exists
