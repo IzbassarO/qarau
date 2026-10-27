@@ -1203,12 +1203,15 @@ tasks:
     at 390x844; same functions, layout may differ).
 
     '
-  status: in_progress
+  status: done
   depends_on:
   - DS1
   - U2
   owner: dev_app
   run: run-20261026-223632
+  branch: devteam/UI-inspections
+  pr: https://github.com/IzbassarO/qarau/pull/81
+  done_at: '2026-10-26'
 - id: REV1-api
   area: core
   title: 'Decisions: append-only confirm / reject / reclass'
