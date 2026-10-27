@@ -913,38 +913,32 @@ it('closes an open details drawer when API evidence opens and keeps the summarie
   expect(panel.contains(details.querySelector('summary'))).toBe(false);
 });
 
-it.each(['first', '701'])(
-  'loads the reference deep link %s when the real API list is empty',
-  async (id) => {
-    mockFindingViewer();
-    const fetch = vi.fn().mockResolvedValue(Response.json([]));
-    vi.stubGlobal('fetch', fetch);
-    renderViewer('notre-dame-p3e', `?finding=${id}`);
-    const heading = await screen.findByRole('heading', { name: 'Corrosion' });
-    const panel = heading.closest('aside')!;
-    expect(panel.querySelectorAll('.evidence-thumbnails img')).toHaveLength(3);
-    expect(panel.querySelectorAll('.evidence-thumbnails polygon')).toHaveLength(3);
-    expect(screen.getByText('Critical')).toBeTruthy();
-    expect(screen.getByText('1.2 m²')).toBeTruthy();
-    expect(screen.queryByRole('alert')).toBeNull();
-    expect(screen.queryByText('No findings in this run.')).toBeNull();
-    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections']);
-  },
-);
+it('keeps an empty API list empty on the first-finding deep link', async () => {
+  mockFindingViewer();
+  const fetch = vi.fn().mockResolvedValue(Response.json([]));
+  vi.stubGlobal('fetch', fetch);
+  renderViewer('notre-dame-p3e', '?finding=first');
+  expect(await screen.findByText('No findings in this run.')).toBeTruthy();
+  await waitFor(() => expect(document.querySelector('.viewer-point-canvas')).not.toBeNull());
+  expect(screen.queryByRole('heading', { name: 'Corrosion' })).toBeNull();
+  expect(screen.queryByText('Loading finding evidence…')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections']);
+});
 
-it('loads the bundled reference when preview answers API requests with HTML instead of JSON', async () => {
+it('shows an unavailable API error when preview answers with HTML', async () => {
   mockFindingViewer();
   vi.stubGlobal(
     'fetch',
     vi
       .fn()
-      .mockResolvedValue(
-        new Response('<html></html>', { headers: { 'Content-Type': 'text/html' } }),
+      .mockImplementation(
+        async () => new Response('<html></html>', { headers: { 'Content-Type': 'text/html' } }),
       ),
   );
   renderViewer('notre-dame-p3e', '?finding=first');
-  expect(await screen.findByRole('heading', { name: 'Corrosion' })).toBeTruthy();
-  expect(screen.queryByRole('alert')).toBeNull();
+  expect(await screen.findByText('Could not load this finding. Try again.')).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'Corrosion' })).toBeNull();
 });
 
 it.each([401, 403, 503])(
@@ -984,8 +978,8 @@ it('keeps real API findings authoritative on the reference deep link', async () 
 it.each(['first', '701'])(
   'shows evidence for %s before the point cloud finishes downloading',
   async (id) => {
+    const fetch = mockFindingViewer();
     const bundle = { ...createDemo('en').bundle, runId: 'notre-dame-p3e' };
-    vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
     let finish: ((value: bundleApi.Bundle) => void) | undefined;
     vi.spyOn(bundleApi, 'loadBundle').mockReturnValue(
       new Promise((resolve) => {
@@ -993,8 +987,6 @@ it.each(['first', '701'])(
       }),
     );
     const setSensitivity = vi.spyOn(ViewerEngine.prototype, 'setSensitivity');
-    const fetch = vi.fn().mockResolvedValue(Response.json([]));
-    vi.stubGlobal('fetch', fetch);
     renderViewer('notre-dame-p3e', `?finding=${id}`);
 
     expect(await screen.findByRole('heading', { name: 'Corrosion' })).toBeTruthy();
@@ -1011,11 +1003,17 @@ it.each(['first', '701'])(
     await waitFor(() => expect(document.querySelector('.viewer-point-canvas')).not.toBeNull());
     expect(screen.getAllByRole('complementary', { name: 'Evidence' })).toHaveLength(1);
     expect(screen.getByRole('heading', { name: 'Corrosion' })).toBeTruthy();
-    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections']);
+    expect(fetch.mock.calls.map(([url]) => url).sort()).toEqual([
+      '/api/findings/701',
+      '/api/inspections',
+      '/api/inspections/41/findings',
+      '/api/inspections/41/runs',
+    ]);
   },
 );
 
 it('keeps a loading evidence dismissal when the map becomes ready', async () => {
+  mockFindingViewer();
   const bundle = { ...createDemo('en').bundle, runId: 'notre-dame-p3e' };
   vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
   let finish: ((value: bundleApi.Bundle) => void) | undefined;
@@ -1024,7 +1022,6 @@ it('keeps a loading evidence dismissal when the map becomes ready', async () => 
       finish = resolve;
     }),
   );
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([])));
   renderViewer('notre-dame-p3e', '?finding=first');
   await screen.findByRole('heading', { name: 'Corrosion' });
   fireEvent.click(screen.getByRole('button', { name: 'Close evidence' }));
@@ -1055,3 +1052,49 @@ it('retains the WebGL engine and camera when findings arrive after geometry', as
   expect(dispose).not.toHaveBeenCalled();
   expect(engine.camera.position.toArray()).toEqual([2, -2, 2]);
 });
+
+it.each(['empty', 'error'] as const)(
+  'keeps a settled %s findings result through the geometry-loading handoff',
+  async (state) => {
+    const routes = mockFindingViewer();
+    const bundle = { ...createDemo('en').bundle, runId: 'notre-dame-p3e' };
+    let finish!: (value: bundleApi.Bundle) => void;
+    vi.spyOn(bundleApi, 'loadBundle').mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const fetch = vi.fn((url: string) =>
+      url === '/api/inspections/41/findings'
+        ? Promise.resolve(
+            state === 'empty' ? Response.json([]) : new Response(null, { status: 500 }),
+          )
+        : routes(url),
+    );
+    vi.stubGlobal('fetch', fetch);
+    renderViewer('notre-dame-p3e', '?finding=first');
+    const message =
+      state === 'empty' ? 'No findings in this run.' : 'Could not load this finding. Try again.';
+    await screen.findByText(message);
+    const addedText: string[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records)
+        for (const node of record.addedNodes) addedText.push(node.textContent ?? '');
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      await act(async () => finish(bundle));
+      await waitFor(() => expect(document.querySelector('.viewer-point-canvas')).not.toBeNull());
+      const panel = screen.getByRole('complementary', { name: 'Evidence' });
+      expect(within(panel).getByText(message)).toBeTruthy();
+      expect(screen.queryByText('Loading finding evidence…')).toBeNull();
+      expect(addedText.join(' ')).not.toContain('Loading finding evidence…');
+      expect(
+        fetch.mock.calls.filter(([url]) => url === '/api/inspections/41/findings'),
+      ).toHaveLength(1);
+      expect(screen.queryByRole('heading', { name: 'Corrosion' })).toBeNull();
+    } finally {
+      observer.disconnect();
+    }
+  },
+);

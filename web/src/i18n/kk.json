@@ -315,7 +315,7 @@
   "evidence.scale": "Масштаб көзі",
   "evidence.scaleNotSet": "Масштаб орнатылмаған",
   "evidence.squareMetres": "м²",
-  "evidence.unscaledUnits": "бірлік · масштаб орнатылмаған",
+  "evidence.areaUnitsWithoutScale": "бірлік · масштаб орнатылмаған",
   "evidence.frames": "Дәлел кадрлары",
   "evidence.frame": "Кадр",
   "evidence.status.proposed": "Тексеруді күтуде",

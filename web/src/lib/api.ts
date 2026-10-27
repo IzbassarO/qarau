@@ -1,26 +1,28 @@
 import { authHeader } from '../auth/auth';
 
+/** HTTP failure from the authenticated API transport. */
+export class ApiError extends Error {
+  constructor(
+    public readonly path: string,
+    public readonly status?: number,
+  ) {
+    // Keep the status message used by existing authentication/error views.
+    super(status === undefined ? path : String(status));
+    this.name = 'ApiError';
+  }
+}
+
 /** Older servers and the Vite run catalog do not implement inspection CRUD. */
-export class ApiUnavailableError extends Error {}
+export class ApiUnavailableError extends ApiError {}
 
 export async function readApi(path: string, signal?: AbortSignal): Promise<unknown> {
   const response = await fetch(path, { signal, headers: authHeader() });
-  if ([404, 405, 501].includes(response.status)) throw new ApiUnavailableError(path);
-  if (!response.ok) throw new Error(String(response.status));
+  if ([404, 405, 501].includes(response.status))
+    throw new ApiUnavailableError(path, response.status);
+  if (!response.ok) throw new ApiError(path, response.status);
   // Vite's SPA fallback answers unknown API paths with index.html and HTTP 200.
   if (response.headers.get('Content-Type')?.includes('text/html'))
     throw new ApiUnavailableError(path);
-  return response.json();
-}
-
-export async function postApi(path: string, body: unknown, signal?: AbortSignal): Promise<unknown> {
-  const response = await fetch(path, {
-    method: 'POST',
-    signal,
-    headers: { ...authHeader(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) throw new Error(String(response.status));
   return response.json();
 }
 

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openDetails, openNavigation } from './chrome';
+import { mockFindingApi } from './findingApi';
 import { inspectionsFixture } from '../src/fixtures/inspections';
 import en from '../src/i18n/en.json' with { type: 'json' };
 import ru from '../src/i18n/ru.json' with { type: 'json' };
@@ -100,7 +101,9 @@ for (const theme of ['light', 'dark'] as const) {
   test(`phone evidence leaves viewer menus reachable: ${theme}`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: theme });
     await page.addInitScript(() => localStorage.setItem('qarau.lang', 'en'));
+    await mockFindingApi(page);
     await page.goto('/viewer/notre-dame-p3e?finding=first');
+    await page.waitForFunction(() => window.__qarau?.pointsLoaded);
     const evidence = page.getByRole('complementary', { name: 'Evidence' });
     await expect(evidence.getByRole('heading', { name: 'Corrosion' })).toBeVisible();
     await expect(evidence.locator('.evidence-thumbnails img')).toHaveCount(3);

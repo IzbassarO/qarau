@@ -315,7 +315,7 @@
   "evidence.scale": "Scale source",
   "evidence.scaleNotSet": "Scale not set",
   "evidence.squareMetres": "m²",
-  "evidence.unscaledUnits": "units · scale not set",
+  "evidence.areaUnitsWithoutScale": "units · scale not set",
   "evidence.frames": "Evidence frames",
   "evidence.frame": "Frame",
   "evidence.status.proposed": "Awaiting review",

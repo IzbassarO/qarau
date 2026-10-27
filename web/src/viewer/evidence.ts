@@ -1,14 +1,4 @@
-import type { Key } from '../i18n';
 import type { Finding } from '../lib/findings';
-
-export function formatArea(
-  finding: Pick<Finding, 'area_m2' | 'area_units' | 'scale'>,
-  t: (key: Key) => string,
-): string {
-  if (finding.area_m2 !== null && finding.scale !== 'not set')
-    return `${finding.area_m2.toFixed(1)} ${t('evidence.squareMetres')}`;
-  return `${finding.area_units.toFixed(1)} ${t('evidence.unscaledUnits')}`;
-}
 
 /** Adapt API evidence metadata to the existing bundle renderer, keeping API IDs intact. */
 export function withApiFindings(

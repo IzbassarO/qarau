@@ -106,12 +106,7 @@ export function ViewerScreen({
   initialFinding?: string | null;
 }) {
   const { t } = useI18n();
-  const {
-    api: apiFindings,
-    reference: referenceCandidate,
-    preview: previewFinding,
-    findings: runFindings,
-  } = useRunEvidence(sourceBundle.runId, initialFinding);
+  const { api: apiFindings, findings: runFindings } = useRunEvidence(sourceBundle.runId);
   const bundle = useMemo(
     () => withApiFindings(sourceBundle, runFindings),
     [sourceBundle, runFindings],
@@ -782,11 +777,9 @@ export function ViewerScreen({
           {evidenceRequest !== null && (
             <EvidencePanel
               findingId={evidenceId}
-              previewFinding={previewFinding}
               frames={frames}
               listState={
-                (evidenceRequest === 'first' || evidenceRequest === referenceCandidate?.id) &&
-                !previewFinding
+                evidenceRequest === 'first'
                   ? apiFindings.isPending
                     ? 'loading'
                     : apiFindings.isError

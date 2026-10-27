@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { SessionImage } from '../auth/SessionImage';
 import { useI18n } from '../i18n';
 import type { EvidenceFrame, Severity } from '../lib/findings';
-import { fitContain, polygonToSvgPoints } from './outline';
+import { containFit, polygonPoints } from '../lib/outline';
 
 export function FrameWithOutline({
   evidence,
@@ -60,9 +60,9 @@ export function FrameWithOutline({
           >
             <polygon
               className={`qv-mask${severity === 'watch' ? ' qv-mask--watch' : ''}`}
-              points={polygonToSvgPoints(
+              points={polygonPoints(
                 evidence.outline,
-                fitContain(size.width, size.height, box.width, box.height),
+                containFit(size.width, size.height, box.width, box.height),
               )}
             />
           </svg>

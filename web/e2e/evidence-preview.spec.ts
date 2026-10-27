@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { build, preview } from 'vite';
+import { mockFindingApi } from './findingApi';
 
-// Exercise compiled app code and the real local run service. No page.route API mocks.
+// Exercise compiled app code and local run images; findings exist only in page.route mocks.
 for (const theme of ['light', 'dark'] as const) {
   test(`compiled preview opens /viewer/notre-dame-p3e?finding=first: ${theme}`, async ({
     page,
@@ -24,7 +25,9 @@ for (const theme of ['light', 'dark'] as const) {
       });
       // Simulate a screenshot runner that does not forward the viewer path in Referer.
       await page.setExtraHTTPHeaders({ Referer: 'http://127.0.0.1/' });
+      await mockFindingApi(page);
       await page.goto(`http://127.0.0.1:${address.port}/viewer/notre-dame-p3e?finding=first`);
+      await page.waitForFunction(() => window.__qarau?.pointsLoaded);
       const panel = page.getByRole('complementary', { name: 'Evidence' });
       await expect(panel.getByRole('heading', { name: 'Corrosion' })).toBeVisible();
       await expect(panel.locator('.evidence-thumbnails img')).toHaveCount(3);

@@ -51,29 +51,5 @@
         "confidence": 0.987654
       }
     ]
-  },
-  "decisions": [
-    {
-      "id": 801,
-      "finding_id": 701,
-      "user_id": 9,
-      "user": "Dana Serik",
-      "verdict": "confirm",
-      "comment": "Checked the source frames.",
-      "new_class": null,
-      "new_severity": null,
-      "created_at": "2026-10-21T10:12:00Z"
-    },
-    {
-      "id": 802,
-      "finding_id": 701,
-      "user_id": 9,
-      "user": "Dana Serik",
-      "verdict": "reclass",
-      "comment": "Keep as critical after checking all angles.",
-      "new_class": null,
-      "new_severity": "critical",
-      "created_at": "2026-10-22T09:30:00Z"
-    }
-  ]
+  }
 }

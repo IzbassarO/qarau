@@ -1,24 +1,8 @@
 import { expect, it } from 'vitest';
-import { LANGS } from '../i18n';
 import { createDemo } from '../fixtures/demo';
 import fixture from '../test/fixtures/finding.json';
 import type { Finding } from '../lib/findings';
-import { formatArea, withApiFindings } from './evidence';
-
-it('formats a scaled API measurement in square metres', () => {
-  expect(
-    formatArea(
-      { area_m2: 1.234, area_units: 3.5, scale: 'reference: sheet' },
-      (key) => LANGS.en[key],
-    ),
-  ).toBe('1.2 m²');
-});
-
-it('makes the missing scale explicit in EN', () => {
-  expect(
-    formatArea({ area_m2: null, area_units: 3.5, scale: 'not set' }, (key) => LANGS.en[key]),
-  ).toBe('3.5 units · scale not set');
-});
+import { withApiFindings } from './evidence';
 
 it('preserves large finding IDs and replaces matching bundle markers with API data', () => {
   const bundle = createDemo('en').bundle;

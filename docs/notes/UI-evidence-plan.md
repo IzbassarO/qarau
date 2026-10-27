@@ -1,47 +1,31 @@
-# UI-evidence — implementation plan
+# UI-evidence — part 1 of 2: trim branch and data layer
 
-Only part 1 is implemented in this round. Backend files and design sources are read-only.
+The owner narrowed this round to data helpers and removal of fabricated evidence and decision code. Continue the existing implementation; preserve its read-only viewer while removing its fallback data. Panel integration and browser acceptance belong to part 2.
 
-1. Mirror DEF1 and REV1 JSON contracts, enums and session roles in a typed client using the existing API transport and TanStack Query keys. DEF1 lists by inspection, so resolve a run through inspection metadata and filter by the exact API run ID. Keep unsupported legacy catalogs usable without presenting fabricated findings as real observations.
-2. Add pure contain-fit and pixel polygon transforms with fixed numeric expectations. Format area from the API measurement and scale source, with translated units and an explicit missing-scale label.
-3. Build the read-only evidence card using existing v8 detail, thumbnail and mask components. Show loading, readable failure, empty evidence, class, severity, effective status, area and scale source. Load protected frames through SessionImage; use natural image dimensions for SVG alignment. Never display confidence.
-4. Connect API findings to map point indices and markers, preserving bundle finding IDs. Support `?finding=<id>` and `?finding=first`; opening evidence replaces point info. The reference notre-dame-p3e deep link includes the checked-in fixture as a fallback when its API has no findings or is unsupported, including compiled previews. Real API findings retain priority; other viewer URLs use the backend.
-5. Test fetch URLs, authenticated decision POST bodies, fixture parsing, panel states, outline coordinates, area text and viewer opening/picking with mocked APIs. Run lint, typecheck, all Vitest tests and production build. No screenshot capture or server is needed; Kerege runs browser checks.
+1. Remove decision types, endpoints, query options and tests, and decision fixture records. Remove the client evidence fixture and Vite evidence shim. Existing browser tests receive findings only through `page.route`.
+2. Mirror `backend/app/findings.py` exactly. `listFindings(runId)` resolves the inspection using the real catalog and RunOut, then filters by database run ID. `getFinding(id)` reads the detail endpoint. Both use the authenticated `readApi` transport with typed HTTP errors.
+3. Move contain-fit geometry into `src/lib/outline.ts`, exposing `containFit`, `mapPoint` and `polygonPoints`. Move `formatArea` into `findings.ts` and supply the missing-scale label through all three dictionaries.
+4. Add a node-side production-source fixture scan. Test exact URLs, Authorization, literal fixture responses, HTTP 500, run associations, area strings and fixed outline coordinates. Replace obsolete fallback assertions with empty/error assertions; retain existing read-only panel tests.
+5. Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, then inspect the built client for fixture records. Do not start servers, capture screenshots or run Playwright; Kerege handles browser execution.
 
-Parts 2 and 3 remain separate: append-only decision log and role-based actions; broader locale/phone validation and Playwright fixture e2e. New part-1 copy still uses the existing ru/kk/en dictionaries to avoid hard-coded interface text.
+## Contract details
 
-References: `backend/app/findings.py`, `decisions.py`, `auth.py`, model enums and OpenAPI tests; `docs/design/DESIGN.md`, `viewer-3d.md`, `screens/finding-light.png` and `screens/evidence-phone-light.png`.
+DEF1 has no run-findings route: list is `/api/inspections/{id}/findings`. `EvidenceOut` contains `frame_id`, `image_url`, `outline`, `confidence`; it does not contain width/height. Do not invent response fields. The existing renderer obtains dimensions from manifest camera metadata or the loaded image. Confidence stays in the API type and is never rendered.
 
-Licences checked in installed package metadata: React, Three.js, TanStack Query, Vitest and Testing Library are MIT, permitting commercial use. Existing Playwright is Apache-2.0 per the task contract. No dependencies or models are added.
+Set `retryOnMount: false` on findings queries so the existing loading/ready handoff cannot restart a failed request. A single panel instance and further viewer integration remain part 2.
 
-OpenAPI verification: the full app import needs unavailable `rq`. Using the existing backend and pipeline virtual environments, generated OpenAPI directly from the unmodified findings, decisions and CRUD routers in a temporary in-memory FastAPI app. Verified FindingOut, EvidenceOut, DecisionIn/Out, RunOut and every enum; no dependency installation, backend edits or server.
+## Licences
 
-The reference preview is opt-in through `/viewer/notre-dame-p3e?finding=first` or `?finding=701`. Its bundled fallback is independent of Referer, server paths and API origin. The older Vite shim remains compatible; its Referer and filesystem checks no longer determine whether the control URL can show evidence. Other runs and ordinary viewer URLs keep their existing sources.
+Checked installed package metadata: React, Three.js, TanStack Query, Vitest, Testing Library, Vite, ESLint and Prettier are MIT; Playwright and TypeScript are Apache-2.0. All permit commercial use. No dependencies or models added.
 
-## Part 1 verification
+## Verification
 
-- `cd web && pnpm lint && pnpm typecheck` — passed.
-- `cd web && pnpm test && pnpm build` — passed, 43 test files and 801 tests. The build retains Vite's large-chunk advisory; no build errors.
-- Literal contain-fit coordinates, scaled/unscaled area, fetch URLs/session headers, decision POST payloads, loading/error/retry/empty/loaded panel states, hidden confidence, natural image dimensions and resize, large finding IDs and point picking, marker selection and both deep links are covered.
-- All three fixture image files exist in the read-only notre-dame-p3e bundle. Preview middleware is covered without starting a server.
-- No servers, screenshots or Playwright runs were started. Kerege performs browser verification; full fixture e2e and phone work remain in part 3. Decision log/actions remain in part 2.
+- `cd web && pnpm lint && pnpm typecheck` passed.
+- `cd web && pnpm test && pnpm build` passed: 43 test files, 818 tests, including source fixture scan, i18n key parity, mocked API failures and both error/empty loading-to-ready regressions.
+- Inspected built JavaScript for the fixture run ID, comment, scale source, confidence sentinel, fixed area string and fixture import path: none are present. Ordinary translated class labels remain available.
+- Kept existing authentication error messages compatible while adding typed HTTP status/path fields. Reuse successful detail responses for 30 seconds across the existing viewer handoff; failed requests have `retryOnMount: false`.
+- Vite retains its existing large-chunk advisory. No server, screenshot capture or Playwright run was started.
 
-## E2e repair round
+## Remaining: part 2
 
-Kerege reported unrelated inspection-run discovery requests and phone controls blocked by evidence opened for legacy bundle findings. Resolve explicit inspection `run_id` metadata before scanning RunOut records, keep legacy-only findings on the existing timecode panel, and stack the mobile evidence panel below the controls. Add regression coverage and the new findings response to the existing inspection e2e mock; preserve all its assertions. Run the required local checks; browser execution remains with Kerege.
-
-Repair verification: lint and typecheck passed; all 804 Vitest tests in 43 files passed; production build passed. Existing test assertions are unchanged. Added phone Playwright coverage for opening viewer menus while evidence is visible in both themes; it awaits Kerege's browser run. Confirmed the two failing run bundles contain legacy findings IDs. No servers or screenshots were started.
-
-## Screenshot fixture repair
-
-The control URL must work when its API has no findings, including a compiled preview with no Referer header. Include the existing reference finding in the client bundle, scoped to the explicit notre-dame-p3e finding deep links and used only for an empty or unavailable findings API. Keep real API findings authoritative and authentication/server failures visible. Pass reference data directly to the read-only panel instead of requesting its synthetic ID from the real backend. Other runs and ordinary viewer URLs retain their current behavior.
-
-Share the filesystem run middleware between Vite dev and preview so the production-preview browser regression can load the real reference bundle and its three source images. Keep existing shim tests and assertions. Add Vitest coverage for the reported empty-list case and a Playwright test that builds and opens the exact URL through Vite preview, without API mocks and with an origin-only Referer. The test must stop its preview in a finally block. Kerege runs it; this sandbox does not start servers or capture screenshots.
-
-Verification: lint, typecheck, all 817 Vitest tests in 44 files and the production build passed. Confirmed the reference data exists in the compiled client. Tests cover empty and unsupported APIs, numeric and first deep links, real API precedence, and visible 401/403/503 failures. Existing assertions remain unchanged. Vite's installed MIT licence was checked for the programmatic preview test. Compared the card structure with finding-light.png: existing qv-detail, qv-sev, qv-facts3, the large frame and selected thumbnail strip remain in use, with qv-mask polygons; no design values changed. Pixel comparison and the actual compiled-preview browser run belong to Kerege/tester; no servers or screenshots were started here.
-
-## Compiled desktop loading repair
-
-The compiled-preview assertion timed out on desktop while both phone variants passed. Browser failure artifacts are unavailable locally. The current loading path serializes evidence behind all geometry downloads, and changing API findings recreates the WebGL engine. Start evidence loading alongside the bundle, show its existing panel while geometry is pending, and hand off the same Query cache to the ready viewer. Update finding attributes in the existing engine instead of recreating its scene. Add deferred-geometry and scene-retention regressions. Preserve the compiled-preview assertions and their timeouts; Kerege runs browsers.
-
-Verification: lint and typecheck passed; all 822 Vitest tests in 44 files and the production build passed. New tests hold geometry unresolved while asserting the loaded class, three frames and polygons, then check the handoff and dismissal. Engine tests verify in-place finding updates/clears, current picking IDs, stable attributes and unchanged camera. The compiled-preview test file, assertions and timeouts are unchanged. No server, browser run or screenshot was started in this sandbox; Kerege must confirm the reported desktop failures are resolved.
+Complete viewer/panel integration and browser acceptance against the demo seed. Existing browser tests now source findings via `page.route` and wait for `window.__qarau.pointsLoaded`; moving the compiled-preview build to one shared setup remains part of the part-2 e2e work. Kerege runs the browser tests and the tester captures reference screenshots.

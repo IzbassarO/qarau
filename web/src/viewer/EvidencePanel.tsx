@@ -2,9 +2,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useI18n, type Key } from '../i18n';
 import type { FrameInfo } from '../lib/bundle';
-import { findingOptions, type Finding } from '../lib/findings';
+import { findingOptions, formatArea, type Finding } from '../lib/findings';
 import { FrameWithOutline } from './FrameWithOutline';
-import { formatArea } from './evidence';
 import './evidence.css';
 
 const statusKeys: Record<string, Key> = {
@@ -20,23 +19,19 @@ export function EvidencePanel({
   onClose,
   listState,
   onRetry,
-  previewFinding,
 }: {
   findingId: number | null;
   frames: readonly FrameInfo[];
   onClose: () => void;
   listState?: 'loading' | 'error';
   onRetry?: () => void;
-  /** Explicit reference-bundle preview; never cached as a real backend record. */
-  previewFinding?: Finding;
 }) {
   const { t } = useI18n();
-  const supplied = previewFinding?.id === findingId ? previewFinding : undefined;
   const query = useQuery({
     ...findingOptions(findingId ?? 0),
-    enabled: findingId !== null && !supplied && !listState,
+    enabled: findingId !== null && !listState,
   });
-  const finding = supplied ?? query.data;
+  const finding = query.data;
   return (
     <aside className="qv-detail evidence-panel" aria-label={t('evidence.title')}>
       <header className="qv-detail__head evidence-header">
@@ -62,9 +57,9 @@ export function EvidencePanel({
           </div>
         ) : findingId === null ? (
           <p role="status">{t('evidence.noFindings')}</p>
-        ) : !supplied && query.isPending ? (
+        ) : query.isPending ? (
           <p role="status">{t('evidence.loading')}</p>
-        ) : !supplied && query.isError ? (
+        ) : query.isError ? (
           <div role="alert" className="evidence-message">
             <p>{t('evidence.error')}</p>
             <button

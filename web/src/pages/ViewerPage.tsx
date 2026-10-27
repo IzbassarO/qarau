@@ -28,7 +28,7 @@ export function ViewerPage() {
   const requestKey = `${runId}:${requestedFinding}`;
   const [dismissedFinding, setDismissedFinding] = useState<string | null>(null);
   const initialFinding = dismissedFinding === requestKey ? null : requestedFinding;
-  const evidence = useRunEvidence(runId, initialFinding, initialFinding !== null);
+  const evidence = useRunEvidence(runId, initialFinding !== null);
   const numericFinding =
     initialFinding !== null &&
     /^\d+$/.test(initialFinding) &&
@@ -101,10 +101,8 @@ export function ViewerPage() {
             <EvidencePanel
               findingId={findingId}
               frames={st.frames ?? []}
-              previewFinding={evidence.preview}
               listState={
-                (initialFinding === 'first' || numericFinding === evidence.reference?.id) &&
-                !evidence.preview
+                initialFinding === 'first'
                   ? evidence.api.isPending
                     ? 'loading'
                     : evidence.api.isError

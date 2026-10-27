@@ -315,7 +315,7 @@
   "evidence.scale": "Источник масштаба",
   "evidence.scaleNotSet": "Масштаб не задан",
   "evidence.squareMetres": "м²",
-  "evidence.unscaledUnits": "ед. · масштаб не задан",
+  "evidence.areaUnitsWithoutScale": "ед. · масштаб не задан",
   "evidence.frames": "Кадры доказательств",
   "evidence.frame": "Кадр",
   "evidence.status.proposed": "Ожидает проверки",
