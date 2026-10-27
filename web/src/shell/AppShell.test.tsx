@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useParams } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LANGS, setLang, type Lang } from '../i18n';
 import { createDemo } from '../fixtures/demo';
@@ -19,6 +19,11 @@ vi.mock('../viewer/ViewerScreen', () => ({
   ),
 }));
 
+function MapDestination() {
+  const { runId } = useParams();
+  return <p>Map opened: {runId}</p>;
+}
+
 const clients: QueryClient[] = [];
 function renderRoute(route = '/', signedIn = true) {
   if (signedIn) sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
@@ -31,6 +36,7 @@ function renderRoute(route = '/', signedIn = true) {
           <Routes>
             <Route element={<RequireAuth />}>
               <Route path="/" element={<AppShell />} />
+              <Route path="/viewer/:runId" element={<MapDestination />} />
               <Route path="/inspections/demo" element={<AppShell demo />} />
               <Route path="/inspections/:id" element={<AppShell />} />
             </Route>
@@ -68,7 +74,7 @@ it('collapses navigation from its header and restores it with the topbar control
   expect(nav.closest('.qv-app')?.className).toBe('qv qv-app app-shell sidebar-collapsed');
 });
 
-it('presents the API inspection catalog with v8 rows and opens the selected inspection', async () => {
+it('renders the inspection list at / with New inspection above its rows and opens progress', async () => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
@@ -85,13 +91,23 @@ it('presents the API inspection catalog with v8 rows and opens the selected insp
   );
   renderRoute('/');
   const main = within(screen.getByRole('main'));
-  const row = await main.findByRole('button', { name: /North wall/ });
-  expect(row.className).toBe('qv-row catalog-row');
-  expect(row.parentElement?.className).toBe('qv-list catalog-list');
+  const table = await main.findByRole('table', { name: 'Inspections' });
+  const row = within(table).getByRole('row', { name: /North site/ });
+  expect(row.className).toBe('qv-row inspections-list-row');
+  expect(row.parentElement?.className).toBe('qv-list');
+  const create = main.getByRole('button', { name: 'New inspection' });
+  expect(create.className).toBe('qv-btn');
+  expect(create.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(create);
+  expect(await screen.findByRole('dialog', { name: 'New inspection' })).toBeTruthy();
+  fireEvent.click(
+    within(screen.getByRole('dialog')).getAllByRole('button', { name: 'Close' }).at(-1)!,
+  );
+  expect(screen.queryByRole('dialog')).toBeNull();
   expect(main.getByRole('heading', { name: 'Inspections' }).className).toBe('qv-title');
   expect(within(row).getByRole('time').getAttribute('datetime')).toBe('2026-10-23T12:00:00Z');
   expect(within(row).getByText('Uploaded').className).toBe('qv-status qv-status--muted');
-  fireEvent.click(row);
+  fireEvent.click(within(row).getByRole('button', { name: 'Show progress' }));
   expect(await main.findByRole('heading', { name: 'North wall' })).toBeTruthy();
   expect(screen.getByRole('link', { name: /North wall/ }).getAttribute('aria-current')).toBe(
     'page',
@@ -111,19 +127,16 @@ it.each<Lang>(['en', 'ru', 'kk'])(
     const main = within(screen.getByRole('main'));
     expect(screen.getByRole('main').className).toBe('qv-page shell-main');
     expect(screen.getByRole('main').closest('.qv-app')?.className).toBe('qv qv-app app-shell');
-    expect(main.getByRole('heading').className).toBe('qv-heading');
-    expect(main.getByRole('heading').parentElement?.className).toBe('qv-empty empty-state');
-    expect(main.getByRole('button', { name: LANGS[lang]['inspection.new'] }).className).toBe(
-      'qv-btn qv-btn--secondary',
+    expect(main.getByRole('heading', { name: LANGS[lang]['list.title'] }).className).toBe(
+      'qv-title',
     );
+    expect(main.getByRole('button', { name: LANGS[lang]['list.newInspection'] }).className).toBe(
+      'qv-btn',
+    );
+    expect(await main.findByText(LANGS[lang]['list.emptyTitle'])).toBeTruthy();
+    expect(main.getAllByText(LANGS[lang]['list.emptyDescription'])).toHaveLength(1);
     expect(main.getAllByText(LANGS[lang]['shell.emptyDescription'])).toHaveLength(1);
-    const hint =
-      lang === 'en'
-        ? /Select an inspection/
-        : lang === 'ru'
-          ? /Выберите инспекцию/
-          : /тексеруді таңдаңыз/;
-    expect(main.getAllByText(hint)).toHaveLength(1);
+    expect(main.queryByRole('table')).toBeNull();
   },
 );
 
@@ -273,7 +286,13 @@ it('lists the real inspections on home, not the demo', async () => {
       url === '/api/sites'
         ? [{ id: 1, org_id: 1, name: 'North site' }]
         : [
-            { id: 1, site_id: 1, title: 'notre-dame-p3', status: 'uploaded' },
+            {
+              id: 1,
+              site_id: 1,
+              title: 'notre-dame-p3',
+              status: 'uploaded',
+              created_at: '2026-10-17T10:00:00Z',
+            },
             {
               id: 2,
               site_id: 1,
@@ -560,5 +579,196 @@ it('populates the home sidebar from /api/runs when the API inspection table is e
   expect(navigation.queryByText('Completed')).toBeNull();
   expect(navigation.getByRole('button', { name: 'New inspection' })).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
-  expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections', '/api/runs']);
+  expect(within(screen.getByRole('main')).getByText('No inspections yet')).toBeTruthy();
+  expect(within(screen.getByRole('main')).queryByRole('table')).toBeNull();
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+    '/api/inspections',
+    '/api/inspections',
+    '/api/runs',
+  ]);
 });
+
+it('recovers both the start-page list and sidebar after an API failure', async () => {
+  let available = false;
+  const fetch = vi.fn(async (url: string) => {
+    if (url === '/api/inspections')
+      return available
+        ? Response.json([
+            {
+              id: 7,
+              site_id: 1,
+              status: 'uploaded',
+              created_at: '2026-10-23T12:00:00Z',
+            },
+          ])
+        : new Response(null, { status: 503 });
+    if (url === '/api/sites') return Response.json([{ id: 1, org_id: 1, name: 'North site' }]);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  renderRoute('/');
+  expect((await screen.findByRole('alert')).textContent).toContain('Could not load inspections');
+  expect(screen.queryByRole('table')).toBeNull();
+  available = true;
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+  const table = await screen.findByRole('table', { name: 'Inspections' });
+  expect(within(table).getByRole('row', { name: /North site/ })).toBeTruthy();
+  expect(await screen.findByRole('link', { name: /Inspection 7/ })).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+    '/api/inspections',
+    '/api/inspections',
+    '/api/inspections',
+    '/api/inspections',
+    '/api/sites',
+    '/api/sites',
+  ]);
+});
+
+it.each<Lang>(['en', 'ru', 'kk'])(
+  'renders five inert demo rows without API reads in %s',
+  (lang) => {
+    setLang(lang);
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    renderRoute('/?demo=inspections');
+    const table = screen.getByRole('table', { name: LANGS[lang]['list.title'] });
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows.map((row) => row.dataset.inspectionId)).toEqual([
+      '105',
+      '104',
+      '103',
+      '102',
+      '101',
+    ]);
+    expect(rows.map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual([
+      'Pipe rack PR-2, bay 7',
+      'Tank T-104, north wall',
+      'Tank T-112, roof',
+      'Separator V-301, shell',
+      'Pipe rack PR-5, bays 12 to 14',
+    ]);
+    expect(rows.map((row) => within(row).getAllByRole('cell')[2].textContent)).toEqual([
+      LANGS[lang]['list.status.uploaded'],
+      LANGS[lang]['list.status.queued'],
+      LANGS[lang]['list.status.running'],
+      LANGS[lang]['list.status.done'],
+      LANGS[lang]['list.status.failed'],
+    ]);
+    expect(rows.map((row) => within(row).getAllByRole('cell')[3].textContent)).toEqual([
+      '—',
+      '—',
+      '2',
+      '4',
+      '—',
+    ]);
+    expect(
+      within(table)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual([
+      LANGS[lang]['list.showProgress'],
+      LANGS[lang]['list.showProgress'],
+      LANGS[lang]['list.showProgress'],
+      LANGS[lang]['list.openMap'],
+      LANGS[lang]['list.retry'],
+    ]);
+    within(table)
+      .getAllByRole('button')
+      .forEach((button) => fireEvent.click(button));
+    expect(screen.getByRole('table')).toBe(table);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);
+
+it.each([true, false])(
+  'opens the map using the API run ID (supplied in list: %s)',
+  async (inList) => {
+    const inspection = { id: 7, site_id: 1, status: 'done', created_at: '2026-10-23T12:00:00Z' };
+    const fetch = vi.fn(async (url: string) => {
+      if (url === '/api/sites') return Response.json([{ id: 1, org_id: 1, name: 'North site' }]);
+      if (url === '/api/inspections')
+        return Response.json([{ ...inspection, ...(inList ? { run_id: 'map-7' } : {}) }]);
+      if (url === '/api/inspections/7')
+        return Response.json({ ...inspection, run_id: 'map-7', steps: [] });
+      if (url === '/api/inspections/7/runs')
+        return Response.json([{ id: 'map-7', status: 'done' }]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    renderRoute('/');
+    fireEvent.click(await screen.findByRole('button', { name: 'Open map' }));
+    expect(await screen.findByText('Map opened: map-7')).toBeTruthy();
+    if (!inList) expect(fetch).toHaveBeenCalledWith('/api/inspections/7', expect.anything());
+  },
+);
+
+it('retries the API failed step and refreshes the table and sidebar from the server', async () => {
+  let retried = false;
+  const inspection = { id: 7, site_id: 1, status: 'failed', created_at: '2026-10-23T12:00:00Z' };
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === '/api/sites') return Response.json([{ id: 1, org_id: 1, name: 'North site' }]);
+    if (url === '/api/inspections')
+      return Response.json([{ ...inspection, status: retried ? 'queued' : 'failed' }]);
+    if (url === '/api/inspections/7')
+      return Response.json({
+        ...inspection,
+        run_id: 'run-7',
+        steps: [{ name: 'frames', status: 'failed' }],
+      });
+    if (url === '/api/inspections/7/runs/run-7/steps/frames/rerun' && init?.method === 'POST') {
+      retried = true;
+      return Response.json(
+        { run_id: 'run-7', status: 'queued', job_id: 'job-7', from_step: 'frames' },
+        { status: 202 },
+      );
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  renderRoute('/');
+  fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+  const table = screen.getByRole('table');
+  expect(await within(table).findByText('Queued')).toBeTruthy();
+  expect(await within(screen.getByRole('navigation')).findByText('Queued')).toBeTruthy();
+  expect(within(table).getByRole('button', { name: 'Show progress' })).toBeTruthy();
+  expect(within(table).getByText('—')).toBeTruthy();
+  expect(fetch).toHaveBeenCalledWith('/api/inspections/7/runs/run-7/steps/frames/rerun', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer test-api-value' },
+  });
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it.each(['missing-step', 'rejected'] as const)(
+  'keeps a failed inspection truthful after %s',
+  async (failure) => {
+    const inspection = { id: 7, site_id: 1, status: 'failed', created_at: '2026-10-23T12:00:00Z' };
+    const fetch = vi.fn(async (url: string) => {
+      if (url === '/api/sites') return Response.json([{ id: 1, org_id: 1, name: 'North site' }]);
+      if (url === '/api/inspections') return Response.json([inspection]);
+      if (url === '/api/inspections/7')
+        return Response.json({
+          ...inspection,
+          run_id: 'run-7',
+          steps: failure === 'missing-step' ? [] : [{ name: 'sparse', status: 'failed' }],
+        });
+      if (url === '/api/inspections/7/runs/run-7/steps/sparse/rerun')
+        return new Response(null, { status: 409 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    renderRoute('/');
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Could not open or retry this inspection. Try again. If it still fails, contact your administrator.',
+    );
+    expect(within(screen.getByRole('table')).getByText('Failed')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    if (failure === 'missing-step')
+      expect(fetch.mock.calls.map(([url]) => url)).not.toContain(
+        '/api/inspections/7/runs/run-7/steps/sparse/rerun',
+      );
+  },
+);

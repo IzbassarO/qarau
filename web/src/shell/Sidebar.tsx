@@ -16,6 +16,7 @@ export function shortDate(iso: string, lang: string): string {
 interface SidebarProps {
   sites: Site[];
   onNewInspection: () => void;
+  newInspectionPrimary?: boolean;
   onNavigate: () => void;
   demo?: boolean;
   loading?: boolean;
@@ -25,6 +26,7 @@ interface SidebarProps {
 export function Sidebar({
   sites,
   onNewInspection,
+  newInspectionPrimary = true,
   onNavigate,
   onCollapse,
   demo,
@@ -73,7 +75,10 @@ export function Sidebar({
           </button>
         )}
       </div>
-      <button className="qv-btn qv-btn--block new-inspection" onClick={onNewInspection}>
+      <button
+        className={`qv-btn qv-btn--block new-inspection${newInspectionPrimary ? '' : ' qv-btn--secondary'}`}
+        onClick={onNewInspection}
+      >
         <span aria-hidden="true">+</span> {t('inspection.new')}
       </button>
       <div className="sidebar-heading">

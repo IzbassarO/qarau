@@ -12,3 +12,12 @@ export async function readApi(path: string, signal?: AbortSignal): Promise<unkno
     throw new ApiUnavailableError(path);
   return response.json();
 }
+
+/** S1 reruns the named step and its successors; the API supplies all identifiers. */
+export async function rerunInspectionStep(inspectionId: string, runId: string, step: string) {
+  const response = await fetch(
+    `/api/inspections/${encodeURIComponent(inspectionId)}/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(step)}/rerun`,
+    { method: 'POST', headers: authHeader() },
+  );
+  if (!response.ok) throw new Error(String(response.status));
+}

@@ -1,5 +1,6 @@
 # Pipeline worker (S1, ADR 0022): an RQ worker (backend/) that runs the workflow steps as
-# `python -m qarau_pipeline step …` children in the pipeline/ environment. Python 3.12 + ffmpeg;
+# `python -m qarau_pipeline step …` children in the pipeline/ environment. Python 3.12 + ffmpeg
+# + Pango (LGPL-2.1+, dynamically linked by WeasyPrint for the PDF report, RPT1);
 # both uv projects installed from their lock files. linux/amd64 only: pycolmap 4.2.1 ships no
 # linux/arm64 wheel (on Apple silicon Docker runs it under emulation; fine for dev).
 # Build contexts (infra/docker-compose.yml): `pipeline` and `backend` are the two project dirs.
@@ -8,6 +9,7 @@ FROM --platform=linux/amd64 python:3.12-slim
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 UV_LINK_MODE=copy
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg libgl1 libglib2.0-0 \
+        libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /usr/local/bin/uv
 

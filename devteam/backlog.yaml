@@ -14,7 +14,9 @@ notes: 'Demo chain (owner, 2026-10-22). Product first, then metres: website + de
 
   Queue for the brain (todo tasks, file order): B1, U2, S1, DS1, D1, DEF1-api, UI-inspections, REV1-api,
 
-  UI-evidence, RPT1, UI-mark, UI-report, D2, COV1. Then LATER: status `later`, off the demo chain; the
+  UI-evidence, UI-evidence-b, UI-evidence-c,
+
+  RPT1, UI-mark, UI-report, D2, COV1. Then LATER: status `later`, off the demo chain; the
 
   brain never plans it, dependencies never un-block it, `devteam resume` does not touch it. A task comes
 
@@ -1203,12 +1205,15 @@ tasks:
     at 390x844; same functions, layout may differ).
 
     '
-  status: in_progress
+  status: done
   depends_on:
   - DS1
   - U2
   owner: dev_app
   run: run-20261026-223632
+  branch: devteam/UI-inspections
+  pr: https://github.com/IzbassarO/qarau/pull/81
+  done_at: '2026-10-26'
 - id: REV1-api
   area: core
   title: 'Decisions: append-only confirm / reject / reclass'
@@ -1260,50 +1265,159 @@ tasks:
   done_at: '2026-10-24'
 - id: UI-evidence
   area: app
-  title: Evidence panel with decisions
-  goal: 'Today clicking a point in the viewer shows the frames that see it (A6, UX-dense) but there are
-    no findings
+  title: Read-only evidence panel on the real API
+  goal: 'Today clicking a point in the viewer shows the frames that see it (A6, UX-dense) but no findings.
 
-    and no decisions. DEF1-api gives findings with 3 evidence frames, outline polygons and area + scale
-    source;
-
-    REV1-api gives POST/GET decisions.
+    DEF1-api gives findings with 3 evidence frames, outline polygons and area + scale source.
 
 
-    Build (web/ only): the evidence panel of the viewer spec (viewer-3d.md): click a finding (red/orange
-    points) ->
+    Build (web/ only), part 1 of the evidence panel of the viewer spec (viewer-3d.md): click a finding
 
-    panel with class, severity, status, area ("1.2 m²", or "<n> units · scale not set"), the 3 frames
-    with the
+    (red/orange points) or open /viewer/<run>?finding=<id> or ?finding=first -> a read-only panel with
 
-    outline drawn over them (SVG polygon from the API, no raster), and the decision log (user,
+    class, severity, status, area ("1.2 m²", or "<n> units · scale not set") and the 3 frames with the
 
-    verdict, comment, time; oldest first; no edit or delete UI anywhere). Confirm / Reject / Reclass with
-    a
+    outline drawn over them (SVG polygon from the API, no raster); no model confidence number anywhere.
 
-    comment field (required for reject and reclass) -> POST decision, then the log and the status refresh.
+    Data only from the real API: the dev seed (python -m app.seed, QARAU_ENV=dev) adds "Demo site" with
 
-    Viewers (role) see the panel without the buttons.
+    one inspection on run notre-dame-p3e and one manual finding with 3 evidence frames.
 
-    Not in this task: marking a new finding (UI-mark), automatic findings, the PDF.
+    One panel instance across the viewer''s loading and ready states (no remount), or retryOnMount: false
 
-    Done when: Vitest for the panel states, the outline overlay math, role-based buttons and the POST
-    with a
+    on the findings query: a failed or empty findings request never flips the panel back to Loading.
 
-    mocked API; an e2e in the viewer on a fixture bundle with a mocked finding; i18n ru/kk/en; tester
+    No test data in the client build: remove src/fixtures/evidence.ts and every bundled finding; test
 
-    screenshots of /viewer/notre-dame-p3e with the panel open (light and dark, ru/kk/en).
+    findings live only in e2e mocks (page.route) and test fixtures. The evidence-preview e2e builds once
+
+    (globalSetup or the existing preview server) and waits for window.__qarau.pointsLoaded before any
+
+    panel assertion.
+
+
+    Not in this task: decision log and actions (UI-evidence-b); phone layout, ru/kk/en and the full e2e
+
+    (UI-evidence-c); marking a new finding (UI-mark); automatic findings; the PDF.
+
+
+    Done when: web/src/lib/findings.ts has typed functions for findings, tested against a mocked fetch;
+
+    outline.test.ts asserts a 1920x1080 frame in a 400x400 box maps (0,0)->(0,87.5) and
+
+    (1920,1080)->(400,312.5); formatArea gives "1.2 m²" for 1.234 m² with scale and "3.5 units · scale
+
+    not set" (EN) without; EvidencePanel tests cover loading, error and loaded (class, severity, status,
+
+    area, 3 frames each with an svg polygon, no confidence value), and that an error or empty list after
+
+    load never shows Loading again; no finding data in the built client; tester screenshots of
+
+    /viewer/notre-dame-p3e?finding=first on the demo seed show the panel with 3 outlined frames, no error.
 
     Reference: docs/design/screens/finding-light.png (design system v8); match it, adjust only alignment
-    and size; phone layout per DESIGN.md Responsive (reference docs/design/screens/evidence-phone-light.png
-    at 390x844; same functions, layout may differ).
+    and size.
+
+    Owner 2026-10-27: split in three (part 1 alone was 32 files / +2245 lines and used every fix loop);
+    the bundled finding "Corrosion, Critical, 1.2 m²" was fabricated data, so the panel shows only the
+    real API with the demo seed; the remount race flipped the panel to Loading.
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - DS1
   - DEF1-api
   - REV1-api
+  owner: dev_app
+  run: run-20261027-183321
+  branch: devteam/UI-evidence
+- id: UI-evidence-b
+  area: app
+  title: Decision log and actions in the evidence panel
+  goal: 'Today (after UI-evidence) the evidence panel is read-only. REV1-api gives POST/GET decisions.
+
+
+    Build (web/ only): in the evidence panel, the decision log (user, verdict, comment, time; oldest
+
+    first; no edit or delete UI anywhere) and Confirm / Reject / Reclass with a comment field (required
+
+    for reject and reclass) -> POST decision via web/src/lib/findings.ts, then the log and the status
+
+    refresh. Viewers (role) see the panel without the buttons. Data only from the real API (the dev
+
+    seed''s demo finding has an empty log); test decisions only in mocks and test fixtures.
+
+
+    Not in this task: phone layout, ru/kk/en polish and the full e2e (UI-evidence-c); marking a new
+
+    finding (UI-mark).
+
+
+    Done when: DecisionLog tests assert fixture decisions given out of order render oldest first and
+
+    no edit or delete control exists; DecisionForm tests assert reject and reclass without a comment do
+
+    not call the mocked POST and reject with comment ''Rust is paint'' POSTs that literal comment with
+
+    the reject verdict; a test asserts after a successful POST the shown status updates to the mocked
+
+    refetch''s value; a test asserts the viewer role sees no Confirm/Reject/Reclass and an engineer sees
+
+    all three; tester screenshots of /viewer/notre-dame-p3e?finding=first show the decision log and,
+
+    for the signed-in tester, the three buttons with a comment field.
+
+    Reference: docs/design/screens/finding-light.png (design system v8); match it, adjust only alignment
+    and size.
+
+    Owner 2026-10-27: part 2 of the UI-evidence split; starts from UI-evidence''s merged panel.
+
+    '
+  status: todo
+  depends_on:
+  - UI-evidence
+- id: UI-evidence-c
+  area: app
+  title: 'Evidence panel: phone layout, ru/kk/en, full e2e'
+  goal: 'Today (after UI-evidence-b) the evidence panel works on desktop with decisions.
+
+
+    Build (web/ only): the phone layout per DESIGN.md Responsive (reference
+
+    docs/design/screens/evidence-phone-light.png at 390x844; same functions, layout may differ), every
+
+    panel string in ru/kk/en, and the full Playwright e2e of the panel.
+
+
+    Not in this task: marking a new finding (UI-mark), automatic findings, the PDF.
+
+
+    Done when: web/src/i18n/en.json, ru.json and kk.json have every evidence-panel key with
+
+    non-identical ru/kk values and keys.test.ts passes; viewer.css uses only design tokens (noLiterals
+
+    passes) with a phone breakpoint for the panel; a Playwright e2e mocks findings and decisions with
+
+    page.route on the fixture bundle, opens the panel by clicking a finding point and by
+
+    ?finding=<id> / ?finding=first, checks 3 svg polygons (no raster mask) and posts a decision that
+
+    then appears in the log; no model confidence number is rendered (a Vitest test asserts the
+
+    fixture''s confidence is absent); lint, tsc, Vitest and the Playwright e2e pass; tester screenshots
+
+    of /viewer/notre-dame-p3e?finding=first show the 3D canvas with the panel open (class, severity,
+
+    status, area, outlined frames, decision log) like docs/design/screens/finding-light.png, light and
+
+    dark, ru/kk/en, desktop and 390x844, no untranslated keys and no error banner.
+
+    Owner 2026-10-27: part 3 of the UI-evidence split; the whole-task criteria of the old plan land here.
+
+    '
+  status: todo
+  depends_on:
+  - UI-evidence-b
 - id: RPT1
   area: core
   title: PDF inspection report
@@ -1355,13 +1469,25 @@ tasks:
 
     and that a viewer can GET it while no token is 401; ruff, mypy, pytest pass.
 
+
+    Owner 2026-10-27: WeasyPrint + Jinja2 is required; Pango is installed on the Mac and in CI. The report
+    is a corporate document read by company managers: cover page (company, asset, capture date, report
+    number, version), one-page executive summary, findings table by severity, one card per finding (map
+    location, 3 best frames, size with uncertainty, who confirmed and when), a ''not inspected'' section,
+    method and limitations, sign-off block (prepared / checked / approved), page header/footer with report
+    number and ''page X of Y'', document control (version history, verification ID), ru/kk/en, PDF/A output.
+    Typography and colours from design system v8.
+
     '
-  licence: WeasyPrint (BSD-3-Clause) or ReportLab (BSD-3-Clause); IBM Plex fonts (OFL-1.1).
+  licence: 'WeasyPrint (BSD-3-Clause) + Jinja2 (BSD-3-Clause), Pango (LGPL-2.1+, system library); IBM
+    Plex fonts (OFL-1.1); pyphen (WeasyPrint''s hyphenation): owner 2026-10-27 accepts it under LGPL-2.1+/MPL-1.1,
+    not GPL.'
   status: in_progress
   depends_on:
   - REV1-api
   owner: dev_pipeline
-  run: run-20261026-223632
+  run: run-20261027-183321
+  branch: devteam/RPT1
 - id: UI-mark
   area: app
   title: Mark a region on the 3D map as a finding
@@ -1404,7 +1530,7 @@ tasks:
     '
   status: todo
   depends_on:
-  - UI-evidence
+  - UI-evidence-c
 - id: UI-report
   area: app
   title: Report preview page and PDF download

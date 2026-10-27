@@ -150,7 +150,8 @@ then unattended (`run --continuous` overnight).
   round (its own docs/ attempts are only reverted). Anti-bypass checks on the diff: new
   `test.skip` / `.only` / `xfail` / `pytest.mark.skip` (a skip only while a data file is
   missing is allowed), fewer assertions or tests, looser thresholds in tests, `.patch` /
-  `.diff` files, code under docs/ → sent back with the reason (twice → blocked). Every
+  `.diff` files, code under docs/, test retries set in code or test config (`retries:`,
+  `retry:`, `--reruns`, `pytest.mark.flaky`) → sent back with the reason (twice → blocked). Every
   violation goes to `.state/violations.jsonl`, "Needs your attention" and the daily report.
 - Owner-approved test rewrites (`gates.test_rewrite_allowed`, per task; owner 2026-10-24 for
   DS1: tests that pin the old look move to the v8 values): in the listed test files, fewer
@@ -172,7 +173,11 @@ then unattended (`run --continuous` overnight).
   port (`QARAU_E2E_PORT`, never a reused server), killed with the step after. A failing e2e
   sends the round back with the failures and no LLM tester call; otherwise the judge sees every
   test line (passed / failed / skipped). Developers never run e2e: a Codex sandbox cannot open
-  a port (the sandbox is not loosened for it).
+  a port (the sandbox is not loosened for it). Owner 2026-10-27: fixed `--workers=3
+  --retries=1` (late failures were flakes under load, 24/24 passed on a re-run). A test that
+  fails, then passes on the retry, is flaky: it does not block, but it is listed in the packet
+  (= PR body), in `.state/flaky.jsonl` and in the daily report. A test that fails twice blocks;
+  the developer gets its error lines and the first 30 lines of its `error-context.md`.
 - Owner additions: every `- ` line under "Owner additions (<date>):" in a task's goal must be
   one of the plan's criteria, word for word (case and line breaks aside), or the plan is
   rejected and re-planned once.
@@ -269,8 +274,10 @@ then unattended (`run --continuous` overnight).
   before `dev-*`; it fails a different colour, font or component and allows spacing or size
   differences. Naming a reference screen in a criterion is read-only: no split for it.
 - Dependencies: a task may list `depends_on: [ids]`. The brain never plans it until all of
-  them are `done`; a `blocked` task whose dependencies are all done goes back to `todo` (pushed
-  to `dev` like any status) when the last one merges, or at the next `devteam run`.
+  them are `done`; a `blocked` task parked on them (`blocked_reason: waits for <id>`, naming
+  one of its `depends_on`) goes back to `todo` (pushed to `dev` like any status) when the last
+  one merges, or at the next `devteam run`. A task blocked for any other reason (fix loops,
+  gates, limits, a crash, the owner) stays `blocked` until `devteam resume` (owner, 2026-10-27).
   Status `later` (owner, 2026-10-22) parks a task off the demo chain: the brain never plans it,
   done dependencies never move it to `todo`, `devteam resume` leaves it; it comes back only by a
   PR into `dev` that sets `todo`. The dashboard lists them in a "Later" column.

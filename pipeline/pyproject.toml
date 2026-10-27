@@ -14,6 +14,11 @@ dependencies = [
   "reportlab>=4.2",  # BSD-3-Clause; the PDF inspection report (report/, ADR 0027)
   "sqlalchemy>=2.0",  # MIT; the report reads the API's tables (report/inputs.py)
   "psycopg[binary]>=3.2",  # LGPL-3.0, unmodified, as in backend/; Postgres driver for the CLI
+  # The PDF report (RPT1, owner 2026-10-27): Jinja2 HTML -> WeasyPrint, sharing design system v8
+  # CSS and fonts. WeasyPrint BSD-3-Clause, Jinja2 BSD-3-Clause; needs Pango (LGPL-2.1+, a
+  # system library: Homebrew on the Mac, apt in CI and infra/worker).
+  "weasyprint>=66",
+  "jinja2>=3.1",
 ]
 
 # A real package, so backend/ can depend on it (uv path source, editable; ADR 0023).
@@ -26,7 +31,7 @@ build-backend = "hatchling.build"
 modal = ["modal==1.6.2"]  # ADR 0019: real dense GPU runs only (uv sync --extra modal)
 
 [dependency-groups]
-# moto: Apache-2.0, fake S3; pypdf: BSD-3-Clause, reads the report PDFs in tests
+# moto: Apache-2.0, fake S3; pypdf: BSD-3-Clause, reads PDFs back in tests
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "moto[s3]>=5", "pypdf>=5"]
 ml = [
     "torch>=2.14.1",

@@ -124,7 +124,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.locator('.qv-side')).toHaveCSS('background-color', themeColors[theme].bg);
       await closeNavigation(page);
       await expect(
-        page.getByRole('main').getByRole('heading', { name: t['catalog.title'], exact: true }),
+        page.getByRole('main').getByRole('heading', { name: t['list.title'], exact: true }),
       ).toBeVisible();
       await openNavigation(page);
       await expect(navigation.getByRole('button', { name: t['inspection.new'] })).toBeVisible();
@@ -146,9 +146,9 @@ for (const theme of ['light', 'dark'] as const) {
         expect(size.scrollWidth, JSON.stringify(size)).toBeLessThanOrEqual(size.clientWidth);
       }
       await closeNavigation(page);
-      const catalog = page.getByRole('main').locator('.catalog-list');
+      const catalog = page.getByRole('main').getByRole('table', { name: t['list.title'] });
       await expect(catalog).toBeVisible();
-      await expect(catalog.locator('button.catalog-row')).toHaveCount(1);
+      await expect(catalog.locator('[data-inspection-id]')).toHaveCount(1);
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
