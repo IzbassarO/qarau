@@ -37,6 +37,14 @@ from devteam.costs import BudgetExceeded, SubscriptionLimit
 from devteam.supervise import TaskHalted
 
 AGENTS = ["brain", "dev_pipeline", "dev_app", "tester"]
+GIT_NET_COMMANDS = {"fetch", "push", "ls-remote", "pull"}
+GIT_NET_WAITS = (10, 30, 90)  # seconds before each retry of a git network command
+GIT_NET_ERROR = re.compile(
+    r"Could not resolve host|Failed to connect|Connection (refused|reset|timed out)|"
+    r"Operation timed out|Network is unreachable|"
+    r"The requested URL returned error: 5\d\d|early EOF|unexpected disconnect",
+    re.I,
+)
 # Never touched by a developer, tracked or ignored. Checked by snapshot (git can't see ignored).
 PROTECTED = [".env", ".env.*", "*/.env", "*/.env.*", "data/*", "scratch/*", "*.sqlite"]
 PROTECTED_OK = [".env.example", "*/.env.example"]
@@ -177,6 +185,36 @@ def e2e_output(out: str) -> str:
     lines = out.splitlines()
     tests = [x.strip() for x in lines if " › " in x]
     return "\n".join(tests + [x for x in lines[-40:] if " › " not in x])[-6000:]
+
+
+def e2e_report(out: str, timed_out: bool, minutes: int) -> str:
+    """What the developer gets for a failed e2e run (DS1, 2026-10-26: three blind rounds on a
+    bare FAIL and the log's last 1500 characters, one of them a timeout): a plain TIMEOUT line
+    with the counts, or each failing test's name and its first error lines."""
+    lines = out.splitlines()
+    total = re.search(r"Running (\d+) tests?", out)
+    passed = sum(bool(re.match(r"\s*✓\s+\d+ ", x)) for x in lines)
+    failed = [x.strip() for x in lines if re.match(r"\s*✘\s+\d+ ", x)]
+    skipped = sum(bool(re.match(r"\s*-\s+\d+ ", x)) for x in lines)
+    left = int(total[1]) - passed - len(failed) - skipped if total else "?"
+    if timed_out:
+        head = (
+            f"TIMEOUT: e2e stopped after {minutes} min (not a test failure); {passed} passed, "
+            f"{len(failed)} failed, {left} not run."
+        )
+    else:
+        head = f"e2e FAILED: {len(failed)} failed, {passed} passed."
+    blocks, cur = [], None  # the list reporter's "  1) [project] › file:line › name" blocks
+    for x in lines:
+        if re.match(r"\s+\d+\) \[", x):
+            cur = [x.strip().rstrip("─ ")]
+            blocks.append(cur)
+        elif cur is not None and re.match(r"\s+\d+ (failed|flaky|passed|skipped|did not run)", x):
+            cur = None
+        elif cur is not None and x.strip() and len(cur) < 9:
+            cur.append("  " + x.strip())
+    detail = "\n\n".join("\n".join(b) for b in blocks) or "\n".join(failed)
+    return f"{head}\n{detail}".strip()[:5000]
 
 
 def criterion_key(c: dict, criteria: list) -> str:
@@ -822,14 +860,22 @@ class Team:
         env: dict | None = None,
     ) -> str:
         self._guard(args)
-        with self._git_lock:
-            r = subprocess.run(  # bytes, not text=True: that would turn \r in file names into \n
-                ["git", *args],
-                cwd=cwd or self.root,
-                capture_output=True,
-                input=input.encode("utf-8", "replace") if input is not None else None,
-                env={**os.environ, "GIT_LITERAL_PATHSPECS": "1", **(env or {})},
-            )
+        # A network command that cannot reach the remote is retried after GIT_NET_WAITS before
+        # it fails (2026-10-26: one DNS drop on `git fetch` blocked DS1 as a crash).
+        for wait in (*GIT_NET_WAITS, None) if args[0] in GIT_NET_COMMANDS else (None,):
+            with self._git_lock:
+                r = subprocess.run(  # bytes, not text=True: \r in file names would become \n
+                    ["git", *args],
+                    cwd=cwd or self.root,
+                    capture_output=True,
+                    input=input.encode("utf-8", "replace") if input is not None else None,
+                    env={**os.environ, "GIT_LITERAL_PATHSPECS": "1", **(env or {})},
+                )
+            err = r.stderr.decode(errors="replace")
+            if not r.returncode or wait is None or not GIT_NET_ERROR.search(err):
+                break
+            self.emit("brain", f"git {args[0]}: network error, retrying in {wait}s: {err[-200:]}")
+            time.sleep(wait)
         if r.returncode:
             raise RuntimeError(f"git {' '.join(args)}: {r.stderr.decode(errors='replace').strip()}")
         # never surrogateescape: a binary file in a diff reached the judge's prompt as lone
@@ -1150,14 +1196,15 @@ class Team:
         out = []
         for kind, cmd in steps:
             r = self.run_proc(cmd, cwd=s["worktree"], timeout=1800)
-            out.append(
-                {
-                    "cmd": cmd,
-                    "kind": kind,
-                    "ok": r["ok"],
-                    "output": self.redact(r["output"][-4000:]),
-                }
-            )
+            output = self.redact(r["output"][-4000:])
+            c = {"cmd": cmd, "kind": kind, "ok": r["ok"], "output": output}
+            if r.get("timed_out"):
+                c["timed_out"] = True
+                c["report"] = (
+                    "TIMEOUT: stopped after 30 min (not a failure of the check itself).\n"
+                    + c["output"][-1500:]
+                )
+            out.append(c)
             if kind == "setup" and not r["ok"]:
                 break
         return out
@@ -1481,7 +1528,8 @@ def build_graph(team: Team, checkpointer):
                     e2e_failed = any(not c["ok"] for c in e2e)
                     checks = team.run_checks(cs) + e2e
                     for c in checks:
-                        team.emit("tester", f"{'ok  ' if c['ok'] else 'FAIL'} {c['cmd']}", task=tid)
+                        mark = "ok  " if c["ok"] else "TIMEOUT" if c.get("timed_out") else "FAIL"
+                        team.emit("tester", f"{mark} {c['cmd']}", task=tid)
                     if not e2e_failed:
                         runs, problems = tester_benchmark(cs, clean)
                         shots, more = G.screenshots(team, cs, s.get("routes") or [], runs=runs)
@@ -1499,8 +1547,15 @@ def build_graph(team: Team, checkpointer):
                     "criteria": [],
                     "summary": "",
                     "how_to_try": "",
-                    "feedback": "Kerege ran the e2e tests (Playwright) right after your round and "
-                    "they fail, so the tester did not review this round. Fix them first.",
+                    "feedback": (
+                        "Kerege ran the e2e tests (Playwright) right after your round and they "
+                        "did not finish within the time limit (TIMEOUT below: not a test "
+                        "failure; fix any failed tests listed, and do not add slow tests), so "
+                        "the tester did not review this round."
+                        if any(c.get("timed_out") for c in e2e)
+                        else "Kerege ran the e2e tests (Playwright) right after your round and "
+                        "they fail, so the tester did not review this round. Fix them first."
+                    ),
                 }
             else:
                 verdict = team.agents.judge(
@@ -1526,7 +1581,9 @@ def build_graph(team: Team, checkpointer):
                 f"{s['routes']}: visual criteria cannot pass without them.\n" + "\n".join(problems)
             )
         if failed:
-            logs = "\n".join(f"$ {c['cmd']}\n{c['output'][-1500:]}" for c in failed)
+            logs = "\n".join(
+                f"$ {c['cmd']}\n{c.get('report') or c['output'][-1500:]}" for c in failed
+            )
             verdict["feedback"] = f"{verdict.get('feedback', '')}\n\nFailing checks:\n{logs}"
         verdict["checks"] = checks
         snap = team.snapshot(s["worktree"])  # files the checks made are not the developer's
@@ -1617,7 +1674,11 @@ def build_graph(team: Team, checkpointer):
         )
         team.emit("tester", "e2e (Playwright) on the clean checkout", task=cs["task"]["id"])
         r = team.run_proc(cmd, cwd=clean, timeout=e["timeout_min"] * 60)
-        return [{"cmd": cmd, "kind": "e2e", "ok": r["ok"], "output": e2e_output(r["output"])}]
+        c = {"cmd": cmd, "kind": "e2e", "ok": r["ok"], "output": e2e_output(r["output"])}
+        if not r["ok"]:
+            c["timed_out"] = bool(r.get("timed_out"))
+            c["report"] = team.redact(e2e_report(r["output"], c["timed_out"], e["timeout_min"]))
+        return [c]
 
     def tester_benchmark(cs: TaskState, clean: str) -> tuple[Path | None, list[str]]:
         """Pipeline tasks with routes: the tester runs the quick benchmark itself on the clean

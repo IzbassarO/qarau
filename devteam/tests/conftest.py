@@ -74,6 +74,7 @@ def fast_poll(monkeypatch):
 @pytest.fixture(autouse=True)
 def no_retry_waits(monkeypatch):
     monkeypatch.setattr("devteam.real.RETRY_WAITS", (0, 0, 0))
+    monkeypatch.setattr("devteam.graph.GIT_NET_WAITS", (0, 0, 0))
 
 
 @pytest.fixture(autouse=True)
