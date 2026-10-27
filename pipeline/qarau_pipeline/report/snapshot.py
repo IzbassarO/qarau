@@ -74,7 +74,7 @@ class Ortho:
         return np.stack([x, y], axis=1)
 
 
-def fit(xyz: np.ndarray, view: View, size: tuple[int, int], pad: int = PAD) -> Ortho:
+def frame_cloud(xyz: np.ndarray, view: View, size: tuple[int, int], pad: int = PAD) -> Ortho:
     """Frame the cloud: the 0.5-99.5 % range of its points (nearest point, so a small cloud is
     framed by its extremes) fills the image less `pad` on every side."""
     right, up, _ = view.axes()
@@ -206,7 +206,7 @@ def map_snapshot(
     marker of every not rejected finding of the run: the centre of its points."""
     points, _ = read_points(run_dir, man, "points")  # findings index this layer
     xyz, rgb = read_points(run_dir, man, "dense" if "dense" in man else "points")
-    ortho = fit(xyz, map_view(man), size)
+    ortho = frame_cloud(xyz, map_view(man), size)
     img = rasterize(xyz, rgb, ortho)
     markers: dict[int, tuple[float, float]] = {}
     crops: dict[int, Crop] = {}

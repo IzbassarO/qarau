@@ -20,7 +20,7 @@ from qarau_pipeline.report.snapshot import (
     MAP_GROUND,
     TOP_DOWN,
     View,
-    fit,
+    frame_cloud,
     load_visuals,
     map_snapshot,
     map_view,
@@ -38,7 +38,7 @@ COLOURS = np.array([GREEN, BLUE, RED], np.uint8)
 def test_top_down_pixels() -> None:
     """11 x 7 image, 1 px pad: the cloud spans 4 x 2 units, so 2 px per unit around pixel
     (5, 3); A and B land on (1, 5), C on (9, 1); each point is a 3 x 3 square."""
-    img = rasterize(CLOUD, COLOURS, fit(CLOUD, TOP_DOWN, (11, 7), pad=1), dot=3)
+    img = rasterize(CLOUD, COLOURS, frame_cloud(CLOUD, TOP_DOWN, (11, 7), pad=1), dot=3)
     assert img.shape == (7, 11, 3)
     for x, y in [(1, 5), (0, 4), (2, 6), (0, 6), (2, 4)]:
         assert tuple(img[y, x]) == GREEN, (x, y)  # B over A
@@ -52,7 +52,7 @@ def test_top_down_pixels() -> None:
 def test_side_view_pixels() -> None:
     """From +x, level: screen x is the cloud's y, screen y its z. Spans 2 x 1 units, so 4 px per
     unit around (5, 3): B on (1, 1), C on (9, 5), A on (1, 5); single pixels."""
-    img = rasterize(CLOUD, COLOURS, fit(CLOUD, View(0.0, 0.0), (11, 7), pad=1), dot=1)
+    img = rasterize(CLOUD, COLOURS, frame_cloud(CLOUD, View(0.0, 0.0), (11, 7), pad=1), dot=1)
     assert tuple(img[1, 1]) == GREEN
     assert tuple(img[5, 9]) == BLUE
     assert tuple(img[5, 1]) == RED
@@ -60,8 +60,9 @@ def test_side_view_pixels() -> None:
 
 
 def test_same_cloud_same_png_bytes() -> None:
-    a = png(rasterize(CLOUD, COLOURS, fit(CLOUD, View(30.0, 30.0), (64, 48))))
-    b = png(rasterize(CLOUD.copy(), COLOURS.copy(), fit(CLOUD.copy(), View(30.0, 30.0), (64, 48))))
+    view = View(30.0, 30.0)
+    a = png(rasterize(CLOUD, COLOURS, frame_cloud(CLOUD, view, (64, 48))))
+    b = png(rasterize(CLOUD.copy(), COLOURS.copy(), frame_cloud(CLOUD.copy(), view, (64, 48))))
     assert a == b
     assert a[:8] == b"\x89PNG\r\n\x1a\n"
 
