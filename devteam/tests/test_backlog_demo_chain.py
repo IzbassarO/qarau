@@ -15,7 +15,7 @@ from devteam.graph import outside_paths
 
 CHAIN = [
     "B1", "U2", "S1", "DS1", "D1", "DEF1-api", "UI-inspections", "REV1-api", "UI-evidence",
-    "RPT1", "UI-mark", "UI-report", "D2", "COV1",
+    "UI-evidence-b", "UI-evidence-c", "RPT1", "UI-mark", "UI-report", "D2", "COV1",
 ]  # fmt: skip
 DEPS = {
     "B1": [],
@@ -27,8 +27,11 @@ DEPS = {
     "UI-inspections": ["DS1", "U2"],
     "REV1-api": ["DEF1-api"],
     "UI-evidence": ["DS1", "DEF1-api", "REV1-api"],
+    # owner, 2026-10-27: UI-evidence split in three; its branch continues as the first part
+    "UI-evidence-b": ["UI-evidence"],
+    "UI-evidence-c": ["UI-evidence-b"],
     "RPT1": ["REV1-api"],
-    "UI-mark": ["UI-evidence"],
+    "UI-mark": ["UI-evidence-c"],
     "UI-report": ["RPT1", "DS1"],
     "D2": ["S1", "U2"],
     "COV1": ["RPT1"],
@@ -98,6 +101,19 @@ def test_every_demo_chain_goal_has_done_when_checks_and_a_scope():
     for tid in ("B1", "DEF1-api", "UI-evidence"):  # metres only with a scale
         assert "scale" in by[tid]["goal"].lower()
     assert "STOPPED until Kubernetes" in by["DEF1-api"]["goal"]
+
+
+@pytest.mark.backlog
+def test_ui_evidence_split_keeps_its_branch_and_bans_bundled_findings():
+    """Owner 2026-10-27: part 1 alone was 32 files and used every fix loop, and it bundled a
+    fabricated finding into the client for the screenshots."""
+    by = {t["id"]: t for t in real_backlog()}
+    a = by["UI-evidence"]
+    assert a["branch"] == "devteam/UI-evidence"  # earlier work continues as part 1
+    assert "remove src/fixtures/evidence.ts" in a["goal"] and "retryOnMount" in a["goal"]
+    assert "window.__qarau.pointsLoaded" in a["goal"] and "Demo site" in a["goal"]
+    for tid in ("UI-evidence", "UI-evidence-b", "UI-evidence-c"):
+        assert "Owner 2026-10-27:" in by[tid]["goal"], tid
 
 
 @pytest.mark.backlog
