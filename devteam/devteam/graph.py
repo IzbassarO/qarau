@@ -80,7 +80,17 @@ FORBIDDEN_BRANCH = {"-D", "-d", "--delete", "-M", "-m", "--move", "-f", "--force
 POLL_S = 5  # a running step is checked this often (limits, `devteam stop <task>`)
 CPU_EVERY_S = 60  # supervisor: how often a round's CPU use is sampled
 OWNER_STOP = "stopped by the owner"
+DEPS_WAIT = "waits for"  # blocked_reason of a task parked on its depends_on, e.g. "waits for A7a"
 CONFLICT = re.compile(rb"^(<{7}|>{7})( |$)", re.M)  # markers git leaves (not "=======": markdown)
+
+
+def waits_on_dependencies(t: dict) -> bool:
+    """Blocked only until its depends_on merge: blocked_reason "waits for <dependency>". Blocked by
+    fix loops, gates, limits, a crash or the owner: only `devteam resume` moves it (owner,
+    2026-10-27: RPT1, blocked by the tester, went back to todo when another task merged)."""
+    reason = (t.get("blocked_reason") or "").strip()
+    first = re.split(r"[\s,;:.()]+", reason.removeprefix(DEPS_WAIT + " "), maxsplit=1)[0]
+    return reason.startswith(DEPS_WAIT + " ") and first in (t.get("depends_on") or [])
 
 
 def _feed(pipe, text: str):
@@ -921,13 +931,16 @@ class Team:
         return ""
 
     def unblock_ready(self) -> list[str]:
-        """Blocked tasks whose depends_on are all done go back to todo, pushed to dev."""
+        """Blocked tasks waiting on their depends_on (waits_on_dependencies) go back to todo when
+        those are all done, pushed to dev. Any other blocked task waits for `devteam resume`."""
         tasks = self.load_backlog()
         done = {t["id"] for t in tasks if t["status"] == "done"}
         ready = [
             t["id"]
             for t in tasks
-            if t["status"] == "blocked" and t.get("depends_on") and set(t["depends_on"]) <= done
+            if t["status"] == "blocked"
+            and waits_on_dependencies(t)
+            and set(t["depends_on"]) <= done
         ]
         for tid in ready:
             self.update_task(tid, status="todo", blocked_reason=None)

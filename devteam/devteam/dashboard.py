@@ -16,7 +16,7 @@ import yaml
 from devteam import costs
 from devteam import watchdog as W
 from devteam.continuous import runs_of_day
-from devteam.graph import AGENTS, OWNER_STOP, Team
+from devteam.graph import AGENTS, OWNER_STOP, Team, waits_on_dependencies
 
 GH_CACHE_S = 60
 EVENTS_TAIL = 400_000  # bytes of events.log read per refresh
@@ -137,7 +137,7 @@ VIOLATION_DO = {
 def blocked_action(t: dict, by_id: dict) -> str | None:
     """What the owner should do about a blocked task; None when it is not the owner's move."""
     tid, reason = t["id"], t.get("blocked_reason") or ""
-    if [d for d in t.get("depends_on") or [] if by_id.get(d, {}).get("status") != "done"]:
+    if waits_on_dependencies(t):
         return None  # back to todo by itself when its dependencies merge
     if t.get("owner_only"):  # P4a-2a-run: never `devteam resume` it
         return (

@@ -52,7 +52,9 @@ def test_brain_never_plans_a_task_whose_dependencies_are_not_done(repo):
 
 def test_blocked_task_goes_back_to_todo_on_dev_when_its_dependencies_are_done(repo):
     team, graph = make(repo)
-    team.update_task("T-003", status="blocked", depends_on=["T-002"], blocked_reason="wait")
+    team.update_task(
+        "T-003", status="blocked", depends_on=["T-002"], blocked_reason="waits for T-002"
+    )
     team.push_status("T-003", "backlog: T-003 blocked")
     assert dev_backlog(repo)["T-003"]["status"] == "blocked"
     run(graph, "r1")  # T-001 and T-002 merge; T-003 is not planned while blocked
@@ -67,11 +69,37 @@ def test_blocked_task_goes_back_to_todo_on_dev_when_its_dependencies_are_done(re
 
 def test_blocked_task_with_unfinished_dependencies_stays_blocked(repo):
     team, _ = make(repo)
-    team.update_task("T-003", status="blocked", depends_on=["T-001", "T-002"])
+    team.update_task(
+        "T-003", status="blocked", depends_on=["T-001", "T-002"], blocked_reason="waits for T-001"
+    )
     team.update_task("T-001", status="done")
     assert team.unblock_ready() == [] and statuses(team)["T-003"] == "blocked"
     team.update_task("T-002", status="done")
     assert team.unblock_ready() == ["T-003"] and statuses(team)["T-003"] == "todo"
+
+
+def test_task_blocked_by_fix_loops_stays_blocked_until_resume(repo):
+    """Owner 2026-10-27: RPT1, blocked by the tester twice, went back to todo at 23:41 when
+    another task merged. Only a task parked on its depends_on moves by itself."""
+    team, graph = make(repo)
+    reason = "tester: sent back twice in a row for the same reason"
+    team.update_task("T-003", status="blocked", depends_on=["T-002"], blocked_reason=reason)
+    team.push_status("T-003", "backlog: T-003 blocked")
+    run(graph, "r1")  # T-001 and T-002 merge
+    assert (
+        statuses(team)["T-003"] == "blocked" and dev_backlog(repo)["T-003"]["status"] == "blocked"
+    )
+    for reason in (
+        "crashed: Traceback (most recent call last)",
+        "supervisor: 16000000 tokens in one round",
+        "waits for the owner: T-002 merged, then the owner runs it",
+        "waits for T-001",  # names no dependency of its own
+    ):
+        team.update_task("T-003", blocked_reason=reason)
+        assert team.unblock_ready() == [], reason
+    team.request("resume", "T-003")
+    team.apply_controls(running=False)
+    assert statuses(team)["T-003"] == "todo"
 
 
 def test_a_task_with_earlier_work_continues_on_its_branch(repo, tmp_path):
