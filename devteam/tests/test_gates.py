@@ -619,7 +619,7 @@ class Judged(Fast):
         return super().develop(team, s)
 
 
-def e2e_team(repo, tmp_path, code=0, dev="dev_app", agents=None, loops=0):
+def e2e_team(repo, tmp_path, code=0, dev="dev_app", agents=None, loops=0, command=None, mins=None):
     agents = agents or Fast()
     agents.plan = only("T-002" if dev == "dev_app" else "T-001", dev)
     devs = copy.deepcopy(CFG["developers"])
@@ -628,7 +628,10 @@ def e2e_team(repo, tmp_path, code=0, dev="dev_app", agents=None, loops=0):
         d.pop("screenshots", None)
     gates = copy.deepcopy(CFG["gates"])
     log = tmp_path / "e2e.log"
-    gates["e2e"]["command"] = E2E.format(py=sys.executable, log=str(log), port="{port}", code=code)
+    gates["e2e"]["command"] = command or E2E.format(
+        py=sys.executable, log=str(log), port="{port}", code=code
+    )
+    gates["e2e"]["timeout_min"] = mins or gates["e2e"]["timeout_min"]
     team, graph = make_team(
         repo, agents, fake=False, developers=devs, gates=gates, max_fix_loops=loops
     )
@@ -695,6 +698,140 @@ def test_judge_sees_which_e2e_tests_ran_or_skipped():
     shown = GR.e2e_output(out)
     assert "› far" in shown and "› real data" in shown and "3 passed, 1 skipped" in shown
     assert shown.count("vite log") <= 40
+
+
+# Playwright's list reporter, as Kerege saw it on DS1 (2026-10-26), trimmed
+E2E_TIMED_OUT = """Running 208 tests using 4 workers
+vite log line
+  ✓   1 [desktop] › e2e/login.spec.ts:13:7 › signed-out login: light, en (2.1s)
+  ✓   2 [desktop] › e2e/login.spec.ts:13:7 › signed-out login: light, ru (2.0s)
+  -   3 [desktop] › e2e/viewer.spec.ts:19:3 › viewer: notre-dame
+  ✘   4 [phone] › e2e/viewer-chrome.spec.ts:21:5 › v8 viewer chrome fits: light, kk (3.0m)
+"""
+E2E_FAILED = """Running 3 tests using 2 workers
+  ✓   1 [desktop] › e2e/login.spec.ts:13:7 › signed-out login: light, en (2.1s)
+  ✘   2 [desktop] › e2e/point-info.spec.ts:90:1 › click while drag still orbits (6.1s)
+  ✘   3 [phone] › e2e/point-info.spec.ts:90:1 › click while drag still orbits (6.3s)
+
+  1) [desktop] › e2e/point-info.spec.ts:90:1 › click while drag still orbits ──────────────
+
+    Error: expect(locator).toHaveAttribute(expected) failed
+
+    Locator: getByRole('button', { name: 'Point info' })
+    Expected: "false"
+    Timeout: 5000ms
+    Error: element(s) not found
+
+      108 |   await expect(panel).toHaveCount(0);
+    > 109 |   await expect(tool).toHaveAttribute('aria-pressed', 'false');
+      110 |   expect(errors).toEqual([]);
+      111 | });
+
+  2) [phone] › e2e/point-info.spec.ts:90:1 › click while drag still orbits ────────────────
+
+    Error: page.screenshot: Test timeout of 180000ms exceeded.
+
+  2 failed
+    [desktop] › e2e/point-info.spec.ts:90:1 › click while drag still orbits
+    [phone] › e2e/point-info.spec.ts:90:1 › click while drag still orbits
+  1 passed (9.0m)
+"""
+
+
+def test_e2e_report_says_timeout_plainly_with_counts():
+    assert GR.e2e_report(E2E_TIMED_OUT, True, 20) == (
+        "TIMEOUT: e2e stopped after 20 min (not a test failure); 2 passed, 1 failed, "
+        "204 not run.\n"
+        "✘   4 [phone] › e2e/viewer-chrome.spec.ts:21:5 › v8 viewer chrome fits: light, kk (3.0m)"
+    )
+
+
+def test_e2e_report_gives_each_failing_test_and_its_first_error_lines():
+    assert GR.e2e_report(E2E_FAILED, False, 20) == (
+        "e2e FAILED: 2 failed, 1 passed.\n"
+        "1) [desktop] › e2e/point-info.spec.ts:90:1 › click while drag still orbits\n"
+        "  Error: expect(locator).toHaveAttribute(expected) failed\n"
+        "  Locator: getByRole('button', { name: 'Point info' })\n"
+        '  Expected: "false"\n'
+        "  Timeout: 5000ms\n"
+        "  Error: element(s) not found\n"
+        "  108 |   await expect(panel).toHaveCount(0);\n"
+        "  > 109 |   await expect(tool).toHaveAttribute('aria-pressed', 'false');\n"
+        "  110 |   expect(errors).toEqual([]);\n\n"
+        "2) [phone] › e2e/point-info.spec.ts:90:1 › click while drag still orbits\n"
+        "  Error: page.screenshot: Test timeout of 180000ms exceeded."
+    )
+
+
+@pytest.mark.usefixtures("fast_poll")
+def test_a_timed_out_e2e_tells_the_developer_it_timed_out_not_failed(repo, tmp_path):
+    agents = Judged()
+    cmd = (
+        "echo 'Running 3 tests using 1 worker' && "
+        "echo '  ✓  1 [desktop] › e2e/a.spec.ts:1:1 › a (1.0s)' && sleep 30"
+    )
+    team, _ = e2e_team(repo, tmp_path, agents=agents, loops=1, command=cmd, mins=0.02)
+    assert agents.judged == 0
+    assert "did not finish within the time limit" in agents.feedback
+    assert "they fail" not in agents.feedback
+    assert (
+        "TIMEOUT: e2e stopped after 0.02 min (not a test failure); 1 passed, 0 failed, "
+        "2 not run." in agents.feedback
+    )
+    assert "TIMEOUT echo 'Running 3 tests" in (team.home / "events.log").read_text()
+
+
+def test_git_fetch_retries_a_network_error_then_succeeds(repo, monkeypatch):
+    team = team_for(repo)
+    real, calls = GR.subprocess.run, []
+
+    def flaky(cmd, **kw):
+        if cmd[:2] == ["git", "fetch"]:
+            calls.append(cmd)
+            if len(calls) < 3:
+                return SimpleNamespace(
+                    returncode=128,
+                    stdout=b"",
+                    stderr=b"fatal: unable to access 'https://github.com/x/y.git/': "
+                    b"Could not resolve host: github.com",
+                )
+        return real(cmd, **kw)
+
+    monkeypatch.setattr(GR.subprocess, "run", flaky)
+    team.fetch("dev")
+    assert len(calls) == 3
+    assert "git fetch: network error, retrying in 0s" in (team.home / "events.log").read_text()
+
+
+def test_git_gives_up_after_the_retries_and_never_retries_other_errors(repo, monkeypatch):
+    team = team_for(repo)
+    calls = []
+
+    def fails(cmd, **kw):
+        calls.append(cmd)
+        err = b"Could not resolve host: github.com" if cmd[1] == "fetch" else b"bad revision"
+        return SimpleNamespace(returncode=128, stdout=b"", stderr=err)
+
+    monkeypatch.setattr(GR.subprocess, "run", fails)
+    with pytest.raises(RuntimeError, match="Could not resolve host"):
+        team.git("fetch", "-q", "origin")
+    assert len(calls) == 1 + len(GR.GIT_NET_WAITS)
+    calls.clear()
+    with pytest.raises(RuntimeError, match="bad revision"):
+        team.git("rev-parse", "nope")  # not a network command: once
+    assert len(calls) == 1
+    calls.clear()
+    monkeypatch.setattr(
+        GR.subprocess,
+        "run",
+        lambda cmd, **kw: (
+            calls.append(cmd)
+            or SimpleNamespace(returncode=128, stdout=b"", stderr=b"couldn't find remote ref nope")
+        ),
+    )
+    with pytest.raises(RuntimeError, match="remote ref"):
+        team.git("fetch", "-q", "origin", "nope")  # a network command, not a network error
+    assert len(calls) == 1
 
 
 def test_web_developer_is_told_the_tester_runs_e2e():
