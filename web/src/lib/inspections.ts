@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { Source, Stats } from './bundle';
 import type { ProcessingRunPayload, ProcessingStagePayload } from './processing';
 import { authHeader } from '../auth/auth';
@@ -7,7 +7,18 @@ import { ApiUnavailableError, readApi } from './api';
 
 export type InspectionStatus = 'uploaded' | 'queued' | 'running' | 'done' | 'failed' | 'unknown';
 
+/** The v8 list contract; dates are ISO strings from InspectionOut.created_at. */
 export interface InspectionSummary {
+  id: string;
+  siteName: string;
+  date: string;
+  status: Exclude<InspectionStatus, 'unknown'>;
+  findingsCount: number | null;
+  runId?: string;
+}
+
+/** Existing grouped catalog metadata, including read-only legacy exports. */
+export interface SiteInspectionSummary {
   id: string;
   siteId: string;
   /** The run name (run id unless the API gives a title). */
@@ -27,7 +38,7 @@ export interface Site {
   id: string;
   /** Empty for unnamed/unassigned sites; their labels are translated by the UI. */
   name: string;
-  inspections: InspectionSummary[];
+  inspections: SiteInspectionSummary[];
 }
 
 export interface RunSummary {
@@ -86,7 +97,7 @@ export function groupRunsIntoSites(runs: readonly RunSummary[]): Site[] {
         : {}),
     });
   }
-  const newestFirst = (a: InspectionSummary, b: InspectionSummary) =>
+  const newestFirst = (a: SiteInspectionSummary, b: SiteInspectionSummary) =>
     timestamp(b.createdAt) - timestamp(a.createdAt) || a.id.localeCompare(b.id);
   const groups = Array.from(sites.values());
   for (const site of groups) site.inspections.sort(newestFirst);
@@ -121,7 +132,8 @@ export interface InspectionPayload extends ProcessingRunPayload {
   status: string;
   created_at: string;
   title?: string;
-  run_id?: string;
+  run_id?: string | null;
+  findings_count?: number | null;
 }
 
 export interface InspectionDetail extends InspectionPayload {
@@ -193,7 +205,7 @@ export function groupInspectionsIntoSites(
   for (const group of groups)
     for (const summary of group.inspections) {
       const detail = inspections.find((inspection) => String(inspection.id) === summary.id);
-      summary.runId = detail?.runId ?? detail?.run_id;
+      summary.runId = detail?.runId ?? detail?.run_id ?? undefined;
     }
   return groups;
 }
@@ -232,19 +244,81 @@ export async function listInspections(signal?: AbortSignal): Promise<Site[]> {
   return groupInspectionsIntoSites(inspections, sites);
 }
 
-export function useInspections(enabled = true) {
-  return useQuery({
+function groupedInspectionOptions(enabled: boolean) {
+  return {
     queryKey: ['inspections'],
-    queryFn: ({ signal }) => listInspections(signal),
+    queryFn: ({ signal }: { signal: AbortSignal }) => listInspections(signal),
     enabled,
     retry: false,
-    refetchInterval: (query) =>
-      query.state.data?.some((site) =>
-        site.inspections.some((inspection) =>
-          ['uploaded', 'queued', 'running', 'unknown'].includes(inspection.status),
-        ),
+  };
+}
+
+/** Sort a copy, preserving API order for equal dates, and retain the uncapped count. */
+export function sortAndCap(items: readonly InspectionSummary[], limit = 50) {
+  const count = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 50;
+  return {
+    rows: [...items].sort((a, b) => Date.parse(b.date) - Date.parse(a.date)).slice(0, count),
+    total: items.length,
+  };
+}
+
+/** The list uses inspection CRUD only; an empty list is authoritative. */
+export async function fetchInspectionSummaries(signal?: AbortSignal): Promise<InspectionSummary[]> {
+  const payload = await readApi('/api/inspections', signal);
+  if (!Array.isArray(payload) || !payload.every(isInspection))
+    throw new Error('Invalid inspections response');
+  if (payload.length === 0) return [];
+  const sites = await listSites(signal);
+  return Promise.all(
+    payload.map(async (item): Promise<InspectionSummary> => {
+      // B1 leaves inspections as created after upload; S1 identifies the current run.
+      const inspection: InspectionDetail =
+        item.status === 'created' ? await getInspection(String(item.id), signal) : item;
+      const status = inspectionStatus(inspection.status);
+      if (
+        status === 'unknown' ||
+        !Number.isFinite(Date.parse(inspection.created_at)) ||
+        (inspection.findings_count != null &&
+          (!Number.isInteger(inspection.findings_count) || inspection.findings_count < 0))
+      )
+        throw new Error('Invalid inspection summary');
+      return {
+        id: String(inspection.id),
+        siteName: sites.find((site) => site.id === inspection.site_id)?.name ?? '',
+        date: inspection.created_at,
+        status,
+        findingsCount: inspection.findings_count ?? null,
+        ...(inspection.run_id ? { runId: inspection.run_id } : {}),
+        ...(inspection.runId ? { runId: inspection.runId } : {}),
+      };
+    }),
+  );
+}
+
+export function useInspections(): UseQueryResult<InspectionSummary[], Error>;
+/** Compatibility for the existing site catalog until start-page wiring in part 2. */
+export function useInspections(enabled: boolean): UseQueryResult<Site[], Error>;
+export function useInspections(
+  enabled?: boolean,
+): UseQueryResult<InspectionSummary[] | Site[], Error> {
+  const grouped = enabled !== undefined;
+  return useQuery<InspectionSummary[] | Site[]>({
+    ...(grouped
+      ? groupedInspectionOptions(enabled)
+      : {
+          queryKey: ['inspections', 'list'],
+          queryFn: ({ signal }: { signal: AbortSignal }) => fetchInspectionSummaries(signal),
+          retry: false,
+        }),
+    refetchInterval: (query) => {
+      const data = query.state.data ?? [];
+      const active = (inspection: { status: InspectionStatus }) =>
+        ['uploaded', 'queued', 'running', 'unknown'].includes(inspection.status);
+      return data.some((item) =>
+        'inspections' in item ? item.inspections.some(active) : active(item),
       )
         ? 5000
-        : false,
+        : false;
+    },
   });
 }

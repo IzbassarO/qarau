@@ -1,0 +1,26 @@
+/* Fit the v8 five-column ListRow to translated inspection data and action labels. */
+.inspections-list-row {
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.5fr) minmax(
+      0,
+      1fr
+    );
+  padding-block: var(--space-2);
+}
+.inspections-list-row > * {
+  min-width: 0;
+}
+.inspections-list-row .qv-row__name,
+.inspections-list-row .qv-status,
+.inspections-list-row .qv-btn {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.inspections-list-count {
+  text-align: right;
+}
+.inspections-list-action {
+  justify-self: end;
+}
+.inspections-list-total {
+  margin-top: var(--space-3);
+}
