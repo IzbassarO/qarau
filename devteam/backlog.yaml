@@ -1323,13 +1323,13 @@ tasks:
     real API with the demo seed; the remount race flipped the panel to Loading.
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - DS1
   - DEF1-api
   - REV1-api
   owner: dev_app
-  run: run-20261026-234958
+  run: run-20261027-183321
   branch: devteam/UI-evidence
 - id: UI-evidence-b
   area: app
