@@ -128,7 +128,6 @@ void main() {
 
 export interface Callbacks {
   onPick: (point: number | null, layer?: PointLayer) => void;
-  onFindingPick?: (findingId: number) => void;
   onFlyModeChange?: (active: boolean) => void;
   onThirdPersonChange?: (active: boolean) => void;
   onAlignModeChange?: (active: boolean) => void;
@@ -264,9 +263,10 @@ export class ViewerEngine {
       new Uint8BufferAttribute(new Uint8Array(m.points.count * 3), 3, true),
     );
     this.updateFindingColors(signals);
-    const findingIds = new Uint32Array(m.points.count);
-    if (b.pointFinding) findingIds.set(b.pointFinding);
-    g.setAttribute('fid', new BufferAttribute(findingIds, 1));
+    g.setAttribute(
+      'fid',
+      new BufferAttribute(b.pointFinding ?? new Uint16Array(m.points.count), 1),
+    );
     // bounding sphere once; robust (outliers must not inflate it) and never recomputed
     g.boundingSphere = null;
     g.computeBoundingSphere();
@@ -483,10 +483,6 @@ export class ViewerEngine {
 
   private updateFindingColors(signals: SignalColors) {
     const { pointFinding, findings } = this.b;
-    const attribute = this.pointGeometry.getAttribute('findingColor') as BufferAttribute;
-    const colors = attribute.array as Uint8Array;
-    colors.fill(0);
-    attribute.needsUpdate = true;
     if (!pointFinding || !findings) return;
     const palette = new Map(
       findings.map((finding) => [
@@ -494,6 +490,9 @@ export class ViewerEngine {
         colorBytes(signals[finding.severity === 'critical' ? 'critical' : 'watch']),
       ]),
     );
+    const attribute = this.pointGeometry.getAttribute('findingColor') as BufferAttribute;
+    const colors = attribute.array as Uint8Array;
+    colors.fill(0);
     for (let point = 0; point < this.b.manifest.points.count; point++) {
       const color = palette.get(pointFinding[point]);
       if (color) colors.set(color, point * 3);
@@ -626,19 +625,6 @@ export class ViewerEngine {
 
   setSelectedFinding(id: number) {
     this.mat.uniforms.uSelected.value = id;
-    this.dirty = true;
-  }
-
-  /** Findings can arrive after geometry. Retain the scene, camera and GPU attributes. */
-  setFindings(findings: Bundle['findings'], pointFinding: Bundle['pointFinding']) {
-    if (this.b.findings === findings && this.b.pointFinding === pointFinding) return;
-    this.b = { ...this.b, findings, pointFinding };
-    const attribute = this.pointGeometry.getAttribute('fid') as BufferAttribute;
-    const ids = attribute.array as Uint32Array;
-    ids.fill(0);
-    if (pointFinding) ids.set(pointFinding.subarray(0, ids.length));
-    attribute.needsUpdate = true;
-    this.updateFindingColors(this.readSignalColors());
     this.dirty = true;
   }
 
@@ -1082,17 +1068,8 @@ export class ViewerEngine {
     }
     if (this.pointInfoActive) {
       const point = this.pickInfoAt(e);
-      const findingId = point?.layer === 'sparse' ? this.b.pointFinding?.[point.index] : undefined;
-      if (findingId) {
-        this.cb.onFindingPick?.(findingId);
-        return;
-      }
       if (point?.layer === 'dense') this.cb.onPick(point.index, 'dense');
       else this.cb.onPick(point?.index ?? null);
-    } else {
-      const point = this.pickAt(e);
-      const findingId = point === undefined ? undefined : this.b.pointFinding?.[point];
-      if (findingId) this.cb.onFindingPick?.(findingId);
     }
   };
   private noCtx = (e: Event) => e.preventDefault();

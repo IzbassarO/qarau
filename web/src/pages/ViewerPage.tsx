@@ -2,20 +2,11 @@ import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { createDemo } from '../fixtures/demo';
 import { useI18n, type Key } from '../i18n';
-import {
-  BundleError,
-  FarLayerError,
-  loadBundle,
-  loadManifest,
-  type Bundle,
-  type FrameInfo,
-} from '../lib/bundle';
+import { BundleError, FarLayerError, loadBundle, loadManifest, type Bundle } from '../lib/bundle';
 import { ViewerScreen } from '../viewer/ViewerScreen';
-import { useRunEvidence } from '../viewer/useRunEvidence';
-import { EvidencePanel } from '../viewer/EvidencePanel';
 
 type State =
-  | { s: 'loading'; p: number; frames?: readonly FrameInfo[] }
+  | { s: 'loading'; p: number }
   | { s: 'error'; code: 'noManifest' | 'badVersion' | 'generic'; msg: string }
   | { s: 'ready'; bundle: Bundle };
 
@@ -24,19 +15,6 @@ export function ViewerPage() {
   const { t, lang } = useI18n();
   const [st, setSt] = useState<State>({ s: 'loading', p: 0 });
   const [search] = useSearchParams();
-  const requestedFinding = search.get('finding');
-  const requestKey = `${runId}:${requestedFinding}`;
-  const [dismissedFinding, setDismissedFinding] = useState<string | null>(null);
-  const initialFinding = dismissedFinding === requestKey ? null : requestedFinding;
-  const evidence = useRunEvidence(runId, initialFinding !== null);
-  const numericFinding =
-    initialFinding !== null &&
-    /^\d+$/.test(initialFinding) &&
-    Number.isSafeInteger(Number(initialFinding))
-      ? Number(initialFinding)
-      : null;
-  const findingId =
-    initialFinding === 'first' ? (evidence.findings[0]?.id ?? null) : numericFinding;
 
   useEffect(() => {
     if (runId === 'demo') return;
@@ -45,12 +23,7 @@ export function ViewerPage() {
     (async () => {
       try {
         const m = await loadManifest(runId);
-        if (!dead) setSt({ s: 'loading', p: 0, frames: m.frames });
-        const bundle = await loadBundle(
-          runId,
-          m,
-          (p) => !dead && setSt({ s: 'loading', p, frames: m.frames }),
-        );
+        const bundle = await loadBundle(runId, m, (p) => !dead && setSt({ s: 'loading', p }));
         if (!dead) setSt({ s: 'ready', bundle });
       } catch (e) {
         if (dead) return;
@@ -84,38 +57,7 @@ export function ViewerPage() {
         initialPoint={valid ? point : null}
         invalidPoint={search.has('point') && !valid}
         initialMode={search.get('mode') === 'observer' ? 'observer' : 'orbit'}
-        initialFinding={initialFinding}
       />
-    );
-  }
-  // Evidence is useful before the map is ready. Do not serialize its API or frames
-  // behind binary cloud downloads, ground estimation, or WebGL initialization.
-  if (st.s === 'loading' && (initialFinding === 'first' || numericFinding !== null)) {
-    return (
-      <div className="qv qv-screen viewer-screen">
-        <div className="qv-screen__main viewer-workspace">
-          <main className="qv-map viewer-main">
-            <p role="status">{t('viewer.loading')}</p>
-          </main>
-          <div className="viewer-overlays">
-            <EvidencePanel
-              findingId={findingId}
-              frames={st.frames ?? []}
-              listState={
-                initialFinding === 'first'
-                  ? evidence.api.isPending
-                    ? 'loading'
-                    : evidence.api.isError
-                      ? 'error'
-                      : undefined
-                  : undefined
-              }
-              onRetry={() => void evidence.api.refetch()}
-              onClose={() => setDismissedFinding(requestKey)}
-            />
-          </div>
-        </div>
-      </div>
     );
   }
   return (

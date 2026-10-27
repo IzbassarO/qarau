@@ -123,16 +123,10 @@ function setup(bundle = createDemo('en').bundle) {
   const onFlyModeChange = vi.fn();
   const onAlignModeChange = vi.fn();
   const onPick = vi.fn();
-  const onFindingPick = vi.fn();
-  const engine = new ViewerEngine(canvas, bundle, {
-    onFlyModeChange,
-    onPick,
-    onAlignModeChange,
-    onFindingPick,
-  });
+  const engine = new ViewerEngine(canvas, bundle, { onFlyModeChange, onPick, onAlignModeChange });
   engines.add(engine);
   canvas.focus();
-  return { canvas, engine, onFlyModeChange, onPick, onAlignModeChange, onFindingPick };
+  return { canvas, engine, onFlyModeChange, onPick, onAlignModeChange };
 }
 
 function key(
@@ -1592,72 +1586,4 @@ describe('ViewerEngine object framing', () => {
     expect(engine.camera.position.distanceTo(initial)).toBeLessThan(1e-9);
     expect(engine.controls.target.toArray()).toEqual(bounds.center);
   });
-});
-
-it.each([false, true])(
-  'opens a finding point by its API ID with point-info mode %s',
-  (pointInfo) => {
-    const bundle = navigationBundle();
-    bundle.pointFinding = new Uint32Array(bundle.manifest.points.count).fill(70001);
-    const { canvas, engine, onFindingPick, onPick } = setup(bundle);
-    engine.setPointInfoMode(pointInfo);
-    const pixel = engine.project([1, -1, 1]);
-    pointer(canvas, 'pointerdown', pixel.x, pixel.y);
-    pointer(canvas, 'pointerup', pixel.x, pixel.y);
-    expect(onFindingPick).toHaveBeenCalledExactlyOnceWith(70001);
-    expect(onPick).not.toHaveBeenCalled();
-  },
-);
-
-it('updates and clears finding IDs, colours and picks without recreating GPU attributes', () => {
-  document.documentElement.dataset.theme = 'light';
-  const bundle = navigationBundle();
-  const { engine, canvas, onFindingPick, onPick } = setup(bundle);
-  const cloud = engine.scene.children.find(
-    (item) => item instanceof Points && item.material instanceof ShaderMaterial,
-  ) as Points<import('three').BufferGeometry, ShaderMaterial>;
-  const geometry = cloud.geometry;
-  const ids = geometry.getAttribute('fid');
-  const colours = geometry.getAttribute('findingColor');
-  const positions = geometry.getAttribute('position');
-  const renderer = engine.renderer;
-  engine.camera.position.set(2, -2, 2);
-  engine.camera.lookAt(0, 0, 0);
-  engine.camera.updateMatrixWorld();
-  engine.setFindings(
-    [
-      {
-        id: 70001,
-        class: 'corrosion',
-        severity: 'critical',
-        status: 'confirmed',
-        n_points: 8,
-        centroid: [0, 0, 0],
-        bbox: { min: [-1, -1, -1], max: [1, 1, 1] },
-        frames: [0],
-      },
-    ],
-    new Uint32Array(8).fill(70001),
-  );
-  expect(cloud.geometry).toBe(geometry);
-  expect(geometry.getAttribute('fid')).toBe(ids);
-  expect(geometry.getAttribute('findingColor')).toBe(colours);
-  expect(geometry.getAttribute('position')).toBe(positions);
-  expect(engine.renderer).toBe(renderer);
-  expect(engine.camera.position.toArray()).toEqual([2, -2, 2]);
-  expect(Array.from(ids.array.slice(0, 3))).toEqual([70001, 70001, 70001]);
-  expect(Array.from(colours.array.slice(0, 3))).toEqual([196, 42, 24]);
-  const pixel = engine.project([1, -1, 1]);
-  pointer(canvas, 'pointerdown', pixel.x, pixel.y);
-  pointer(canvas, 'pointerup', pixel.x, pixel.y);
-  expect(onFindingPick).toHaveBeenCalledExactlyOnceWith(70001);
-
-  engine.setFindings([], undefined);
-  expect(Array.from(ids.array.slice(0, 3))).toEqual([0, 0, 0]);
-  expect(Array.from(colours.array.slice(0, 3))).toEqual([0, 0, 0]);
-  engine.setPointInfoMode(true);
-  pointer(canvas, 'pointerdown', pixel.x, pixel.y);
-  pointer(canvas, 'pointerup', pixel.x, pixel.y);
-  expect(onFindingPick).toHaveBeenCalledOnce();
-  expect(onPick).toHaveBeenCalledOnce();
 });

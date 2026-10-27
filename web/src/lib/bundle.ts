@@ -115,7 +115,7 @@ export interface Finding {
   class: string;
   prompt?: string;
   severity: Severity;
-  status: string;
+  status: 'confirmed' | 'low_evidence';
   confidence?: number;
   n_points: number;
   centroid: number[];
@@ -154,7 +154,7 @@ export interface Bundle {
   assembled: Uint32Array;
   /** v2, optional: findings and the per-point finding id (0 = none) */
   findings?: Finding[];
-  pointFinding?: Uint16Array | Uint32Array;
+  pointFinding?: Uint16Array;
   /** set when the manifest lists findings but they could not be read */
   findingsError?: 'missing' | 'broken';
 }

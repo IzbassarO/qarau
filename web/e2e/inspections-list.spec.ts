@@ -76,8 +76,6 @@ for (const [lang, t] of Object.entries({ en, ru, kk })) {
         }
         if (path === '/api/runs/inspection-done/manifest.json')
           return route.fulfill({ json: { ...manifest, run_id: 'inspection-done' } });
-        // This exported fixture has no DEF1 findings for its current run.
-        if (path === '/api/inspections/102/findings') return route.fulfill({ json: [] });
         const file = files.get(path.replace('/api/runs/inspection-done/files/', ''));
         if (file)
           return route.fulfill({

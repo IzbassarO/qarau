@@ -33,7 +33,7 @@ test('dense fixture toggles independently and a picked dense point lists its sou
   const toggle = page.getByRole('button', { name: en['viewer.show.densePoints'] });
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await expect
-    .poll(() => page.evaluate(() => window.__qarau!.denseLayer!()))
+    .poll(() => page.evaluate(() => window.__qarau!.denseLayer()))
     .toEqual({
       available: true,
       visible: true,
@@ -43,7 +43,7 @@ test('dense fixture toggles independently and a picked dense point lists its sou
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await expect
-    .poll(() => page.evaluate(() => window.__qarau!.denseLayer!()))
+    .poll(() => page.evaluate(() => window.__qarau!.denseLayer()))
     .toEqual({
       available: true,
       visible: false,
@@ -52,7 +52,7 @@ test('dense fixture toggles independently and a picked dense point lists its sou
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await expect
-    .poll(() => page.evaluate(() => window.__qarau!.denseLayer!()))
+    .poll(() => page.evaluate(() => window.__qarau!.denseLayer()))
     .toEqual({
       available: true,
       visible: true,
@@ -67,7 +67,7 @@ test('dense fixture toggles independently and a picked dense point lists its sou
   await closeTools(page);
   const canvas = page.getByLabel(en['canvas.label']);
   const box = (await canvas.boundingBox())!;
-  const point = await page.evaluate(() => window.__qarau!.densePointScreen!(0));
+  const point = await page.evaluate(() => window.__qarau!.densePointScreen(0));
   expect(point).not.toBeNull();
   await page.mouse.click(box.x + point!.x, box.y + point!.y);
 

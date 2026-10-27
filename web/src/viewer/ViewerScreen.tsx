@@ -4,7 +4,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useEffectEvent,
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
@@ -30,10 +29,6 @@ import {
 } from './ui';
 import { buildDensePointInfo, buildPointInfo, frameTime } from './pointInfo';
 import { PointInfoPanel } from './PointInfoPanel';
-import { EvidencePanel } from './EvidencePanel';
-import { withApiFindings } from './evidence';
-import { ApiUnavailableError } from '../lib/api';
-import { useRunEvidence } from './useRunEvidence';
 import { Minimap, type MinimapHandle } from './Minimap.tsx';
 import { canShowHumanFigure } from './observer';
 import { SessionImage } from '../auth/SessionImage';
@@ -49,11 +44,11 @@ declare global {
   interface Window {
     __qarau?: {
       pointsLoaded: boolean;
-      fps?: number;
+      fps: number;
       engine?: ViewerEngine;
-      bench?: (on: boolean) => void;
-      denseLayer?: () => { available: boolean; visible: boolean; count: number };
-      densePointScreen?: (index: number) => { x: number; y: number } | null;
+      bench: (on: boolean) => void;
+      denseLayer: () => { available: boolean; visible: boolean; count: number };
+      densePointScreen: (index: number) => { x: number; y: number } | null;
     };
   }
 }
@@ -91,41 +86,23 @@ const icon = (d: ReactNode) => (
 );
 
 export function ViewerScreen({
-  bundle: sourceBundle,
+  bundle,
   embedded = false,
   initialPoint = null,
   invalidPoint = false,
   initialMode = 'orbit',
-  initialFinding = null,
 }: {
   bundle: Bundle;
   embedded?: boolean;
   initialPoint?: number | null;
   invalidPoint?: boolean;
   initialMode?: 'orbit' | 'observer';
-  initialFinding?: string | null;
 }) {
   const { t } = useI18n();
-  const { api: apiFindings, findings: runFindings } = useRunEvidence(sourceBundle.runId);
-  const bundle = useMemo(
-    () => withApiFindings(sourceBundle, runFindings),
-    [sourceBundle, runFindings],
-  );
-  const [evidenceRequest, setEvidenceRequest] = useState<number | 'first' | null>(() =>
-    initialFinding === 'first'
-      ? 'first'
-      : initialFinding &&
-          /^\d+$/.test(initialFinding) &&
-          Number.isSafeInteger(Number(initialFinding))
-        ? Number(initialFinding)
-        : null,
-  );
-  const evidenceId = evidenceRequest === 'first' ? (runFindings[0]?.id ?? null) : evidenceRequest;
   const m = bundle.manifest;
   const frames = m.frames;
   const isImages = m.source.kind === 'images';
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const chromeRef = useRef<HTMLDivElement>(null);
   const toolsRef = useRef<HTMLDetailsElement>(null);
   const pointInfoToolRef = useRef<HTMLButtonElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
@@ -136,7 +113,7 @@ export function ViewerScreen({
   const [humanFigure, setHumanFigure] = useState(false);
   const [alignMode, setAlignMode] = useState(false);
   const [pointInfoMode, setPointInfoMode] = useState(
-    initialMode !== 'observer' && initialPoint !== null && evidenceRequest === null,
+    initialMode !== 'observer' && initialPoint !== null,
   );
   const userId = useSyncExternalStore(subscribeToAuth, sessionUserId, () => null);
   const [sensitivitySetting, setSensitivitySetting] = useState(() => ({
@@ -188,33 +165,14 @@ export function ViewerScreen({
     return isImages ? `#${i}` : time === null ? t('pointInfo.noTimestamp') : fmtTime(time);
   };
   const canPlay = isImages || frames.every((frame) => frameTime(frame) !== null);
-  const pickFinding = useEffectEvent((id: number) => {
-    setEvidenceRequest(runFindings.some((finding) => finding.id === id) ? id : null);
-    setSel(id);
-    setPicked(null);
-    setPointInfoMode(false);
-  });
-
-  useEffect(() => {
-    if (evidenceRequest === null) return;
-    // The evidence card replaces the open drawer; its summaries stay reachable.
-    chromeRef.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach((drawer) => {
-      drawer.open = false;
-    });
-  }, [evidenceRequest]);
 
   // engine lifecycle
   useEffect(() => {
     const canvas = canvasRef.current!;
     let eng: ViewerEngine;
     try {
-      eng = new ViewerEngine(canvas, sourceBundle, {
+      eng = new ViewerEngine(canvas, bundle, {
         onPick: (p, layer = 'sparse') => setPicked(p === null ? null : { index: p, layer }),
-        onFindingPick: (id) => {
-          // Exported bundle IDs are not necessarily DEF1 database IDs. Keep
-          // their existing timecodes unless the API identifies the same finding.
-          pickFinding(id);
-        },
         onFlyModeChange: setFlyMode,
         onThirdPersonChange: setThirdPerson,
         onAlignModeChange: setAlignMode,
@@ -229,9 +187,6 @@ export function ViewerScreen({
     const ro = new ResizeObserver(() => eng.resize());
     ro.observe(canvas);
     eng.resize();
-    // Readiness also belongs to compiled previews; engine debug access stays dev-only.
-    window.__qarau = { pointsLoaded: true };
-    let fpsTimer: ReturnType<typeof setInterval> | undefined;
     if (import.meta.env.DEV) {
       window.__qarau = {
         pointsLoaded: true,
@@ -241,36 +196,35 @@ export function ViewerScreen({
         denseLayer: () => ({
           available: eng.hasDenseLayer(),
           visible: eng.scene.getObjectByName('dense')?.visible ?? false,
-          count: sourceBundle.dense?.count ?? 0,
+          count: bundle.dense?.count ?? 0,
         }),
         densePointScreen: (index) => {
           if (
-            !sourceBundle.dense ||
+            !bundle.dense ||
             !Number.isSafeInteger(index) ||
             index < 0 ||
-            index >= sourceBundle.dense.count
+            index >= bundle.dense.count
           )
             return null;
           const p = eng.project(
-            Array.from(sourceBundle.dense.position.subarray(index * 3, index * 3 + 3)),
+            Array.from(bundle.dense.position.subarray(index * 3, index * 3 + 3)),
           );
           return p.visible ? { x: p.x, y: p.y } : null;
         },
       };
-      fpsTimer = setInterval(() => window.__qarau && (window.__qarau.fps = eng.fps), 500);
+      const q = setInterval(() => window.__qarau && (window.__qarau.fps = eng.fps), 500);
+      return () => {
+        clearInterval(q);
+        ro.disconnect();
+        eng.dispose();
+        delete window.__qarau;
+      };
     }
-    const readiness = window.__qarau;
     return () => {
-      clearInterval(fpsTimer);
       ro.disconnect();
       eng.dispose();
-      if (window.__qarau === readiness) delete window.__qarau;
     };
-  }, [sourceBundle, initialMode]);
-
-  useEffect(() => {
-    engineRef.current?.setFindings(bundle.findings, bundle.pointFinding);
-  }, [bundle]);
+  }, [bundle, initialMode]);
 
   useEffect(() => engineRef.current?.setFrame(frame), [frame, bundle]);
   useEffect(() => engineRef.current?.setOptions(opts), [opts, bundle]);
@@ -283,10 +237,7 @@ export function ViewerScreen({
     else engineRef.current?.setPicked(point?.index ?? null);
   }, [picked, pointInfoMode, bundle]);
   useEffect(() => engineRef.current?.setPointInfoMode(pointInfoMode), [pointInfoMode, bundle]);
-  useEffect(
-    () => engineRef.current?.setSelectedFinding(evidenceId ?? sel ?? 0),
-    [evidenceId, sel, bundle],
-  );
+  useEffect(() => engineRef.current?.setSelectedFinding(sel ?? 0), [sel, bundle]);
   useEffect(() => engineRef.current?.setSensitivity(sensitivity), [sensitivity, bundle]);
   useEffect(() => engineRef.current?.setBoostKey(boostKey), [boostKey, bundle]);
   useEffect(() => engineRef.current?.setHumanFigureVisible(humanFigure), [humanFigure, bundle]);
@@ -340,9 +291,6 @@ export function ViewerScreen({
   };
 
   const select = (x: Finding) => {
-    setEvidenceRequest(runFindings.some((finding) => finding.id === x.id) ? x.id : null);
-    setPicked(null);
-    setPointInfoMode(false);
     if (sel === x.id) return setSel(null);
     setSel(x.id);
     const d = x.bbox.max.map((v, k) => v - x.bbox.min[k]);
@@ -423,378 +371,339 @@ export function ViewerScreen({
       )}
 
       <div className="qv-screen__main viewer-workspace">
-        <div className="viewer-overlays">
-          <div className="viewer-chrome" ref={chromeRef}>
-            <details ref={toolsRef} name="viewer-panels" className="viewer-tools-drawer">
-              <summary className="qv-pill">{t('toolbar.label')}</summary>
-              <div
-                role="toolbar"
-                aria-label={t('toolbar.label')}
-                aria-orientation="vertical"
-                className="qv-float viewer-toolbar"
+        <div className="viewer-chrome">
+          <details ref={toolsRef} name="viewer-panels" className="viewer-tools-drawer">
+            <summary className="qv-pill">{t('toolbar.label')}</summary>
+            <div
+              role="toolbar"
+              aria-label={t('toolbar.label')}
+              aria-orientation="vertical"
+              className="qv-float viewer-toolbar"
+            >
+              <ToolButton label={t('toolbar.reset')} onClick={() => eng()?.resetView()}>
+                {icon(<path d="M3 9a6 6 0 1 0 2-4.5M3 3v3h3" />)}
+              </ToolButton>
+              <ToolButton label={t('toolbar.top')} onClick={() => eng()?.topView()}>
+                {icon(
+                  <>
+                    <rect x="3" y="3" width="12" height="12" rx="2" />
+                    <circle cx="9" cy="9" r="2" fill="currentColor" />
+                  </>,
+                )}
+              </ToolButton>
+              <ToolButton label={t('toolbar.side')} onClick={() => eng()?.sideView()}>
+                {icon(<path d="M2 14h14M5 14V7h8v7" />)}
+              </ToolButton>
+              <ToolButton label={t('toolbar.front')} onClick={() => eng()?.frontView()}>
+                {icon(<path d="M3 14V4h12v10M6 14V9h6v5M2 14h14" />)}
+              </ToolButton>
+              <ToolButton
+                label={t('toolbar.threeQuarter')}
+                onClick={() => eng()?.threeQuarterView()}
               >
-                <ToolButton label={t('toolbar.reset')} onClick={() => eng()?.resetView()}>
-                  {icon(<path d="M3 9a6 6 0 1 0 2-4.5M3 3v3h3" />)}
-                </ToolButton>
-                <ToolButton label={t('toolbar.top')} onClick={() => eng()?.topView()}>
-                  {icon(
-                    <>
-                      <rect x="3" y="3" width="12" height="12" rx="2" />
-                      <circle cx="9" cy="9" r="2" fill="currentColor" />
-                    </>,
-                  )}
-                </ToolButton>
-                <ToolButton label={t('toolbar.side')} onClick={() => eng()?.sideView()}>
-                  {icon(<path d="M2 14h14M5 14V7h8v7" />)}
-                </ToolButton>
-                <ToolButton label={t('toolbar.front')} onClick={() => eng()?.frontView()}>
-                  {icon(<path d="M3 14V4h12v10M6 14V9h6v5M2 14h14" />)}
-                </ToolButton>
-                <ToolButton
-                  label={t('toolbar.threeQuarter')}
-                  onClick={() => eng()?.threeQuarterView()}
-                >
-                  {icon(<path d="m9 2 6 3.5v7L9 16l-6-3.5v-7L9 2Zm0 7L3 5.5M9 9l6-3.5M9 9v7" />)}
-                </ToolButton>
-                <ToolButton
-                  label={t('toolbar.alignSurface')}
-                  pressed={alignMode}
-                  onClick={() => eng()?.beginSurfaceAlignment()}
-                >
-                  {icon(<path d="m2 12 7 4 7-4-7-4-7 4ZM9 10V2M6 5l3-3 3 3" />)}
-                </ToolButton>
-                <ToolButton
-                  label={t('toolbar.camera')}
-                  onClick={() => eng()?.viewThroughFrame(frame)}
-                >
-                  {icon(
-                    <>
-                      <rect x="2" y="5" width="10" height="8" rx="1.5" />
-                      <path d="M12 8l4-2v6l-4-2" />
-                    </>,
-                  )}
-                </ToolButton>
-                <PointInfoTool
-                  ref={pointInfoToolRef}
-                  active={pointInfoMode}
-                  onClick={() => {
-                    setEvidenceRequest(null);
-                    if (pointInfoMode) closePointInfo();
-                    else setPointInfoMode(true);
-                  }}
-                />
-                <span className="viewer-toolbar-divider" />
-                <ToolButton
-                  label={t('toolbar.zoomIn')}
-                  onClick={(event) => eng()?.zoom(0.8, event.altKey)}
-                >
-                  +
-                </ToolButton>
-                <ToolButton
-                  label={t('toolbar.zoomOut')}
-                  onClick={(event) => eng()?.zoom(1.25, event.altKey)}
-                >
-                  −
-                </ToolButton>
-              </div>
-            </details>
-
-            <div className="viewer-modebar">
-              <ModeSwitch
-                orbitActive={!flyMode}
-                onOrbit={() => eng()?.setOrbitMode()}
-                onObserver={() => eng()?.setObserverMode()}
+                {icon(<path d="m9 2 6 3.5v7L9 16l-6-3.5v-7L9 2Zm0 7L3 5.5M9 9l6-3.5M9 9v7" />)}
+              </ToolButton>
+              <ToolButton
+                label={t('toolbar.alignSurface')}
+                pressed={alignMode}
+                onClick={() => eng()?.beginSurfaceAlignment()}
+              >
+                {icon(<path d="m2 12 7 4 7-4-7-4-7 4ZM9 10V2M6 5l3-3 3 3" />)}
+              </ToolButton>
+              <ToolButton
+                label={t('toolbar.camera')}
+                onClick={() => eng()?.viewThroughFrame(frame)}
+              >
+                {icon(
+                  <>
+                    <rect x="2" y="5" width="10" height="8" rx="1.5" />
+                    <path d="M12 8l4-2v6l-4-2" />
+                  </>,
+                )}
+              </ToolButton>
+              <PointInfoTool
+                ref={pointInfoToolRef}
+                active={pointInfoMode}
+                onClick={() => {
+                  if (pointInfoMode) closePointInfo();
+                  else setPointInfoMode(true);
+                }}
               />
-              {flyMode && (
-                <div className="viewer-inline">
+              <span className="viewer-toolbar-divider" />
+              <ToolButton
+                label={t('toolbar.zoomIn')}
+                onClick={(event) => eng()?.zoom(0.8, event.altKey)}
+              >
+                +
+              </ToolButton>
+              <ToolButton
+                label={t('toolbar.zoomOut')}
+                onClick={(event) => eng()?.zoom(1.25, event.altKey)}
+              >
+                −
+              </ToolButton>
+            </div>
+          </details>
+
+          <div className="viewer-modebar">
+            <ModeSwitch
+              orbitActive={!flyMode}
+              onOrbit={() => eng()?.setOrbitMode()}
+              onObserver={() => eng()?.setObserverMode()}
+            />
+            {flyMode && (
+              <div className="viewer-inline">
+                <button
+                  type="button"
+                  aria-pressed={thirdPerson}
+                  onClick={() => {
+                    eng()?.toggleThirdPerson();
+                    canvasRef.current?.focus({ preventScroll: true });
+                  }}
+                  className="qv-btn qv-btn--secondary qv-btn--sm viewer-control"
+                >
+                  {t('viewer.observer.thirdPerson')}
+                </button>
+                {thirdPerson && canShowHumanFigure(bundle) && (
                   <button
                     type="button"
-                    aria-pressed={thirdPerson}
+                    aria-pressed={humanFigure}
                     onClick={() => {
-                      eng()?.toggleThirdPerson();
+                      setHumanFigure((visible) => !visible);
                       canvasRef.current?.focus({ preventScroll: true });
                     }}
                     className="qv-btn qv-btn--secondary qv-btn--sm viewer-control"
                   >
-                    {t('viewer.observer.thirdPerson')}
+                    {t('viewer.observer.humanFigure')}
                   </button>
-                  {thirdPerson && canShowHumanFigure(bundle) && (
-                    <button
-                      type="button"
-                      aria-pressed={humanFigure}
-                      onClick={() => {
-                        setHumanFigure((visible) => !visible);
-                        canvasRef.current?.focus({ preventScroll: true });
-                      }}
-                      className="qv-btn qv-btn--secondary qv-btn--sm viewer-control"
-                    >
-                      {t('viewer.observer.humanFigure')}
-                    </button>
-                  )}
-                </div>
-              )}
-              <NavigationSettings
-                sensitivity={sensitivity}
-                onSensitivityChange={(value) => {
-                  setSensitivitySetting({ userId, value });
-                  saveSensitivity(userId, value);
-                }}
-                boostKey={boostKey}
-                onBoostKeyChange={(value) => {
-                  setBoostSetting({ userId, value });
-                  saveObserverBoostKey(userId, value);
-                }}
-              />
-            </div>
-            <details
-              name="viewer-panels"
-              className="viewer-panel-drawer"
-              open={(pointInfoMode && !!pointInfo) || undefined}
-            >
-              <summary className="qv-pill">{t('viewer.details')}</summary>
-              <aside className="qv-float qv-fold__body viewer-panel">
-                <div className="qv-float viewer-legend">
-                  {[
-                    ['var(--color-viewer-current)', 'legend.now'],
-                    [`rgb(${rampSwatches[1].join(',')})`, 'legend.seen'],
-                    ['var(--color-viewer-later)', 'legend.later'],
-                    ['var(--color-finding-not-seen)', 'legend.never'],
-                  ].map(([c, k]) => (
-                    <span key={k} className="viewer-inline">
-                      <span className="viewer-legend-swatch" style={{ background: c }} />
-                      {t(k as 'legend.now')}
-                    </span>
-                  ))}
-                </div>
-
-                {pointInfoMode && pointInfo && (
-                  <PointInfoPanel
-                    info={pointInfo}
-                    onSeek={seekPointFrame}
-                    onClose={closePointInfo}
-                  />
                 )}
-                {pointInfoMode && !pointInfo && (
-                  <p className="viewer-small viewer-muted">{t('pointInfo.hint')}</p>
-                )}
-                <section className="viewer-section">
-                  <div className="viewer-section-heading">
-                    <h2 className="qv-heading viewer-heading">{t('panel.frame')}</h2>
-                    <span className={`${mono} viewer-caption viewer-muted`}>{tc(frame)}</span>
-                  </div>
-                  <div className="qv-thumb__img viewer-frame">
-                    <SessionImage
-                      src={bundle.assetUrl?.(f.thumb) ?? runUrl(bundle.runId, f.thumb)}
-                      alt={t('panel.frame')}
-                      className="size-full object-contain"
-                    />
-                  </div>
-                  <p className={`${mono} viewer-caption viewer-muted truncate`}>
-                    {f.image.split('/').pop()} · {t('panel.blur')}{' '}
-                    {f.blur === null ? '—' : f.blur.toFixed(1)}
-                    {f.drop_reason === 'blur' && ` · ${t('panel.droppedBlur')}`}
-                    {f.drop_reason === 'exposure' && ` · ${t('panel.droppedExposure')}`}
-                  </p>
-                  {!f.registered && (
-                    <p className="viewer-small viewer-error">{t('panel.notRegistered')}</p>
-                  )}
-                  <div className="viewer-data">
-                    <Row k={t('panel.cameraHeight')} v={f.center ? f.center[2].toFixed(2) : '—'} />
-                    <Row
-                      k={t('panel.visible')}
-                      v={(
-                        bundle.frameOffsets[frame + 1] - bundle.frameOffsets[frame]
-                      ).toLocaleString()}
-                    />
-                    <Row
-                      k={t('panel.assembled')}
-                      v={`${Math.round((bundle.assembled[frame] / m.points.count) * 100)}%`}
-                    />
-                  </div>
-                  <p className="viewer-caption viewer-muted">{t('panel.cameraHeightNote')}</p>
-                </section>
-
-                <section className="viewer-section" aria-label={t('findings.title')}>
-                  <H2>{t('findings.title')}</H2>
-                  {apiFindings.isError && !(apiFindings.error instanceof ApiUnavailableError) && (
-                    <p role="alert" className="viewer-small">
-                      {t('evidence.error')}
-                    </p>
-                  )}
-                  {!m.findings && !runFindings.length ? (
-                    <p className="viewer-small viewer-muted">{t('findings.notRun')}</p>
-                  ) : bundle.findingsError ? null : findings.length === 0 ? (
-                    <p className="viewer-small viewer-muted">{t('findings.empty')}</p>
-                  ) : (
-                    <ul className="viewer-findings">
-                      {findings.map((x) => (
-                        <li key={x.id}>
-                          <button
-                            type="button"
-                            data-testid="finding-item"
-                            aria-pressed={x.id === sel}
-                            onClick={() => select(x)}
-                            className="viewer-finding-item"
-                          >
-                            <span className="viewer-finding-id" style={{ background: sevColor(x) }}>
-                              {x.id}
-                            </span>
-                            <span className="viewer-finding-label">
-                              <span className="truncate">
-                                {x.class} ·{' '}
-                                {t(
-                                  x.severity === 'critical'
-                                    ? 'findings.critical'
-                                    : 'findings.watch',
-                                )}
-                              </span>
-                              <span
-                                className={`viewer-caption ${x.status === 'low_evidence' ? 'viewer-error' : 'viewer-muted'}`}
-                              >
-                                {t(
-                                  x.status === 'low_evidence'
-                                    ? 'findings.lowEvidence'
-                                    : 'findings.confirmed',
-                                )}
-                              </span>
-                            </span>
-                            <span className={`${mono} shrink-0 viewer-caption viewer-muted`}>
-                              {x.frames.length} {t('findings.frames')}
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {selected && (
-                    <div data-testid="finding-detail" className="qv-card viewer-finding-detail">
-                      {selected.status === 'low_evidence' && (
-                        <p className="viewer-caption viewer-error">
-                          {t('findings.lowEvidenceNote')}
-                        </p>
-                      )}
-                      <span className="viewer-small">{t('findings.seenAt')}</span>
-                      <div className="viewer-finding-times">
-                        {selected.frames.map((i) => (
-                          <button
-                            key={i}
-                            type="button"
-                            data-testid="finding-timecode"
-                            onClick={() => jump(i)}
-                            className={`${mono} qv-btn qv-btn--secondary qv-btn--sm viewer-control viewer-caption ${i === frame ? 'selected' : ''}`}
-                          >
-                            {tc(i)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </section>
-
-                <section className="viewer-section">
-                  <H2>{t('show.title')}</H2>
-                  <Toggle on={opts.buildUp} onChange={(v) => setOpts({ ...opts, buildUp: v })}>
-                    {t('show.buildUp')}
-                  </Toggle>
-                  <Toggle
-                    on={opts.showCurrent}
-                    onChange={(v) => setOpts({ ...opts, showCurrent: v })}
-                  >
-                    {t('show.current')}
-                  </Toggle>
-                  <Toggle on={opts.frustums} onChange={(v) => setOpts({ ...opts, frustums: v })}>
-                    {t('show.frustums')}
-                  </Toggle>
-                  {farAvailable && (
-                    <Toggle on={showFarLayer} onChange={setShowFarLayer}>
-                      {t('viewer.show.farPoints')}
-                    </Toggle>
-                  )}
-                  {denseAvailable && (
-                    <DenseToggle on={showDenseLayer} onChange={setShowDenseLayer} />
-                  )}
-                  {findings.length > 0 && (
-                    <Toggle on={opts.findings} onChange={(v) => setOpts({ ...opts, findings: v })}>
-                      {t('show.findings')}
-                    </Toggle>
-                  )}
-                  <div title={!rgbAvailable ? t('show.rgbUnavailable') : undefined}>
-                    <Toggle
-                      on={activeColorMode === 'rgb'}
-                      onChange={(on) => changeColorMode(on ? 'rgb' : 'height')}
-                      disabled={!rgbAvailable}
-                      label={t('show.colorMode')}
-                      title={!rgbAvailable ? t('show.rgbUnavailable') : undefined}
-                      describedBy={!rgbAvailable ? colorModeHintId : undefined}
-                    >
-                      <span className="viewer-label-stack">
-                        <span>{t('show.colorMode')}</span>
-                        <span className="viewer-caption viewer-muted">
-                          {t(activeColorMode === 'rgb' ? 'show.rgb' : 'show.heightBlue')}
-                        </span>
-                      </span>
-                    </Toggle>
-                    {!rgbAvailable && (
-                      <span id={colorModeHintId} role="tooltip" className="sr-only">
-                        {t('show.rgbUnavailable')}
-                      </span>
-                    )}
-                  </div>
-                  <label className="viewer-slider-row">
-                    <span className="shrink-0">{t('show.pointSize')}</span>
-                    <input
-                      type="range"
-                      min={0.5}
-                      max={8}
-                      step={0.25}
-                      value={opts.pointSize}
-                      onChange={(e) => setOpts({ ...opts, pointSize: Number(e.target.value) })}
-                      className="w-full"
-                    />
-                  </label>
-                </section>
-
-                <section className="viewer-section">
-                  <H2>{t('run.title')}</H2>
-                  <div className="viewer-data">
-                    <Row k={t('run.used')} v={stats.frames_extracted - stats.frames_dropped} />
-                    <Row k={t('run.dropped')} v={stats.frames_dropped} />
-                    <Row k={t('run.registered')} v={stats.frames_registered} />
-                    <Row k={t('run.points')} v={stats.points.toLocaleString()} />
-                    {totalS > 0 && (
-                      <Row k={t('run.time')} v={`${totalS.toFixed(1)} ${t('unit.s')}`} />
-                    )}
-                  </div>
-                  <div className="viewer-height-ramp" aria-hidden="true">
-                    {RAMP.map((c) => (
-                      <span key={c} className="viewer-height-swatch" style={{ background: c }} />
-                    ))}
-                  </div>
-                </section>
-              </aside>
-            </details>
-          </div>
-          {evidenceRequest !== null && (
-            <EvidencePanel
-              findingId={evidenceId}
-              frames={frames}
-              listState={
-                evidenceRequest === 'first'
-                  ? apiFindings.isPending
-                    ? 'loading'
-                    : apiFindings.isError
-                      ? 'error'
-                      : undefined
-                  : undefined
-              }
-              onRetry={() => void apiFindings.refetch()}
-              onClose={() => {
-                setEvidenceRequest(null);
-                setSel(null);
-                canvasRef.current?.focus();
+              </div>
+            )}
+            <NavigationSettings
+              sensitivity={sensitivity}
+              onSensitivityChange={(value) => {
+                setSensitivitySetting({ userId, value });
+                saveSensitivity(userId, value);
+              }}
+              boostKey={boostKey}
+              onBoostKeyChange={(value) => {
+                setBoostSetting({ userId, value });
+                saveObserverBoostKey(userId, value);
               }}
             />
-          )}
+          </div>
+          <details
+            name="viewer-panels"
+            className="viewer-panel-drawer"
+            open={(pointInfoMode && !!pointInfo) || undefined}
+          >
+            <summary className="qv-pill">{t('viewer.details')}</summary>
+            <aside className="qv-float qv-fold__body viewer-panel">
+              <div className="qv-float viewer-legend">
+                {[
+                  ['var(--color-viewer-current)', 'legend.now'],
+                  [`rgb(${rampSwatches[1].join(',')})`, 'legend.seen'],
+                  ['var(--color-viewer-later)', 'legend.later'],
+                  ['var(--color-finding-not-seen)', 'legend.never'],
+                ].map(([c, k]) => (
+                  <span key={k} className="viewer-inline">
+                    <span className="viewer-legend-swatch" style={{ background: c }} />
+                    {t(k as 'legend.now')}
+                  </span>
+                ))}
+              </div>
+
+              {pointInfoMode && pointInfo && (
+                <PointInfoPanel info={pointInfo} onSeek={seekPointFrame} onClose={closePointInfo} />
+              )}
+              {pointInfoMode && !pointInfo && (
+                <p className="viewer-small viewer-muted">{t('pointInfo.hint')}</p>
+              )}
+              <section className="viewer-section">
+                <div className="viewer-section-heading">
+                  <h2 className="qv-heading viewer-heading">{t('panel.frame')}</h2>
+                  <span className={`${mono} viewer-caption viewer-muted`}>{tc(frame)}</span>
+                </div>
+                <div className="qv-thumb__img viewer-frame">
+                  <SessionImage
+                    src={bundle.assetUrl?.(f.thumb) ?? runUrl(bundle.runId, f.thumb)}
+                    alt={t('panel.frame')}
+                    className="size-full object-contain"
+                  />
+                </div>
+                <p className={`${mono} viewer-caption viewer-muted truncate`}>
+                  {f.image.split('/').pop()} · {t('panel.blur')}{' '}
+                  {f.blur === null ? '—' : f.blur.toFixed(1)}
+                  {f.drop_reason === 'blur' && ` · ${t('panel.droppedBlur')}`}
+                  {f.drop_reason === 'exposure' && ` · ${t('panel.droppedExposure')}`}
+                </p>
+                {!f.registered && (
+                  <p className="viewer-small viewer-error">{t('panel.notRegistered')}</p>
+                )}
+                <div className="viewer-data">
+                  <Row k={t('panel.cameraHeight')} v={f.center ? f.center[2].toFixed(2) : '—'} />
+                  <Row
+                    k={t('panel.visible')}
+                    v={(
+                      bundle.frameOffsets[frame + 1] - bundle.frameOffsets[frame]
+                    ).toLocaleString()}
+                  />
+                  <Row
+                    k={t('panel.assembled')}
+                    v={`${Math.round((bundle.assembled[frame] / m.points.count) * 100)}%`}
+                  />
+                </div>
+                <p className="viewer-caption viewer-muted">{t('panel.cameraHeightNote')}</p>
+              </section>
+
+              <section className="viewer-section" aria-label={t('findings.title')}>
+                <H2>{t('findings.title')}</H2>
+                {!m.findings ? (
+                  <p className="viewer-small viewer-muted">{t('findings.notRun')}</p>
+                ) : bundle.findingsError ? null : findings.length === 0 ? (
+                  <p className="viewer-small viewer-muted">{t('findings.empty')}</p>
+                ) : (
+                  <ul className="viewer-findings">
+                    {findings.map((x) => (
+                      <li key={x.id}>
+                        <button
+                          type="button"
+                          data-testid="finding-item"
+                          aria-pressed={x.id === sel}
+                          onClick={() => select(x)}
+                          className="viewer-finding-item"
+                        >
+                          <span className="viewer-finding-id" style={{ background: sevColor(x) }}>
+                            {x.id}
+                          </span>
+                          <span className="viewer-finding-label">
+                            <span className="truncate">
+                              {x.class} ·{' '}
+                              {t(
+                                x.severity === 'critical' ? 'findings.critical' : 'findings.watch',
+                              )}
+                            </span>
+                            <span
+                              className={`viewer-caption ${x.status === 'low_evidence' ? 'viewer-error' : 'viewer-muted'}`}
+                            >
+                              {t(
+                                x.status === 'low_evidence'
+                                  ? 'findings.lowEvidence'
+                                  : 'findings.confirmed',
+                              )}
+                            </span>
+                          </span>
+                          <span className={`${mono} shrink-0 viewer-caption viewer-muted`}>
+                            {x.frames.length} {t('findings.frames')}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {selected && (
+                  <div data-testid="finding-detail" className="qv-card viewer-finding-detail">
+                    {selected.status === 'low_evidence' && (
+                      <p className="viewer-caption viewer-error">{t('findings.lowEvidenceNote')}</p>
+                    )}
+                    <span className="viewer-small">{t('findings.seenAt')}</span>
+                    <div className="viewer-finding-times">
+                      {selected.frames.map((i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          data-testid="finding-timecode"
+                          onClick={() => jump(i)}
+                          className={`${mono} qv-btn qv-btn--secondary qv-btn--sm viewer-control viewer-caption ${i === frame ? 'selected' : ''}`}
+                        >
+                          {tc(i)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <section className="viewer-section">
+                <H2>{t('show.title')}</H2>
+                <Toggle on={opts.buildUp} onChange={(v) => setOpts({ ...opts, buildUp: v })}>
+                  {t('show.buildUp')}
+                </Toggle>
+                <Toggle
+                  on={opts.showCurrent}
+                  onChange={(v) => setOpts({ ...opts, showCurrent: v })}
+                >
+                  {t('show.current')}
+                </Toggle>
+                <Toggle on={opts.frustums} onChange={(v) => setOpts({ ...opts, frustums: v })}>
+                  {t('show.frustums')}
+                </Toggle>
+                {farAvailable && (
+                  <Toggle on={showFarLayer} onChange={setShowFarLayer}>
+                    {t('viewer.show.farPoints')}
+                  </Toggle>
+                )}
+                {denseAvailable && <DenseToggle on={showDenseLayer} onChange={setShowDenseLayer} />}
+                {findings.length > 0 && (
+                  <Toggle on={opts.findings} onChange={(v) => setOpts({ ...opts, findings: v })}>
+                    {t('show.findings')}
+                  </Toggle>
+                )}
+                <div title={!rgbAvailable ? t('show.rgbUnavailable') : undefined}>
+                  <Toggle
+                    on={activeColorMode === 'rgb'}
+                    onChange={(on) => changeColorMode(on ? 'rgb' : 'height')}
+                    disabled={!rgbAvailable}
+                    label={t('show.colorMode')}
+                    title={!rgbAvailable ? t('show.rgbUnavailable') : undefined}
+                    describedBy={!rgbAvailable ? colorModeHintId : undefined}
+                  >
+                    <span className="viewer-label-stack">
+                      <span>{t('show.colorMode')}</span>
+                      <span className="viewer-caption viewer-muted">
+                        {t(activeColorMode === 'rgb' ? 'show.rgb' : 'show.heightBlue')}
+                      </span>
+                    </span>
+                  </Toggle>
+                  {!rgbAvailable && (
+                    <span id={colorModeHintId} role="tooltip" className="sr-only">
+                      {t('show.rgbUnavailable')}
+                    </span>
+                  )}
+                </div>
+                <label className="viewer-slider-row">
+                  <span className="shrink-0">{t('show.pointSize')}</span>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={8}
+                    step={0.25}
+                    value={opts.pointSize}
+                    onChange={(e) => setOpts({ ...opts, pointSize: Number(e.target.value) })}
+                    className="w-full"
+                  />
+                </label>
+              </section>
+
+              <section className="viewer-section">
+                <H2>{t('run.title')}</H2>
+                <div className="viewer-data">
+                  <Row k={t('run.used')} v={stats.frames_extracted - stats.frames_dropped} />
+                  <Row k={t('run.dropped')} v={stats.frames_dropped} />
+                  <Row k={t('run.registered')} v={stats.frames_registered} />
+                  <Row k={t('run.points')} v={stats.points.toLocaleString()} />
+                  {totalS > 0 && (
+                    <Row k={t('run.time')} v={`${totalS.toFixed(1)} ${t('unit.s')}`} />
+                  )}
+                </div>
+                <div className="viewer-height-ramp" aria-hidden="true">
+                  {RAMP.map((c) => (
+                    <span key={c} className="viewer-height-swatch" style={{ background: c }} />
+                  ))}
+                </div>
+              </section>
+            </aside>
+          </details>
         </div>
         <main className="viewer-main">
           <div className="qv-map viewer-canvas">
