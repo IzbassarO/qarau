@@ -1,5 +1,32 @@
 # DS1 — design system v8 checklist
 
+## Tester return: preserve the phone sign-in gradient
+
+Criterion 4 requires the v8 hero gradient at both viewport sizes. The inherited
+phone CSS replaced its background and mark colours with surface colours, and
+shell.css hid its ::before entirely. Remove both overrides and the pseudo-element
+display:none selector. Keep the compact 56 px band, centered form and existing
+v8 background, gradient, light ink and white mark tile in both themes.
+
+Add e2e assertions for the fixed exported hero/mark colours and the complete
+gradient fixture, with the pseudo-element generated, displayed and visible.
+Apply them to the existing desktop/phone and explicit phone sign-in cases in
+en/ru/kk and Light/Dark. Retain every previous assertion and expected value;
+the transparent phone form remains valid and no fixed expectation conflicts.
+No token, font or dependency changes. Existing Playwright (Apache-2.0), Vite and
+Vitest (MIT) permit commercial use; installed metadata rechecked.
+
+Run lint, typecheck, unit tests and build, plus Playwright discovery. Kerege
+executes e2e and captures screenshots under the task's sandbox rule; start no
+server or browser locally.
+
+Verification completed: pnpm lint, pnpm typecheck, all 725 unit tests (37 files,
+including noLiterals) and pnpm build pass. The existing large-chunk advisory
+remains. Playwright discovery succeeds for 224 tests, 112 in each project.
+Every pre-existing sign-in assertion and fixed expectation is retained; the
+gradient checks are additions only. Browser e2e and screenshot acceptance remain
+with Kerege. No server, browser or screenshot capture was started.
+
 ## Current round: part 2 audit (2026-10-26)
 
 Continue the existing `devteam/DS1` implementation at `4fa5049`; do not redo

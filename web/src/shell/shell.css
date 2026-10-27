@@ -518,7 +518,6 @@ button.catalog-row {
     padding: var(--space-2) var(--space-4);
     border-bottom: 1px solid var(--line);
   }
-  .login-hero::before,
   .login-hero-copy {
     display: none;
   }

@@ -1,5 +1,5 @@
 import { openNavigation } from './chrome';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 import ru from '../src/i18n/ru.json' with { type: 'json' };
 import kk from '../src/i18n/kk.json' with { type: 'json' };
@@ -17,12 +17,42 @@ const themeColors = {
   },
 };
 
+async function expectHeroGradient(page: Page) {
+  const hero = page.locator('.login-hero');
+  await expect(hero).toHaveCSS('background-color', 'rgb(18, 18, 18)');
+  await expect(hero).toHaveCSS('color', 'rgb(244, 244, 242)');
+  await expect(hero.locator('.qv-mark--hero')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await expect(hero.locator('.qv-mark--hero')).toHaveCSS('color', 'rgb(17, 17, 17)');
+  // Fixed v8 export fixture: also check the pseudo-element paints, since a
+  // background-image alone can still be hidden by a phone display:none rule.
+  expect(
+    await hero.evaluate((element) => {
+      const style = getComputedStyle(element, '::before');
+      return {
+        display: style.display,
+        visibility: style.visibility,
+        opacity: style.opacity,
+        content: style.content,
+        image: style.backgroundImage,
+      };
+    }),
+  ).toEqual({
+    display: 'block',
+    visibility: 'visible',
+    opacity: '1',
+    content: '""',
+    image:
+      'radial-gradient(900px 640px at 20% 0%, rgb(58, 58, 58) 0%, rgba(58, 58, 58, 0) 60%), radial-gradient(700px 500px at 100% 100%, rgb(42, 42, 42) 0%, rgba(42, 42, 42, 0) 60%)',
+  });
+}
+
 for (const theme of ['light', 'dark'] as const) {
   for (const [lang, t] of Object.entries({ en, ru, kk })) {
     test(`signed-out ${theme} login: ${lang}`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme });
       await page.addInitScript((locale) => localStorage.setItem('qarau.lang', locale), lang);
       await page.goto('/?signed-out');
+      await expectHeroGradient(page);
       await expect(page.getByRole('heading', { name: t['auth.title'] })).toBeVisible();
       await expect(page.getByLabel(t['auth.username'])).toBeVisible();
       await expect(page.getByLabel(t['auth.password'])).toHaveAttribute('type', 'password');
@@ -92,6 +122,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.locator('.login-page')).toHaveCSS('display', 'grid');
       await expect(page.locator('.login-page')).toHaveCSS('grid-template-columns', '390px');
       await expect(page.locator('.qv-hero')).toBeVisible();
+      await expectHeroGradient(page);
       await expect(page.locator('.qv-hero .shell-wordmark')).toHaveText(t['shell.product']);
       await expect(page.locator('.login-card .shell-wordmark')).toHaveCount(0);
       await expect(page.getByRole('button', { name: t['auth.signIn'] })).toHaveCSS(
