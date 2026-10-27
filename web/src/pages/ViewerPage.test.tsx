@@ -980,3 +980,78 @@ it('keeps real API findings authoritative on the reference deep link', async () 
   expect(screen.queryByRole('heading', { name: 'Corrosion' })).toBeNull();
   expect(screen.queryByRole('alert')).toBeNull();
 });
+
+it.each(['first', '701'])(
+  'shows evidence for %s before the point cloud finishes downloading',
+  async (id) => {
+    const bundle = { ...createDemo('en').bundle, runId: 'notre-dame-p3e' };
+    vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+    let finish: ((value: bundleApi.Bundle) => void) | undefined;
+    vi.spyOn(bundleApi, 'loadBundle').mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const setSensitivity = vi.spyOn(ViewerEngine.prototype, 'setSensitivity');
+    const fetch = vi.fn().mockResolvedValue(Response.json([]));
+    vi.stubGlobal('fetch', fetch);
+    renderViewer('notre-dame-p3e', `?finding=${id}`);
+
+    expect(await screen.findByRole('heading', { name: 'Corrosion' })).toBeTruthy();
+    const panel = screen.getByRole('complementary', { name: 'Evidence' });
+    expect(panel.querySelectorAll('.evidence-thumbnails img')).toHaveLength(3);
+    await waitFor(() =>
+      expect(panel.querySelectorAll('.evidence-thumbnails polygon')).toHaveLength(3),
+    );
+    expect(document.querySelector('.viewer-point-canvas')).toBeNull();
+    expect(setSensitivity).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    await act(async () => finish!(bundle));
+    await waitFor(() => expect(document.querySelector('.viewer-point-canvas')).not.toBeNull());
+    expect(screen.getAllByRole('complementary', { name: 'Evidence' })).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'Corrosion' })).toBeTruthy();
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections']);
+  },
+);
+
+it('keeps a loading evidence dismissal when the map becomes ready', async () => {
+  const bundle = { ...createDemo('en').bundle, runId: 'notre-dame-p3e' };
+  vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+  let finish: ((value: bundleApi.Bundle) => void) | undefined;
+  vi.spyOn(bundleApi, 'loadBundle').mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([])));
+  renderViewer('notre-dame-p3e', '?finding=first');
+  await screen.findByRole('heading', { name: 'Corrosion' });
+  fireEvent.click(screen.getByRole('button', { name: 'Close evidence' }));
+  await act(async () => finish!(bundle));
+  await waitFor(() => expect(document.querySelector('.viewer-point-canvas')).not.toBeNull());
+  expect(screen.queryByRole('complementary', { name: 'Evidence' })).toBeNull();
+});
+
+it('retains the WebGL engine and camera when findings arrive after geometry', async () => {
+  const routes = mockFindingViewer();
+  let finish: ((value: Response) => void) | undefined;
+  const pending = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => (url === '/api/inspections/41/findings' ? pending : routes(url))),
+  );
+  const sensitivity = vi.spyOn(ViewerEngine.prototype, 'setSensitivity');
+  const dispose = vi.spyOn(ViewerEngine.prototype, 'dispose');
+  renderViewer('notre-dame-p3e');
+  await waitFor(() => expect(sensitivity).toHaveBeenCalled());
+  const engine = sensitivity.mock.contexts[0] as ViewerEngine;
+  engine.camera.position.set(2, -2, 2);
+  await act(async () => finish!(Response.json([findingFixture.finding])));
+  await screen.findByRole('button', { name: 'Finding 701' });
+  expect(new Set(sensitivity.mock.contexts).size).toBe(1);
+  expect(dispose).not.toHaveBeenCalled();
+  expect(engine.camera.position.toArray()).toEqual([2, -2, 2]);
+});

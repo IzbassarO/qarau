@@ -1608,3 +1608,56 @@ it.each([false, true])(
     expect(onPick).not.toHaveBeenCalled();
   },
 );
+
+it('updates and clears finding IDs, colours and picks without recreating GPU attributes', () => {
+  document.documentElement.dataset.theme = 'light';
+  const bundle = navigationBundle();
+  const { engine, canvas, onFindingPick, onPick } = setup(bundle);
+  const cloud = engine.scene.children.find(
+    (item) => item instanceof Points && item.material instanceof ShaderMaterial,
+  ) as Points<import('three').BufferGeometry, ShaderMaterial>;
+  const geometry = cloud.geometry;
+  const ids = geometry.getAttribute('fid');
+  const colours = geometry.getAttribute('findingColor');
+  const positions = geometry.getAttribute('position');
+  const renderer = engine.renderer;
+  engine.camera.position.set(2, -2, 2);
+  engine.camera.lookAt(0, 0, 0);
+  engine.camera.updateMatrixWorld();
+  engine.setFindings(
+    [
+      {
+        id: 70001,
+        class: 'corrosion',
+        severity: 'critical',
+        status: 'confirmed',
+        n_points: 8,
+        centroid: [0, 0, 0],
+        bbox: { min: [-1, -1, -1], max: [1, 1, 1] },
+        frames: [0],
+      },
+    ],
+    new Uint32Array(8).fill(70001),
+  );
+  expect(cloud.geometry).toBe(geometry);
+  expect(geometry.getAttribute('fid')).toBe(ids);
+  expect(geometry.getAttribute('findingColor')).toBe(colours);
+  expect(geometry.getAttribute('position')).toBe(positions);
+  expect(engine.renderer).toBe(renderer);
+  expect(engine.camera.position.toArray()).toEqual([2, -2, 2]);
+  expect(Array.from(ids.array.slice(0, 3))).toEqual([70001, 70001, 70001]);
+  expect(Array.from(colours.array.slice(0, 3))).toEqual([196, 42, 24]);
+  const pixel = engine.project([1, -1, 1]);
+  pointer(canvas, 'pointerdown', pixel.x, pixel.y);
+  pointer(canvas, 'pointerup', pixel.x, pixel.y);
+  expect(onFindingPick).toHaveBeenCalledExactlyOnceWith(70001);
+
+  engine.setFindings([], undefined);
+  expect(Array.from(ids.array.slice(0, 3))).toEqual([0, 0, 0]);
+  expect(Array.from(colours.array.slice(0, 3))).toEqual([0, 0, 0]);
+  engine.setPointInfoMode(true);
+  pointer(canvas, 'pointerdown', pixel.x, pixel.y);
+  pointer(canvas, 'pointerup', pixel.x, pixel.y);
+  expect(onFindingPick).toHaveBeenCalledOnce();
+  expect(onPick).toHaveBeenCalledOnce();
+});

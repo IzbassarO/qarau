@@ -4,11 +4,11 @@ import {
   useMemo,
   useRef,
   useState,
+  useEffectEvent,
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
 import { Link } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
 import { useI18n } from '../i18n';
 import { hasRgb, runUrl, type Bundle, type Finding } from '../lib/bundle';
 import { heightRamp, RAMP } from '../lib/geometry';
@@ -32,9 +32,8 @@ import { buildDensePointInfo, buildPointInfo, frameTime } from './pointInfo';
 import { PointInfoPanel } from './PointInfoPanel';
 import { EvidencePanel } from './EvidencePanel';
 import { withApiFindings } from './evidence';
-import { findingsForRunOptions } from '../lib/findings';
 import { ApiUnavailableError } from '../lib/api';
-import { referenceEvidenceFor } from '../fixtures/evidence';
+import { useRunEvidence } from './useRunEvidence';
 import { Minimap, type MinimapHandle } from './Minimap.tsx';
 import { canShowHumanFigure } from './observer';
 import { SessionImage } from '../auth/SessionImage';
@@ -107,20 +106,12 @@ export function ViewerScreen({
   initialFinding?: string | null;
 }) {
   const { t } = useI18n();
-  const apiFindings = useQuery({
-    ...findingsForRunOptions(sourceBundle.runId),
-    enabled: sourceBundle.runId !== 'demo',
-  });
-  const referenceCandidate = referenceEvidenceFor(sourceBundle.runId, initialFinding);
-  const previewFinding =
-    (!apiFindings.isError && apiFindings.data?.length === 0) ||
-    apiFindings.error instanceof ApiUnavailableError
-      ? referenceCandidate
-      : undefined;
-  const runFindings = useMemo(
-    () => (apiFindings.data?.length ? apiFindings.data : previewFinding ? [previewFinding] : []),
-    [apiFindings.data, previewFinding],
-  );
+  const {
+    api: apiFindings,
+    reference: referenceCandidate,
+    preview: previewFinding,
+    findings: runFindings,
+  } = useRunEvidence(sourceBundle.runId, initialFinding);
   const bundle = useMemo(
     () => withApiFindings(sourceBundle, runFindings),
     [sourceBundle, runFindings],
@@ -202,6 +193,12 @@ export function ViewerScreen({
     return isImages ? `#${i}` : time === null ? t('pointInfo.noTimestamp') : fmtTime(time);
   };
   const canPlay = isImages || frames.every((frame) => frameTime(frame) !== null);
+  const pickFinding = useEffectEvent((id: number) => {
+    setEvidenceRequest(runFindings.some((finding) => finding.id === id) ? id : null);
+    setSel(id);
+    setPicked(null);
+    setPointInfoMode(false);
+  });
 
   useEffect(() => {
     if (evidenceRequest === null) return;
@@ -216,15 +213,12 @@ export function ViewerScreen({
     const canvas = canvasRef.current!;
     let eng: ViewerEngine;
     try {
-      eng = new ViewerEngine(canvas, bundle, {
+      eng = new ViewerEngine(canvas, sourceBundle, {
         onPick: (p, layer = 'sparse') => setPicked(p === null ? null : { index: p, layer }),
         onFindingPick: (id) => {
           // Exported bundle IDs are not necessarily DEF1 database IDs. Keep
           // their existing timecodes unless the API identifies the same finding.
-          setEvidenceRequest(runFindings.some((finding) => finding.id === id) ? id : null);
-          setSel(id);
-          setPicked(null);
-          setPointInfoMode(false);
+          pickFinding(id);
         },
         onFlyModeChange: setFlyMode,
         onThirdPersonChange: setThirdPerson,
@@ -249,18 +243,18 @@ export function ViewerScreen({
         denseLayer: () => ({
           available: eng.hasDenseLayer(),
           visible: eng.scene.getObjectByName('dense')?.visible ?? false,
-          count: bundle.dense?.count ?? 0,
+          count: sourceBundle.dense?.count ?? 0,
         }),
         densePointScreen: (index) => {
           if (
-            !bundle.dense ||
+            !sourceBundle.dense ||
             !Number.isSafeInteger(index) ||
             index < 0 ||
-            index >= bundle.dense.count
+            index >= sourceBundle.dense.count
           )
             return null;
           const p = eng.project(
-            Array.from(bundle.dense.position.subarray(index * 3, index * 3 + 3)),
+            Array.from(sourceBundle.dense.position.subarray(index * 3, index * 3 + 3)),
           );
           return p.visible ? { x: p.x, y: p.y } : null;
         },
@@ -277,7 +271,11 @@ export function ViewerScreen({
       ro.disconnect();
       eng.dispose();
     };
-  }, [bundle, initialMode, runFindings]);
+  }, [sourceBundle, initialMode]);
+
+  useEffect(() => {
+    engineRef.current?.setFindings(bundle.findings, bundle.pointFinding);
+  }, [bundle]);
 
   useEffect(() => engineRef.current?.setFrame(frame), [frame, bundle]);
   useEffect(() => engineRef.current?.setOptions(opts), [opts, bundle]);
