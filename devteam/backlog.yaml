@@ -1302,11 +1302,13 @@ tasks:
     at 390x844; same functions, layout may differ).
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - DS1
   - DEF1-api
   - REV1-api
+  owner: dev_app
+  run: run-20261026-234958
 - id: RPT1
   area: core
   title: PDF inspection report
