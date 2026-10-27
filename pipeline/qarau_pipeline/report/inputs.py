@@ -46,6 +46,7 @@ class FindingInput:
     run_dir: str  # relative to QARAU_RUNS_DIR: where the evidence frame images live
     evidence: tuple[Evidence, ...]
     decisions: tuple[DecisionEntry, ...]  # oldest first
+    points: tuple[int, ...] = ()  # indices into the run's bundle points: its map location
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,7 @@ class ReportInput:
     versions: tuple[VersionEntry, ...]  # document control, oldest first
     verification_id: str
     coverage: None = None  # not-seen areas; COV1 fills it, until then "coverage not computed"
+    run_dirs: tuple[str, ...] = ()  # the inspection's runs by id; the map: the last exported
 
 
 def verification_id(*parts: object) -> str:
@@ -121,6 +123,7 @@ run = sa.table("run", sa.column("id"), sa.column("inspection_id"), sa.column("ru
 finding = sa.table(
     "finding", sa.column("id"), sa.column("run_id"), sa.column("class"), sa.column("severity"),
     sa.column("status"), sa.column("area_m2", sa.Float), sa.column("scale_source"),
+    sa.column("points", sa.JSON),
 )  # fmt: skip
 observation = sa.table(
     "observation", sa.column("id"), sa.column("finding_id"), sa.column("frame_id"),
@@ -161,6 +164,9 @@ def load_report_input(engine: sa.Engine, inspection_id: int, report_time: dateti
             .where(run.c.inspection_id == inspection_id)
             .order_by(finding.c.id)
         ).all()
+        run_dirs = tuple(c.execute(
+            sa.select(run.c.run_dir).where(run.c.inspection_id == inspection_id).order_by(run.c.id)
+        ).scalars())  # fmt: skip
         ids = [r.id for r in rows]
         obs: dict[int, list[Evidence]] = {i: [] for i in ids}
         for o in c.execute(
@@ -190,7 +196,7 @@ def load_report_input(engine: sa.Engine, inspection_id: int, report_time: dateti
             id=r.id, class_=class_, severity=severity, status=status, area_m2=r.area_m2,
             scale_source=r.scale_source, area_uncertainty_pct=None, run_dir=r.run_dir,
             evidence=tuple(obs[r.id]),
-            decisions=tuple(decs[r.id]),
+            decisions=tuple(decs[r.id]), points=tuple(int(i) for i in r.points or ()),
         ))  # fmt: skip
     last = max((d for f in findings for d in f.decisions), key=lambda d: d.time, default=None)
     engineer = None if last is None else last.user
@@ -202,4 +208,5 @@ def load_report_input(engine: sa.Engine, inspection_id: int, report_time: dateti
         report_number=number, version=1, engineer=engineer, report_time=report_time,
         findings=found, versions=(VersionEntry(1, report_time, engineer),),
         verification_id=verification_id(number, 1, report_time.isoformat(), engineer, found),
+        run_dirs=run_dirs,
     )  # fmt: skip

@@ -17,6 +17,9 @@
 </style>
 </head>
 <body>
+{% set the_map = visuals.map %}
+{# A finding's number on the map, in map pixels: the severity colour, white figures (DESIGN.md) #}
+{% macro marker(f, at) %}<g><circle cx="{{ at[0] }}" cy="{{ at[1] }}" r="22" fill="{{ colours[f.severity] }}" stroke="#ffffff" stroke-width="3"/><text x="{{ at[0] }}" y="{{ at[1] + 8.5 }}" text-anchor="middle" font-family="IBM Plex Sans" font-weight="600" font-size="24" fill="#ffffff">{{ f.id }}</text></g>{% endmacro %}
 
 <section class="cover">
   <div class="band">
@@ -58,7 +61,17 @@
     {% endfor %}
   </table>
   <h2><span>2</span><span>{{ t('section_map') }}</span></h2>
-  <p class="figcap">{{ t('map_pending') }}</p>
+  {% if the_map %}
+  <figure class="map">
+    <img src="{{ the_map.src }}" alt="">
+    <svg viewBox="0 0 {{ the_map.width }} {{ the_map.height }}" preserveAspectRatio="none">
+      {% for f in findings if f.id in the_map.markers %}{{ marker(f, the_map.markers[f.id]) }}{% endfor %}
+    </svg>
+  </figure>
+  <p class="figcap">{{ t('map_caption') }}</p>
+  {% else %}
+  <p class="figcap">{{ t('map_none') }}</p>
+  {% endif %}
 </section>
 
 <section class="page">
@@ -89,13 +102,18 @@
 <section class="page">
   <h2><span>4</span><span>{{ t('section_cards') }}</span></h2>
   {% for f in findings %}
-  <div class="card">
+  <div class="card" id="finding-{{ f.id }}">
     <h3>{{ t('finding_title', id=f.id) }}</h3>
     <table class="facts">
       <tr><td>{{ t('label_class') }}</td><td>{{ word('class', f.class_) }}</td></tr>
       <tr><td>{{ t('label_severity') }}</td><td><span class="sev {{ f.severity }}">{{ word('severity', f.severity) }}</span></td></tr>
       <tr><td>{{ t('label_status') }}</td><td>{{ word('status', f.status) }}</td></tr>
-      <tr><td>{{ t('label_location') }}</td><td>{{ t('location_pending') }}</td></tr>
+      <tr><td>{{ t('label_location') }}</td><td>
+        {%- if f.status == 'rejected' %}{{ t('location_rejected') }}
+        {%- elif the_map and f.id in the_map.crops %}{% set c = the_map.crops[f.id] %}{{ t('location_marker', id=f.id) }}
+        <svg class="loc" viewBox="{{ c.x }} {{ c.y }} {{ c.width }} {{ c.height }}"><image href="{{ c.src }}" x="{{ c.x }}" y="{{ c.y }}" width="{{ c.width }}" height="{{ c.height }}"/>{{ marker(f, the_map.markers[f.id]) }}</svg>
+        {%- else %}{{ t('location_none') }}{% endif -%}
+      </td></tr>
       <tr><td>{{ t('label_area') }}</td><td>{{ area(f) }}</td></tr>
       <tr><td>{{ t('label_scale') }}</td><td>{{ f.scale_source or t('scale_not_set') }}</td></tr>
       <tr><td>{{ t('label_evidence') }}</td><td>
@@ -103,6 +121,24 @@
       </td></tr>
       <tr><td>{{ t('label_decided') }}</td><td>{{ decided(f) }}</td></tr>
     </table>
+    {% set outline = 'rejected' if f.status == 'rejected' else f.severity %}
+    <div class="plates">
+      {% for p in visuals.plates.get(f.id, ()) %}
+      <figure class="plate">
+        {% if p.src %}
+        <div class="frame">
+          <img src="{{ p.src }}" alt="">
+          <svg viewBox="0 0 {{ p.width }} {{ p.height }}" preserveAspectRatio="none">
+            {%- if p.points %}<polygon points="{{ p.points }}" fill="none" stroke="{{ colours[outline] }}" stroke-width="{{ (p.width / 120) | round(1) }}" stroke-linejoin="round"/>{% endif -%}
+          </svg>
+        </div>
+        {% else %}
+        <p class="missing">{{ t('plate_missing') }}</p>
+        {% endif %}
+        <figcaption>{{ plate_caption(p) }}</figcaption>
+      </figure>
+      {% endfor %}
+    </div>
     <h4>{{ t('decision_log') }}</h4>
     {% if f.decisions %}
     <table class="data log">

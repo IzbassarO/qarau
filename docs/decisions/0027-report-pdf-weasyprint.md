@@ -67,6 +67,6 @@ on the Mac, apt in CI and `infra/worker`.
 - WeasyPrint needs Pango at run time. On the Mac, `qarau_pipeline/__init__.py` points
   `DYLD_FALLBACK_LIBRARY_PATH` at Homebrew; CI and the worker image install it with apt.
 - Layout changes are HTML/CSS. A render takes about 1 s for the 7-page fixture.
-- Next: the map snapshot and the 3 evidence frames with SVG outlines (part 2, own ADR), the route,
+- Next: the map snapshot and the 3 evidence frames with SVG outlines (part 2, ADR 0032), the route,
   the Report table and the hash headers (part 3). Not in RPT1: XLSX, work orders, e-mail,
   signatures, coverage computation (COV1 fills the "not inspected" section).

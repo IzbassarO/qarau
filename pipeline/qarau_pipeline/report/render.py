@@ -3,7 +3,8 @@ templates/report.html.j2 and templates/report.css, laid out by WeasyPrint (Pango
 
 Sections in order: cover, executive summary, map, findings by severity, one card per finding,
 not inspected areas, method and limitations, sign-off, document control; a header with the report
-number and a footer with the engineer, the report time and "page X of Y" on every page. Every
+number and a footer with the engineer, the report time and "page X of Y" on every page. The map
+snapshot and the evidence frames come from snapshot.py (ADR 0032), embedded as data URIs. Every
 visible string comes from translations.toml; the v8 fonts are embedded from fonts/. The report
 time inside the input is the only clock: the same input and language give the same bytes.
 """
@@ -24,11 +25,14 @@ from markupsafe import Markup
 
 from ..interfaces import StageError
 from .inputs import DecisionEntry, FindingInput, ReportInput, load_report_input
+from .snapshot import Plate, Visuals, load_visuals
 
 HERE = Path(__file__).resolve().parent
 TEMPLATES = HERE / "templates"
 LANGS = ("ru", "kk", "en")
 SEVERITY_ORDER = {"critical": 0, "watch": 1}
+# SVG markers and outlines (v8 light `critical`, `watch`; `map-text` for a rejected outline)
+COLOURS = {"critical": "#c42a18", "watch": "#a65400", "rejected": "#ededeb"}
 
 
 def load_strings(lang: str) -> dict[str, Any]:
@@ -121,6 +125,12 @@ def _context(inp: ReportInput, s: dict[str, Any], lang: str) -> dict[str, Any]:
         last = f.decisions[-1]
         return t("decided", user=last.user, time=when(last.time))
 
+    def plate_caption(p: Plate) -> str:
+        if p.time_s is None:
+            return t("evidence_frame", frame=p.frame_id)
+        time = f"{p.time_s:.1f}".replace(".", s["decimal"])
+        return t("plate_caption", frame=p.frame_id, time=time)
+
     findings = sorted(inp.findings, key=lambda f: (SEVERITY_ORDER.get(f.severity, 9), f.id))
     confirmed = [f for f in inp.findings if f.status == "confirmed"]
     measured = [f.area_m2 for f in confirmed if f.area_m2 is not None]
@@ -138,7 +148,8 @@ def _context(inp: ReportInput, s: dict[str, Any], lang: str) -> dict[str, Any]:
     engineer = inp.engineer or t("engineer_none")
     return {
         "lang": lang, "s": s, "inp": inp, "t": t, "word": word, "when": when, "area": area,
-        "verdict": verdict, "decided": decided, "findings": findings, "summary": summary,
+        "verdict": verdict, "decided": decided, "plate_caption": plate_caption, "colours": COLOURS,
+        "findings": findings, "summary": summary,
         "engineer": engineer,
         "header": css_content(str(s["header"]), number=inp.report_number, version=inp.version),
         "footer": css_content(str(s["footer"]), engineer=engineer, time=when(inp.report_time)),
@@ -146,7 +157,18 @@ def _context(inp: ReportInput, s: dict[str, Any], lang: str) -> dict[str, Any]:
     }  # fmt: skip
 
 
-def render_pdf(inp: ReportInput, s: dict[str, Any], lang: str) -> bytes:
+def render_html(
+    inp: ReportInput, s: dict[str, Any], lang: str, visuals: Visuals | None = None
+) -> str:
+    """The report's HTML; `visuals` from snapshot.load_visuals (None: no runs dir)."""
+    ctx = _context(inp, s, lang)
+    ctx["visuals"] = visuals or load_visuals(inp, None)
+    return _env().get_template("report.html.j2").render(ctx)
+
+
+def render_pdf(
+    inp: ReportInput, s: dict[str, Any], lang: str, visuals: Visuals | None = None
+) -> bytes:
     """The report as PDF/A-3b bytes. `s` is one language table of translations.toml."""
     if inp.report_time.tzinfo is None:
         raise StageError("report time needs a time zone (ISO 8601 with an offset)")
@@ -154,7 +176,7 @@ def render_pdf(inp: ReportInput, s: dict[str, Any], lang: str) -> bytes:
     from weasyprint import CSS, HTML
     from weasyprint.text.fonts import FontConfiguration
 
-    html = _env().get_template("report.html.j2").render(_context(inp, s, lang))
+    html = render_html(inp, s, lang, visuals)
     fonts = FontConfiguration()
     css = CSS(filename=TEMPLATES / "report.css", font_config=fonts)
     pdf = HTML(string=html, base_url=str(TEMPLATES)).write_pdf(
@@ -164,13 +186,16 @@ def render_pdf(inp: ReportInput, s: dict[str, Any], lang: str) -> bytes:
     return pdf
 
 
-def render_report(inp: ReportInput, lang: str) -> bytes:
-    return render_pdf(inp, load_strings(lang), lang)
+def render_report(inp: ReportInput, lang: str, runs_dir: Path | None = None) -> bytes:
+    """The PDF; the map and the evidence frames come from the run dirs under `runs_dir`."""
+    return render_pdf(inp, load_strings(lang), lang, load_visuals(inp, runs_dir))
 
 
 def generate(
-    inspection_id: int, lang: str, report_time: datetime, engine: sa.Engine
-) -> tuple[bytes, str]:
+    inspection_id: int, lang: str, report_time: datetime, engine: sa.Engine,
+    runs_dir: Path | None,
+) -> tuple[bytes, str]:  # fmt: skip
     """(PDF bytes, their SHA-256 hex) of an inspection's report: the CLI and the API call this."""
-    pdf = render_report(load_report_input(engine, inspection_id, report_time), lang)
+    inp = load_report_input(engine, inspection_id, report_time)
+    pdf = render_report(inp, lang, runs_dir)
     return pdf, hashlib.sha256(pdf).hexdigest()

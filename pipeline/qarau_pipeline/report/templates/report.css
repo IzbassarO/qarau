@@ -114,6 +114,20 @@ table.data tr { break-inside: avoid; }
 .card > h3, .card > .facts { break-after: avoid; }
 .card > .facts { break-inside: avoid; margin-bottom: 8px; }
 
+/* Map figure (v8 `.fig .qv-map`: 290 px, radius 8, on `map-ground`) with SVG markers over it */
+.map { position: relative; margin: 16px 0 6px; height: 290px; border-radius: 8px; overflow: hidden; }
+.map img, .map svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.loc { display: block; width: 240px; height: 120px; margin-top: 6px; border-radius: 6px; }
+
+/* Evidence plates (v8 `.plates`, `.plate`): the frame with the outline drawn over it */
+.plates { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin: 12px 0 4px; break-inside: avoid; }
+.plate { margin: 0; }
+.plate .frame { position: relative; border-radius: 6px; overflow: hidden; }
+.plate img { display: block; width: 100%; }
+.plate svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.plate figcaption { font-size: 13px; line-height: 17px; color: var(--ink-muted); margin-top: 6px; }
+.plate .missing { font-size: 13px; line-height: 18px; color: var(--ink-muted); font-style: italic; }
+
 .signoff { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px; margin-top: 8px; }
 .signoff .role { font-weight: 500; margin: 0; }
 .signoff .line { height: 56px; border-bottom: 1px solid var(--ink); margin-bottom: 6px; }

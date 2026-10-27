@@ -271,7 +271,7 @@ def make_db(path: Path) -> str:
                                  created_at DATETIME);
         CREATE TABLE run (id TEXT PRIMARY KEY, inspection_id INTEGER, run_dir TEXT);
         CREATE TABLE finding (id INTEGER PRIMARY KEY, run_id TEXT, class TEXT, severity TEXT,
-                              status TEXT, area_m2 FLOAT, scale_source TEXT);
+                              status TEXT, area_m2 FLOAT, scale_source TEXT, points JSON);
         CREATE TABLE observation (id INTEGER PRIMARY KEY, finding_id INTEGER, frame_id INTEGER,
                                   outline JSON);
         CREATE TABLE decision (id INTEGER PRIMARY KEY, finding_id INTEGER, user_id INTEGER,
@@ -283,8 +283,8 @@ def make_db(path: Path) -> str:
         INSERT INTO inspection VALUES (7, 1, 'quick_scan', '2026-10-21 04:41:00.000000');
         INSERT INTO run VALUES ('r1', 7, 'notre-dame-p3e');
         INSERT INTO finding VALUES (1, 'r1', 'corrosion', 'critical', 'proposed', 0.42,
-                                    'manual: Letter sheet');
-        INSERT INTO finding VALUES (2, 'r1', 'coating', 'critical', 'proposed', NULL, NULL);
+                                    'manual: Letter sheet', '[4, 9, 11]');
+        INSERT INTO finding VALUES (2, 'r1', 'coating', 'critical', 'proposed', NULL, NULL, NULL);
         INSERT INTO observation VALUES (1, 1, 412, '[[10, 20], [60, 20], [35, 70]]'),
                                        (2, 1, 415, '[[1, 2], [3, 4], [5, 6]]'),
                                        (3, 2, 12, NULL);
@@ -319,6 +319,8 @@ def test_load_report_input(tmp_path: Path) -> None:
     assert (one.area_m2, one.scale_source, one.area_uncertainty_pct) == (
         0.42, "manual: Letter sheet", None,
     )  # fmt: skip
+    assert inp.run_dirs == ("notre-dame-p3e",)
+    assert (one.points, two.points) == ((4, 9, 11), ())
     assert [e.frame_id for e in one.evidence] == [412, 415]
     assert one.evidence[0].outline == ((10.0, 20.0), (60.0, 20.0), (35.0, 70.0))
     assert [d.verdict for d in one.decisions] == ["confirm", "reclass"]
@@ -333,7 +335,8 @@ def test_load_report_input(tmp_path: Path) -> None:
 def test_cli_writes_the_same_file_twice(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     url = make_db(tmp_path / "api.db")
     when = "2026-10-26T14:32:00+05:00"
-    args = ["report", "--inspection", "7", "--db", url, "--report-time", when]
+    args = ["report", "--inspection", "7", "--db", url, "--report-time", when,
+            "--runs-dir", str(tmp_path)]  # fmt: skip
     main([*args, "--lang", "kk", "--out", str(tmp_path / "a.pdf")])
     main([*args, "--lang", "kk", "--out", str(tmp_path / "b.pdf")])
     a, b = (tmp_path / "a.pdf").read_bytes(), (tmp_path / "b.pdf").read_bytes()

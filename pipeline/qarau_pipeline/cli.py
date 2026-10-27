@@ -213,9 +213,12 @@ def cmd_report(a: argparse.Namespace) -> None:
         raise StageError(f"--report-time: {err}") from err
     # naive: the machine's zone; whole seconds, so the printed time reproduces the file
     when = (when.astimezone() if when.tzinfo is None else when).replace(microsecond=0)
+    runs = a.runs_dir or os.environ.get("QARAU_RUNS_DIR")
+    if not runs:
+        print("report: no --runs-dir or QARAU_RUNS_DIR: the PDF has no map and no frame images")
     engine = sa.create_engine(url)
     try:
-        pdf, sha = generate(a.inspection, a.lang, when, engine)
+        pdf, sha = generate(a.inspection, a.lang, when, engine, Path(runs) if runs else None)
     finally:
         engine.dispose()
     Path(a.out).write_bytes(pdf)
@@ -326,6 +329,7 @@ def main(argv: list[str] | None = None) -> None:
     rp.add_argument("--report-time", help="ISO 8601, e.g. 2026-10-26T14:32:00+05:00 (default: "
                     "now); the only clock in the PDF: same time, same file")  # fmt: skip
     rp.add_argument("--db", help="SQLAlchemy URL (default: $QARAU_DATABASE_URL)")
+    rp.add_argument("--runs-dir", help="run dirs: map and frames (default: $QARAU_RUNS_DIR)")
     rp.set_defaults(fn=cmd_report)
     b = sub.add_parser("benchmark", help="all reference videos -> <out>/results.json")
     b.add_argument("--data", required=True, help="dir with the reference videos (read-only)")
