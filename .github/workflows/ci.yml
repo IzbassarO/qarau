@@ -13,6 +13,8 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
+      # Pango (LGPL-2.1+) for WeasyPrint: the report route renders the pipeline's PDF (RPT1)
+      - run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
       - run: uv run ruff check .
@@ -27,7 +29,8 @@ jobs:
       - id: dir
         run: test -d pipeline && echo present=true >> "$GITHUB_OUTPUT" || true
       - if: steps.dir.outputs.present == 'true'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        # Pango (LGPL-2.1+) for WeasyPrint, the PDF report (RPT1); tests/test_pdf_env.py renders one
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0
       - if: steps.dir.outputs.present == 'true'
         uses: astral-sh/setup-uv@v5
       - name: Lint, typecheck and test pipeline
