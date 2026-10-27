@@ -2,7 +2,7 @@
 
 Sections in order: object, map, findings (each with its decision log), not-seen areas; a footer
 with the engineer and the report time on every page. Every visible string comes from
-translations.toml; the fonts (design system v8: Geologica, IBM Plex Sans, JetBrains Mono) are
+translations.toml; the fonts (design system v8: Geologica, IBM Plex Sans) are
 embedded from fonts/. ReportLab's invariant mode plus the report time as the PDF dates make the
 output a pure function of (input, language, report time): the same three give the same bytes.
 """
@@ -53,7 +53,6 @@ FONTS = {
     "QvSans-Medium": "IBMPlexSans-Medium.ttf",
     "QvSans-SemiBold": "IBMPlexSans-SemiBold.ttf",
     "QvSans-Italic": "IBMPlexSans-Italic.ttf",
-    "QvMono": "JetBrainsMono-Regular.ttf",
 }
 PX = 0.75  # the v8 report document is 794 px wide = A4 (595 pt)
 MARGIN_X, MARGIN_TOP, MARGIN_BOTTOM = 72 * PX, 64 * PX, 88 * PX

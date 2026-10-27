@@ -1,14 +1,12 @@
 Fonts of the PDF report (qarau_pipeline/report/fonts/). Each TTF here merges the latin,
 latin-ext, cyrillic and cyrillic-ext subsets of one weight as published by Google Fonts
 (@fontsource packages, the same files the web app self-hosts), with the OpenType layout
-tables removed. Geologica SemiBold, IBM Plex Sans Regular/Medium/SemiBold/Italic and
-JetBrains Mono Regular, all under the SIL Open Font License 1.1:
+tables removed. Geologica SemiBold and IBM Plex Sans Regular/Medium/SemiBold/Italic, both
+under the SIL Open Font License 1.1:
 
 Copyright 2020 The Geologica Project Authors (https://github.com/googlefonts/geologica)
 
 Copyright 2019 IBM Corp. All rights reserved. IBMPlexSans-Italic[wdth,wght].ttf: Copyright 2019 IBM Corp. All rights reserved.
-
-Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono) JetBrainsMono-Italic[wght].ttf: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
