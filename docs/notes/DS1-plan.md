@@ -1,6 +1,53 @@
 # DS1 — design system v8 checklist
 
-## Current round: part 1 audit (2026-10-26)
+## Current round: part 2 audit (2026-10-26)
+
+Continue the existing `devteam/DS1` implementation at `4fa5049`; do not redo
+accepted part 1. Read CLAUDE.md, DESIGN.md and the sign-in, inspections, upload,
+states, themes, viewer and evidence-phone reference images (Light above Dark).
+The worktree was clean before this audit.
+
+| Build item | Current branch evidence | Gap / action |
+| --- | --- | --- |
+| 1. Wire v8 | index.css imports tokens.css and bundle.css once; aliases resolve to v8; system data-theme follows media changes; JSON has one v8 set; italic helpers are present. | Done in accepted part 1; preserve. |
+| 2. Fonts | main.tsx self-hosts the specified weights/styles of all four families, with no IBM Plex Mono import or CDN. | Done in accepted part 1; preserve. |
+| 3. qv screens and phone | Shell, sidebar, sign-in, upload dialog, processing rows and viewer already use the v8 qv classes. The phone sidebar folds, cards stack, viewer panels share an adaptive control grid and touch targets expand. | Remove remaining redundant qv button/icon presentation overrides in viewer.css; use qv-muted for the run identifier. Preserve the inherited layouts and domain-specific map styling. Visual acceptance remains with the tester. |
+| 4. Literals | Former bundle literals live in named tokens; noLiterals allows only the tokenised hero gradient. shell.css and viewer.css have no colour or font-family literals. | Done in accepted part 1; rerun guard with the full unit suite. |
+| 5. Old-look tests | Existing tests pin the v8 palettes, OK, map ground, neutral accent, border/focus and JetBrains Mono as fixed fixtures. | Done in accepted part 1; preserve every assertion. |
+| 6. Playwright and ADR | Both fixed viewport projects and their literal unit expectations exist, with reuseExistingServer: false. ADR 0026 already adopts v8 and supersedes ADR 0018's values. | Keep the config and single existing ADR. Add the explicitly requested missing web/e2e/phone-layout.spec.ts with fixed scrollWidth <= 390 assertions for / and /viewer/notre-dame-p3e. |
+
+Implementation plan: close only these gaps, add phone regressions using existing
+API fixtures and translated labels, then run pnpm lint, typecheck, test and build.
+Discover the complete Playwright suite without starting a server. Per the task's
+explicit sandbox rule, Kerege executes e2e in both projects and captures all
+screenshots; do not launch a browser/server or take screenshots locally.
+
+Installed package metadata checked for this round: the four Fontsource packages
+are OFL-1.1; React, Three.js, Vite and Vitest are MIT; Playwright is Apache-2.0.
+All permit commercial use. No dependency, model, tool or skill is added.
+
+Part 2 gap work completed:
+
+- Added `web/e2e/phone-layout.spec.ts`, with a literal 390×844 viewport and
+  document `scrollWidth <= 390` assertions on `/` and `/viewer/notre-dame-p3e`.
+  Root checks cover en/ru/kk in both themes, collapsed/open navigation and the
+  upload dialog. Viewer checks cover both themes, the fixed map ground, no
+  error banner and open details/settings panels. No screenshot capture is added.
+- Removed local playback colours, button disabled-state overrides, icon and
+  thumbnail hover overrides. The existing qv components now supply those styles;
+  the run identifier uses qv-muted instead of duplicating it in viewer.css.
+  No token, font, bundle value, existing test assertion or screen layout changed.
+- The inherited two-project config, literal config tests and ADR 0026 already
+  satisfy item 6; no second ADR or duplicate implementation was needed.
+
+Verification: pnpm lint and pnpm typecheck pass; pnpm test passes all 725 tests
+in 37 files, including noLiterals; pnpm build passes with the existing large
+JavaScript chunk advisory. Playwright discovery finds 224 tests in 13 files,
+including this regression in both projects. Discovery is not an e2e pass.
+Kerege still needs to run the full browser suite and judge screenshots in both
+themes, sizes and all three languages. No server or browser was started locally.
+
+## Previous round: part 1 audit (2026-10-26)
 
 Continue `devteam/DS1`, including the ten existing task commits through
 `1c9138a` and the merge from dev. The worktree was clean before this audit.

@@ -347,7 +347,7 @@ export function ViewerScreen({
             <Link to="/" className="qv-crumb">
               {t('nav.overview')}
             </Link>
-            <span className="qv-mono viewer-run-id">{bundle.runId}</span>
+            <span className="qv-mono qv-muted viewer-run-id">{bundle.runId}</span>
             <span className="qv-caption">{t('nav.viewer')}</span>
           </div>
           <LangSwitch />
