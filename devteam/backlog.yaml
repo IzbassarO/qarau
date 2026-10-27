@@ -1203,10 +1203,12 @@ tasks:
     at 390x844; same functions, layout may differ).
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - DS1
   - U2
+  owner: dev_app
+  run: run-20261026-223632
 - id: REV1-api
   area: core
   title: 'Decisions: append-only confirm / reject / reclass'
