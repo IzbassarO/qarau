@@ -296,18 +296,22 @@ export async function fetchInspectionSummaries(signal?: AbortSignal): Promise<In
 }
 
 export function useInspections(): UseQueryResult<InspectionSummary[], Error>;
-/** Compatibility for the existing site catalog until start-page wiring in part 2. */
+export function useInspections(options: {
+  enabled: boolean;
+}): UseQueryResult<InspectionSummary[], Error>;
+/** Grouped metadata for the Sidebar and existing inspection detail routes. */
 export function useInspections(enabled: boolean): UseQueryResult<Site[], Error>;
 export function useInspections(
-  enabled?: boolean,
+  enabled?: boolean | { enabled: boolean },
 ): UseQueryResult<InspectionSummary[] | Site[], Error> {
-  const grouped = enabled !== undefined;
+  const grouped = typeof enabled === 'boolean';
   return useQuery<InspectionSummary[] | Site[]>({
     ...(grouped
       ? groupedInspectionOptions(enabled)
       : {
           queryKey: ['inspections', 'list'],
           queryFn: ({ signal }: { signal: AbortSignal }) => fetchInspectionSummaries(signal),
+          enabled: typeof enabled === 'object' ? enabled.enabled : true,
           retry: false,
         }),
     refetchInterval: (query) => {

@@ -24,3 +24,68 @@
 .inspections-list-total {
   margin-top: var(--space-3);
 }
+
+.inspections-heading {
+  flex-wrap: wrap;
+}
+.inspections-heading > div {
+  min-width: 0;
+}
+.inspections-heading .qv-btn {
+  flex: none;
+}
+.inspections-list-row > :last-child[role='columnheader'] {
+  text-align: right;
+}
+
+@media (max-width: 767px) {
+  .inspections-heading {
+    align-items: stretch;
+    flex-direction: column;
+    margin-top: var(--space-8);
+  }
+  .inspections-list .qv-list {
+    background: var(--bg);
+    border: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+  /* Keep column labels accessible while the phone presents stacked ListRows. */
+  .inspections-list-row.qv-row--head {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .inspections-list-row:not(.qv-row--head) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: var(--space-2);
+  }
+  .inspections-list-row > :first-child {
+    grid-column: 1 / -1;
+  }
+  .inspections-list-row > :nth-child(2) {
+    grid-column: 1;
+  }
+  .inspections-list-row > :nth-child(3) {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .inspections-list-row > :nth-child(4) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .inspections-list-action {
+    grid-column: 2;
+    grid-row: 3;
+    max-width: 100%;
+  }
+}

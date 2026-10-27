@@ -4,7 +4,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useI18n } from '../i18n';
 import { createDemo } from '../fixtures/demo';
 import { useInspections } from '../lib/inspections';
-import { Sidebar, shortDate } from './Sidebar';
+import { Sidebar } from './Sidebar';
+import { InspectionsStartPage } from './InspectionsStartPage';
+import { inspectionFixtureSites } from '../fixtures/inspections';
 import { InspectionView } from './InspectionView';
 import { NewInspectionDialog } from './NewInspectionDialog';
 import { Wordmark } from './ShellIdentity';
@@ -19,13 +21,13 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(() => searchParams.has('new-inspection'));
-  // The demo lives only at /inspections/demo, never mixed into API inspections.
-  const showDemo = demo;
+  const listDemo = !id && !demo && searchParams.get('demo') === 'inspections';
+  const showDemo = demo || listDemo;
   const inspections = useInspections(!showDemo);
-  const demoData = useMemo(() => (showDemo ? createDemo(lang) : null), [showDemo, lang]);
+  const demoData = useMemo(() => (demo ? createDemo(lang) : null), [demo, lang]);
   const sites = useMemo(
-    () => demoData?.sites ?? inspections.data ?? [],
-    [demoData, inspections.data],
+    () => (listDemo ? inspectionFixtureSites : (demoData?.sites ?? inspections.data ?? [])),
+    [listDemo, demoData, inspections.data],
   );
   const selected =
     demoData?.inspection ??
@@ -65,6 +67,7 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
       <div className="sidebar-container" id="inspection-sidebar">
         <Sidebar
           sites={sites}
+          newInspectionPrimary={!!id || demo}
           demo={showDemo}
           loading={!showDemo && inspections.isPending}
           onNavigate={closeNavigation}
@@ -119,7 +122,7 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
           {showDemo && <span className="qv-caption demo-badge">{t('shell.demo')}</span>}
         </header>
         <main id="inspection-main" tabIndex={-1} className="qv-page shell-main">
-          {!showDemo && inspections.isError && (
+          {id && !showDemo && inspections.isError && (
             <div className="qv-notice api-error" role="alert">
               <div>
                 <strong className="qv-strong">{t('shell.connectionError')}</strong>
@@ -164,68 +167,8 @@ export function AppShell({ demo = false }: { demo?: boolean }) {
                 <p>{t(inspections.isError ? 'shell.connectionHint' : 'inspection.selectOther')}</p>
               </div>
             </div>
-          ) : sites.some((site) => site.inspections.length > 0) ? (
-            <section className="qv-page__inner inspection-catalog" aria-labelledby="catalog-title">
-              <header className="qv-page__head catalog-heading">
-                <div>
-                  <h1 className="qv-title" id="catalog-title">
-                    {t('catalog.title')}
-                  </h1>
-                  <p className="qv-caption">{t('shell.emptyDescription')}</p>
-                </div>
-                <button className="qv-btn qv-btn--secondary" onClick={() => setDialogOpen(true)}>
-                  {t('inspection.new')}
-                </button>
-              </header>
-              <div className="qv-list catalog-list">
-                <div className="qv-row qv-row--head catalog-row" aria-hidden="true">
-                  <span>{t('catalog.object')}</span>
-                  <span>{t('catalog.shot')}</span>
-                  <span>{t('catalog.status')}</span>
-                </div>
-                {sites
-                  .flatMap((site) => site.inspections)
-                  .map((inspection) => (
-                    <button
-                      type="button"
-                      className="qv-row catalog-row"
-                      key={inspection.id}
-                      onClick={() => navigate(`/inspections/${encodeURIComponent(inspection.id)}`)}
-                    >
-                      <span className="qv-row__name">
-                        {inspection.title === inspection.id && /^\d+$/.test(inspection.id)
-                          ? `${t('shell.inspection')} ${inspection.id}`
-                          : inspection.title}
-                      </span>
-                      {inspection.createdAt ? (
-                        <time className="qv-caption" dateTime={inspection.createdAt}>
-                          {shortDate(inspection.createdAt, lang)}
-                        </time>
-                      ) : (
-                        <span className="qv-caption">{t('inspection.dateUnknown')}</span>
-                      )}
-                      <span className="qv-status qv-status--muted">
-                        {inspection.reportedStatus ?? t(`status.${inspection.status}`)}
-                      </span>
-                    </button>
-                  ))}
-              </div>
-            </section>
           ) : (
-            <div className="qv-card">
-              <div className="qv-card__head">
-                <p className="qv-caption">{t('shell.product')}</p>
-              </div>
-              <div className="qv-empty empty-state">
-                <h1 className="qv-heading">
-                  <b>{t('shell.emptyTitle')}</b>
-                </h1>
-                <p>{t('shell.emptyDescription')}</p>
-                <button className="qv-btn qv-btn--secondary" onClick={() => setDialogOpen(true)}>
-                  <span aria-hidden="true">+</span> {t('inspection.new')}
-                </button>
-              </div>
-            </div>
+            <InspectionsStartPage demo={listDemo} onNewInspection={() => setDialogOpen(true)} />
           )}
         </main>
       </div>

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openDetails, openNavigation } from './chrome';
-import catalog from '../src/test/fixtures/legacy-export-catalog.json' with { type: 'json' };
+import { inspectionsFixture } from '../src/fixtures/inspections';
 import en from '../src/i18n/en.json' with { type: 'json' };
 import ru from '../src/i18n/ru.json' with { type: 'json' };
 import kk from '../src/i18n/kk.json' with { type: 'json' };
@@ -23,20 +23,31 @@ for (const theme of ['light', 'dark'] as const) {
         localStorage.setItem('qarau.lang', locale);
         sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
       }, lang);
-      await page.route('**/api/inspections', (route) => route.fulfill({ json: [] }));
-      await page.route('**/api/runs', (route) => route.fulfill({ json: catalog }));
+      await page.route('**/api/inspections', (route) =>
+        route.fulfill({
+          json: inspectionsFixture.slice(0, 2).map((inspection) => ({
+            id: Number(inspection.id),
+            site_id: 1,
+            mode: 'quick_scan',
+            status: inspection.status,
+            created_at: inspection.date,
+            run_id: inspection.runId,
+          })),
+        }),
+      );
       await page.route('**/api/sites', (route) =>
         route.fulfill({ json: [{ id: 1, org_id: 1, name: 'North site' }] }),
       );
 
       await page.goto('/');
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-      await expect(page.getByRole('heading', { name: t['catalog.title'] })).toBeVisible();
-      const rows = page.locator('button.catalog-row');
+      await expect(page.getByRole('heading', { name: t['list.title'] })).toBeVisible();
+      const rows = page.getByRole('table').locator('[data-inspection-id]');
       await expect(rows).toHaveCount(2);
       await noHorizontalOverflow(page);
       for (const row of await rows.all()) {
         await expect(row).toBeInViewport();
+        await expect(row.getByRole('button', { name: t['list.showProgress'] })).toBeVisible();
         expect(await row.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
           true,
         );

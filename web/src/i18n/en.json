@@ -302,5 +302,6 @@
   "list.emptyDescription": "Shoot a wall or a pipe rack with the Letter sheet in frame, then upload the video. The first map takes about 7 minutes.",
   "list.count": "{shown} of {total}",
   "list.unnamedObject": "Unnamed object",
-  "list.newInspection": "New inspection"
+  "list.newInspection": "New inspection",
+  "list.actionError": "Could not open or retry this inspection. Try again. If it still fails, contact your administrator."
 }
