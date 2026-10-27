@@ -1323,7 +1323,7 @@ tasks:
     real API with the demo seed; the remount race flipped the panel to Loading.
 
     '
-  status: blocked
+  status: todo
   depends_on:
   - DS1
   - DEF1-api
@@ -1331,18 +1331,6 @@ tasks:
   owner: dev_app
   run: run-20261026-234958
   branch: devteam/UI-evidence
-  blocked_reason: 'tester: Kerege ran the e2e tests (Playwright) right after your round and they fail,
-    so the tester did not review this round. Fix them first.
-
-
-    Failing checks:
-
-    $ cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_E2E_PORT=57880 QARAU_RUNS_DIR=/Users/izbassar/Documents/Startup/qarau/data/runs
-    pnpm exec playwright test --reporter=list
-
-    e2e FAILED: 2 failed, 272 passed.
-
-    1) [desktop] › e2e/evidence-preview.spec.ts:6:3 › compiled preview opens /viewer/notre-dame-p3e?finding=fi'
 - id: UI-evidence-b
   area: app
   title: Decision log and actions in the evidence panel
