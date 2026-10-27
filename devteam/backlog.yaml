@@ -1357,9 +1357,11 @@ tasks:
 
     '
   licence: WeasyPrint (BSD-3-Clause) or ReportLab (BSD-3-Clause); IBM Plex fonts (OFL-1.1).
-  status: todo
+  status: in_progress
   depends_on:
   - REV1-api
+  owner: dev_pipeline
+  run: run-20261026-223632
 - id: UI-mark
   area: app
   title: Mark a region on the 3D map as a finding
