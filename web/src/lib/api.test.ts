@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { ApiUnavailableError, readApi } from './api';
+import { ApiUnavailableError, readApi, rerunInspectionStep } from './api';
 import { listSites } from './sites';
 
 afterEach(() => {
@@ -60,4 +60,20 @@ it('loads real site records with the bearer session and rejects malformed site r
     headers: { Authorization: 'Bearer test-api-value' },
   });
   await expect(listSites()).rejects.toThrow('Invalid sites response');
+});
+
+it('posts a step rerun to S1 with encoded identifiers and the session header', async () => {
+  sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
+  const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+  vi.stubGlobal('fetch', fetch);
+  await rerunInspectionStep('7', 'run/7', 'sparse');
+  expect(fetch).toHaveBeenCalledExactlyOnceWith(
+    '/api/inspections/7/runs/run%2F7/steps/sparse/rerun',
+    { method: 'POST', headers: { Authorization: 'Bearer test-api-value' } },
+  );
+});
+
+it.each([401, 403, 404, 409, 503])('preserves a failed rerun response (%i)', async (status) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status })));
+  await expect(rerunInspectionStep('7', 'run-7', 'frames')).rejects.toThrow(String(status));
 });

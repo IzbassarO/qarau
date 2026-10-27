@@ -4,7 +4,7 @@ import { BundleError, FarLayerError, loadBundle, loadManifest, type Bundle } fro
 import {
   getInspection,
   inspectionStatus,
-  type InspectionSummary,
+  type SiteInspectionSummary,
   type RunSummary,
 } from '../lib/inspections';
 import { processingSteps } from '../lib/processing';
@@ -16,7 +16,7 @@ export function InspectionView({
   run,
   demoBundle,
 }: {
-  inspection: InspectionSummary;
+  inspection: SiteInspectionSummary;
   run?: RunSummary;
   demoBundle?: Bundle;
 }) {

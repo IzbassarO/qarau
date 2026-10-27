@@ -5,15 +5,238 @@ import {
   listInspections,
   groupRunsIntoSites,
   inspectionStatus,
+  fetchInspectionSummaries,
+  sortAndCap,
   UNASSIGNED_SITE_ID,
+  type InspectionSummary,
   type RunSummary,
 } from './inspections';
 import catalog from '../test/fixtures/run-catalog.json';
 import legacyCatalog from '../test/fixtures/legacy-export-catalog.json';
+import inspectionsFixture from '../test/fixtures/inspections.json';
 
 afterEach(() => {
   sessionStorage.clear();
   vi.unstubAllGlobals();
+});
+
+describe('sortAndCap', () => {
+  const items: InspectionSummary[] = [
+    { id: 'old', siteName: 'Tank', date: '2026-10-01T09:00:00Z', status: 'done', findingsCount: 0 },
+    {
+      id: 'offset',
+      siteName: 'Pipe',
+      date: '2026-10-24T15:00:00+05:00',
+      status: 'uploaded',
+      findingsCount: null,
+    },
+    {
+      id: 'newest',
+      siteName: 'Tank',
+      date: '2026-10-24T11:00:00Z',
+      status: 'running',
+      findingsCount: null,
+    },
+  ];
+
+  it('sorts actual instants newest first against literal expected ids without mutating input', () => {
+    const before = structuredClone(items);
+    const result = sortAndCap(items);
+    expect(result.rows.map(({ id }) => id)).toEqual(['newest', 'offset', 'old']);
+    expect(result.total).toBe(3);
+    expect(items).toEqual(before);
+    expect(result.rows).not.toBe(items);
+  });
+
+  it('caps a sorted copy and returns the total before the cap', () => {
+    const result = sortAndCap(items, 2);
+    expect(result.rows.map(({ id }) => id)).toEqual(['newest', 'offset']);
+    expect(result.total).toBe(3);
+    expect(sortAndCap([], 50)).toEqual({ rows: [], total: 0 });
+    expect(sortAndCap(items, 0)).toEqual({ rows: [], total: 3 });
+  });
+
+  it('preserves API order for tied dates', () => {
+    const result = sortAndCap([
+      { id: 'b', siteName: 'Tank', date: '2026-10-24T10:00:00Z', status: 'done', findingsCount: 0 },
+      {
+        id: 'a',
+        siteName: 'Pipe',
+        date: '2026-10-24T15:00:00+05:00',
+        status: 'done',
+        findingsCount: null,
+      },
+    ]);
+    expect(result.rows.map(({ id }) => id)).toEqual(['b', 'a']);
+  });
+});
+
+describe('v8 inspection summaries', () => {
+  it('maps B1 InspectionOut and site names, leaving unavailable counts null', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === '/api/inspections')
+          return Response.json(inspectionsFixture.inspections.slice(0, 5));
+        if (url === '/api/sites') return Response.json(inspectionsFixture.sites);
+        throw new Error(`Unexpected API request: ${url}`);
+      }),
+    );
+    expect(await fetchInspectionSummaries()).toEqual([
+      {
+        id: '1',
+        siteName: 'Pipe rack PR-2, bay 7',
+        date: '2026-10-24T10:12:00Z',
+        status: 'uploaded',
+        findingsCount: null,
+      },
+      {
+        id: '2',
+        siteName: 'Tank T-104, north wall',
+        date: '2026-10-26T10:12:00Z',
+        status: 'queued',
+        findingsCount: null,
+      },
+      {
+        id: '3',
+        siteName: 'Tank T-112, roof',
+        date: '2026-10-25T10:12:00Z',
+        status: 'running',
+        findingsCount: null,
+      },
+      {
+        id: '4',
+        siteName: 'Separator V-301, shell',
+        date: '2026-10-23T10:12:00Z',
+        status: 'done',
+        findingsCount: 4,
+      },
+      {
+        id: '5',
+        siteName: 'Pipe rack PR-5, bays 12 to 14',
+        date: '2026-10-22T10:12:00Z',
+        status: 'failed',
+        findingsCount: 0,
+      },
+    ]);
+  });
+
+  it('resolves a B1 created status through S1 latest-run identity', async () => {
+    const fetch = vi.fn(async (url: string) => {
+      switch (url) {
+        case '/api/inspections':
+          return Response.json([
+            {
+              id: 7,
+              site_id: 1,
+              mode: 'quick_scan',
+              status: 'created',
+              created_at: '2026-10-24T10:00:00Z',
+            },
+          ]);
+        case '/api/sites':
+          return Response.json([{ id: 1, org_id: 1, name: 'North' }]);
+        case '/api/inspections/7':
+          return Response.json({
+            id: 7,
+            site_id: 1,
+            mode: 'quick_scan',
+            status: 'created',
+            created_at: '2026-10-24T10:00:00Z',
+            run_id: 'latest-run',
+          });
+        case '/api/inspections/7/runs':
+          return Response.json([
+            { id: 'older-run', status: 'done' },
+            { id: 'latest-run', status: 'uploaded' },
+          ]);
+        default:
+          throw new Error(`Unexpected API request: ${url}`);
+      }
+    });
+    vi.stubGlobal('fetch', fetch);
+    expect(await fetchInspectionSummaries()).toEqual([
+      {
+        id: '7',
+        siteName: 'North',
+        date: '2026-10-24T10:00:00Z',
+        status: 'uploaded',
+        findingsCount: null,
+        runId: 'latest-run',
+      },
+    ]);
+  });
+
+  it('preserves a supplied run id and explicit null findings', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        Response.json(
+          url === '/api/sites'
+            ? inspectionsFixture.sites
+            : [
+                {
+                  id: 7,
+                  site_id: 1,
+                  mode: 'quick_scan',
+                  status: 'done',
+                  created_at: '2026-10-24T10:00:00Z',
+                  run_id: 'run-seven',
+                  findings_count: null,
+                },
+              ],
+        ),
+      ),
+    );
+    expect(await fetchInspectionSummaries()).toEqual([
+      {
+        id: '7',
+        siteName: 'Pipe rack PR-2, bay 7',
+        date: '2026-10-24T10:00:00Z',
+        status: 'done',
+        findingsCount: null,
+        runId: 'run-seven',
+      },
+    ]);
+  });
+
+  it.each([401, 403, 404, 503])(
+    'does not turn HTTP %i into an empty or legacy list',
+    async (status) => {
+      const fetch = vi.fn().mockResolvedValue(new Response('', { status }));
+      vi.stubGlobal('fetch', fetch);
+      await expect(fetchInspectionSummaries()).rejects.toThrow();
+      expect(fetch).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    { status: 'future_state' },
+    { created_at: 'not-a-date' },
+    { findings_count: -1 },
+    { findings_count: 1.5 },
+  ])('rejects malformed summary fields %j', async (fields) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        Response.json(
+          url === '/api/sites'
+            ? inspectionsFixture.sites
+            : [
+                {
+                  id: 7,
+                  site_id: 1,
+                  mode: 'quick_scan',
+                  status: 'done',
+                  created_at: '2026-10-24T10:00:00Z',
+                  ...fields,
+                },
+              ],
+        ),
+      ),
+    );
+    await expect(fetchInspectionSummaries()).rejects.toThrow('Invalid inspection summary');
+  });
 });
 
 describe('groupRunsIntoSites', () => {
