@@ -1,3 +1,4 @@
+import { openTools, closeTools } from './chrome';
 import { expect, test } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 
@@ -44,9 +45,12 @@ test('Notre-Dame deep link opens point evidence and thumbnails seek the source f
         import('three').PointsMaterial
       >
     ).material.color.clone();
-    return { black: engine.renderer.getClearColor(color).getHex() === 0, selected: marker.visible };
+    return {
+      mapGround: engine.renderer.getClearColor(color).getHex() === 0x131313,
+      selected: marker.visible,
+    };
   });
-  expect(state).toEqual({ black: true, selected: true });
+  expect(state).toEqual({ mapGround: true, selected: true });
   expect(errors).toEqual([]);
 });
 
@@ -57,11 +61,13 @@ test('Notre-Dame info tool picks on a click while drag still orbits', async ({ p
   await page.goto('/viewer/notre-dame');
   await page.waitForFunction(() => window.__qarau?.pointsLoaded, null, { timeout: 120_000 });
   await expect(page.getByRole('alert')).toHaveCount(0);
+  await openTools(page);
   const tool = page.getByRole('button', { name: en['pointInfo.tool'] });
   await expect(tool).toBeVisible();
   await expect(tool).toHaveAttribute('aria-pressed', 'false');
   await tool.click();
   await expect(tool).toHaveAttribute('aria-pressed', 'true');
+  await closeTools(page);
   const canvas = page.getByLabel(en['canvas.label']);
   const box = (await canvas.boundingBox())!;
   const start = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
@@ -81,7 +87,17 @@ test('Notre-Dame info tool picks on a click while drag still orbits', async ({ p
     const positions = cloud.geometry.getAttribute('position');
     for (let i = 0; i < positions.count; i += 7) {
       const p = engine.project([positions.getX(i), positions.getY(i), positions.getZ(i)]);
-      if (p.visible && p.x > 100 && p.y > 100 && p.x < 500 && p.y < 500) return p;
+      const canvas = engine.renderer.domElement;
+      const box = canvas.getBoundingClientRect();
+      if (
+        p.visible &&
+        p.x > 100 &&
+        p.y > 100 &&
+        p.x < 500 &&
+        p.y < 500 &&
+        document.elementFromPoint(box.x + p.x, box.y + p.y) === canvas
+      )
+        return p;
     }
     throw new Error('No visible cloud point found');
   });

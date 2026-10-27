@@ -1,3 +1,4 @@
+import { openNavigation } from './chrome';
 import { expect, test } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 import ru from '../src/i18n/ru.json' with { type: 'json' };
@@ -26,6 +27,7 @@ for (const theme of ['light', 'dark'] as const) {
         });
       });
       await page.goto('/');
+      await openNavigation(page);
       const navigation = page.getByRole('navigation');
       await expect(navigation.locator('.inspection-status-chip')).toHaveCount(3);
       await expect(

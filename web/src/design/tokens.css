@@ -94,6 +94,105 @@
   --shadow-focus: 0 0 0 3px rgba(238, 240, 243, 0.25);
 }
 :root {
+  --color-white: #ffffff;
+  --color-black: #111111;
+  --color-transparent: transparent;
+  --radius-question: 15px;
+  --font-size-detail: 12.5px;
+  --font-size-body-plus: 13.5px;
+  --font-size-control-large: 15px;
+  --shadow-toggle-knob: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-thumbnail-inset: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-thumbnail-selected: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --mask-critical-fill: rgba(210, 50, 31, 0.14);
+  --mask-watch-fill: rgba(182, 93, 0, 0.14);
+  --color-thumbnail-tag: rgba(19, 19, 19, 0.72);
+  --color-dialog-scrim: rgba(13, 15, 19, 0.45);
+  --color-map-pill: rgba(13, 15, 19, 0.7);
+  --signin-hero-bg: #121212;
+  --signin-hero-ink: #f4f4f2;
+  --signin-hero-gradient:
+    radial-gradient(900px 640px at 20% 0%, #3a3a3a 0%, rgba(58, 58, 58, 0) 60%),
+    radial-gradient(700px 500px at 100% 100%, #2a2a2a 0%, rgba(42, 42, 42, 0) 60%);
+  --signin-hero-sub: rgba(244, 244, 242, 0.78);
+  --signin-hero-logos: rgba(244, 244, 242, 0.5);
+  --signin-hero-logo-strong: rgba(244, 240, 232, 0.8);
+  --shadow-map-pin: 0 0 0 4px rgba(255, 255, 255, 0.25);
+  --color-hud-key: rgba(26, 25, 23, 0.78);
+  --color-hud-key-border: rgba(236, 232, 223, 0.45);
+  --color-map-target: rgba(26, 25, 23, 0.8);
+  --color-map-menu-scrim: rgba(26, 25, 23, 0.55);
+  --color-photo-dot: rgba(255, 255, 255, 0.45);
+  --color-media-overlay: rgba(19, 19, 19, 0.7);
+  --color-video-time: rgba(0, 0, 0, 0.45);
+  --select-indicator-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  --layout-sidebar: 248px;
+  --layout-topbar: 48px;
+  --layout-row: 56px;
+  --layout-rail: 40px;
+  --layout-side-panel: 460px;
+  --layout-timeline: 108px;
+  --layout-dialog-min: 640px;
+  --layout-dialog-max: 920px;
+  --layout-report-document: 794px;
+  --layout-phone: 390px;
+  --t-hero-family: var(--font-display);
+  --t-hero-size: 44px;
+  --t-hero-line-height: 48px;
+  --t-hero-weight: 600;
+  --t-hero-letter-spacing: -0.025em;
+  --t-display-family: var(--font-display);
+  --t-display-size: 30px;
+  --t-display-line-height: 36px;
+  --t-display-weight: 600;
+  --t-display-letter-spacing: -0.02em;
+  --t-title-family: var(--font-display);
+  --t-title-size: 22px;
+  --t-title-line-height: 28px;
+  --t-title-weight: 600;
+  --t-title-letter-spacing: -0.015em;
+  --t-heading-family: var(--font-display);
+  --t-heading-size: 16px;
+  --t-heading-line-height: 22px;
+  --t-heading-weight: 600;
+  --t-heading-letter-spacing: -0.005em;
+  --t-body-family: var(--font-sans);
+  --t-body-size: 14px;
+  --t-body-line-height: 20px;
+  --t-body-weight: 400;
+  --t-body-strong-family: var(--font-sans);
+  --t-body-strong-size: 14px;
+  --t-body-strong-line-height: 20px;
+  --t-body-strong-weight: 600;
+  --t-body-italic-family: var(--font-sans);
+  --t-body-italic-size: 14px;
+  --t-body-italic-line-height: 20px;
+  --t-body-italic-weight: 400;
+  --t-body-italic-style: italic;
+  --t-caption-family: var(--font-sans);
+  --t-caption-size: 13px;
+  --t-caption-line-height: 18px;
+  --t-caption-weight: 400;
+  --t-label-family: var(--font-sans);
+  --t-label-size: 13px;
+  --t-label-line-height: 18px;
+  --t-label-weight: 500;
+  --t-quote-family: var(--font-serif);
+  --t-quote-size: 18px;
+  --t-quote-line-height: 26px;
+  --t-quote-weight: 400;
+  --t-quote-style: italic;
+  --t-mono-family: var(--font-mono);
+  --t-mono-size: 13px;
+  --t-mono-line-height: 20px;
+  --t-mono-weight: 400;
+  --t-mono-large-family: var(--font-mono);
+  --t-mono-large-size: 28px;
+  --t-mono-large-line-height: 32px;
+  --t-mono-large-weight: 500;
+  --t-mono-large-letter-spacing: -0.02em;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -153,6 +252,7 @@
   font-weight: 600;
 }
 .t-body-italic {
+  font-style: italic;
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 20px;
@@ -171,6 +271,7 @@
   font-weight: 500;
 }
 .t-quote {
+  font-style: italic;
   font-family: var(--font-serif);
   font-size: 18px;
   line-height: 26px;

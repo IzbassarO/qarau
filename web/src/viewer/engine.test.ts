@@ -14,6 +14,18 @@ vi.mock('three', async (importOriginal) => {
     ...three,
     WebGLRenderer: class {
       autoClear = true;
+      context = {
+        SYNC_GPU_COMMANDS_COMPLETE: 0x9117,
+        ALREADY_SIGNALED: 0x911a,
+        TIMEOUT_EXPIRED: 0x911b,
+        CONDITION_SATISFIED: 0x911c,
+        WAIT_FAILED: 0x911d,
+        fenceSync: vi.fn(() => ({})),
+        clientWaitSync: vi.fn(() => 0x911a),
+        deleteSync: vi.fn(),
+        flush: vi.fn(),
+      };
+      getContext = () => this.context;
       setPixelRatio = vi.fn();
       getPixelRatio = () => 1;
       setClearColor = vi.fn();
@@ -35,8 +47,10 @@ let exitLockDescriptor: PropertyDescriptor | undefined;
 const pendingFrames = new Map<number, FrameRequestCallback>();
 const engines = new Set<ViewerEngine>();
 let exitPointerLock = vi.fn();
+let initialTheme: string | undefined;
 
 beforeEach(() => {
+  initialTheme = document.documentElement.dataset.theme;
   now = 1000;
   frameId = 0;
   lockedElement = null;
@@ -61,6 +75,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (initialTheme === undefined) delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = initialTheme;
   for (const engine of engines) engine.dispose();
   engines.clear();
   document.body.replaceChildren();
@@ -166,6 +182,88 @@ function mouseLook(dx: number, dy: number) {
   });
   document.dispatchEvent(event);
 }
+
+describe('ViewerEngine GPU scheduling', () => {
+  it('coalesces setup and resize into the first animation frame', () => {
+    const { engine } = setup();
+    engine.resize();
+    engine.setFrame(10);
+    expect(engine.renderer.render).not.toHaveBeenCalled();
+    frame();
+    expect(engine.renderer.render).toHaveBeenCalledOnce();
+    const points = engine.scene.children.find(
+      (child) => child instanceof Points && child.material instanceof ShaderMaterial,
+    ) as Points<import('three').BufferGeometry, ShaderMaterial>;
+    expect(points.material.uniforms.uCurrentFrame.value).toBe(10);
+  });
+
+  it('does no GPU work for a discarded setup', () => {
+    const { engine } = setup();
+    engine.dispose();
+    engines.delete(engine);
+    frame(60);
+    expect(engine.renderer.render).not.toHaveBeenCalled();
+    expect(
+      (engine.renderer.getContext() as WebGL2RenderingContext).fenceSync,
+    ).not.toHaveBeenCalled();
+  });
+
+  it.each([0x911a, 0x911c])(
+    'keeps one draw in flight and renders the latest state after GPU completion (%i)',
+    (completion) => {
+      const { engine } = setup();
+      const gl = engine.renderer.getContext() as WebGL2RenderingContext;
+      const fence = {} as WebGLSync;
+      vi.mocked(gl.fenceSync).mockReturnValue(fence);
+      const points = engine.scene.children.find(
+        (child) => child instanceof Points && child.material instanceof ShaderMaterial,
+      ) as Points<import('three').BufferGeometry, ShaderMaterial>;
+      const drawnFrames: number[] = [];
+      vi.mocked(engine.renderer.render).mockImplementation(() => {
+        drawnFrames.push(points.material.uniforms.uCurrentFrame.value);
+      });
+      const wait = vi.mocked(gl.clientWaitSync);
+      wait.mockReturnValue(gl.TIMEOUT_EXPIRED);
+      frame();
+      engine.viewThroughFrame(10);
+      engine.setFrame(10);
+      frame(60);
+      engine.setFrame(11);
+      engine.resetView();
+      frame(60);
+      expect(engine.renderer.render).toHaveBeenCalledOnce();
+      expect(gl.fenceSync).toHaveBeenCalledExactlyOnceWith(0x9117, 0);
+      expect(gl.flush).toHaveBeenCalledOnce();
+      expect(gl.deleteSync).not.toHaveBeenCalled();
+      expect(wait).toHaveBeenLastCalledWith(fence, 0, 0);
+
+      wait.mockReturnValue(completion);
+      frame();
+      expect(engine.renderer.render).toHaveBeenCalledTimes(2);
+      expect(gl.deleteSync).toHaveBeenCalledExactlyOnceWith(fence);
+      expect(gl.fenceSync).toHaveBeenCalledTimes(2);
+      expect(gl.flush).toHaveBeenCalledTimes(2);
+      expect(drawnFrames).toEqual([0, 11]);
+      expect(points.material.uniforms.uCurrentFrame.value).toBe(11);
+      frame(60);
+      expect(engine.renderer.render).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('releases the in-flight fence on disposal', () => {
+    const { engine } = setup();
+    const gl = engine.renderer.getContext() as WebGL2RenderingContext;
+    const fence = {} as WebGLSync;
+    vi.mocked(gl.fenceSync).mockReturnValue(fence);
+    vi.mocked(gl.clientWaitSync).mockReturnValue(gl.TIMEOUT_EXPIRED);
+    frame();
+    engine.dispose();
+    engines.delete(engine);
+    expect(gl.deleteSync).toHaveBeenCalledExactlyOnceWith(fence);
+    frame(60);
+    expect(engine.renderer.render).toHaveBeenCalledOnce();
+  });
+});
 
 describe('ViewerEngine point info tool', () => {
   it('selects through the existing picker only when active and preserves orbit during drags', () => {
@@ -330,6 +428,11 @@ describe('ViewerEngine dense layer', () => {
 });
 
 describe('ViewerEngine far layer', () => {
+  it('draws the map on the fixed v8 map-ground colour', () => {
+    const { engine } = setup();
+    expect(engine.renderer.setClearColor).toHaveBeenCalledExactlyOnceWith('#131313');
+  });
+
   const farPoints = (engine: ViewerEngine) =>
     engine.scene.getObjectByName('far') as Points<import('three').BufferGeometry, PointsMaterial>;
 
@@ -349,22 +452,36 @@ describe('ViewerEngine far layer', () => {
     expect(object.geometry.getAttribute('position').count).toBe(bundle.manifest.points.count);
     expect(far.geometry.getAttribute('color')).toBeUndefined();
     expect(far.material.vertexColors).toBe(false);
-    expect(far.material.color.getHexString()).toBe('6b727d');
+    expect(far.material.color.getHexString()).toBe('6f6f6b');
     expect(far.visible).toBe(false);
     engine.setFarVisible(true);
     expect(far.visible).toBe(true);
     engine.setFrame(5);
     engine.setColorMode('height');
     expect(far.visible).toBe(true);
-    expect(far.material.color.getHexString()).toBe('6b727d');
+    expect(far.material.color.getHexString()).toBe('6f6f6b');
     engine.setFarVisible(false);
     expect(far.visible).toBe(false);
     expect(object.visible).toBe(true);
   });
 
+  it('uses the fixed v8 dark not-seen palette', () => {
+    document.documentElement.dataset.theme = 'dark';
+    const { engine } = setup();
+    expect(farPoints(engine).material.color.getHexString()).toBe('9a9a96');
+    const points = engine.scene.children.find(
+      (child) => child instanceof Points && child.material instanceof ShaderMaterial,
+    ) as Points<import('three').BufferGeometry, ShaderMaterial>;
+    expect(points.material.uniforms.uUnseenColor.value.toArray()).toEqual([
+      154 / 255,
+      154 / 255,
+      150 / 255,
+    ]);
+  });
+
   it('reads the not-seen CSS token from the canvas', () => {
     const style = document.createElement('style');
-    style.textContent = 'canvas { --color-notseen: #123456; }';
+    style.textContent = 'canvas { --unseen: #123456; }';
     document.body.append(style);
     const { engine } = setup();
     expect(farPoints(engine).material.color.getHexString()).toBe('123456');
@@ -1009,6 +1126,36 @@ describe('ViewerEngine colour modes', () => {
     ) as Points;
   }
 
+  function findingBundle() {
+    const bundle = navigationBundle();
+    bundle.findings = [
+      {
+        id: 1,
+        class: 'corrosion',
+        severity: 'critical',
+        status: 'confirmed',
+        n_points: 1,
+        centroid: [-1, -1, -1],
+        bbox: { min: [-1, -1, -1], max: [-1, -1, -1] },
+        frames: [0],
+      },
+      {
+        id: 2,
+        class: 'corrosion',
+        severity: 'watch',
+        status: 'confirmed',
+        n_points: 1,
+        centroid: [-1, -1, 1],
+        bbox: { min: [-1, -1, 1], max: [-1, -1, 1] },
+        frames: [0],
+      },
+    ];
+    bundle.pointFinding = new Uint16Array(bundle.manifest.points.count);
+    bundle.pointFinding.set([1, 2]);
+    bundle.firstSeen[2] = 65535;
+    return bundle;
+  }
+
   it('setColorMode swaps height and RGB buffers without rebuilding geometry or point positions', () => {
     const bundle = navigationBundle();
     bundle.color = Uint8Array.from({ length: bundle.position.length }, (_, i) => (i * 23) % 256);
@@ -1045,40 +1192,19 @@ describe('ViewerEngine colour modes', () => {
     expect(positions.array).toBe(bundle.position);
   });
 
-  it('keeps critical finding points red and watch points orange in RGB mode', () => {
-    const bundle = navigationBundle();
-    bundle.findings = [
-      {
-        id: 1,
-        class: 'corrosion',
-        severity: 'critical',
-        status: 'confirmed',
-        n_points: 1,
-        centroid: [-1, -1, -1],
-        bbox: { min: [-1, -1, -1], max: [-1, -1, -1] },
-        frames: [0],
-      },
-      {
-        id: 2,
-        class: 'corrosion',
-        severity: 'watch',
-        status: 'confirmed',
-        n_points: 1,
-        centroid: [-1, -1, 1],
-        bbox: { min: [-1, -1, 1], max: [-1, -1, 1] },
-        frames: [0],
-      },
-    ];
-    bundle.pointFinding = new Uint16Array(bundle.manifest.points.count);
-    bundle.pointFinding.set([1, 2]);
-    bundle.firstSeen[2] = 65535;
+  it.each([
+    { theme: 'light', expected: [0xc4, 0x2a, 0x18, 0xa6, 0x54, 0x00] },
+    { theme: 'dark', expected: [0xff, 0x74, 0x66, 0xf5, 0xa7, 0x42] },
+  ])('keeps v8 $theme finding colours in RGB mode', ({ theme, expected }) => {
+    document.documentElement.dataset.theme = theme;
+    const bundle = findingBundle();
     const { engine } = setup(bundle);
     const points = cloud(engine, bundle);
     const overlay = points.geometry.getAttribute('findingColor');
     const material = points.material as ShaderMaterial;
     engine.setColorMode('rgb');
     expect(engine.colorMode).toBe('rgb');
-    expect(Array.from(overlay.array.slice(0, 6))).toEqual([0xf0, 0x56, 0x5c, 0xf2, 0xa3, 0x3a]);
+    expect(Array.from(overlay.array.slice(0, 6))).toEqual(expected);
     expect(overlay.normalized).toBe(true);
     expect(points.geometry.getAttribute('findingColor')).toBe(overlay);
     expect(material.uniforms.uFindings.value).toBe(1);
@@ -1087,6 +1213,95 @@ describe('ViewerEngine colour modes', () => {
     expect(Array.from(points.geometry.getAttribute('fid').array.slice(0, 3))).toEqual([1, 2, 0]);
     engine.setColorMode('height');
     expect(points.geometry.getAttribute('findingColor')).toBe(overlay);
+  });
+
+  it('refreshes light, dark and light signals in place after a system theme change', async () => {
+    document.documentElement.dataset.theme = 'light';
+    const bundle = findingBundle();
+    const { engine } = setup(bundle);
+    const points = cloud(engine, bundle);
+    const geometry = points.geometry;
+    const positions = geometry.getAttribute('position');
+    const overlay = geometry.getAttribute('findingColor') as import('three').BufferAttribute;
+    const overlayBytes = overlay.array;
+    const material = points.material as ShaderMaterial;
+    const unseen = material.uniforms.uUnseenColor.value as Vector3;
+    const far = engine.scene.getObjectByName('far') as Points<
+      import('three').BufferGeometry,
+      PointsMaterial
+    >;
+    const farGeometry = far.geometry;
+    const camera = engine.camera.position.clone();
+    const target = engine.controls.target.clone();
+    expect(Array.from(overlayBytes.slice(0, 6))).toEqual([0xc4, 0x2a, 0x18, 0xa6, 0x54, 0x00]);
+    expect(far.material.color.getHexString()).toBe('6f6f6b');
+    frame(60);
+
+    for (const { theme, finding, notSeen, unseenBytes } of [
+      {
+        theme: 'dark',
+        finding: [0xff, 0x74, 0x66, 0xf5, 0xa7, 0x42],
+        notSeen: '9a9a96',
+        unseenBytes: [154, 154, 150],
+      },
+      {
+        theme: 'light',
+        finding: [0xc4, 0x2a, 0x18, 0xa6, 0x54, 0x00],
+        notSeen: '6f6f6b',
+        unseenBytes: [111, 111, 107],
+      },
+    ]) {
+      const uploadVersion = overlay.version;
+      const render = vi.mocked(engine.renderer.render).mockClear();
+      document.documentElement.dataset.theme = theme;
+      await Promise.resolve();
+      expect(points.geometry).toBe(geometry);
+      expect(geometry.getAttribute('position')).toBe(positions);
+      expect(geometry.getAttribute('findingColor')).toBe(overlay);
+      expect(overlay.array).toBe(overlayBytes);
+      expect(overlay.version).toBeGreaterThan(uploadVersion);
+      expect(Array.from(overlayBytes.slice(0, 6))).toEqual(finding);
+      expect(far.geometry).toBe(farGeometry);
+      expect(far.material.color.getHexString()).toBe(notSeen);
+      expect(far.visible).toBe(false);
+      expect(material.uniforms.uUnseenColor.value).toBe(unseen);
+      expect(unseen.toArray().map((value) => Math.round(value * 255))).toEqual(unseenBytes);
+      expect(engine.camera.position).toEqual(camera);
+      expect(engine.controls.target).toEqual(target);
+      expect(engine.renderer.setClearColor).toHaveBeenCalledExactlyOnceWith('#131313');
+      frame();
+      expect(render).toHaveBeenCalled();
+    }
+  });
+
+  it('watches only the root theme attribute and disconnects before disposal', async () => {
+    document.documentElement.dataset.theme = 'light';
+    const observe = vi.spyOn(MutationObserver.prototype, 'observe');
+    const disconnect = vi.spyOn(MutationObserver.prototype, 'disconnect');
+    const bundle = findingBundle();
+    const { engine } = setup(bundle);
+    const points = cloud(engine, bundle);
+    const overlay = points.geometry.getAttribute('findingColor') as import('three').BufferAttribute;
+    const material = points.material as ShaderMaterial;
+    const unseen = material.uniforms.uUnseenColor.value as Vector3;
+    const far = engine.scene.getObjectByName('far') as Points<
+      import('three').BufferGeometry,
+      PointsMaterial
+    >;
+    expect(observe).toHaveBeenCalledExactlyOnceWith(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    const uploadVersion = overlay.version;
+    engine.dispose();
+    engines.delete(engine);
+    expect(disconnect).toHaveBeenCalledOnce();
+    document.documentElement.dataset.theme = 'dark';
+    await Promise.resolve();
+    expect(overlay.version).toBe(uploadVersion);
+    expect(Array.from(overlay.array.slice(0, 6))).toEqual([0xc4, 0x2a, 0x18, 0xa6, 0x54, 0x00]);
+    expect(unseen.toArray().map((value) => Math.round(value * 255))).toEqual([111, 111, 107]);
+    expect(far.material.color.getHexString()).toBe('6f6f6b');
   });
 
   it.each([undefined, new Uint8Array(1)])(
@@ -1136,12 +1351,11 @@ describe('ViewerEngine opt-in display modes', () => {
     const frustums = engine.scene.children.filter((child) => child instanceof LineSegments);
     expect(frustums).toHaveLength(1);
     const [currentFrustum] = frustums;
-    const cameraDot = engine.scene.children.find(
-      (child) =>
-        child instanceof Points &&
-        child.material instanceof PointsMaterial &&
-        child.material.color.getHex() === 0x5b9bff,
-    )!;
+    const cameraDot = engine.scene.getObjectByName('current-camera-point') as Points<
+      import('three').BufferGeometry,
+      PointsMaterial
+    >;
+    expect(cameraDot.material.color.getHexString()).toBe('ededeb');
     const cloud = engine.scene.children.find(
       (child) => child instanceof Points && child.material instanceof ShaderMaterial,
     ) as Points;

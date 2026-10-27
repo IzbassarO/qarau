@@ -144,7 +144,7 @@ export function NewInspectionDialog({
   return (
     <dialog
       ref={dialog}
-      className="inspection-dialog"
+      className="qv qv-dialog inspection-dialog"
       aria-labelledby="new-inspection-title"
       aria-describedby="upload-description"
       onCancel={(event) => {
@@ -152,155 +152,165 @@ export function NewInspectionDialog({
         close();
       }}
     >
-      <div className="dialog-heading">
-        <h2 id="new-inspection-title">{t('inspection.new')}</h2>
+      <div className="qv-dialog__head dialog-heading">
+        <h2 className="qv-heading" id="new-inspection-title">
+          {t('inspection.new')}
+        </h2>
         <button
           type="button"
-          className="shell-button icon-button"
+          className="qv-iconbtn icon-button"
           aria-label={t('dialog.close')}
           onClick={close}
         >
           <span aria-hidden="true">×</span>
         </button>
       </div>
-      <p className="muted" id="upload-description">
-        {t('upload.description')}
-      </p>
-      <div className="upload-site">
-        <label htmlFor="inspection-site">{t('upload.site')}</label>
-        <select
-          id="inspection-site"
-          value={siteId}
-          disabled={busy || siteState !== 'ready' || sites.length === 0}
-          aria-describedby={
-            siteState !== 'ready' || sites.length === 0 ? 'upload-sites-state' : undefined
-          }
-          onChange={(event) => {
-            resetSession();
-            setSiteId(event.target.value);
-          }}
-        >
-          <option value="">
-            {t(
-              siteState === 'loading'
-                ? 'upload.sitesLoading'
-                : siteState === 'unavailable'
-                  ? 'upload.sitesUnavailable'
-                  : 'upload.chooseSite',
-            )}
-          </option>
-          {sites.map((site) => (
-            <option key={site.id} value={site.id}>
-              {site.name}
-            </option>
-          ))}
-        </select>
-        {siteState === 'loading' && (
-          <p id="upload-sites-state" className="muted" role="status">
-            {t('upload.sitesLoading')}
-          </p>
-        )}
-        {siteState === 'ready' && sites.length === 0 && (
-          <p id="upload-sites-state" className="notice" role="status">
-            {t('upload.sitesEmpty')}
-          </p>
-        )}
-        {siteState === 'unavailable' && (
-          <p id="upload-sites-state" className="notice" role="status">
-            {t('upload.catalogOnly')}
-          </p>
-        )}
-        {siteState === 'error' && (
-          <div id="upload-sites-state" className="upload-sites-error">
-            <p className="upload-error" role="alert">
-              {t('upload.sitesError')}
-            </p>
-            <button
-              className="shell-button"
-              onClick={() => {
-                setSiteState('loading');
-                setSiteAttempt((value) => value + 1);
-              }}
-            >
-              {t('shell.retry')}
-            </button>
-          </div>
-        )}
-      </div>
-      <label className="upload-picker" htmlFor="inspection-video">
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-        >
-          <path d="M12 16V4m-5 5 5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />
-        </svg>
-        <span>{t('upload.choose')}</span>
-        <span className="muted">{t('upload.formats')}</span>
-        <input
-          id="inspection-video"
-          className="sr-only"
-          type="file"
-          accept={VIDEO_ACCEPT}
-          disabled={busy}
-          aria-invalid={!!error && error !== 'upload.cancelled' && error !== 'upload.network'}
-          aria-describedby={error ? 'upload-error' : 'upload-description'}
-          onChange={(event) => validate(event.target.files?.[0])}
-        />
-      </label>
-      {file && (
-        <p className="selected-file">
-          {t('upload.selected')}: {file.name}
+      <div className="qv-dialog__body qv-dialog__body--one">
+        <p className="qv-caption" id="upload-description">
+          {t('upload.description')}
         </p>
-      )}
-      {(busy || progress) && file && (
-        <div className="upload-progress" aria-live="polite">
-          <label htmlFor="video-progress">{t('upload.progress')}</label>
-          <progress id="video-progress" max={100} value={progress?.percent ?? 0} />
-          <div className="upload-metrics">
-            <span>
-              {mb(progress?.sentBytes ?? 0)} {t('upload.unitMB')} / {mb(file.size)}{' '}
-              {t('upload.unitMB')}
-            </span>
-            <span>
-              {Math.round(progress?.percent ?? 0)} {t('upload.unitPercent')}
-            </span>
-            <span>
-              {mb(progress?.bytesPerSecond ?? 0)} {t('upload.unitMBs')}
-            </span>
-          </div>
-          {busy && (
-            <p className="muted" role="status">
+        <div className="qv-field upload-site">
+          <label htmlFor="inspection-site">{t('upload.site')}</label>
+          <select
+            className="qv-select"
+            id="inspection-site"
+            value={siteId}
+            disabled={busy || siteState !== 'ready' || sites.length === 0}
+            aria-describedby={
+              siteState !== 'ready' || sites.length === 0 ? 'upload-sites-state' : undefined
+            }
+            onChange={(event) => {
+              resetSession();
+              setSiteId(event.target.value);
+            }}
+          >
+            <option value="">
               {t(
-                progress?.percent === 100
-                  ? 'upload.finishing'
-                  : progress
-                    ? 'upload.sending'
-                    : 'upload.preparing',
+                siteState === 'loading'
+                  ? 'upload.sitesLoading'
+                  : siteState === 'unavailable'
+                    ? 'upload.sitesUnavailable'
+                    : 'upload.chooseSite',
               )}
+            </option>
+            {sites.map((site) => (
+              <option key={site.id} value={site.id}>
+                {site.name}
+              </option>
+            ))}
+          </select>
+          {siteState === 'loading' && (
+            <p id="upload-sites-state" className="qv-caption" role="status">
+              {t('upload.sitesLoading')}
             </p>
           )}
+          {siteState === 'ready' && sites.length === 0 && (
+            <p id="upload-sites-state" className="qv-notice" role="status">
+              {t('upload.sitesEmpty')}
+            </p>
+          )}
+          {siteState === 'unavailable' && (
+            <p id="upload-sites-state" className="qv-notice" role="status">
+              {t('upload.catalogOnly')}
+            </p>
+          )}
+          {siteState === 'error' && (
+            <div id="upload-sites-state" className="upload-sites-error">
+              <p className="qv-notice upload-error" role="alert">
+                {t('upload.sitesError')}
+              </p>
+              <button
+                className="qv-btn qv-btn--secondary"
+                onClick={() => {
+                  setSiteState('loading');
+                  setSiteAttempt((value) => value + 1);
+                }}
+              >
+                {t('shell.retry')}
+              </button>
+            </div>
+          )}
         </div>
-      )}
-      {error && (
-        <p className="upload-error" role="alert" id="upload-error">
-          {t(error)}
-        </p>
-      )}
-      <div className="dialog-actions">
+        <label className="qv-drop upload-picker" htmlFor="inspection-video">
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
+            <path d="M12 16V4m-5 5 5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />
+          </svg>
+          <span>{t('upload.choose')}</span>
+          <span className="qv-caption">{t('upload.formats')}</span>
+          <input
+            id="inspection-video"
+            className="sr-only"
+            type="file"
+            accept={VIDEO_ACCEPT}
+            disabled={busy}
+            aria-invalid={!!error && error !== 'upload.cancelled' && error !== 'upload.network'}
+            aria-describedby={error ? 'upload-error' : 'upload-description'}
+            onChange={(event) => validate(event.target.files?.[0])}
+          />
+        </label>
+        {file && (
+          <p className="qv-caption selected-file">
+            {t('upload.selected')}: {file.name}
+          </p>
+        )}
+        {(busy || progress) && file && (
+          <div className="qv-upbar upload-progress" aria-live="polite">
+            <label htmlFor="video-progress">{t('upload.progress')}</label>
+            <progress
+              className="qv-pbar"
+              id="video-progress"
+              max={100}
+              value={progress?.percent ?? 0}
+            />
+            <div className="qv-caption upload-metrics">
+              <span>
+                {mb(progress?.sentBytes ?? 0)} {t('upload.unitMB')} / {mb(file.size)}{' '}
+                {t('upload.unitMB')}
+              </span>
+              <span>
+                {Math.round(progress?.percent ?? 0)} {t('upload.unitPercent')}
+              </span>
+              <span>
+                {mb(progress?.bytesPerSecond ?? 0)} {t('upload.unitMBs')}
+              </span>
+            </div>
+            {busy && (
+              <p className="qv-caption" role="status">
+                {t(
+                  progress?.percent === 100
+                    ? 'upload.finishing'
+                    : progress
+                      ? 'upload.sending'
+                      : 'upload.preparing',
+                )}
+              </p>
+            )}
+          </div>
+        )}
+        {error && (
+          <p className="qv-notice upload-error" role="alert" id="upload-error">
+            {t(error)}
+          </p>
+        )}
+      </div>
+      <div className="qv-dialog__foot dialog-actions">
         {busy ? (
-          <button className="shell-button" onClick={cancel}>
+          <button className="qv-btn qv-btn--secondary" onClick={cancel}>
             {t('upload.cancel')}
           </button>
         ) : (
           <>
-            <button className="shell-button" onClick={close}>
+            <button className="qv-btn qv-btn--secondary" onClick={close}>
               {t('dialog.close')}
             </button>
             <button
-              className="shell-button primary"
+              className="qv-btn"
               disabled={!file || !siteId || siteState !== 'ready'}
               onClick={() => void start()}
             >

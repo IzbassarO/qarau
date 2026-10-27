@@ -1,10 +1,11 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import type { Vector3 } from 'three';
 import type { Bundle } from '../lib/bundle';
-import tokens from '../design/tokens.json';
+import tokens from '../design/tokens.json' with { type: 'json' };
 import { computeMinimapTransform, viewConePolygon } from './minimap';
 
-const SIZE = tokens.shared.layout.minimap;
+// Fixed canvas backing resolution; v8 has no separate minimap layout token.
+const SIZE = 180;
 const MAX_POINTS = 20_000;
 
 export interface MinimapState {
@@ -50,9 +51,9 @@ export const Minimap = forwardRef<MinimapHandle, { bundle: Bundle; label: string
       poseContext.current = context(pose.current);
       if (!ctx) return;
       ctx.clearRect(0, 0, SIZE, SIZE);
-      ctx.fillStyle = tokens.shared.color['viewer-canvas'];
+      ctx.fillStyle = tokens.map.ground;
       ctx.fillRect(0, 0, SIZE, SIZE);
-      ctx.fillStyle = tokens.shared.color['finding-inspected'];
+      ctx.fillStyle = tokens.map.text;
       ctx.globalAlpha = 0.6;
       const count = Math.floor(bundle.position.length / 3);
       const stride = Math.max(1, Math.ceil(count / MAX_POINTS));
@@ -88,18 +89,18 @@ export const Minimap = forwardRef<MinimapHandle, { bundle: Bundle; label: string
           ctx.lineTo(polygon[1].x, polygon[1].y);
           ctx.lineTo(polygon[2].x, polygon[2].y);
           ctx.closePath();
-          ctx.fillStyle = tokens.shared.color['viewer-text'];
+          ctx.fillStyle = tokens.map.text;
           ctx.globalAlpha = 0.2;
           ctx.fill();
           ctx.globalAlpha = 1;
-          ctx.strokeStyle = tokens.shared.color['viewer-text'];
+          ctx.strokeStyle = tokens.map.text;
           ctx.lineWidth = 1;
           ctx.stroke();
           ctx.beginPath();
           ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-          ctx.fillStyle = tokens.shared.color['viewer-canvas'];
+          ctx.fillStyle = tokens.map.ground;
           ctx.fill();
-          ctx.strokeStyle = tokens.shared.color['viewer-current'];
+          ctx.strokeStyle = tokens.map.text;
           ctx.lineWidth = 1.5;
           ctx.stroke();
         },
@@ -112,7 +113,7 @@ export const Minimap = forwardRef<MinimapHandle, { bundle: Bundle; label: string
         role="img"
         aria-label={label}
         data-testid="observer-minimap"
-        className="viewer-minimap"
+        className="qv-float qv-float--map viewer-minimap"
         style={{ width: SIZE, height: SIZE }}
       >
         <canvas ref={cloud} width={SIZE} height={SIZE} aria-hidden="true" />

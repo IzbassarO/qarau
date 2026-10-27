@@ -24,6 +24,12 @@ beforeEach(() => setLang('en'));
 it('renders three-decimal model coordinates, views and unavailable measurements', () => {
   render(<PointInfoPanel info={info} onSeek={vi.fn()} onClose={vi.fn()} />);
   expect(screen.getByRole('region', { name: 'Point info' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Point info' }).className).toBe(
+    'qv-pop point-info-panel',
+  );
+  expect(screen.getByRole('button', { name: 'Close point info' }).className).toBe(
+    'qv-iconbtn viewer-tool',
+  );
   for (const text of ['1.235 model units', '-2.000 model units', '3.400 model units', 'Views', '2'])
     expect(screen.getByText(text)).toBeTruthy();
   expect(screen.getAllByText('Not available: needs metric scale (P5a)')).toHaveLength(2);

@@ -44,6 +44,19 @@ it.each<Lang>(['en', 'ru', 'kk'])(
     expect(screen.getByLabelText(t['auth.username']).getAttribute('autocomplete')).toBe('username');
     expect(screen.getByLabelText(t['auth.password']).getAttribute('type')).toBe('password');
     expect(screen.getByRole('button', { name: t['auth.signIn'] })).toBeTruthy();
+    expect(screen.getByRole('main').className).toBe('qv login-page');
+    expect(
+      screen.getByRole('heading', { name: t['auth.heroTitle'] }).closest('section')?.className,
+    ).toBe('qv-hero login-hero');
+    expect(screen.getByRole('heading', { name: t['auth.title'] }).className).toBe('qv-title');
+    expect(screen.getByLabelText(t['auth.username']).className).toBe('qv-input');
+    expect(screen.getByLabelText(t['auth.password']).className).toBe('qv-input');
+    expect(screen.getByRole('button', { name: t['auth.signIn'] }).className).toBe(
+      'qv-btn qv-btn--lg qv-btn--block',
+    );
+    expect(screen.getByRole('group', { name: t['language.label'] }).className).toBe(
+      'qv-segment shell-languages',
+    );
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('navigation')).toBeNull();
   },
@@ -59,6 +72,7 @@ it.each([401, 403])(
     expect((await screen.findByRole('alert')).textContent).toBe(
       LANGS.en['auth.invalidCredentials'],
     );
+    expect(screen.getByRole('alert').className).toBe('qv-notice login-error');
     expect(authHeader()).toEqual({});
     expect(sessionStorage.length).toBe(0);
     expect((screen.getByLabelText('Password') as HTMLInputElement).value).toBe('');

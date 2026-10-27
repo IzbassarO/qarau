@@ -24,6 +24,10 @@ it.each([
   expect(within(row).getByText('Video import')).toBeTruthy();
   expect(within(row).getByText(label)).toBeTruthy();
   expect(row.getAttribute('data-state')).toBe(status);
+  expect(row.classList.contains('qv-row')).toBe(true);
+  expect(row.closest('section')?.className).toBe('qv-card processing-section');
+  expect(screen.getByRole('heading', { name: 'Processing steps' }).className).toBe('qv-heading');
+  expect(within(row).getByText(label).classList.contains('qv-status')).toBe(true);
   expect(row.querySelector('svg')).toBeTruthy();
 });
 
@@ -38,6 +42,10 @@ it.each<Lang>(['en', 'ru', 'kk'])(
       />,
     );
     expect(screen.getByText(t['processing.error.tooFewRegisteredFrames.title'])).toBeTruthy();
+    expect(
+      screen.getByText(t['processing.error.tooFewRegisteredFrames.title']).closest('.qv-notice')
+        ?.className,
+    ).toBe('qv-notice step-error');
     expect(screen.getByText(t['processing.whatWentWrong'])).toBeTruthy();
     expect(screen.getByText(t['processing.whatToDo'])).toBeTruthy();
     expect(screen.getByText(t['processing.error.tooFewRegisteredFrames.whatToDo'])).toBeTruthy();
@@ -82,6 +90,7 @@ it('keeps unknown stages, statuses, error codes and raw detail accessible with f
   );
   expect(screen.getByText('Unknown stage')).toBeTruthy();
   expect(screen.getByText('new_stage')).toBeTruthy();
+  expect(screen.getByText('new_stage').className).toBe('qv-mono qv-muted step-raw');
   expect(screen.getByText('waiting_for_device')).toBeTruthy();
   expect(screen.getByText(LANGS.en['processing.error.unknown.whatToDo'])).toBeTruthy();
   fireEvent.click(screen.getByText('Processing details'));
@@ -112,6 +121,7 @@ it('updates running elapsed time and stops its timer when finished', () => {
 it('shows a localized empty state', () => {
   render(<ProcessingSteps steps={[]} />);
   expect(screen.getByText(LANGS.en['inspection.noStages'])).toBeTruthy();
+  expect(screen.getByRole('status').className).toBe('qv-card__body qv-caption');
 });
 
 it('renders the S1 step fixture returned by GET /api/inspections/{id}', async () => {

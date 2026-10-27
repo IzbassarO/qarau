@@ -1,3 +1,4 @@
+import { openTools } from './chrome';
 import { expect, test } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 
@@ -27,6 +28,7 @@ for (const run of ['notre-dame', 'room', 'aegviidu']) {
     const observer = modes.getByRole('button', { name: en['viewer.mode.observer'], exact: true });
     await expect(observer).toBeEnabled();
     await expect(observer).toHaveAttribute('aria-pressed', 'false');
+    await openTools(page);
     for (const label of [
       'toolbar.top',
       'toolbar.front',
@@ -68,7 +70,7 @@ for (const run of ['notre-dame', 'room', 'aegviidu']) {
       return {
         visibleFraction: visible / sampled,
         points: positions.count,
-        black: engine.renderer.getClearColor(dots.material.color.clone()).getHex() === 0,
+        mapGround: engine.renderer.getClearColor(dots.material.color.clone()).getHex() === 0x131313,
         up: camera.up.toArray(),
         horizonTilt: Math.abs(right.z),
         frustums: engine.scene.children.filter((object) => object.type === 'LineSegments').length,
@@ -76,7 +78,7 @@ for (const run of ['notre-dame', 'room', 'aegviidu']) {
     });
     expect(framing.points).toBeGreaterThan(100);
     expect(framing.visibleFraction).toBeGreaterThan(0.8);
-    expect(framing.black).toBe(true);
+    expect(framing.mapGround).toBe(true);
     expect(framing.up).toEqual([0, 0, 1]);
     expect(framing.horizonTilt).toBeLessThan(1e-7);
     expect(framing.frustums).toBe(1);
@@ -86,6 +88,7 @@ for (const run of ['notre-dame', 'room', 'aegviidu']) {
     await expect(
       modes.getByRole('button', { name: en['viewer.mode.orbit'], exact: true }),
     ).toHaveAttribute('aria-pressed', 'true');
+    await openTools(page);
     await page.getByRole('button', { name: en['toolbar.alignSurface'], exact: true }).click();
     await expect(page.getByRole('status')).toHaveText(en['canvas.alignHint']);
     await page.keyboard.press('Escape');

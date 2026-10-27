@@ -3,6 +3,7 @@ import {
   BufferAttribute,
   BufferGeometry,
   CapsuleGeometry,
+  Color,
   Group,
   Line,
   LineBasicMaterial,
@@ -40,6 +41,7 @@ import {
 import { defaultViewState, initialFraming } from './defaults';
 import { clampCamera, clampPosition, estimateGround, estimateSurfaceNormal } from './constraints';
 import { hasRgb, type Bundle } from '../lib/bundle';
+import tokens from '../design/tokens.json' with { type: 'json' };
 import {
   colmapPoseToThree,
   csrSlice,
@@ -62,6 +64,12 @@ export interface Options {
 
 export type ColorMode = 'height' | 'rgb';
 export type PointLayer = 'sparse' | 'dense';
+type SignalColors = Record<'critical' | 'watch' | 'unseen', string>;
+
+function colorBytes(value: string): [number, number, number] {
+  const hex = new Color(value).getHex();
+  return [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255];
+}
 
 function heightColors(position: Float32Array, [low, high]: [number, number]) {
   const colors = new Uint8Array(position.length);
@@ -79,6 +87,7 @@ const POINT_PROJECTION = /* glsl */ `
 
 const VERT = /* glsl */ `
 uniform float uFindings, uSelected;
+uniform vec3 uUnseenColor, uLaterColor;
 uniform float uCurrentFrame, uBuildUp, uShowCurrent, uPointSize, uPixelRatio, uRefDist;
 attribute float firstSeen;
 attribute float visibleNow;
@@ -88,11 +97,11 @@ varying vec3 vColor;
 void main() {
   vec3 c = color;
   float k = 1.0;
-  if (firstSeen > 65534.5) c = vec3(0.4196, 0.4471, 0.4902);            // #6B727D never observed
-  else if (uBuildUp > 0.5 && firstSeen > uCurrentFrame) c = vec3(0.1647, 0.1961, 0.2510); // #2A3240
+  if (firstSeen > 65534.5) c = uUnseenColor;
+  else if (uBuildUp > 0.5 && firstSeen > uCurrentFrame) c = uLaterColor;
   else if (uShowCurrent > 0.5 && visibleNow > 0.5) { c = min(c * 1.25 + 0.12, vec3(1.0)); k = 1.25; }
   if (uFindings > 0.5 && findingColor.r > 0.0 && firstSeen < 65534.5 && !(uBuildUp > 0.5 && firstSeen > uCurrentFrame)) {
-    c = findingColor; // #F0565C critical, #F2A33A watch, in both colour modes
+    c = findingColor; // Severity colours remain independent of the base colour mode.
     k = fid == uSelected ? 1.9 : 1.35;
     if (uSelected > 0.5 && fid != uSelected) c *= 0.65;
   }
@@ -127,6 +136,7 @@ export interface Callbacks {
 
 export class ViewerEngine {
   readonly renderer: WebGLRenderer;
+  private gl: WebGL2RenderingContext;
   readonly scene = new Scene();
   readonly camera = new PerspectiveCamera(50, 1, 0.01, 100);
   readonly controls: NavigationControls;
@@ -172,12 +182,14 @@ export class ViewerEngine {
   private heldKeys = new Set<string>();
   private pointerLocked = false;
   private disposed = false;
+  private themeObserver: MutationObserver;
   private lookDrag: { id: number; x: number; y: number } | null = null;
   private axisAnimation: {
     pivot: Vector3;
     target: ReturnType<typeof viewDirectionFor>;
   } | null = null;
   private dirty = true;
+  private renderFence: WebGLSync | null = null;
   private raf = 0;
   private tween: null | {
     t0: number;
@@ -203,11 +215,14 @@ export class ViewerEngine {
   ) {
     const m = b.manifest;
     const defaults = defaultViewState(b);
+    const signals = this.readSignalColors();
     this.currentColorMode = defaults.colorMode;
     this.frustumsVisible = defaults.frustums;
     this.renderer = new WebGLRenderer({ canvas, antialias: true });
+    // Three r186 requires WebGL2; its type definitions still include WebGL1 here.
+    this.gl = this.renderer.getContext() as WebGL2RenderingContext;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setClearColor(0x000000);
+    this.renderer.setClearColor(tokens.map.ground);
     this.renderer.autoClear = false;
 
     const centers = m.frames.filter((f) => f.registered && f.center).map((f) => f.center!);
@@ -242,21 +257,12 @@ export class ViewerEngine {
     this.visAttr = new BufferAttribute(this.visibleNow, 1);
     this.visAttr.setUsage(35048); // DynamicDrawUsage
     g.setAttribute('visibleNow', this.visAttr);
-    // findings (v2): per-point severity + id, uploaded once; toggling is a uniform
-    const findingColors = new Uint8Array(m.points.count * 3);
-    if (b.pointFinding && b.findings) {
-      const palette = new Map(
-        b.findings.map((x) => [
-          x.id,
-          x.severity === 'critical' ? [0xf0, 0x56, 0x5c] : [0xf2, 0xa3, 0x3a],
-        ]),
-      );
-      for (let p = 0; p < m.points.count; p++) {
-        const color = palette.get(b.pointFinding[p]);
-        if (color) findingColors.set(color, p * 3);
-      }
-    }
-    g.setAttribute('findingColor', new Uint8BufferAttribute(findingColors, 3, true));
+    // Theme changes refresh severity bytes in the existing attribute; toggles use a uniform.
+    g.setAttribute(
+      'findingColor',
+      new Uint8BufferAttribute(new Uint8Array(m.points.count * 3), 3, true),
+    );
+    this.updateFindingColors(signals);
     g.setAttribute(
       'fid',
       new BufferAttribute(b.pointFinding ?? new Uint16Array(m.points.count), 1),
@@ -276,6 +282,8 @@ export class ViewerEngine {
         uPointSize: { value: 2.5 },
         uPixelRatio: { value: this.renderer.getPixelRatio() },
         uRefDist: { value: r * 2 },
+        uUnseenColor: { value: new Vector3(...colorBytes(signals.unseen)).divideScalar(255) },
+        uLaterColor: { value: new Vector3(...colorBytes(tokens.map.grid)).divideScalar(255) },
         uFindings: { value: 1 },
         uSelected: { value: 0 },
       },
@@ -312,10 +320,9 @@ export class ViewerEngine {
     if (b.far && b.far.position.length > 0) {
       const farGeometry = new BufferGeometry();
       farGeometry.setAttribute('position', new BufferAttribute(b.far.position, 3));
-      const color = getComputedStyle(canvas).getPropertyValue('--color-notseen').trim();
       this.farPoints = new Points(
         farGeometry,
-        new PointsMaterial({ color: color || '#6B727D', size: 2.5, sizeAttenuation: false }),
+        new PointsMaterial({ color: signals.unseen, size: 2.5, sizeAttenuation: false }),
       );
       this.farPoints.name = 'far';
       this.farPoints.visible = defaults.showFarLayer;
@@ -327,18 +334,18 @@ export class ViewerEngine {
     this.regIdx.forEach((fi, k) => pathPts.set(m.frames[fi].center!, k * 3));
     const pg = new BufferGeometry();
     pg.setAttribute('position', new BufferAttribute(pathPts, 3));
-    this.pathSolid = new Line(pg, new LineBasicMaterial({ color: 0xcfd6e2 }));
+    this.pathSolid = new Line(pg, new LineBasicMaterial({ color: tokens.map.text }));
     const dg = pg.clone();
     this.pathDash = new Line(
       dg,
-      new LineDashedMaterial({ color: 0x4a5160, dashSize: r * 0.015, gapSize: r * 0.015 }),
+      new LineDashedMaterial({ color: tokens.map.grid, dashSize: r * 0.015, gapSize: r * 0.015 }),
     );
     this.pathDash.computeLineDistances();
     this.pathSolid.frustumCulled = this.pathDash.frustumCulled = false;
     this.pathSolid.name = 'camera-path';
     this.pathDots = new Points(
       pg.clone(),
-      new PointsMaterial({ color: 0x9aa6b8, size: 3, sizeAttenuation: false }),
+      new PointsMaterial({ color: tokens.map.text, size: 3, sizeAttenuation: false }),
     );
     this.pathDots.name = 'camera-path-dots';
     this.pathDots.frustumCulled = false;
@@ -347,14 +354,15 @@ export class ViewerEngine {
     // One frustum buffer, reused for the current frame. Never allocate per-frame pyramids.
     const ng = new BufferGeometry();
     ng.setAttribute('position', new BufferAttribute(new Float32Array(48), 3));
-    this.frustumNow = new LineSegments(ng, new LineBasicMaterial({ color: 0x5b9bff }));
+    this.frustumNow = new LineSegments(ng, new LineBasicMaterial({ color: tokens.map.text }));
     this.frustumNow.name = 'current-camera-frustum';
     const dg2 = new BufferGeometry();
     dg2.setAttribute('position', new BufferAttribute(new Float32Array(3), 3));
     this.dot = new Points(
       dg2,
-      new PointsMaterial({ color: 0x5b9bff, size: 9, sizeAttenuation: false }),
+      new PointsMaterial({ color: tokens.map.text, size: 9, sizeAttenuation: false }),
     );
+    this.dot.name = 'current-camera-point';
     this.frustumNow.frustumCulled = this.dot.frustumCulled = false;
     this.scene.add(this.frustumNow, this.dot);
 
@@ -363,7 +371,12 @@ export class ViewerEngine {
     mg.setAttribute('position', new BufferAttribute(new Float32Array(3), 3));
     this.pickMark = new Points(
       mg,
-      new PointsMaterial({ color: 0xffffff, size: 10, sizeAttenuation: false, depthTest: false }),
+      new PointsMaterial({
+        color: tokens.map.text,
+        size: 10,
+        sizeAttenuation: false,
+        depthTest: false,
+      }),
     );
     this.pickMark.name = 'selected-point';
     this.pickMark.renderOrder = 1;
@@ -378,7 +391,7 @@ export class ViewerEngine {
       const angle = (i / 48) * Math.PI * 2;
       ring.push(new Vector3(Math.cos(angle) * markerRadius, Math.sin(angle) * markerRadius, 0));
     }
-    const markerMaterial = new LineBasicMaterial({ color: 0x9bc4ff, depthTest: false });
+    const markerMaterial = new LineBasicMaterial({ color: tokens.map.text, depthTest: false });
     this.observerMarker.add(
       new Line(new BufferGeometry().setFromPoints(ring), markerMaterial),
       new Line(
@@ -396,7 +409,7 @@ export class ViewerEngine {
       const scale = 1 / b.manifest.world.scale_m_per_unit!;
       this.humanFigure = new Mesh(
         new CapsuleGeometry(0.2 * scale, 1.35 * scale, 4, 8),
-        new MeshBasicMaterial({ color: 0xb9c9dc, wireframe: true }),
+        new MeshBasicMaterial({ color: tokens.map.text, wireframe: true }),
       );
       this.humanFigure.name = 'observer-human';
       this.humanFigure.rotation.x = Math.PI / 2;
@@ -442,9 +455,59 @@ export class ViewerEngine {
     document.addEventListener('visibilitychange', this.onVisibility);
     window.addEventListener('blur', this.onBlur);
     canvas.addEventListener('contextmenu', this.noCtx);
+    this.themeObserver = new MutationObserver(this.updateTheme);
+    this.themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
     this.setFrame(0);
-    this.loop();
+    // Coalesce setup/resize, and let StrictMode dispose its trial setup before drawing.
+    this.raf = requestAnimationFrame(this.loop);
   }
+
+  private readSignalColors(): SignalColors {
+    const theme = document.documentElement.dataset.theme;
+    const palette =
+      theme === 'dark'
+        ? tokens.themes.dark
+        : theme === 'midnight'
+          ? tokens.themes.midnight
+          : tokens.themes.light;
+    const style = getComputedStyle(this.canvas);
+    return {
+      critical: style.getPropertyValue('--critical').trim() || palette.critical,
+      watch: style.getPropertyValue('--watch').trim() || palette.watch,
+      unseen: style.getPropertyValue('--unseen').trim() || palette.unseen,
+    };
+  }
+
+  private updateFindingColors(signals: SignalColors) {
+    const { pointFinding, findings } = this.b;
+    if (!pointFinding || !findings) return;
+    const palette = new Map(
+      findings.map((finding) => [
+        finding.id,
+        colorBytes(signals[finding.severity === 'critical' ? 'critical' : 'watch']),
+      ]),
+    );
+    const attribute = this.pointGeometry.getAttribute('findingColor') as BufferAttribute;
+    const colors = attribute.array as Uint8Array;
+    colors.fill(0);
+    for (let point = 0; point < this.b.manifest.points.count; point++) {
+      const color = palette.get(pointFinding[point]);
+      if (color) colors.set(color, point * 3);
+    }
+    attribute.needsUpdate = true;
+  }
+
+  private updateTheme = () => {
+    if (this.disposed) return;
+    const signals = this.readSignalColors();
+    this.farPoints?.material.color.set(signals.unseen);
+    this.mat.uniforms.uUnseenColor.value.set(...colorBytes(signals.unseen)).divideScalar(255);
+    this.updateFindingColors(signals);
+    this.dirty = true;
+  };
 
   // ------------------------------------------------------------ frames / options
   /** Fill 5 vertices*... pyramid (apex + 4 corners, 8 segments) for frame fi at depth d. */
@@ -1305,7 +1368,7 @@ export class ViewerEngine {
       this.dirty = true;
     this.enforceCamera();
     // fps = frames actually rendered per second; renders are on demand, so idle reads 0
-    if (this.dirty) {
+    if (this.dirty && this.renderReady()) {
       this.dirty = false;
       this.render();
       this.frames++;
@@ -1316,6 +1379,17 @@ export class ViewerEngine {
       this.lastFps = now;
     }
   };
+
+  /** Do not queue full-cloud draws faster than the GPU can finish them. */
+  private renderReady() {
+    if (!this.renderFence) return true;
+    const gl = this.gl;
+    // A zero timeout polls completion without blocking input or the compositor.
+    if (gl.clientWaitSync(this.renderFence, 0, 0) === gl.TIMEOUT_EXPIRED) return false;
+    gl.deleteSync(this.renderFence);
+    this.renderFence = null;
+    return true;
+  }
 
   private render() {
     const r = this.renderer;
@@ -1332,12 +1406,16 @@ export class ViewerEngine {
     const shown = [this.frustumNow.visible, this.dot.visible];
     if (atCam) this.frustumNow.visible = this.dot.visible = false;
     r.render(this.scene, this.camera);
+    const gl = this.gl;
+    this.renderFence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
     [this.frustumNow.visible, this.dot.visible] = shown;
     this.onRender?.();
   }
 
   dispose() {
     this.disposed = true;
+    this.themeObserver.disconnect();
     this.exitFlyMode();
     this.axisAnimation = null;
     cancelAnimationFrame(this.raf);
@@ -1386,6 +1464,10 @@ export class ViewerEngine {
     this.densePoints?.geometry.dispose();
     this.densePoints?.material.dispose();
     this.densePoints?.removeFromParent();
+    if (this.renderFence) {
+      this.gl.deleteSync(this.renderFence);
+      this.renderFence = null;
+    }
     this.renderer.dispose();
   }
 }

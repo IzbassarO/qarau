@@ -192,6 +192,8 @@
   "processing.error.unknown.whatWentWrong": "The pipeline reported a problem that this version cannot explain yet.",
   "processing.error.unknown.whatToDo": "Check the pipeline details below. Retry the failed stage; if it fails again, share the inspection ID and error details with your administrator.",
   "auth.documentTitle": "Qarau Vision — Sign in",
+  "auth.heroTitle": "Film the wall. Get every defect, measured.",
+  "auth.heroTagline": "Where it is, how big, and the proof.",
   "auth.title": "Sign in to the control center",
   "auth.description": "Enter your username and password to open your sites and inspections.",
   "auth.username": "Username",
@@ -275,5 +277,10 @@
   "processing.mapWaiting": "The 3D map will be available after processing.",
   "inspection.detailError": "Could not load inspection progress. Check your connection and try again.",
   "upload.sitesUnavailable": "Site selection is unavailable",
-  "upload.catalogOnly": "You can view existing inspections here. To upload a video, use a workspace with site management and uploads enabled."
+  "upload.catalogOnly": "You can view existing inspections here. To upload a video, use a workspace with site management and uploads enabled.",
+  "catalog.title": "Inspections",
+  "catalog.object": "Object",
+  "catalog.shot": "Shot",
+  "catalog.status": "Status",
+  "viewer.details": "Frames and layers"
 }

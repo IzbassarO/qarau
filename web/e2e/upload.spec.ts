@@ -1,3 +1,4 @@
+import { openNavigation, closeNavigation } from './chrome';
 import { expect, test } from '@playwright/test';
 import en from '../src/i18n/en.json' with { type: 'json' };
 import ru from '../src/i18n/ru.json' with { type: 'json' };
@@ -139,12 +140,14 @@ for (const theme of ['light', 'dark'] as const) {
       finish();
       await expect(dialog).not.toBeVisible();
       await expect(page).toHaveURL('/inspections/41');
+      await openNavigation(page);
       const entry = page
         .getByRole('navigation')
         .getByRole('link', { name: new RegExp(`${t['shell.inspection']} 41`) });
       await expect(entry).toBeVisible();
       await expect(entry.getByText(t['status.uploaded'], { exact: true })).toBeVisible();
       await expect(entry).toHaveAttribute('aria-current', 'page');
+      await closeNavigation(page);
       await expect(page.getByText(t['processing.uploadedWaiting'])).toBeVisible();
       await expect(page.getByRole('alert')).toHaveCount(0);
       expect(offsets).toEqual([0, 4_194_304]);

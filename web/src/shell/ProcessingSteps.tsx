@@ -10,7 +10,7 @@ import {
 
 function StateIcon({ status }: { status: ProcessingStep['status'] }) {
   return (
-    <span className={`step-icon ${status}`} aria-hidden="true">
+    <span className={`qv-muted step-icon ${status}`} aria-hidden="true">
       <svg
         viewBox="0 0 24 24"
         fill="none"
@@ -47,13 +47,15 @@ export function ProcessingSteps({
   }, [running]);
 
   return (
-    <section className="processing-section" aria-labelledby="processing-title">
-      <div className="section-heading">
-        <h2 id="processing-title">{t('inspection.processing')}</h2>
-        <span className="muted">{t('inspection.processingNote')}</span>
+    <section className="qv-card processing-section" aria-labelledby="processing-title">
+      <div className="qv-card__head section-heading">
+        <h2 className="qv-heading" id="processing-title">
+          {t('inspection.processing')}
+        </h2>
+        <span className="qv-caption">{t('inspection.processingNote')}</span>
       </div>
       {steps.length === 0 ? (
-        <p className="muted" role="status">
+        <p className="qv-card__body qv-caption" role="status">
           {t(uploaded ? 'processing.uploadedWaiting' : 'inspection.noStages')}
         </p>
       ) : (
@@ -65,21 +67,23 @@ export function ProcessingSteps({
             return (
               <li
                 key={`${step.id}-${index}`}
-                className={`processing-step ${step.status}`}
+                className={`qv-row processing-step ${step.status}`}
                 data-state={step.status}
               >
                 <div className="step-row">
                   <StateIcon status={step.status} />
-                  <span className="step-name">
+                  <span className="qv-strong step-name">
                     {t(label)}
                     {label === 'processing.unknownStage' && step.id && (
-                      <span className="step-raw">{step.id}</span>
+                      <span className="qv-mono qv-muted step-raw">{step.id}</span>
                     )}
                   </span>
-                  <span className={`step-state ${step.status}`}>
+                  <span
+                    className={`qv-status qv-status--muted qv-caption step-state ${step.status}`}
+                  >
                     {t(`processing.status.${step.status}`)}
                   </span>
-                  <span className="step-time" title={t('processing.duration')}>
+                  <span className="qv-caption step-time" title={t('processing.duration')}>
                     {duration === undefined ? (
                       t('processing.durationUnavailable')
                     ) : (
@@ -91,33 +95,36 @@ export function ProcessingSteps({
                   </span>
                 </div>
                 {step.status === 'unknown' && (
-                  <p className="step-unknown">
+                  <p className="qv-caption step-unknown">
                     {t('processing.unknownState')}
-                    {step.reportedStatus && <span className="step-raw">{step.reportedStatus}</span>}
+                    {step.reportedStatus && (
+                      <span className="qv-mono step-raw">{step.reportedStatus}</span>
+                    )}
                   </p>
                 )}
                 {step.status === 'failed' && (
-                  <div className="step-error">
-                    <h3>{t(error.title)}</h3>
+                  <div className="qv-notice step-error">
+                    <h3 className="qv-heading">{t(error.title)}</h3>
                     <dl>
                       <div>
-                        <dt>{t('processing.whatWentWrong')}</dt>
-                        <dd>{t(error.whatWentWrong)}</dd>
+                        <dt className="qv-strong">{t('processing.whatWentWrong')}</dt>
+                        <dd className="qv-caption">{t(error.whatWentWrong)}</dd>
                       </div>
                       <div>
-                        <dt>{t('processing.whatToDo')}</dt>
-                        <dd>{t(error.whatToDo)}</dd>
+                        <dt className="qv-strong">{t('processing.whatToDo')}</dt>
+                        <dd className="qv-caption">{t(error.whatToDo)}</dd>
                       </div>
                     </dl>
                   </div>
                 )}
                 {(step.detail || step.errorCode) &&
                   (step.status === 'failed' || step.status === 'unknown') && (
-                    <details className="step-detail">
+                    <details className="qv-caption step-detail">
                       <summary>{t('processing.details')}</summary>
                       {step.errorCode && (
                         <p>
-                          {t('processing.errorCode')} <code>{step.errorCode}</code>
+                          {t('processing.errorCode')}{' '}
+                          <code className="qv-mono">{step.errorCode}</code>
                         </p>
                       )}
                       {step.detail && <p className="step-raw-detail">{step.detail}</p>}

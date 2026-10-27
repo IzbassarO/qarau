@@ -1,3 +1,4 @@
+import { openDetails, closeDetails, openTools, closeTools } from './chrome';
 import { expect, test, type Page } from '@playwright/test';
 import { readDenseFixture } from '../src/fixtures/dense-bundle/readFixture';
 import en from '../src/i18n/en.json' with { type: 'json' };
@@ -28,6 +29,7 @@ test('dense fixture toggles independently and a picked dense point lists its sou
   await serveDenseFixture(page);
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(page.getByText(en['error.webgl'])).toHaveCount(0);
+  await openDetails(page);
   const toggle = page.getByRole('button', { name: en['viewer.show.densePoints'] });
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await expect
@@ -57,9 +59,12 @@ test('dense fixture toggles independently and a picked dense point lists its sou
       count: 4,
     });
 
+  await closeDetails(page);
+  await openTools(page);
   const tool = page.getByRole('button', { name: en['pointInfo.tool'] });
   await tool.click();
   await expect(tool).toHaveAttribute('aria-pressed', 'true');
+  await closeTools(page);
   const canvas = page.getByLabel(en['canvas.label']);
   const box = (await canvas.boundingBox())!;
   const point = await page.evaluate(() => window.__qarau!.densePointScreen(0));

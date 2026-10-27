@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { setLang } from '../i18n';
+import { LANGS, setLang, type Lang } from '../i18n';
 import * as upload from '../lib/upload';
 import { NewInspectionDialog } from './NewInspectionDialog';
 
@@ -37,6 +37,26 @@ async function chooseVideo(size = 10_485_760) {
   });
   fireEvent.click(screen.getByRole('button', { name: 'Upload video' }));
 }
+
+it.each<Lang>(['en', 'ru', 'kk'])('uses v8 dialog and form components in %s', async (lang) => {
+  setLang(lang);
+  render(<NewInspectionDialog onClose={() => {}} />);
+  expect(screen.getByRole('dialog').className).toBe('qv qv-dialog inspection-dialog');
+  expect(screen.getByRole('heading').className).toBe('qv-heading');
+  expect(screen.getByLabelText(LANGS[lang]['upload.site']).className).toBe('qv-select');
+  expect(
+    screen.getByLabelText(new RegExp(LANGS[lang]['upload.choose'])).closest('label')?.className,
+  ).toBe('qv-drop upload-picker');
+  expect(screen.getByRole('button', { name: LANGS[lang]['upload.start'] }).className).toBe(
+    'qv-btn',
+  );
+  expect(
+    screen
+      .getAllByRole('button', { name: LANGS[lang]['dialog.close'] })
+      .map((button) => button.className),
+  ).toEqual(['qv-iconbtn icon-button', 'qv-btn qv-btn--secondary']);
+  expect(await screen.findByRole('option', { name: 'North site' })).toBeTruthy();
+});
 
 it('loads the site selector from GET /api/sites and requires a site and video', async () => {
   render(<NewInspectionDialog onClose={() => {}} />);
@@ -127,6 +147,7 @@ it('shows 4.0 MB / 10.0 MB, 40 % and MB/s during upload, then cancels', async ()
   expect(screen.getByText('40 %')).toBeTruthy();
   expect(screen.getByText('2.0 MB/s')).toBeTruthy();
   expect(screen.getByRole('progressbar').getAttribute('value')).toBe('40');
+  expect(screen.getByRole('progressbar').className).toBe('qv-pbar');
   expect((screen.getByLabelText('Site') as HTMLSelectElement).disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Cancel upload' }));
   expect(options?.signal?.aborted).toBe(true);

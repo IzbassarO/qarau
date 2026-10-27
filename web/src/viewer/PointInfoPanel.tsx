@@ -14,17 +14,17 @@ export function PointInfoPanel({
   const { t } = useI18n();
   const unit = t(info.unit === 'm' ? 'pointInfo.metres' : 'pointInfo.modelUnits');
   return (
-    <section aria-label={t('pointInfo.title')} className="point-info-panel">
-      <div className="viewer-section-heading">
-        <h2 className="viewer-heading">
-          {t('pointInfo.title')} <span className="viewer-mono viewer-muted">#{info.index}</span>
+    <section aria-label={t('pointInfo.title')} className="qv-pop point-info-panel">
+      <div className="qv-pop__head viewer-section-heading">
+        <h2 className="qv-heading viewer-heading">
+          {t('pointInfo.title')} <span className="qv-mono viewer-muted">#{info.index}</span>
         </h2>
         <button
           type="button"
           onClick={onClose}
           aria-label={t('pointInfo.close')}
           title={t('pointInfo.close')}
-          className="viewer-tool"
+          className="qv-iconbtn viewer-tool"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" stroke="currentColor">
             <path d="m3 3 8 8M11 3l-8 8" />
@@ -86,12 +86,12 @@ export function PointInfoPanel({
                 onClick={() => {
                   if (frame.timeSec !== null) onSeek(frame.timeSec, frame.frameId);
                 }}
-                className="point-info-frame"
+                className="qv-thumb point-info-frame"
               >
                 <SessionImage
                   src={frame.thumbnailUrl}
                   alt={`${t('pointInfo.frame')} ${frame.frameId}`}
-                  className="point-info-thumbnail"
+                  className="qv-thumb__img point-info-thumbnail"
                 />
                 <span className="viewer-caption">
                   {frame.timeSec === null

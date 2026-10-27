@@ -18,9 +18,12 @@ export default defineConfig({
   timeout: 180_000,
   use: {
     baseURL: URL,
-    viewport: { width: 1440, height: 900 },
     launchOptions: { args: GL },
   },
+  projects: [
+    { name: 'desktop', use: { viewport: { width: 1440, height: 900 } } },
+    { name: 'phone', use: { viewport: { width: 390, height: 844 } } },
+  ],
   webServer: {
     command: `pnpm exec vite --port ${PORT} --strictPort`,
     url: URL,

@@ -19,6 +19,16 @@ vi.mock('three', async (importOriginal) => {
   return {
     ...actual,
     WebGLRenderer: class {
+      getContext() {
+        return {
+          SYNC_GPU_COMMANDS_COMPLETE: 0x9117,
+          TIMEOUT_EXPIRED: 0x911b,
+          fenceSync: () => ({}),
+          clientWaitSync: () => 0x911a,
+          deleteSync() {},
+          flush() {},
+        };
+      }
       setPixelRatio() {}
       getPixelRatio() {
         return 1;
@@ -82,6 +92,33 @@ function renderViewer(runId: string, query = '') {
 function renderDemo() {
   return renderViewer('demo');
 }
+
+it.each([
+  ['missing', 'The findings file listed in the bundle is missing. Re-run the projection stage.'],
+  [
+    'broken',
+    'The findings file could not be read (damaged or inconsistent with the map). Re-run the projection stage.',
+  ],
+] as const)(
+  'shows a %s findings warning outside the folded panels',
+  async (findingsError, message) => {
+    const bundle = { ...createDemo('en').bundle, runId: 'findings-failure', findingsError };
+    vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+    vi.spyOn(bundleApi, 'loadBundle').mockResolvedValue(bundle);
+    renderViewer('findings-failure');
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe(message);
+    expect(alert.className).toBe('qv-notice viewer-notice viewer-error');
+    expect(alert.closest('details')).toBeNull();
+    expect(document.querySelector('.viewer-panel-drawer')?.hasAttribute('open')).toBe(false);
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(
+      screen.getByLabelText(
+        'Interactive 3D map with point cloud and camera path. Two-finger drag or mouse drag: orbit. Shift: pan. Pinch or mouse wheel: zoom. Alt/Option: precision. 1: Orbit. F: Observer.',
+      ),
+    ).toBeTruthy();
+  },
+);
 
 it('opens in Orbit by default without an observer minimap or human figure', () => {
   const setSensitivity = vi.spyOn(ViewerEngine.prototype, 'setSensitivity');
@@ -189,6 +226,8 @@ it('opens ?point=0 with the info tool, evidence panel and selected-point marker,
   renderViewer('demo', '?point=0');
   const tool = screen.getByRole('button', { name: LANGS.en['pointInfo.tool'] });
   expect(tool.getAttribute('aria-pressed')).toBe('true');
+  const tools = tool.closest('details') as HTMLDetailsElement;
+  expect(tools.open).toBe(false);
   const panel = screen.getByRole('region', { name: LANGS.en['pointInfo.title'] });
   expect(within(panel).getByText(`${bundle.position[0].toFixed(3)} model units`)).toBeTruthy();
   expect(within(panel).getAllByText(LANGS.en['pointInfo.needsScale'])).toHaveLength(2);
@@ -212,6 +251,8 @@ it('opens ?point=0 with the info tool, evidence panel and selected-point marker,
   fireEvent.click(within(panel).getByRole('button', { name: LANGS.en['pointInfo.close'] }));
   expect(screen.queryByRole('region', { name: LANGS.en['pointInfo.title'] })).toBeNull();
   expect(tool.getAttribute('aria-pressed')).toBe('false');
+  expect(tools.open).toBe(true);
+  expect(document.activeElement).toBe(tool);
   expect(engine.scene.getObjectByName('selected-point')!.visible).toBe(false);
 });
 
@@ -285,6 +326,7 @@ it('loads /viewer/demo from the existing local point cloud without requesting a 
   const manifest = vi.spyOn(bundleApi, 'loadManifest');
   const load = vi.spyOn(bundleApi, 'loadBundle');
   renderDemo();
+  advanceFrames(1);
 
   expect(screen.getByLabelText(/Interactive 3D map/)).toBeTruthy();
   const pointCount = createDemo('en').bundle.position.length / 3;
@@ -394,7 +436,10 @@ it.each<Lang>(['en', 'ru', 'kk'])(
       expect((await screen.findByRole('alert')).textContent).toBe(
         LANGS[lang][reason === 'missing' ? 'viewer.far.errorMissing' : 'viewer.far.errorBroken'],
       );
-      await waitFor(() => expect(renderScene).toHaveBeenCalled());
+      await waitFor(() => {
+        advanceFrames(1);
+        expect(renderScene).toHaveBeenCalled();
+      });
       expect(screen.getByLabelText(LANGS[lang]['canvas.label'])).toBeTruthy();
       expect(
         screen.queryByRole('button', { name: LANGS[lang]['viewer.show.farPoints'] }),
@@ -408,6 +453,7 @@ it.each<Lang>(['en', 'ru', 'kk'])(
 it('offers five above-ground axis views around the same pivot and disables the bottom view', () => {
   const axisView = vi.spyOn(ViewerEngine.prototype, 'axisView');
   renderDemo();
+  advanceFrames(1);
   const gizmo = screen.getByRole('group', { name: 'Axis views' });
   expect(within(gizmo).getAllByRole('button')).toHaveLength(6);
   const bottom = within(gizmo).getByRole('button', {

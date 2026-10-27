@@ -58,7 +58,7 @@ export const AxisGizmo = forwardRef<AxisGizmoHandle, { onSelect: (axis: Axis) =>
       <div
         role="group"
         aria-label={t('gizmo.label')}
-        className="viewer-gizmo"
+        className="qv-float qv-float--map viewer-gizmo"
         style={{ width: GIZMO_SIZE, height: GIZMO_SIZE }}
       >
         <svg className="pointer-events-none absolute inset-0 size-full" aria-hidden="true">
@@ -91,7 +91,7 @@ export const AxisGizmo = forwardRef<AxisGizmoHandle, { onSelect: (axis: Axis) =>
             aria-label={t(name)}
             title={t(axis === '-z' ? 'gizmo.groundLimited' : name)}
             onClick={() => onSelect(axis)}
-            className="viewer-axis"
+            className="qv-iconbtn viewer-axis"
             style={{
               width: GIZMO_BUTTON_SIZE,
               height: GIZMO_BUTTON_SIZE,

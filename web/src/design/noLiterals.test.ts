@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 import ts from 'typescript';
 import { expect, it } from 'vitest';
 
@@ -112,6 +112,173 @@ function files(directory: string): string[] {
   });
 }
 
+// Fixture images and point-cloud data are source evidence, not interface styling.
+// Keep their pixels out of the UI palette audit; test sources pin fixed expected colours.
+function uiFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = resolve(directory, entry.name);
+    if (entry.isDirectory()) return entry.name === 'fixtures' ? [] : uiFiles(path);
+    return /\.(?:css|tsx?|svg|json)$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)
+      ? [path]
+      : [];
+  });
+}
+
+function withoutComments(source: string, path: string) {
+  if (!/\.tsx?$/.test(path)) return source.replace(/\/\*[\s\S]*?\*\//g, '');
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.JSX, source);
+  const comments: [number, number][] = [];
+  while (scanner.scan() !== ts.SyntaxKind.EndOfFileToken) {
+    if (
+      scanner.getToken() === ts.SyntaxKind.SingleLineCommentTrivia ||
+      scanner.getToken() === ts.SyntaxKind.MultiLineCommentTrivia
+    ) {
+      comments.push([scanner.getTokenPos(), scanner.getTextPos()]);
+    }
+  }
+  for (const [start, end] of comments.reverse()) {
+    source = source.slice(0, start) + ' '.repeat(end - start) + source.slice(end);
+  }
+  return source;
+}
+
+function colourLiterals(source: string, path: string) {
+  const clean = withoutComments(source, path);
+  const errors: string[] = [];
+  if (/#(?:[\da-f]{8}|[\da-f]{6}|[\da-f]{4}|[\da-f]{3})\b/i.test(clean)) {
+    errors.push('hex colour');
+  }
+  // RGB strings calculated from source data are not palette literals.
+  if (/\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\s*\(\s*[-+.\d]/i.test(clean)) {
+    errors.push('functional colour');
+  }
+  if (path.endsWith('.css')) {
+    for (const [, property, value] of clean.matchAll(/([\w-]+)\s*:\s*([^;{}]+)[;}]/g)) {
+      if (!/color|background|border|fill|stroke|shadow|outline/.test(property)) continue;
+      const bare = value.replace(/var\(--[\w-]+\)/g, '');
+      if (
+        bare
+          .toLowerCase()
+          .split(/[^a-z]+/)
+          .some((word) => namedColors.has(word))
+      ) {
+        errors.push(`named colour in ${property}`);
+      }
+    }
+  } else {
+    const file = ts.createSourceFile(
+      'source.tsx',
+      clean,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    function visit(node: ts.Node) {
+      if (ts.isStringLiteralLike(node) && namedColors.has(node.text.toLowerCase())) {
+        errors.push('named colour');
+      }
+      if (ts.isStringLiteralLike(node) && node.text.includes('var(')) {
+        const bare = node.text.replace(/var\(--[\w-]+\)/g, '');
+        if (
+          bare
+            .toLowerCase()
+            .split(/[^a-z]+/)
+            .some((word) => namedColors.has(word))
+        ) {
+          errors.push('named colour in token fallback');
+        }
+      }
+      if (ts.isNumericLiteral(node) && /^0x[\da-f]{6,8}$/i.test(node.getText(file))) {
+        const parent = node.parent;
+        const name =
+          ts.isVariableDeclaration(parent) || ts.isPropertyAssignment(parent)
+            ? parent.name.getText(file)
+            : ts.isCallExpression(parent) || ts.isNewExpression(parent)
+              ? parent.expression.getText(file)
+              : '';
+        if (/color|fill|stroke/i.test(name)) errors.push('numeric colour');
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(file);
+    // SVG source is XML, so inspect its paint attributes explicitly.
+    if (path.endsWith('.svg')) {
+      for (const [, value] of clean.matchAll(/(?:fill|stroke|color)=["']([^"']+)["']/g)) {
+        if (namedColors.has(value.toLowerCase())) errors.push('named SVG colour');
+      }
+    }
+  }
+  return errors;
+}
+
+function gradientViolations(source: string, path: string) {
+  let clean = withoutComments(source, path);
+  if (path.endsWith('.css')) {
+    // The owner-approved sign-in hero is the only decorative gradient in the UI.
+    clean = clean.replace(/([^{}]+)\{([^{}]*)\}/g, (block, selector: string, body: string) => {
+      if (selector.trim() !== '.qv-hero::before') return block;
+      return `${selector}{${body.replace(/background\s*:\s*var\(--signin-hero-gradient\)\s*;/g, '')}}`;
+    });
+  }
+  const errors: string[] = [];
+  if (/gradient\s*\(/i.test(clean)) errors.push('gradient');
+  if (/--signin-hero-gradient\b/.test(clean)) errors.push('sign-in hero gradient outside hero');
+  return errors;
+}
+
+it('keeps all interface colours in token files and the gradient on the sign-in hero', () => {
+  const sourceDirectory = resolve(process.cwd(), 'src');
+  const paths = uiFiles(sourceDirectory).filter(
+    (path) => !/^design\/tokens\.(?:css|json)$/.test(relative(sourceDirectory, path)),
+  );
+  expect(paths.length).toBeGreaterThan(0);
+  for (const path of paths) {
+    const source = readFileSync(path, 'utf8');
+    expect(colourLiterals(source, path), path).toEqual([]);
+    expect(gradientViolations(source, path), path).toEqual([]);
+  }
+  const bundle = readFileSync(resolve(sourceDirectory, 'design/bundle.css'), 'utf8');
+  expect(bundle.match(/var\(--signin-hero-gradient\)/g)).toHaveLength(1);
+});
+
+it.each([
+  ['component.css', '.a { color: #123456; }'],
+  ['component.css', '.a { background: rgba(0, 0, 0, .5); }'],
+  ['component.css', '.a { color: hsl(0 50% 50%); }'],
+  ['component.css', '.a { background: white; }'],
+  ['component.ts', 'const color = "#123456";'],
+  ['component.ts', 'const color = 0xffaabb;'],
+  ['component.tsx', '<path fill="red" />'],
+  ['component.tsx', '<path fill="var(--ink, red)" />'],
+  ['component.svg', '<path fill="red" />'],
+  ['component.json', '{ "palette": "#123456" }'],
+] as const)('rejects colour literals in %s: %s', (path, source) => {
+  expect(colourLiterals(source, path).length).toBeGreaterThan(0);
+});
+
+it('allows computed evidence colours and token references', () => {
+  expect(colourLiterals('const rgb = `rgb(${channels.join(",")})`;', 'component.ts')).toEqual([]);
+  expect(colourLiterals('.a { color: var(--ink); }', 'component.css')).toEqual([]);
+});
+
+it('allows only the named gradient on the sign-in hero', () => {
+  expect(
+    gradientViolations(
+      '.qv-hero::before { background: var(--signin-hero-gradient); }',
+      'component.css',
+    ),
+  ).toEqual([]);
+  for (const source of [
+    '.a { background: linear-gradient(var(--a), var(--b)); }',
+    '.a { background: var(--signin-hero-gradient); }',
+    '.qv-hero { background: var(--signin-hero-gradient); }',
+    '.qv-hero::before { color: var(--signin-hero-gradient); }',
+    '.qv-hero::before, .a { background: var(--signin-hero-gradient); }',
+  ]) {
+    expect(gradientViolations(source, 'component.css').length).toBeGreaterThan(0);
+  }
+});
+
 it('uses tokens throughout auth and shell CSS/TSX', () => {
   const paths = ['shell', 'auth'].flatMap((folder) => files(resolve(process.cwd(), 'src', folder)));
   expect(paths.length).toBeGreaterThan(0);
@@ -121,6 +288,15 @@ it('uses tokens throughout auth and shell CSS/TSX', () => {
       path,
     ).toEqual([]);
   }
+});
+
+it('keeps font families and colour styling in the v8 bundle, outside shell layout CSS', () => {
+  const path = resolve(process.cwd(), 'src/shell/shell.css');
+  const css = withoutComments(readFileSync(path, 'utf8'), path);
+  expect(css).not.toMatch(/\bfont-family\s*:/i);
+  expect(css).not.toMatch(/(?:^|[;{}])\s*font\s*:/i);
+  expect(css).not.toMatch(/(?:^|[;{}])\s*(?:color|background(?:-[\w-]+)?|[\w-]*color)\s*:/i);
+  expect(colourLiterals(css, path)).toEqual([]);
 });
 
 it.each([
