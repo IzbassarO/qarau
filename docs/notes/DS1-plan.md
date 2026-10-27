@@ -1,15 +1,46 @@
 # DS1 — design system v8 checklist
 
-Current round: part 2 of 2, following acceptance of part 1. Continue the six
-existing DS1 commits and preserve the accepted tokens, fonts and literal checks.
-The initial audit found the qv shell/dialogs already wired, with remaining gaps
-in viewer chrome, phone presentation, Playwright projects and the v8 ADR.
+## Current round: part 1 audit (2026-10-26)
 
-Part 2 plan: reuse the existing qv components for the inspection catalog and
-viewer controls, fit the phone layout to the evidence-phone reference without
-adding features, adapt existing e2e interactions to collapsed navigation, pin
-both viewport fixtures, add ADR 0026, and run the required local checks.
-Kerege executes e2e and screenshots; no local server or screenshots are started.
+Continue `devteam/DS1`, including the ten existing task commits through
+`1c9138a` and the merge from dev. The worktree was clean before this audit.
+This round covers build items 1, 2, 4 and 5 only; preserve inherited part 2 work.
+Read `CLAUDE.md`, DESIGN.md and all nine reference screens, including the
+Light/Dark pairs and the 390×844 evidence-phone reference.
+
+| Build item | Audited branch state | Missing work in this round |
+| --- | --- | --- |
+| 1. Tokens and bundle | Done: one version-8 JSON set; Light/Dark aliases in index.css; tokens.css and bundle.css imported once; system data-theme applied before render and subscribed to changes; both italic helpers present. | No implementation gap found. Run the existing token and theme checks. |
+| 2. Fonts | Done: main.tsx imports all eight required local weight/style files; application sources and index.html contain no IBM Plex Mono import or font CDN. The unused package declaration is not an import. | No implementation gap found. Verify font tests and production font output. |
+| 3. qv screens and phone | Inherited implementation covers shell, sign-in, sidebar, dialogs and viewer chrome, with phone adaptations. | Part 2 and tester visual acceptance; do not change screens in part 1. |
+| 4. Literals | Done: former white/black, 12.5/13.5/15 px and sign-in gradient literals are named CSS/JSON tokens; bundle values are preserved. noLiterals restricts the sign-in gradient to the hero. | No implementation gap found. Run the existing literal guard. |
+| 5. Old-look tests | Done: fixed v8 fixtures pin OK, neutral accent, border/focus values, JetBrains Mono, canvas #131313 and far-layer unseen colour. Expected values are independent literals. | No implementation gap found. Run the full unit suite; Kerege runs e2e. |
+| 6. Playwright and ADR | Inherited desktop 1440×900 and phone 390×844 projects retain reuseExistingServer: false; ADR 0026 supersedes ADR 0018's values. | Part 2 acceptance; preserve the existing config and ADR. |
+
+Plan after audit: run lint, typecheck, tests and build on the inherited code;
+fix only a demonstrated part 1 failure. Do not restyle screens or rewrite working
+code to duplicate earlier commits. Kerege runs e2e and captures screenshots
+outside this sandbox, as required by the current task. Start no local server.
+
+Installed package metadata rechecked: the four Fontsource packages at 5.3.0
+are OFL-1.1; React, Three.js, Vite and Vitest are MIT; Playwright is Apache-2.0.
+All permit commercial use. No dependency, tool, model or skill is added.
+
+Current-round verification completed on the inherited code:
+
+- `pnpm lint` and `pnpm typecheck` pass.
+- `pnpm test` passes all 720 tests in 37 files, including the fixed v8 tokens,
+  fonts, system theme, noLiterals and viewer canvas assertions.
+- `pnpm build` passes and emits local assets for all four font families, with
+  the existing advisory about the JavaScript chunk exceeding 500 kB.
+- `pnpm exec playwright test --list` discovers 208 tests in 12 files across
+  both viewport projects. This is discovery only; e2e execution and visual
+  comparison in en/ru/kk and Light/Dark remain with Kerege.
+- No implementation gap or failing part 1 check was found, so this round changes
+  only this audit/plan. No test, token, bundle value, screen, config or ADR was
+  changed. No server or screenshot capture was started.
+
+## Earlier rounds (inherited implementation and verification)
 
 ## Build items 1–6
 
