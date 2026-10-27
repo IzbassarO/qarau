@@ -1,3 +1,5 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import findingFixture from '../test/fixtures/finding.json';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { PerspectiveCamera, Vector3 } from 'three';
@@ -55,6 +57,7 @@ beforeEach(() => {
   sessionStorage.clear();
   setLang('en');
   vi.clearAllMocks();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 404 })));
   now = 0;
   nextFrame = 0;
   pendingFrames.clear();
@@ -81,11 +84,15 @@ afterEach(() => {
 
 function renderViewer(runId: string, query = '') {
   return render(
-    <MemoryRouter initialEntries={[`/viewer/${runId}${query}`]}>
-      <Routes>
-        <Route path="/viewer/:runId" element={<ViewerPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}
+    >
+      <MemoryRouter initialEntries={[`/viewer/${runId}${query}`]}>
+        <Routes>
+          <Route path="/viewer/:runId" element={<ViewerPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -817,4 +824,44 @@ it('allows colour changes when browser storage is unavailable', async () => {
   expect(toggle.getAttribute('aria-pressed')).toBe('false');
   expect(setColorMode).toHaveBeenLastCalledWith('height');
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+function mockFindingViewer() {
+  const bundle = { ...createDemo('en').bundle, runId: 'notre-dame-p3e' };
+  vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+  vi.spyOn(bundleApi, 'loadBundle').mockResolvedValue(bundle);
+  const fetch = vi.fn(async (url: string) => {
+    if (url === '/api/inspections') return Response.json([{ id: 41 }]);
+    if (url === '/api/inspections/41/runs')
+      return Response.json([
+        { id: 'fixture-notre-dame-run', inspection_id: 41, run_dir: 'notre-dame-p3e' },
+      ]);
+    if (url === '/api/inspections/41/findings') return Response.json([findingFixture.finding]);
+    if (url === '/api/findings/701') return Response.json(findingFixture.finding);
+    return new Response(null, { status: 404 });
+  });
+  vi.stubGlobal('fetch', fetch);
+  return fetch;
+}
+
+it.each(['first', '701'])('opens the read-only finding panel from ?finding=%s', async (finding) => {
+  const fetch = mockFindingViewer();
+  renderViewer('notre-dame-p3e', `?finding=${finding}`);
+  expect(await screen.findByRole('heading', { name: 'Corrosion' })).toBeTruthy();
+  const panel = screen.getByRole('complementary', { name: 'Evidence' });
+  expect(panel.querySelectorAll('.evidence-thumbnails img')).toHaveLength(3);
+  expect(panel.querySelectorAll('.evidence-thumbnails polygon')).toHaveLength(3);
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(fetch.mock.calls.map(([url]) => url)).toContain('/api/findings/701');
+  fireEvent.click(screen.getByRole('button', { name: 'Close evidence' }));
+  expect(screen.queryByRole('complementary', { name: 'Evidence' })).toBeNull();
+});
+
+it('opens API evidence by clicking its numbered finding marker', async () => {
+  mockFindingViewer();
+  renderViewer('notre-dame-p3e');
+  const marker = await screen.findByRole('button', { name: 'Finding 701' });
+  fireEvent.click(marker);
+  expect(await screen.findByRole('heading', { name: 'Corrosion' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: 'Point info' })).toBeNull();
 });

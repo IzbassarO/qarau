@@ -13,6 +13,17 @@ export async function readApi(path: string, signal?: AbortSignal): Promise<unkno
   return response.json();
 }
 
+export async function postApi(path: string, body: unknown, signal?: AbortSignal): Promise<unknown> {
+  const response = await fetch(path, {
+    method: 'POST',
+    signal,
+    headers: { ...authHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(String(response.status));
+  return response.json();
+}
+
 /** S1 reruns the named step and its successors; the API supplies all identifiers. */
 export async function rerunInspectionStep(inspectionId: string, runId: string, step: string) {
   const response = await fetch(

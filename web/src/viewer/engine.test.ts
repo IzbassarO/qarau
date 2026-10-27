@@ -123,10 +123,16 @@ function setup(bundle = createDemo('en').bundle) {
   const onFlyModeChange = vi.fn();
   const onAlignModeChange = vi.fn();
   const onPick = vi.fn();
-  const engine = new ViewerEngine(canvas, bundle, { onFlyModeChange, onPick, onAlignModeChange });
+  const onFindingPick = vi.fn();
+  const engine = new ViewerEngine(canvas, bundle, {
+    onFlyModeChange,
+    onPick,
+    onAlignModeChange,
+    onFindingPick,
+  });
   engines.add(engine);
   canvas.focus();
-  return { canvas, engine, onFlyModeChange, onPick, onAlignModeChange };
+  return { canvas, engine, onFlyModeChange, onPick, onAlignModeChange, onFindingPick };
 }
 
 function key(
@@ -1587,3 +1593,18 @@ describe('ViewerEngine object framing', () => {
     expect(engine.controls.target.toArray()).toEqual(bounds.center);
   });
 });
+
+it.each([false, true])(
+  'opens a finding point by its API ID with point-info mode %s',
+  (pointInfo) => {
+    const bundle = navigationBundle();
+    bundle.pointFinding = new Uint32Array(bundle.manifest.points.count).fill(70001);
+    const { canvas, engine, onFindingPick, onPick } = setup(bundle);
+    engine.setPointInfoMode(pointInfo);
+    const pixel = engine.project([1, -1, 1]);
+    pointer(canvas, 'pointerdown', pixel.x, pixel.y);
+    pointer(canvas, 'pointerup', pixel.x, pixel.y);
+    expect(onFindingPick).toHaveBeenCalledExactlyOnceWith(70001);
+    expect(onPick).not.toHaveBeenCalled();
+  },
+);

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
+import { serveEvidenceFixture } from './vite-evidence-fixture.ts';
 
 const TYPES: Record<string, string> = {
   '.json': 'application/json',
@@ -31,6 +32,9 @@ export function devRuns(): Plugin {
         const p = path.resolve(base, rel);
         return p.startsWith(base + path.sep) ? p : null;
       };
+      server.middlewares.use((req, res, next) => {
+        if (!serveEvidenceFixture(req, res, root)) next();
+      });
       server.middlewares.use('/api/runs', (req, res, next) => {
         if (req.method !== 'GET') return next();
         const parts = decodeURIComponent((req.url ?? '/').split('?')[0])

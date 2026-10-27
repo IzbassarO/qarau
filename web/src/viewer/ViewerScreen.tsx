@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Link } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
 import { useI18n } from '../i18n';
 import { hasRgb, runUrl, type Bundle, type Finding } from '../lib/bundle';
 import { heightRamp, RAMP } from '../lib/geometry';
@@ -29,6 +30,10 @@ import {
 } from './ui';
 import { buildDensePointInfo, buildPointInfo, frameTime } from './pointInfo';
 import { PointInfoPanel } from './PointInfoPanel';
+import { EvidencePanel } from './EvidencePanel';
+import { withApiFindings } from './evidence';
+import { findingsForRunOptions } from '../lib/findings';
+import { ApiUnavailableError } from '../lib/api';
 import { Minimap, type MinimapHandle } from './Minimap.tsx';
 import { canShowHumanFigure } from './observer';
 import { SessionImage } from '../auth/SessionImage';
@@ -86,19 +91,40 @@ const icon = (d: ReactNode) => (
 );
 
 export function ViewerScreen({
-  bundle,
+  bundle: sourceBundle,
   embedded = false,
   initialPoint = null,
   invalidPoint = false,
   initialMode = 'orbit',
+  initialFinding = null,
 }: {
   bundle: Bundle;
   embedded?: boolean;
   initialPoint?: number | null;
   invalidPoint?: boolean;
   initialMode?: 'orbit' | 'observer';
+  initialFinding?: string | null;
 }) {
   const { t } = useI18n();
+  const apiFindings = useQuery({
+    ...findingsForRunOptions(sourceBundle.runId),
+    enabled: sourceBundle.runId !== 'demo',
+  });
+  const bundle = useMemo(
+    () => withApiFindings(sourceBundle, apiFindings.data ?? []),
+    [sourceBundle, apiFindings.data],
+  );
+  const [evidenceRequest, setEvidenceRequest] = useState<number | 'first' | null>(() =>
+    initialFinding === 'first'
+      ? 'first'
+      : initialFinding &&
+          /^\d+$/.test(initialFinding) &&
+          Number.isSafeInteger(Number(initialFinding))
+        ? Number(initialFinding)
+        : null,
+  );
+  const evidenceId =
+    evidenceRequest === 'first' ? (apiFindings.data?.[0]?.id ?? null) : evidenceRequest;
   const m = bundle.manifest;
   const frames = m.frames;
   const isImages = m.source.kind === 'images';
@@ -113,7 +139,7 @@ export function ViewerScreen({
   const [humanFigure, setHumanFigure] = useState(false);
   const [alignMode, setAlignMode] = useState(false);
   const [pointInfoMode, setPointInfoMode] = useState(
-    initialMode !== 'observer' && initialPoint !== null,
+    initialMode !== 'observer' && initialPoint !== null && evidenceRequest === null,
   );
   const userId = useSyncExternalStore(subscribeToAuth, sessionUserId, () => null);
   const [sensitivitySetting, setSensitivitySetting] = useState(() => ({
@@ -173,6 +199,12 @@ export function ViewerScreen({
     try {
       eng = new ViewerEngine(canvas, bundle, {
         onPick: (p, layer = 'sparse') => setPicked(p === null ? null : { index: p, layer }),
+        onFindingPick: (id) => {
+          setEvidenceRequest(id);
+          setSel(id);
+          setPicked(null);
+          setPointInfoMode(false);
+        },
         onFlyModeChange: setFlyMode,
         onThirdPersonChange: setThirdPerson,
         onAlignModeChange: setAlignMode,
@@ -237,7 +269,10 @@ export function ViewerScreen({
     else engineRef.current?.setPicked(point?.index ?? null);
   }, [picked, pointInfoMode, bundle]);
   useEffect(() => engineRef.current?.setPointInfoMode(pointInfoMode), [pointInfoMode, bundle]);
-  useEffect(() => engineRef.current?.setSelectedFinding(sel ?? 0), [sel, bundle]);
+  useEffect(
+    () => engineRef.current?.setSelectedFinding(evidenceId ?? sel ?? 0),
+    [evidenceId, sel, bundle],
+  );
   useEffect(() => engineRef.current?.setSensitivity(sensitivity), [sensitivity, bundle]);
   useEffect(() => engineRef.current?.setBoostKey(boostKey), [boostKey, bundle]);
   useEffect(() => engineRef.current?.setHumanFigureVisible(humanFigure), [humanFigure, bundle]);
@@ -291,6 +326,9 @@ export function ViewerScreen({
   };
 
   const select = (x: Finding) => {
+    setEvidenceRequest(x.id);
+    setPicked(null);
+    setPointInfoMode(false);
     if (sel === x.id) return setSel(null);
     setSel(x.id);
     const d = x.bbox.max.map((v, k) => v - x.bbox.min[k]);
@@ -425,6 +463,7 @@ export function ViewerScreen({
                 ref={pointInfoToolRef}
                 active={pointInfoMode}
                 onClick={() => {
+                  setEvidenceRequest(null);
                   if (pointInfoMode) closePointInfo();
                   else setPointInfoMode(true);
                 }}
@@ -558,7 +597,12 @@ export function ViewerScreen({
 
               <section className="viewer-section" aria-label={t('findings.title')}>
                 <H2>{t('findings.title')}</H2>
-                {!m.findings ? (
+                {apiFindings.isError && !(apiFindings.error instanceof ApiUnavailableError) && (
+                  <p role="alert" className="viewer-small">
+                    {t('evidence.error')}
+                  </p>
+                )}
+                {!m.findings && !apiFindings.data?.length ? (
                   <p className="viewer-small viewer-muted">{t('findings.notRun')}</p>
                 ) : bundle.findingsError ? null : findings.length === 0 ? (
                   <p className="viewer-small viewer-muted">{t('findings.empty')}</p>
@@ -831,6 +875,27 @@ export function ViewerScreen({
             <span className="viewer-caption viewer-muted">{t('timeline.hint')}</span>
           </div>
         </main>
+        {evidenceRequest !== null && (
+          <EvidencePanel
+            findingId={evidenceId}
+            frames={frames}
+            listState={
+              evidenceRequest === 'first'
+                ? apiFindings.isPending
+                  ? 'loading'
+                  : apiFindings.isError
+                    ? 'error'
+                    : undefined
+                : undefined
+            }
+            onRetry={() => void apiFindings.refetch()}
+            onClose={() => {
+              setEvidenceRequest(null);
+              setSel(null);
+              canvasRef.current?.focus();
+            }}
+          />
+        )}
       </div>
     </div>
   );

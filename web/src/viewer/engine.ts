@@ -128,6 +128,7 @@ void main() {
 
 export interface Callbacks {
   onPick: (point: number | null, layer?: PointLayer) => void;
+  onFindingPick?: (findingId: number) => void;
   onFlyModeChange?: (active: boolean) => void;
   onThirdPersonChange?: (active: boolean) => void;
   onAlignModeChange?: (active: boolean) => void;
@@ -1068,8 +1069,17 @@ export class ViewerEngine {
     }
     if (this.pointInfoActive) {
       const point = this.pickInfoAt(e);
+      const findingId = point?.layer === 'sparse' ? this.b.pointFinding?.[point.index] : undefined;
+      if (findingId) {
+        this.cb.onFindingPick?.(findingId);
+        return;
+      }
       if (point?.layer === 'dense') this.cb.onPick(point.index, 'dense');
       else this.cb.onPick(point?.index ?? null);
+    } else {
+      const point = this.pickAt(e);
+      const findingId = point === undefined ? undefined : this.b.pointFinding?.[point];
+      if (findingId) this.cb.onFindingPick?.(findingId);
     }
   };
   private noCtx = (e: Event) => e.preventDefault();

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactEventHandler } from 'react';
 import { useI18n } from '../i18n';
 import { authHeader } from './auth';
 
@@ -7,10 +7,14 @@ export function SessionImage({
   src,
   alt,
   className,
+  onLoad,
+  onError,
 }: {
   src: string;
   alt: string;
   className: string;
+  onLoad?: ReactEventHandler<HTMLImageElement>;
+  onError?: ReactEventHandler<HTMLImageElement>;
 }) {
   const { t } = useI18n();
   const authorization = src.startsWith('/api/runs/') ? authHeader().Authorization : undefined;
@@ -42,12 +46,21 @@ export function SessionImage({
     };
   }, [src, authorization]);
 
-  if (!authorization) return <img src={src} alt={alt} className={className} />;
+  if (!authorization)
+    return <img src={src} alt={alt} className={className} onLoad={onLoad} onError={onError} />;
   if (image?.src === src && image.failed)
     return (
       <p role="alert" className="p-3 text-sm text-watch">
         {t('auth.frameError')}
       </p>
     );
-  return <img src={image?.src === src ? image.url : undefined} alt={alt} className={className} />;
+  return (
+    <img
+      src={image?.src === src ? image.url : undefined}
+      alt={alt}
+      className={className}
+      onLoad={onLoad}
+      onError={onError}
+    />
+  );
 }
