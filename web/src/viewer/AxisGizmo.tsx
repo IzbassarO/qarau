@@ -58,7 +58,7 @@ export const AxisGizmo = forwardRef<AxisGizmoHandle, { onSelect: (axis: Axis) =>
       <div
         role="group"
         aria-label={t('gizmo.label')}
-        className="qv-float viewer-gizmo"
+        className="qv-float qv-float--map viewer-gizmo"
         style={{ width: GIZMO_SIZE, height: GIZMO_SIZE }}
       >
         <svg className="pointer-events-none absolute inset-0 size-full" aria-hidden="true">

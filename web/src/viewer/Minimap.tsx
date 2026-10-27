@@ -113,7 +113,7 @@ export const Minimap = forwardRef<MinimapHandle, { bundle: Bundle; label: string
         role="img"
         aria-label={label}
         data-testid="observer-minimap"
-        className="qv-float viewer-minimap"
+        className="qv-float qv-float--map viewer-minimap"
         style={{ width: SIZE, height: SIZE }}
       >
         <canvas ref={cloud} width={SIZE} height={SIZE} aria-hidden="true" />

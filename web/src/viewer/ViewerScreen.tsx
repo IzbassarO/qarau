@@ -744,7 +744,10 @@ export function ViewerScreen({
             {flyMode && (
               <Minimap ref={minimapRef} bundle={bundle} label={t('viewer.observer.minimap')} />
             )}
-            <div role="status" className={`qv-hud viewer-hint ${flyMode ? 'observer' : 'orbit'}`}>
+            <div
+              role="status"
+              className={`qv-map__hint viewer-hint ${flyMode ? 'observer' : 'orbit'}`}
+            >
               {alignMode
                 ? t('canvas.alignHint')
                 : flyMode

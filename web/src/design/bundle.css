@@ -2157,6 +2157,22 @@
   color: var(--ink);
   overflow: hidden;
 }
+/* Navigation aids stay on the map palette in every app theme. */
+.qv-float--map {
+  background: var(--map-ground);
+  border-color: var(--map-grid);
+  color: var(--map-text);
+}
+.qv-float--map .qv-iconbtn {
+  color: var(--map-text);
+}
+.qv-float--map .qv-iconbtn:hover {
+  background: var(--map-grid);
+}
+.qv-float--map .viewer-minimap-label {
+  background: var(--map-ground);
+  color: var(--map-text);
+}
 .qv-fold__head {
   display: flex;
   align-items: center;

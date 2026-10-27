@@ -157,26 +157,27 @@
 .viewer-hint {
   pointer-events: none;
   bottom: var(--spacing-3);
-  padding: var(--spacing-2);
-  color: var(--color-text-muted);
-  font-size: var(--type-xs);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  color: var(--map-text);
+  font-size: var(--t-caption-size);
 }
 .viewer-hint.orbit {
   left: 50%;
   width: max-content;
-  max-width: calc(100% - var(--size-sidebar-compact));
+  max-width: calc(100% - var(--layout-sidebar) * 2);
   transform: translateX(-50%);
   text-align: center;
 }
 .viewer-hint.observer {
-  left: var(--spacing-3);
+  left: calc(var(--space-12) * 3);
   right: calc(var(--size-minimap) + var(--spacing-3) * 2);
   max-width: var(--size-text);
+  transform: none;
 }
 .viewer-gizmo {
   bottom: var(--spacing-3);
   left: var(--spacing-3);
-  color: var(--color-text-muted);
 }
 .viewer-axis {
   position: absolute;
@@ -197,7 +198,6 @@
   right: var(--spacing-3);
   bottom: var(--spacing-3);
   overflow: hidden;
-  background: var(--color-viewer-canvas);
 }
 .viewer-minimap-label {
   position: absolute;
@@ -205,8 +205,6 @@
   left: 0;
   padding: var(--spacing-1) var(--spacing-2);
   border-bottom-right-radius: var(--round-sm);
-  background: var(--color-surface);
-  color: var(--color-text-muted);
   font-size: var(--type-xs);
 }
 .viewer-timeline {
@@ -546,23 +544,8 @@
   bottom: var(--space-4);
   right: var(--space-4);
 }
-.viewer-hint {
-  margin: 0;
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--t-caption-size);
-  color: var(--map-text);
-}
-.viewer-hint.orbit {
-  max-width: calc(100% - var(--layout-sidebar) * 2);
-}
-.viewer-hint.observer {
-  left: calc(var(--space-12) * 3);
-}
 .viewer-minimap {
   bottom: calc(var(--space-12) * 3);
-}
-.viewer-gizmo {
-  color: var(--ink-muted);
 }
 .viewer-axis {
   min-width: 0;
@@ -606,8 +589,7 @@
 @media (max-width: 1279px) {
   .viewer-hint.orbit,
   .viewer-hint.observer {
-    top: calc(var(--space-12) * 3);
-    bottom: auto;
+    bottom: var(--space-3);
     left: var(--space-4);
     right: var(--space-4);
     width: auto;
@@ -674,10 +656,6 @@
     max-width: calc(100% - var(--space-12) * 3);
     overflow-wrap: anywhere;
   }
-  .viewer-hint.orbit,
-  .viewer-hint.observer {
-    top: calc(var(--space-12) * 4);
-  }
   .viewer-minimap {
     max-width: calc(var(--space-12) * 3);
     max-height: calc(var(--space-12) * 3);
@@ -700,17 +678,11 @@
   flex-shrink: 0;
   max-width: none;
 }
-.viewer-hint.observer {
-  transform: none;
-}
 @media (max-width: 767px) {
-  .viewer-hint.orbit,
-  .viewer-hint.observer {
-    top: auto;
-    bottom: calc(var(--space-12) * 3 + var(--space-4));
-  }
+  /* Leave the bottom edge for translated hints, clear of both navigation aids. */
+  .viewer-gizmo,
   .viewer-minimap {
-    bottom: var(--space-3);
+    bottom: calc(var(--layout-timeline) + var(--space-3));
   }
   .viewer-panel .viewer-legend {
     gap: var(--space-1);

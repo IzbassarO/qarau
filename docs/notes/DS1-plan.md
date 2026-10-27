@@ -1,5 +1,41 @@
 # DS1 — design system v8 checklist
 
+## Tester return: visible phone gradient and map overlays
+
+The latest feedback permits a clearly visible full-width phone gradient as an
+alternative to the plain phone bar, while requiring unchanged e2e assertions.
+Use that alternative: retain the existing 56 px hero and fixed gradient fixture,
+but scale its painted layer down to fit the phone. The export's absolute radial
+sizes currently paint only a near-uniform crop in the narrow band. Change only
+the pseudo-element's dimensions/transform, preserving its colours and image.
+
+Anchor the viewer hint at the bottom of the map above the timeline, using the
+existing qv-map__hint component. Remove the conflicting tablet/phone vertical
+offsets; reserve a separate bottom lane for wrapped hints by lifting the phone
+gizmo/minimap. Keep the hint available for the existing navigation assertions.
+Give the gizmo and minimap a qv-float map variant using existing map-ground,
+map-grid and map-text, including axis buttons and the minimap label. Preserve
+the theme-following styling of other panels.
+
+Leave all existing e2e files unchanged. Add separate fixed-value regressions for
+the dark map floats and bottom hint in both themes, three languages and both
+projects. Run local lint, typecheck, tests, build and Playwright discovery;
+Kerege retains browser execution/screenshots. Existing Vite/Vitest (MIT) and
+Playwright (Apache-2.0) licences permit commercial use; metadata rechecked.
+No new dependency, token value, server or screenshot capture is needed.
+
+Completed the scale adaptation and the map-float variant. Consolidated the
+hint rules at bottom: 12 px; phone navigation aids now leave a separate lane
+for translated hint text. Added `map-overlays.spec.ts` with fixed map colours,
+the fixed bottom offset and no-overlap assertions for Orbit and Observer.
+All pre-existing e2e files remain byte-for-byte unchanged.
+
+Verification: pnpm lint, pnpm typecheck, all 725 unit tests in 37 files (including
+noLiterals), pnpm build and git diff --check pass. Build retains its existing
+large-chunk advisory. Playwright discovery reports 236 tests, 118 per project,
+without errors. Browser e2e and visual acceptance remain assigned to Kerege.
+No server, browser or screenshot capture was started.
+
 ## Tester return: preserve the phone sign-in gradient
 
 Criterion 4 requires the v8 hero gradient at both viewport sizes. The inherited

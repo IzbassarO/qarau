@@ -518,6 +518,14 @@ button.catalog-row {
     padding: var(--space-2) var(--space-4);
     border-bottom: 1px solid var(--line);
   }
+  /* Fit the export's desktop-sized radial fields across the compact phone band. */
+  .login-hero::before {
+    inset: 0 auto auto 0;
+    width: 400%;
+    height: 400%;
+    transform: scale(0.25);
+    transform-origin: top left;
+  }
   .login-hero-copy {
     display: none;
   }
