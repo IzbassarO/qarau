@@ -1028,7 +1028,7 @@ tasks:
     '
   licence: 'The owner''s design files (v8). Fonts: @fontsource/geologica, ibm-plex-sans, lora, jetbrains-mono
     5.3.0, OFL-1.1 (commercial use allowed), already in web/package.json.'
-  status: in_progress
+  status: todo
   owner: dev_app
   run: run-20261026-174855
   branch: devteam/DS1
