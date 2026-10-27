@@ -11,6 +11,11 @@ dependencies = [
   "pyyaml>=6.0.3",
   "scipy>=1.14",
   "boto3>=1.35",  # Apache-2.0; S3-compatible object storage (storage.py, ADR 0024)
+  # The PDF report (RPT1, owner 2026-10-27): Jinja2 HTML -> WeasyPrint, sharing design system v8
+  # CSS and fonts. WeasyPrint BSD-3-Clause, Jinja2 BSD-3-Clause; needs Pango (LGPL-2.1+, a
+  # system library: Homebrew on the Mac, apt in CI and infra/worker).
+  "weasyprint>=66",
+  "jinja2>=3.1",
 ]
 
 # A real package, so backend/ can depend on it (uv path source, editable; ADR 0023).
@@ -23,7 +28,8 @@ build-backend = "hatchling.build"
 modal = ["modal==1.6.2"]  # ADR 0019: real dense GPU runs only (uv sync --extra modal)
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "moto[s3]>=5"]  # moto: Apache-2.0, fake S3
+# moto: Apache-2.0, fake S3; pypdf: BSD-3-Clause, reads PDFs back in tests
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "moto[s3]>=5", "pypdf>=5"]
 ml = [
     "torch>=2.14.1",
     "torchvision>=0.29.1",

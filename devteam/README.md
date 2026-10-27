@@ -269,8 +269,10 @@ then unattended (`run --continuous` overnight).
   before `dev-*`; it fails a different colour, font or component and allows spacing or size
   differences. Naming a reference screen in a criterion is read-only: no split for it.
 - Dependencies: a task may list `depends_on: [ids]`. The brain never plans it until all of
-  them are `done`; a `blocked` task whose dependencies are all done goes back to `todo` (pushed
-  to `dev` like any status) when the last one merges, or at the next `devteam run`.
+  them are `done`; a `blocked` task parked on them (`blocked_reason: waits for <id>`, naming
+  one of its `depends_on`) goes back to `todo` (pushed to `dev` like any status) when the last
+  one merges, or at the next `devteam run`. A task blocked for any other reason (fix loops,
+  gates, limits, a crash, the owner) stays `blocked` until `devteam resume` (owner, 2026-10-27).
   Status `later` (owner, 2026-10-22) parks a task off the demo chain: the brain never plans it,
   done dependencies never move it to `todo`, `devteam resume` leaves it; it comes back only by a
   PR into `dev` that sets `todo`. The dashboard lists them in a "Later" column.

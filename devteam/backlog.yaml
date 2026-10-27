@@ -1373,9 +1373,22 @@ tasks:
 
     and that a viewer can GET it while no token is 401; ruff, mypy, pytest pass.
 
+
+    Owner 2026-10-27: WeasyPrint + Jinja2 is required; Pango is installed on the Mac and in CI. The report
+    is a corporate document read by company managers: cover page (company, asset, capture date, report
+    number, version), one-page executive summary, findings table by severity, one card per finding (map
+    location, 3 best frames, size with uncertainty, who confirmed and when), a ''not inspected'' section,
+    method and limitations, sign-off block (prepared / checked / approved), page header/footer with report
+    number and ''page X of Y'', document control (version history, verification ID), ru/kk/en, PDF/A output.
+    Typography and colours from design system v8.
+
     '
-  licence: WeasyPrint (BSD-3-Clause) or ReportLab (BSD-3-Clause); IBM Plex fonts (OFL-1.1).
-  status: todo
+  licence: WeasyPrint (BSD-3-Clause) + Jinja2 (BSD-3-Clause), Pango (LGPL-2.1+, system library); IBM Plex
+    fonts (OFL-1.1).
+  status: blocked
+  blocked_reason: 'tester: sent back twice for the same reason: the PDF was built with ReportLab, not
+    the required Jinja2 HTML template + WeasyPrint (devteam/.state/packets/RPT1.md). Owner 2026-10-27:
+    Pango is now on the Mac and in CI; continues after `devteam resume RPT1`.'
   depends_on:
   - REV1-api
   owner: dev_pipeline
