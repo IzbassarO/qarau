@@ -847,7 +847,10 @@ def e2e_rule(team, dev: dict) -> str:
         "cannot open a port. Write or update them and run the checks below; right after your "
         "round Kerege runs every e2e test from a clean checkout with its own fresh server. If "
         "one fails, the round comes straight back to you with the failures, before the tester "
-        "looks at it; otherwise the tester sees which ones passed, failed or skipped."
+        "looks at it; otherwise the tester sees which ones passed, failed or skipped. Each "
+        "failing test is retried once: one that passes on the retry is flaky, does not block "
+        "the round, and is listed in the PR and the owner's report. Never set retries in the "
+        "code or config yourself (the scope gate refuses it); fix a flaky test instead."
     )
 
 

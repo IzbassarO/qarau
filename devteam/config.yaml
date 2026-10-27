@@ -66,11 +66,15 @@ gates:
   # developers never run e2e themselves (A5-fix, 2026-10-18).
   e2e:
     when_paths: [web/]
-    command: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_E2E_PORT={port} QARAU_RUNS_DIR={runs_dir} pnpm exec playwright test --reporter=list
+    # Fixed --workers=3 --retries=1 (owner, 2026-10-27): with the default workers the phone WebGL
+    # tests timed out at 180 s on a loaded Mac and one flake blocked a round (24/24 re-runs passed).
+    # A test that fails, then passes on the retry, is FLAKY: not blocking, but listed in the packet,
+    # the PR and the daily report. A test that fails twice blocks as before.
+    command: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_E2E_PORT={port} QARAU_RUNS_DIR={runs_dir} pnpm exec playwright test --reporter=list --workers=3 --retries=1
     # Measured 2026-10-26 on DS1 HEAD (208 tests, desktop + phone projects, 5 workers): 8.7 min
-    # alone, 9.0 min in Kerege. x1.5 = 14 min, so 20 keeps a margin; a run past it is reported
-    # to the developer as TIMEOUT with the counts, never as a test failure.
-    timeout_min: 20
+    # alone, 9.0 min in Kerege, so ~15 min at 3 workers, plus retries. 30 keeps a margin; a run
+    # past it is reported to the developer as TIMEOUT with the counts, never as a test failure.
+    timeout_min: 30
   # Run on the backlog every status commit would push to dev, before it is pushed: a failure
   # keeps the status local and warns (778e072 `backlog: A9-fix done (#41)` turned dev CI red).
   backlog_check: uv run --quiet pytest -q -m backlog -p no:cacheprovider tests
@@ -161,7 +165,8 @@ developers:
       - cd web && pnpm install --frozen-lockfile
     screenshots:           # pages from the plan's `routes`; the tester sees them
       # The real API (backend/ of the same checkout) on a fresh SQLite file ({db}), migrated and
-      # seeded (backend/app/seed.py: org "dev", users admin / engineer / viewer, no sites) for every
+      # seeded (backend/app/seed.py: org "dev", users admin / engineer / viewer, and "Demo site": one
+      # inspection on run notre-dame-p3e with one manual finding, 3 evidence frames) for every
       # screenshot session, on a free port ({api_port}); Vite proxies /api to it (QARAU_API_PROXY).
       # Open dev mode (empty QARAU_API_TOKEN): the tester's login works with any password. Without a
       # backend the pages showed "could not load sites" / "Status unavailable" (U2, 2026-10-23).

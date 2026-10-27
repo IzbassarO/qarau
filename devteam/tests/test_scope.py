@@ -109,6 +109,29 @@ def test_skip_checks_have_no_false_alarms_seen_on_real_prs():
     assert SC.bypass(diff("docs/notes/p.md", plus=["it.only matters"]), ["docs/notes/p.md"]) == []
 
 
+@pytest.mark.parametrize(
+    ("path", "line"),
+    [
+        ("web/e2e/viewer.spec.ts", "test.describe.configure({ retries: 3 });"),
+        ("web/playwright.config.ts", "  retries: 2,"),
+        ("web/vite.config.ts", "  test: { retry: 2 },"),
+        ("web/src/a.test.ts", "it('x', { retry: 5 }, () => {"),
+        ("backend/tests/test_seed.py", "@pytest.mark.flaky(reruns=3)"),
+    ],
+)
+def test_retries_set_in_code_are_refused(path, line):
+    # Kerege retries a failing e2e test once and lists it as flaky (owner, 2026-10-27): more
+    # retries in the code would turn a test that keeps failing into a pass
+    (f,) = SC.bypass(diff(path, plus=[line]), [path], rewrite_ok=[path])
+    assert f.startswith(f"sets test retries in {path}")
+
+
+def test_reading_the_retry_number_is_not_setting_retries():
+    for line in ["  if (testInfo.retry === 1) {", "  const retry = 0;"]:
+        assert SC.bypass(diff("web/e2e/a.spec.ts", plus=[line]), ["web/e2e/a.spec.ts"]) == []
+    assert SC.bypass(diff("web/src/api.ts", plus=["  retry: false,"]), ["web/src/api.ts"]) == []
+
+
 def test_removed_assertions_and_tests_are_refused():
     d = diff(
         "pipeline/tests/test_sky.py",

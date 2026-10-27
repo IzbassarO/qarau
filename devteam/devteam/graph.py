@@ -197,34 +197,82 @@ def e2e_output(out: str) -> str:
     return "\n".join(tests + [x for x in lines[-40:] if " › " not in x])[-6000:]
 
 
-def e2e_report(out: str, timed_out: bool, minutes: int) -> str:
+# one attempt in the list reporter: "  ✘  3 [phone] › a.spec.ts:1:1 › name (retry #1) (3.0m)"
+E2E_ATTEMPT = re.compile(r"\s*([✓✘-])\s+\d+ (.+?)(?: \(retry #\d+\))?(?: \([\d.]+[a-z]+\))?$")
+
+
+def e2e_attempts(out: str) -> dict[str, list[tuple[str, str]]]:
+    """Each test's attempts in order, (mark, line): Kerege runs Playwright with --retries=1."""
+    tests: dict[str, list[tuple[str, str]]] = {}
+    for x in out.splitlines():
+        if m := E2E_ATTEMPT.match(x):
+            tests.setdefault(m[2], []).append((m[1], x.strip()))
+    return tests
+
+
+def e2e_flaky(out: str) -> list[str]:
+    """Tests that failed, then passed on the retry: they do not block a round, but they are
+    listed in the packet, the PR and the daily report (owner, 2026-10-27: 24/24 late e2e
+    failures passed on a re-run; one flake under load blocked a whole round)."""
+    return [t for t, a in e2e_attempts(out).items() if a[-1][0] == "✓" and len(a) > 1]
+
+
+def error_context(cwd: Path, rel: str, lines: int = 30) -> str:
+    """The first lines of Playwright's error-context.md (error, page snapshot, test source).
+    Only under `cwd`: the path comes from test output, which the developer's code can print."""
+    path = (cwd / rel).resolve()
+    if not path.is_relative_to(cwd.resolve()):
+        return ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            head = [x.rstrip() for _, x in zip(range(lines), f, strict=False)]
+    except OSError:
+        return ""
+    return f"  {path.name} (first {lines} lines):\n" + "\n".join(f"    {x}" for x in head)
+
+
+def e2e_report(out: str, timed_out: bool, minutes: int, cwd: Path | None = None) -> str:
     """What the developer gets for a failed e2e run (DS1, 2026-10-26: three blind rounds on a
     bare FAIL and the log's last 1500 characters, one of them a timeout): a plain TIMEOUT line
-    with the counts, or each failing test's name and its first error lines."""
-    lines = out.splitlines()
+    with the counts, or each failing test's name, its first error lines and the head of its
+    error-context.md (`cwd`: where Playwright ran, its paths are relative to it)."""
+    tests = e2e_attempts(out)
+    flaky = set(e2e_flaky(out))
+    last = [a[-1] for t, a in tests.items() if t not in flaky]
     total = re.search(r"Running (\d+) tests?", out)
-    passed = sum(bool(re.match(r"\s*✓\s+\d+ ", x)) for x in lines)
-    failed = [x.strip() for x in lines if re.match(r"\s*✘\s+\d+ ", x)]
-    skipped = sum(bool(re.match(r"\s*-\s+\d+ ", x)) for x in lines)
-    left = int(total[1]) - passed - len(failed) - skipped if total else "?"
+    passed = sum(m == "✓" for m, _ in last)
+    failed = [x for m, x in last if m == "✘"]
+    skipped = sum(m == "-" for m, _ in last)
+    left = int(total[1]) - passed - len(flaky) - len(failed) - skipped if total else "?"
+    flakes = f" Flaky (failed, then passed on retry; not blocking): {len(flaky)}." if flaky else ""
     if timed_out:
         head = (
             f"TIMEOUT: e2e stopped after {minutes} min (not a test failure); {passed} passed, "
-            f"{len(failed)} failed, {left} not run."
+            f"{len(failed)} failed, {left} not run.{flakes}"
         )
     else:
-        head = f"e2e FAILED: {len(failed)} failed, {passed} passed."
+        head = f"e2e FAILED: {len(failed)} failed, {passed} passed.{flakes}"
     blocks, cur = [], None  # the list reporter's "  1) [project] › file:line › name" blocks
-    for x in lines:
+    for x in out.splitlines():
         if re.match(r"\s+\d+\) \[", x):
-            cur = [x.strip().rstrip("─ ")]
+            name = x.strip().rstrip("─ ").split(") ", 1)[1]
+            cur = {"lines": [x.strip().rstrip("─ ")], "ctx": None, "flaky": name in flaky}
             blocks.append(cur)
         elif cur is not None and re.match(r"\s+\d+ (failed|flaky|passed|skipped|did not run)", x):
             cur = None
-        elif cur is not None and x.strip() and len(cur) < 9:
-            cur.append("  " + x.strip())
-    detail = "\n\n".join("\n".join(b) for b in blocks) or "\n".join(failed)
-    return f"{head}\n{detail}".strip()[:5000]
+        elif cur is not None and (m := re.match(r"\s+Error Context: (\S+)", x)):
+            cur["ctx"] = cur["ctx"] or m[1]  # the first attempt's
+        elif cur is not None and x.strip() and len(cur["lines"]) < 9:
+            cur["lines"].append("  " + x.strip())
+    detail = "\n\n".join(
+        "\n".join(b["lines"])
+        + (f"\n{ctx}" if cwd and b["ctx"] and (ctx := error_context(cwd, b["ctx"])) else "")
+        for b in blocks
+        if not b["flaky"]
+    ) or "\n".join(failed)
+    if flaky:
+        detail += "\n\nFlaky (not blocking, fix when you can):\n" + "\n".join(sorted(flaky))
+    return f"{head}\n{detail}".strip()[:12000]
 
 
 def criterion_key(c: dict, criteria: list) -> str:
@@ -741,12 +789,19 @@ class Team:
             f.write(json.dumps(row) + "\n")
         self.emit("tester", f"VIOLATION {kind}: {detail[:300]}", task=task_id)
 
-    def violations(self, day: str) -> list[dict]:
+    def violations(self, day: str, log: str = "violations.jsonl") -> list[dict]:
         try:
-            lines = (self.home / "violations.jsonl").read_text().splitlines()
+            lines = (self.home / log).read_text().splitlines()
         except FileNotFoundError:
             return []
         return [r for r in map(json.loads, lines) if r["ts"].startswith(day)]
+
+    def flaky(self, task_id: str, tests: list[str]):
+        """e2e tests that failed, then passed on the retry: not blocking, kept for the report."""
+        row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "task": task_id, "tests": tests}
+        with self._lock, open(self.home / "flaky.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
+        self.emit("tester", f"FLAKY e2e (passed on retry, not blocking): {tests[:5]}", task=task_id)
 
     @contextlib.contextmanager
     def clean_checkout(self, s):
@@ -1237,6 +1292,7 @@ class Team:
         checks = "\n".join(
             f"- {'ok' if c['ok'] else 'FAIL'}: `{c['cmd']}`" for c in v.get("checks", [])
         )
+        flaky = "\n".join(f"- {t}" for c in v.get("checks", []) for t in c.get("flaky", []))
         gate_lines = "\n".join(f"- {line}" for line in g.get("lines", []))
         if g.get("reason"):
             gate_lines += f"\n- **stopped:** {g['reason']}"
@@ -1262,7 +1318,13 @@ class Team:
                 f"## How to try it\n\n{v.get('how_to_try', '')}\n\n{parts}"
                 f"## Acceptance criteria{f' (part {k + 1})' if parts else ''}\n\n{crit}\n\n"
                 f"## Local checks\n\n{checks or '- (none)'}\n\n"
-                f"## Gates\n\n{gate_lines or '- (not reached)'}\n\n"
+                + (
+                    "## Flaky e2e tests (failed, then passed on retry: not blocking)\n\n"
+                    f"{flaky}\n\n"
+                    if flaky
+                    else ""
+                )
+                + f"## Gates\n\n{gate_lines or '- (not reached)'}\n\n"
                 + (
                     f"## Screenshots (dev machine, seen by the tester)\n\n{shots}\n\n"
                     if shots
@@ -1688,9 +1750,19 @@ def build_graph(team: Team, checkpointer):
         team.emit("tester", "e2e (Playwright) on the clean checkout", task=cs["task"]["id"])
         r = team.run_proc(cmd, cwd=clean, timeout=e["timeout_min"] * 60)
         c = {"cmd": cmd, "kind": "e2e", "ok": r["ok"], "output": e2e_output(r["output"])}
+        if flaky := e2e_flaky(r["output"]):  # never hidden: packet, PR and daily report
+            c["flaky"] = flaky
+            c["output"] = (
+                "FLAKY, not blocking (failed, then passed on retry; owner 2026-10-27):\n"
+                + "\n".join(flaky)
+                + "\n\n"
+                + c["output"]
+            )
+            team.flaky(cs["task"]["id"], flaky)
         if not r["ok"]:
             c["timed_out"] = bool(r.get("timed_out"))
-            c["report"] = team.redact(e2e_report(r["output"], c["timed_out"], e["timeout_min"]))
+            report = e2e_report(r["output"], c["timed_out"], e["timeout_min"], Path(clean) / "web")
+            c["report"] = team.redact(report)
         return [c]
 
     def tester_benchmark(cs: TaskState, clean: str) -> tuple[Path | None, list[str]]:

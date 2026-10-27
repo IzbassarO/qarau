@@ -609,9 +609,11 @@ class Judged(Fast):
 
     judged = 0
     feedback = ""
+    checks: list = []
 
     def judge(self, team, s, checks):
         self.judged += 1
+        self.checks = checks
         return super().judge(team, s, checks)
 
     def develop(self, team, s):
@@ -761,6 +763,107 @@ def test_e2e_report_gives_each_failing_test_and_its_first_error_lines():
         "2) [phone] › e2e/point-info.spec.ts:90:1 › click while drag still orbits\n"
         "  Error: page.screenshot: Test timeout of 180000ms exceeded."
     )
+
+
+# --retries=1 (owner, 2026-10-27): the list reporter prints every attempt
+E2E_RETRIED = """Running 3 tests using 3 workers
+  ✘  1 [phone] › e2e/viewer.spec.ts:19:3 › viewer: notre-dame (3.0m)
+  ✓  2 [phone] › e2e/viewer.spec.ts:19:3 › viewer: notre-dame (retry #1) (40.1s)
+  ✘  3 [desktop] › e2e/evidence.spec.ts:5:1 › panel stays ready (6.1s)
+  ✘  4 [desktop] › e2e/evidence.spec.ts:5:1 › panel stays ready (retry #1) (6.0s)
+  ✓  5 [desktop] › e2e/login.spec.ts:13:7 › signed-out login (2.1s)
+
+  1) [desktop] › e2e/evidence.spec.ts:5:1 › panel stays ready ───────────────────────
+
+    Error: expect(locator).toBeVisible() failed
+
+    Error Context: test-results/pw/evidence-desktop/error-context.md
+
+    Retry #1 ──────────────────────────────────────────────────────────────────────────
+
+    Error: expect(locator).toBeVisible() failed
+
+    Error Context: test-results/pw/evidence-desktop-retry1/error-context.md
+
+  2) [phone] › e2e/viewer.spec.ts:19:3 › viewer: notre-dame ─────────────────────────
+
+    Test timeout of 180000ms exceeded.
+
+    Error Context: ../.env
+
+  1 failed
+    [desktop] › e2e/evidence.spec.ts:5:1 › panel stays ready ───────────────────────
+  1 flaky
+    [phone] › e2e/viewer.spec.ts:19:3 › viewer: notre-dame ─────────────────────────
+  1 passed (4.1m)
+"""
+
+
+def test_e2e_command_runs_three_workers_and_one_retry():
+    cfg = yaml.safe_load((HERE / "config.yaml").read_text())["gates"]["e2e"]
+    assert "--workers=3 --retries=1" in cfg["command"]
+
+
+def test_flaky_test_is_listed_not_counted_as_failed():
+    assert GR.e2e_flaky(E2E_RETRIED) == ["[phone] › e2e/viewer.spec.ts:19:3 › viewer: notre-dame"]
+    report = GR.e2e_report(E2E_RETRIED, False, 30)
+    assert report.startswith(
+        "e2e FAILED: 1 failed, 1 passed. Flaky (failed, then passed on retry; not blocking): 1.\n"
+        "1) [desktop] › e2e/evidence.spec.ts:5:1 › panel stays ready\n"
+    )
+    assert "Test timeout" not in report  # the flaky one's error is not a failure to fix
+    assert report.endswith(
+        "Flaky (not blocking, fix when you can):\n"
+        "[phone] › e2e/viewer.spec.ts:19:3 › viewer: notre-dame"
+    )
+
+
+def test_failed_test_gets_the_head_of_its_error_context(tmp_path):
+    ctx = tmp_path / "web" / "test-results" / "pw" / "evidence-desktop"
+    ctx.mkdir(parents=True)
+    (ctx / "error-context.md").write_text("".join(f"line {i}\n" for i in range(1, 50)))
+    (tmp_path / ".env").write_text("SECRET=1\n")
+    report = GR.e2e_report(E2E_RETRIED, False, 30, tmp_path / "web" / "x" / "y")
+    assert "error-context.md" not in report  # not there: nothing, no crash
+    report = GR.e2e_report(E2E_RETRIED, False, 30, tmp_path / "web")
+    assert "  error-context.md (first 30 lines):\n    line 1\n" in report
+    assert "    line 30\n" in report and "line 31" not in report
+    assert "SECRET" not in report  # a path out of the checkout is never read
+
+
+@pytest.mark.usefixtures("fast_poll")
+def test_flaky_e2e_does_not_block_and_is_in_packet_and_daily_report(repo, tmp_path):
+    agents = Judged()
+    out = E2E_RETRIED.replace("✘  4", "✓  4")  # the evidence test passes on its retry too
+    (tmp_path / "e2e.out").write_text(out)
+    cmd = f"cat {tmp_path / 'e2e.out'}"
+    team, _ = e2e_team(repo, tmp_path, agents=agents, command=cmd)
+    assert agents.judged == 1  # the round went on to the tester
+    packet = (team.home / "packets" / "T-002.md").read_text()
+    section = packet.split("## Flaky e2e tests (failed, then passed on retry: not blocking)")[1]
+    assert "- [phone] › e2e/viewer.spec.ts:19:3 › viewer: notre-dame" in section
+    assert "- [desktop] › e2e/evidence.spec.ts:5:1 › panel stays ready" in section
+    assert "FLAKY e2e" in (team.home / "events.log").read_text()
+    (e2e,) = [c for c in agents.checks if c.get("kind") == "e2e"]  # what the judge sees
+    assert e2e["ok"] and e2e["output"].startswith("FLAKY, not blocking")
+    report = write_report(team).read_text()
+    assert "T-002: [phone] › e2e/viewer.spec.ts:19:3 › viewer: notre-dame" in report
+
+
+@pytest.mark.usefixtures("fast_poll")
+def test_a_test_failing_twice_blocks_with_its_error_context(repo, tmp_path):
+    agents = Judged()
+    (tmp_path / "e2e.out").write_text(E2E_RETRIED)
+    ctx = "web/test-results/pw/evidence-desktop"
+    cmd = (
+        f"mkdir -p {ctx} && echo '- button \"Retry\"' > {ctx}/error-context.md && "
+        f"cat {tmp_path / 'e2e.out'} && exit 1"
+    )
+    team, _ = e2e_team(repo, tmp_path, agents=agents, loops=1, command=cmd)
+    assert agents.judged == 0
+    assert task(team, "T-002")["status"] == "blocked"
+    assert "e2e FAILED: 1 failed, 1 passed." in agents.feedback
+    assert '    - button "Retry"' in agents.feedback
 
 
 @pytest.mark.usefixtures("fast_poll")
