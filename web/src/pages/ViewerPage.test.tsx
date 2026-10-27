@@ -19,6 +19,16 @@ vi.mock('three', async (importOriginal) => {
   return {
     ...actual,
     WebGLRenderer: class {
+      getContext() {
+        return {
+          SYNC_GPU_COMMANDS_COMPLETE: 0x9117,
+          TIMEOUT_EXPIRED: 0x911b,
+          fenceSync: () => ({}),
+          clientWaitSync: () => 0x911a,
+          deleteSync() {},
+          flush() {},
+        };
+      }
       setPixelRatio() {}
       getPixelRatio() {
         return 1;
@@ -316,6 +326,7 @@ it('loads /viewer/demo from the existing local point cloud without requesting a 
   const manifest = vi.spyOn(bundleApi, 'loadManifest');
   const load = vi.spyOn(bundleApi, 'loadBundle');
   renderDemo();
+  advanceFrames(1);
 
   expect(screen.getByLabelText(/Interactive 3D map/)).toBeTruthy();
   const pointCount = createDemo('en').bundle.position.length / 3;
@@ -425,7 +436,10 @@ it.each<Lang>(['en', 'ru', 'kk'])(
       expect((await screen.findByRole('alert')).textContent).toBe(
         LANGS[lang][reason === 'missing' ? 'viewer.far.errorMissing' : 'viewer.far.errorBroken'],
       );
-      await waitFor(() => expect(renderScene).toHaveBeenCalled());
+      await waitFor(() => {
+        advanceFrames(1);
+        expect(renderScene).toHaveBeenCalled();
+      });
       expect(screen.getByLabelText(LANGS[lang]['canvas.label'])).toBeTruthy();
       expect(
         screen.queryByRole('button', { name: LANGS[lang]['viewer.show.farPoints'] }),
@@ -439,6 +453,7 @@ it.each<Lang>(['en', 'ru', 'kk'])(
 it('offers five above-ground axis views around the same pivot and disables the bottom view', () => {
   const axisView = vi.spyOn(ViewerEngine.prototype, 'axisView');
   renderDemo();
+  advanceFrames(1);
   const gizmo = screen.getByRole('group', { name: 'Axis views' });
   expect(within(gizmo).getAllByRole('button')).toHaveLength(6);
   const bottom = within(gizmo).getByRole('button', {

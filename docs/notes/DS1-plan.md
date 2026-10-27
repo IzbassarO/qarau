@@ -26,7 +26,7 @@ Installed package metadata rechecked: the four Fontsource packages at 5.3.0
 are OFL-1.1; React, Three.js, Vite and Vitest are MIT; Playwright is Apache-2.0.
 All permit commercial use. No dependency, tool, model or skill is added.
 
-Current-round verification completed on the inherited code:
+Initial-round verification completed on the inherited code:
 
 - `pnpm lint` and `pnpm typecheck` pass.
 - `pnpm test` passes all 720 tests in 37 files, including the fixed v8 tokens,
@@ -36,9 +36,52 @@ Current-round verification completed on the inherited code:
 - `pnpm exec playwright test --list` discovers 208 tests in 12 files across
   both viewport projects. This is discovery only; e2e execution and visual
   comparison in en/ru/kk and Light/Dark remain with Kerege.
-- No implementation gap or failing part 1 check was found, so this round changes
+- No implementation gap or failing part 1 check was found, so the initial round changed
   only this audit/plan. No test, token, bundle value, screen, config or ADR was
   changed. No server or screenshot capture was started.
+
+## E2e return: phone Orono dense screenshot timeout
+
+Kerege reported 207 passes and one timeout while capturing the phone Orono dense
+viewer after reset/point clicks. The fonts had loaded. Preserve every e2e
+assertion and its timeout. This is a viewer rendering fix required by the gate.
+
+A CPU-side diagnostic in the task scratch directory loaded the actual Orono
+dense bundle (2,101,189 points), using the production loader and real camera math
+with a mocked renderer. Initial, scrubbed, source-camera and reset views all
+settled with zero idle draws across the following 60 ticks. Thus the diagnostic
+does not support an idle-camera redraw loop. It cannot reproduce compositor/GPU
+timing, and no browser screenshot or server was started.
+
+The draw loop currently submits another full-cloud draw without checking GPU
+completion. Under slow software rendering and concurrent browser tests, that
+can build a queue that screenshot capture must drain. Plan: use a nonblocking
+WebGL2 fence to keep one draw in flight, retain dirty changes until the GPU is
+ready, and coalesce changes to their latest state. Defer the initial draw to
+animation-frame time so React StrictMode's discarded setup does no GPU draw.
+Keep every point, font, colour, size, shader and interaction. Add regression
+coverage for a busy GPU, latest-state redraw, disposal and initial scheduling,
+then rerun the required local checks. Kerege must verify browser timing.
+
+Implemented the nonblocking fence and deferred first draw, with five scheduling
+regressions. A scratch run of these regressions against the previous engine
+fails all five: the simulated busy-GPU case submits 50 draws rather than one.
+The current engine holds at one until completion, renders the latest fixed frame
+fixture (11), and then idles. Both WebGL completion statuses and fence disposal
+are covered. This reproduces unbounded submission, not the browser screenshot
+timeout itself; Kerege must confirm the latter.
+
+The component renderer mock now implements the WebGL2 sync API. Three existing
+component tests explicitly advance their mocked animation frame before checking
+the initial draw; asynchronous loading advances it inside the existing waitFor.
+Every existing assertion, expected value and threshold is retained. The e2e
+files, Playwright config, v8 tokens, fonts, styles and shaders are unchanged.
+
+Final local lint, typecheck, all 725 tests in 37 files and production build pass.
+The build retains its existing large-chunk advisory. Three 0.186.1 (MIT) already
+requires WebGL2; its installed source confirms the sync API is available despite
+the legacy context union in the type definitions. No new dependency is used.
+No server or screenshot capture was started. Full e2e remains assigned to Kerege.
 
 ## Earlier rounds (inherited implementation and verification)
 

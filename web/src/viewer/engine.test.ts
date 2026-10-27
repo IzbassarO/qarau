@@ -14,6 +14,18 @@ vi.mock('three', async (importOriginal) => {
     ...three,
     WebGLRenderer: class {
       autoClear = true;
+      context = {
+        SYNC_GPU_COMMANDS_COMPLETE: 0x9117,
+        ALREADY_SIGNALED: 0x911a,
+        TIMEOUT_EXPIRED: 0x911b,
+        CONDITION_SATISFIED: 0x911c,
+        WAIT_FAILED: 0x911d,
+        fenceSync: vi.fn(() => ({})),
+        clientWaitSync: vi.fn(() => 0x911a),
+        deleteSync: vi.fn(),
+        flush: vi.fn(),
+      };
+      getContext = () => this.context;
       setPixelRatio = vi.fn();
       getPixelRatio = () => 1;
       setClearColor = vi.fn();
@@ -170,6 +182,88 @@ function mouseLook(dx: number, dy: number) {
   });
   document.dispatchEvent(event);
 }
+
+describe('ViewerEngine GPU scheduling', () => {
+  it('coalesces setup and resize into the first animation frame', () => {
+    const { engine } = setup();
+    engine.resize();
+    engine.setFrame(10);
+    expect(engine.renderer.render).not.toHaveBeenCalled();
+    frame();
+    expect(engine.renderer.render).toHaveBeenCalledOnce();
+    const points = engine.scene.children.find(
+      (child) => child instanceof Points && child.material instanceof ShaderMaterial,
+    ) as Points<import('three').BufferGeometry, ShaderMaterial>;
+    expect(points.material.uniforms.uCurrentFrame.value).toBe(10);
+  });
+
+  it('does no GPU work for a discarded setup', () => {
+    const { engine } = setup();
+    engine.dispose();
+    engines.delete(engine);
+    frame(60);
+    expect(engine.renderer.render).not.toHaveBeenCalled();
+    expect(
+      (engine.renderer.getContext() as WebGL2RenderingContext).fenceSync,
+    ).not.toHaveBeenCalled();
+  });
+
+  it.each([0x911a, 0x911c])(
+    'keeps one draw in flight and renders the latest state after GPU completion (%i)',
+    (completion) => {
+      const { engine } = setup();
+      const gl = engine.renderer.getContext() as WebGL2RenderingContext;
+      const fence = {} as WebGLSync;
+      vi.mocked(gl.fenceSync).mockReturnValue(fence);
+      const points = engine.scene.children.find(
+        (child) => child instanceof Points && child.material instanceof ShaderMaterial,
+      ) as Points<import('three').BufferGeometry, ShaderMaterial>;
+      const drawnFrames: number[] = [];
+      vi.mocked(engine.renderer.render).mockImplementation(() => {
+        drawnFrames.push(points.material.uniforms.uCurrentFrame.value);
+      });
+      const wait = vi.mocked(gl.clientWaitSync);
+      wait.mockReturnValue(gl.TIMEOUT_EXPIRED);
+      frame();
+      engine.viewThroughFrame(10);
+      engine.setFrame(10);
+      frame(60);
+      engine.setFrame(11);
+      engine.resetView();
+      frame(60);
+      expect(engine.renderer.render).toHaveBeenCalledOnce();
+      expect(gl.fenceSync).toHaveBeenCalledExactlyOnceWith(0x9117, 0);
+      expect(gl.flush).toHaveBeenCalledOnce();
+      expect(gl.deleteSync).not.toHaveBeenCalled();
+      expect(wait).toHaveBeenLastCalledWith(fence, 0, 0);
+
+      wait.mockReturnValue(completion);
+      frame();
+      expect(engine.renderer.render).toHaveBeenCalledTimes(2);
+      expect(gl.deleteSync).toHaveBeenCalledExactlyOnceWith(fence);
+      expect(gl.fenceSync).toHaveBeenCalledTimes(2);
+      expect(gl.flush).toHaveBeenCalledTimes(2);
+      expect(drawnFrames).toEqual([0, 11]);
+      expect(points.material.uniforms.uCurrentFrame.value).toBe(11);
+      frame(60);
+      expect(engine.renderer.render).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('releases the in-flight fence on disposal', () => {
+    const { engine } = setup();
+    const gl = engine.renderer.getContext() as WebGL2RenderingContext;
+    const fence = {} as WebGLSync;
+    vi.mocked(gl.fenceSync).mockReturnValue(fence);
+    vi.mocked(gl.clientWaitSync).mockReturnValue(gl.TIMEOUT_EXPIRED);
+    frame();
+    engine.dispose();
+    engines.delete(engine);
+    expect(gl.deleteSync).toHaveBeenCalledExactlyOnceWith(fence);
+    frame(60);
+    expect(engine.renderer.render).toHaveBeenCalledOnce();
+  });
+});
 
 describe('ViewerEngine point info tool', () => {
   it('selects through the existing picker only when active and preserves orbit during drags', () => {

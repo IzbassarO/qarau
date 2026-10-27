@@ -136,6 +136,7 @@ export interface Callbacks {
 
 export class ViewerEngine {
   readonly renderer: WebGLRenderer;
+  private gl: WebGL2RenderingContext;
   readonly scene = new Scene();
   readonly camera = new PerspectiveCamera(50, 1, 0.01, 100);
   readonly controls: NavigationControls;
@@ -188,6 +189,7 @@ export class ViewerEngine {
     target: ReturnType<typeof viewDirectionFor>;
   } | null = null;
   private dirty = true;
+  private renderFence: WebGLSync | null = null;
   private raf = 0;
   private tween: null | {
     t0: number;
@@ -217,6 +219,8 @@ export class ViewerEngine {
     this.currentColorMode = defaults.colorMode;
     this.frustumsVisible = defaults.frustums;
     this.renderer = new WebGLRenderer({ canvas, antialias: true });
+    // Three r186 requires WebGL2; its type definitions still include WebGL1 here.
+    this.gl = this.renderer.getContext() as WebGL2RenderingContext;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(tokens.map.ground);
     this.renderer.autoClear = false;
@@ -457,7 +461,8 @@ export class ViewerEngine {
       attributeFilter: ['data-theme'],
     });
     this.setFrame(0);
-    this.loop();
+    // Coalesce setup/resize, and let StrictMode dispose its trial setup before drawing.
+    this.raf = requestAnimationFrame(this.loop);
   }
 
   private readSignalColors(): SignalColors {
@@ -1363,7 +1368,7 @@ export class ViewerEngine {
       this.dirty = true;
     this.enforceCamera();
     // fps = frames actually rendered per second; renders are on demand, so idle reads 0
-    if (this.dirty) {
+    if (this.dirty && this.renderReady()) {
       this.dirty = false;
       this.render();
       this.frames++;
@@ -1374,6 +1379,17 @@ export class ViewerEngine {
       this.lastFps = now;
     }
   };
+
+  /** Do not queue full-cloud draws faster than the GPU can finish them. */
+  private renderReady() {
+    if (!this.renderFence) return true;
+    const gl = this.gl;
+    // A zero timeout polls completion without blocking input or the compositor.
+    if (gl.clientWaitSync(this.renderFence, 0, 0) === gl.TIMEOUT_EXPIRED) return false;
+    gl.deleteSync(this.renderFence);
+    this.renderFence = null;
+    return true;
+  }
 
   private render() {
     const r = this.renderer;
@@ -1390,6 +1406,9 @@ export class ViewerEngine {
     const shown = [this.frustumNow.visible, this.dot.visible];
     if (atCam) this.frustumNow.visible = this.dot.visible = false;
     r.render(this.scene, this.camera);
+    const gl = this.gl;
+    this.renderFence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
     [this.frustumNow.visible, this.dot.visible] = shown;
     this.onRender?.();
   }
@@ -1445,6 +1464,10 @@ export class ViewerEngine {
     this.densePoints?.geometry.dispose();
     this.densePoints?.material.dispose();
     this.densePoints?.removeFromParent();
+    if (this.renderFence) {
+      this.gl.deleteSync(this.renderFence);
+      this.renderFence = null;
+    }
     this.renderer.dispose();
   }
 }
