@@ -1,0 +1,173 @@
+{#- The PDF inspection report (render.py). No visible text here: every string is t(...) or data. -#}
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<title>{{ t('doc_title') }}: {{ inp.site }}</title>
+<meta name="author" content="{{ engineer }}">
+<meta name="generator" content="{{ t('product') }}">
+<meta name="dcterms.created" content="{{ inp.report_time.isoformat() }}">
+<meta name="dcterms.modified" content="{{ inp.report_time.isoformat() }}">
+<style>
+@page {
+  @top-right { content: {{ header }}; }
+  @bottom-left { content: {{ footer }}; }
+  @bottom-right { content: {{ page_of }}; }
+}
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div class="band">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+        <g class="q">
+          <circle cx="12" cy="3" r="2"/><circle cx="18.4" cy="5.6" r="2"/>
+          <circle cx="21" cy="12" r="2"/><circle cx="18.4" cy="18.4" r="2"/>
+          <circle cx="12" cy="21" r="2"/><circle cx="5.6" cy="18.4" r="2"/>
+          <circle cx="3" cy="12" r="2"/><circle cx="5.6" cy="5.6" r="2"/>
+        </g>
+        <circle class="f" cx="22" cy="22" r="2"/>
+      </svg>
+      <span>{{ inp.organization }}</span>
+    </div>
+    <div class="ref"><b>{{ inp.report_number }}</b><br>{{ t('label_version') }}: {{ inp.version }}</div>
+  </div>
+  <h1 class="title">{{ t('doc_title') }}</h1>
+  <p class="subtitle">{{ inp.site }}. {{ t('doc_subtitle') }}</p>
+  <table class="facts">
+    <tr><td>{{ t('label_organization') }}</td><td>{{ inp.organization }}</td></tr>
+    <tr><td>{{ t('label_site') }}</td><td>{{ inp.site }}</td></tr>
+    <tr><td>{{ t('label_asset') }}</td><td>{{ inp.asset or t('asset_none') }}</td></tr>
+    <tr><td>{{ t('label_inspection') }}</td><td>{{ t('inspection_ref', id=inp.inspection.id, mode=word('mode', inp.inspection.mode)) }}</td></tr>
+    <tr><td>{{ t('label_capture_date') }}</td><td>{{ when(inp.capture_date) }}</td></tr>
+    <tr><td>{{ t('label_report_number') }}</td><td>{{ inp.report_number }}</td></tr>
+    <tr><td>{{ t('label_version') }}</td><td>{{ inp.version }}</td></tr>
+    <tr><td>{{ t('label_engineer') }}</td><td>{{ engineer }}</td></tr>
+    <tr><td>{{ t('label_report_time') }}</td><td>{{ when(inp.report_time) }}</td></tr>
+  </table>
+</section>
+
+<section class="page">
+  <h2><span>1</span><span>{{ t('section_summary') }}</span></h2>
+  <p class="lead">{{ t('summary_lead') }}</p>
+  <table class="facts">
+    {% for label, value in summary %}
+    <tr><td>{{ label }}</td><td>{{ value }}</td></tr>
+    {% endfor %}
+  </table>
+  <h2><span>2</span><span>{{ t('section_map') }}</span></h2>
+  <p class="figcap">{{ t('map_pending') }}</p>
+</section>
+
+<section class="page">
+  <h2><span>3</span><span>{{ t('section_table') }}</span></h2>
+  {% if findings %}
+  <table class="data">
+    <thead><tr>
+      <th>{{ t('col_no') }}</th><th>{{ t('col_class') }}</th><th>{{ t('col_severity') }}</th>
+      <th>{{ t('col_status') }}</th><th class="r">{{ t('col_area') }}</th>
+    </tr></thead>
+    <tbody>
+    {% for f in findings %}
+    <tr>
+      <td>{{ f.id }}</td><td>{{ word('class', f.class_) }}</td>
+      <td><span class="sev {{ f.severity }}">{{ word('severity', f.severity) }}</span></td>
+      <td>{{ word('status', f.status) }}</td>
+      <td class="r">{{ area(f) }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>{{ t('findings_none') }}</p>
+  {% endif %}
+</section>
+
+{% if findings %}
+<section class="page">
+  <h2><span>4</span><span>{{ t('section_cards') }}</span></h2>
+  {% for f in findings %}
+  <div class="card">
+    <h3>{{ t('finding_title', id=f.id) }}</h3>
+    <table class="facts">
+      <tr><td>{{ t('label_class') }}</td><td>{{ word('class', f.class_) }}</td></tr>
+      <tr><td>{{ t('label_severity') }}</td><td><span class="sev {{ f.severity }}">{{ word('severity', f.severity) }}</span></td></tr>
+      <tr><td>{{ t('label_status') }}</td><td>{{ word('status', f.status) }}</td></tr>
+      <tr><td>{{ t('label_location') }}</td><td>{{ t('location_pending') }}</td></tr>
+      <tr><td>{{ t('label_area') }}</td><td>{{ area(f) }}</td></tr>
+      <tr><td>{{ t('label_scale') }}</td><td>{{ f.scale_source or t('scale_not_set') }}</td></tr>
+      <tr><td>{{ t('label_evidence') }}</td><td>
+        {%- for e in f.evidence[:3] %}{{ t('evidence_frame', frame=e.frame_id) }}{{ ', ' if not loop.last }}{% else %}{{ t('evidence_none') }}{% endfor -%}
+      </td></tr>
+      <tr><td>{{ t('label_decided') }}</td><td>{{ decided(f) }}</td></tr>
+    </table>
+    <h4>{{ t('decision_log') }}</h4>
+    {% if f.decisions %}
+    <table class="data log">
+      <thead><tr>
+        <th>{{ t('col_time') }}</th><th>{{ t('col_engineer') }}</th>
+        <th>{{ t('col_verdict') }}</th><th>{{ t('col_comment') }}</th>
+      </tr></thead>
+      <tbody>
+      {% for d in f.decisions %}
+      <tr><td>{{ when(d.time) }}</td><td>{{ d.user }}</td><td>{{ verdict(d) }}</td><td>{{ d.comment or '' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>{{ t('decisions_none') }}</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="page">
+  <h2><span>5</span><span>{{ t('section_not_seen') }}</span></h2>
+  {# ponytail: COV1 replaces this line with the list of not-seen areas #}
+  <p>{{ t('coverage_not_computed') }}</p>
+
+  <h2><span>6</span><span>{{ t('section_method') }}</span></h2>
+  <h3>{{ t('method_heading') }}</h3>
+  {% for p in s.method %}<p>{{ p }}</p>{% endfor %}
+  <h3>{{ t('limits_heading') }}</h3>
+  {% for p in s.limits %}<p>{{ p }}</p>{% endfor %}
+</section>
+
+<section class="page">
+  <h2><span>7</span><span>{{ t('section_signoff') }}</span></h2>
+  <div class="signoff">
+    {% for role, name in [('signoff_prepared', inp.engineer), ('signoff_checked', None), ('signoff_approved', None)] %}
+    <div>
+      <p class="role">{{ t(role) }}</p>
+      <div class="line"></div>
+      <p class="sigmeta"><b>{{ name or '' }}</b>{{ t('signoff_caption') }}</p>
+    </div>
+    {% endfor %}
+  </div>
+
+  <h2><span>8</span><span>{{ t('section_control') }}</span></h2>
+  <table class="data">
+    <thead><tr>
+      <th>{{ t('col_version') }}</th><th>{{ t('col_date') }}</th>
+      <th>{{ t('col_author') }}</th><th>{{ t('col_change') }}</th>
+    </tr></thead>
+    <tbody>
+    {% for v in inp.versions %}
+    <tr>
+      <td>{{ v.version }}</td><td>{{ when(v.time) }}</td><td>{{ v.author or t('engineer_none') }}</td>
+      <td>{{ t('version_first') if v.version == 1 else t('version_revised') }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <table class="facts">
+    <tr><td>{{ t('label_verification') }}</td><td class="id">{{ inp.verification_id }}</td></tr>
+  </table>
+  <p class="figcap">{{ t('verification_note') }}</p>
+</section>
+
+</body>
+</html>

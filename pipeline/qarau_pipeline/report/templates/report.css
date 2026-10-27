@@ -1,0 +1,121 @@
+/* The PDF inspection report. Values from design system v8 (docs/design/DESIGN.md): the light
+   theme of web/src/design/tokens.css (the report is always a white document) and the `qv-doc`
+   rules of web/src/design/bundle.css. 1 px = 1/96 in, so the 794 px v8 document is A4. The page
+   header and footer content is set per report in report.html.j2. */
+
+@font-face { font-family: "Geologica"; font-weight: 600; src: url("../fonts/Geologica-SemiBold.ttf"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 400; src: url("../fonts/IBMPlexSans-Regular.ttf"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 500; src: url("../fonts/IBMPlexSans-Medium.ttf"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 600; src: url("../fonts/IBMPlexSans-SemiBold.ttf"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 400; font-style: italic; src: url("../fonts/IBMPlexSans-Italic.ttf"); }
+
+:root {
+  --surface-raised: #ffffff;
+  --line: #e5e5e3;
+  --ink: #111111;
+  --ink-muted: #60605c;
+  --ink-faint: #8f8f8a;
+  --critical: #c42a18;
+  --critical-soft: #fbe9e6;
+  --watch: #a65400;
+  --watch-soft: #fbeedc;
+  --font-display: "Geologica", "IBM Plex Sans";
+  --font-sans: "IBM Plex Sans";
+}
+
+@page {
+  size: A4;
+  margin: 72px 72px 80px;
+  background: var(--surface-raised);
+  @top-right {
+    font-family: var(--font-sans); font-size: 13px; line-height: 18px; color: var(--ink-muted);
+    vertical-align: bottom; padding-bottom: 16px;
+  }
+  @bottom-left {
+    font-family: var(--font-sans); font-size: 13px; line-height: 18px; color: var(--ink-muted);
+    vertical-align: top; padding-top: 16px;
+  }
+  @bottom-right {
+    font-family: var(--font-sans); font-size: 13px; line-height: 18px; color: var(--ink-muted);
+    vertical-align: top; padding-top: 16px; white-space: nowrap;
+  }
+}
+
+html {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--ink);
+}
+body { margin: 0; }
+.page { break-before: page; }
+
+/* Cover: the v8 report band, title and facts */
+.band { padding-bottom: 20px; border-bottom: 2px solid var(--ink); }
+.band::after { content: ""; display: block; clear: both; }
+.brand { float: left; font-weight: 600; font-size: 15px; line-height: 24px; }
+.mark { width: 24px; height: 24px; margin-right: 10px; vertical-align: top; }
+.mark .q { fill: var(--ink); }
+.mark .f { fill: var(--critical); }
+.ref { float: right; text-align: right; font-size: 13px; line-height: 18px; color: var(--ink-muted); }
+.ref b { color: var(--ink); font-weight: 500; }
+.title {
+  margin: 120px 0 6px;
+  font-family: var(--font-display);
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.subtitle { font-size: 17px; line-height: 24px; color: var(--ink-muted); margin: 0 0 40px; }
+
+.facts { width: 100%; border-collapse: collapse; margin-bottom: 28px; font-size: 13.5px; line-height: 20px; }
+.facts td { padding: 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.facts td:first-child { width: 220px; padding-right: 12px; color: var(--ink-muted); }
+.facts tr:first-child td { border-top: 1px solid var(--line); }
+.facts .id { font-variant-numeric: tabular-nums; }
+
+h2 {
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 36px 0 12px;
+  break-after: avoid;
+}
+.page > h2:first-child { margin-top: 0; }
+h2 span:first-child {
+  display: inline-block; min-width: 22px; margin-right: 14px; color: var(--ink-faint); font-weight: 500;
+}
+h3 { font-family: var(--font-display); font-size: 15px; line-height: 22px; font-weight: 600; margin: 22px 0 8px; }
+h4 { font-size: 14px; line-height: 20px; font-weight: 600; margin: 14px 0 4px; }
+p { margin: 0 0 12px; }
+p.lead { font-size: 15.5px; line-height: 25px; }
+.figcap { font-size: 13.5px; line-height: 19px; color: var(--ink-muted); font-style: italic; margin: 8px 0 20px; }
+
+table.data { width: 100%; border-collapse: collapse; font-size: 13.5px; line-height: 20px; margin: 10px 0 8px; }
+table.data th {
+  text-align: left; font-weight: 500; color: var(--ink-muted);
+  padding: 8px 10px 8px 0; border-bottom: 1px solid var(--ink);
+}
+table.data td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.data .r { text-align: right; padding-right: 0; font-variant-numeric: tabular-nums; }
+table.data tr { break-inside: avoid; }
+
+.sev {
+  display: inline-block; white-space: nowrap; padding: 1px 8px; border-radius: 5px;
+  font-size: 13px; font-weight: 500; line-height: 18px;
+}
+.sev.critical { color: var(--critical); background: var(--critical-soft); }
+.sev.watch { color: var(--watch); background: var(--watch-soft); }
+
+.card { margin-bottom: 28px; }
+.card > h3, .card > .facts { break-after: avoid; }
+.card > .facts { break-inside: avoid; margin-bottom: 8px; }
+
+.signoff { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px; margin-top: 8px; }
+.signoff .role { font-weight: 500; margin: 0; }
+.signoff .line { height: 56px; border-bottom: 1px solid var(--ink); margin-bottom: 6px; }
+.signoff .sigmeta { font-size: 13px; line-height: 18px; color: var(--ink-muted); }
+.signoff .sigmeta b { color: var(--ink); font-weight: 500; display: block; }

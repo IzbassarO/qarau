@@ -7,6 +7,7 @@ The finding's status, class and severity are replayed from its append-only decis
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -41,6 +42,7 @@ class FindingInput:
     status: str  # proposed | confirmed | rejected
     area_m2: float | None  # only with a scale reference
     scale_source: str | None  # None: scale not set
+    area_uncertainty_pct: float | None  # None: not estimated (never invented)
     run_dir: str  # relative to QARAU_RUNS_DIR: where the evidence frame images live
     evidence: tuple[Evidence, ...]
     decisions: tuple[DecisionEntry, ...]  # oldest first
@@ -54,13 +56,33 @@ class InspectionInput:
 
 
 @dataclass(frozen=True)
+class VersionEntry:
+    version: int
+    time: datetime  # aware
+    author: str | None  # None: no decision yet, so no engineer
+
+
+@dataclass(frozen=True)
 class ReportInput:
     organization: str
     site: str
+    asset: str | None  # None: not recorded (no Asset table yet)
     inspection: InspectionInput
+    capture_date: datetime  # aware
+    report_number: str
+    version: int
     engineer: str | None  # the user of the inspection's latest decision; None: no decision yet
+    report_time: datetime  # aware; the only clock in the PDF
     findings: tuple[FindingInput, ...]
+    versions: tuple[VersionEntry, ...]  # document control, oldest first
+    verification_id: str
     coverage: None = None  # not-seen areas; COV1 fills it, until then "coverage not computed"
+
+
+def verification_id(*parts: object) -> str:
+    """A short ID derived from the report's content: same content, same ID."""
+    h = hashlib.sha256(repr(parts).encode()).hexdigest()[:16].upper()
+    return "-".join(h[i : i + 4] for i in range(0, 16, 4))
 
 
 class _Verdict(Protocol):
@@ -117,7 +139,12 @@ def _aware(t: datetime) -> datetime:
     return t if t.tzinfo is not None else t.replace(tzinfo=UTC)
 
 
-def load_report_input(engine: sa.Engine, inspection_id: int) -> ReportInput:
+def load_report_input(engine: sa.Engine, inspection_id: int, report_time: datetime) -> ReportInput:
+    """The report of an inspection as of `report_time`. Until the Report table (RPT1 part 3)
+    numbers and versions reports, every report is version 1 of `QV-<year>-<inspection id>`, and
+    the capture date is the inspection's date."""
+    if report_time.tzinfo is None:
+        raise StageError("report time needs a time zone (ISO 8601 with an offset)")
     with engine.connect() as c:
         head = c.execute(
             sa.select(organization.c.name, site.c.name, inspection.c.mode, inspection.c.created_at)
@@ -161,14 +188,18 @@ def load_report_input(engine: sa.Engine, inspection_id: int) -> ReportInput:
         status, class_, severity = replay_decisions(*proposed, decs[r.id])
         findings.append(FindingInput(
             id=r.id, class_=class_, severity=severity, status=status, area_m2=r.area_m2,
-            scale_source=r.scale_source, run_dir=r.run_dir, evidence=tuple(obs[r.id]),
+            scale_source=r.scale_source, area_uncertainty_pct=None, run_dir=r.run_dir,
+            evidence=tuple(obs[r.id]),
             decisions=tuple(decs[r.id]),
         ))  # fmt: skip
     last = max((d for f in findings for d in f.decisions), key=lambda d: d.time, default=None)
+    engineer = None if last is None else last.user
+    insp = InspectionInput(inspection_id, head[2], _aware(head[3]))
+    number = f"QV-{insp.date.year}-{inspection_id:04d}"
+    found = tuple(findings)
     return ReportInput(
-        organization=head[0],
-        site=head[1],
-        inspection=InspectionInput(inspection_id, head[2], _aware(head[3])),
-        engineer=None if last is None else last.user,
-        findings=tuple(findings),
-    )
+        organization=head[0], site=head[1], asset=None, inspection=insp, capture_date=insp.date,
+        report_number=number, version=1, engineer=engineer, report_time=report_time,
+        findings=found, versions=(VersionEntry(1, report_time, engineer),),
+        verification_id=verification_id(number, 1, report_time.isoformat(), engineer, found),
+    )  # fmt: skip
