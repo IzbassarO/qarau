@@ -174,6 +174,22 @@ class ScaleReference(Base):
     source: Mapped[str] = mapped_column(sa.String(100))
 
 
+class Report(Base):
+    """One generated PDF inspection report (RPT1, migration 0005). `generated_at` is the report
+    time printed in the PDF; the same data, language and time give the same `sha256`.
+    `created_by` is null for the shared read-only token."""
+
+    __tablename__ = "report"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    inspection_id: Mapped[int] = mapped_column(sa.ForeignKey("inspection.id"), index=True)
+    lang: Mapped[str] = mapped_column(sa.String(2))
+    sha256: Mapped[str] = mapped_column(sa.CHAR(64))
+    generated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True))
+    report_number: Mapped[str] = mapped_column(sa.String(32))
+    version: Mapped[int] = mapped_column(sa.Integer)
+    created_by: Mapped[int | None] = mapped_column(sa.ForeignKey("user.id"), nullable=True)
+
+
 class AuditLog(Base):
     """Append-only (trigger in migration 0001). One row per write request."""
 

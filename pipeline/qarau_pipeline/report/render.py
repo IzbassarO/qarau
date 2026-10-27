@@ -17,7 +17,7 @@ import tomllib
 from datetime import datetime
 from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import sqlalchemy as sa
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
@@ -191,11 +191,17 @@ def render_report(inp: ReportInput, lang: str, runs_dir: Path | None = None) -> 
     return render_pdf(inp, load_strings(lang), lang, load_visuals(inp, runs_dir))
 
 
+class Generated(NamedTuple):
+    pdf: bytes
+    sha256: str  # hex of `pdf`
+    input: ReportInput  # what was rendered: report number, version, report time
+
+
 def generate(
     inspection_id: int, lang: str, report_time: datetime, engine: sa.Engine,
     runs_dir: Path | None,
-) -> tuple[bytes, str]:  # fmt: skip
-    """(PDF bytes, their SHA-256 hex) of an inspection's report: the CLI and the API call this."""
+) -> Generated:  # fmt: skip
+    """An inspection's report as PDF bytes with their SHA-256: the CLI and the API call this."""
     inp = load_report_input(engine, inspection_id, report_time)
     pdf = render_report(inp, lang, runs_dir)
-    return pdf, hashlib.sha256(pdf).hexdigest()
+    return Generated(pdf, hashlib.sha256(pdf).hexdigest(), inp)

@@ -218,7 +218,7 @@ def cmd_report(a: argparse.Namespace) -> None:
         print("report: no --runs-dir or QARAU_RUNS_DIR: the PDF has no map and no frame images")
     engine = sa.create_engine(url)
     try:
-        pdf, sha = generate(a.inspection, a.lang, when, engine, Path(runs) if runs else None)
+        pdf, sha, _ = generate(a.inspection, a.lang, when, engine, Path(runs) if runs else None)
     finally:
         engine.dispose()
     Path(a.out).write_bytes(pdf)

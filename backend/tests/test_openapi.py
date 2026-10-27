@@ -15,6 +15,7 @@ NEW_PATHS = [
     "/api/inspections/{inspection_id}/findings",
     "/api/findings/{finding_id}",
     "/api/findings/{finding_id}/decisions",
+    "/api/inspections/{inspection_id}/report.pdf",
     "/api/users",
     "/api/audit-log",
     "/api/audit-log/{entry_id}",
@@ -34,6 +35,7 @@ EXPECTED_OPERATIONS = {
     "/api/inspections/{inspection_id}/findings": {"get", "post"},
     "/api/findings/{finding_id}": {"get"},
     "/api/findings/{finding_id}/decisions": {"get", "post"},
+    "/api/inspections/{inspection_id}/report.pdf": {"get"},
     "/api/users": {"get", "post"},
     "/api/audit-log": {"get"},
     "/api/audit-log/{entry_id}": {"put", "patch", "delete"},
@@ -58,6 +60,16 @@ def test_openapi_lists_every_new_route_with_a_role() -> None:
     assert set(step) == {"name", "status", "started_at", "finished_at", "duration_s", "error"}
     insp = spec["components"]["schemas"]["InspectionStatus"]["properties"]
     assert {"status", "run_id", "progress", "current_step", "error", "steps"} <= set(insp)
+
+
+def test_openapi_report_route_is_a_viewer_pdf_with_a_language() -> None:
+    spec = TestClient(app).get("/openapi.json").json()
+    op = spec["paths"]["/api/inspections/{inspection_id}/report.pdf"]["get"]
+    assert op["description"].startswith("Role: viewer.")
+    assert "application/pdf" in op["responses"]["200"]["content"]
+    lang = next(p for p in op["parameters"] if p["name"] == "lang")
+    assert lang["in"] == "query" and lang["required"] is True
+    assert lang["schema"]["enum"] == ["ru", "kk", "en"]
 
 
 def test_openapi_decision_operations_declare_their_roles() -> None:

@@ -143,9 +143,12 @@ def _aware(t: datetime) -> datetime:
 
 
 def load_report_input(engine: sa.Engine, inspection_id: int, report_time: datetime) -> ReportInput:
-    """The report of an inspection as of `report_time`. Until the Report table (RPT1 part 3)
-    numbers and versions reports, every report is version 1 of `QV-<year>-<inspection id>`, and
-    the capture date is the inspection's date."""
+    """The report of an inspection as of `report_time`: version 1 of `QV-<year>-<inspection id>`,
+    the capture date is the inspection's date. The API's `report` table logs every generation
+    (hash, time, who) but does not feed back into the PDF, so the same data and report time
+    always give the same bytes.
+    ponytail: fixed version 1; number versions from the report table once a report is issued
+    (signed off), which needs the sign-off workflow."""
     if report_time.tzinfo is None:
         raise StageError("report time needs a time zone (ISO 8601 with an offset)")
     with engine.connect() as c:
