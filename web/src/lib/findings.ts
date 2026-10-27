@@ -91,6 +91,7 @@ export const findingsForRunOptions = (runId: string) =>
     queryFn: ({ signal }) => listFindings(runId, signal),
     retry: false,
     retryOnMount: false,
+    refetchOnMount: false,
   });
 
 export const findingOptions = (id: number) =>
@@ -100,6 +101,7 @@ export const findingOptions = (id: number) =>
     staleTime: 30_000,
     retry: false,
     retryOnMount: false,
+    refetchOnMount: false,
   });
 
 /** A metric area is meaningful only when the API also identifies its scale source. */

@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useEffectEvent,
   useId,
   useMemo,
   useRef,
@@ -8,9 +9,10 @@ import {
   type ReactNode,
 } from 'react';
 import { Link } from 'react-router';
-import { useI18n } from '../i18n';
+import { useI18n, type Key } from '../i18n';
 import { hasRgb, runUrl, type Bundle, type Finding } from '../lib/bundle';
 import { heightRamp, RAMP } from '../lib/geometry';
+import type { Finding as ApiFinding } from '../lib/findings';
 import './viewer.css';
 import { ViewerEngine, type ColorMode, type Options, type PointLayer } from './engine';
 import { defaultViewState } from './defaults';
@@ -91,12 +93,18 @@ export function ViewerScreen({
   initialPoint = null,
   invalidPoint = false,
   initialMode = 'orbit',
+  apiFindings,
+  selectedFindingId = null,
+  onFindingSelect,
 }: {
   bundle: Bundle;
   embedded?: boolean;
   initialPoint?: number | null;
   invalidPoint?: boolean;
   initialMode?: 'orbit' | 'observer';
+  apiFindings?: readonly ApiFinding[];
+  selectedFindingId?: number | null;
+  onFindingSelect?: (id: number | null) => void;
 }) {
   const { t } = useI18n();
   const m = bundle.manifest;
@@ -149,22 +157,52 @@ export function ViewerScreen({
     findings: true,
     pointSize: 2.5,
   });
-  const [sel, setSel] = useState<number | null>(null);
+  const [legacySelection, setSel] = useState<number | null>(null);
+  const sel = apiFindings === undefined ? legacySelection : selectedFindingId;
   const markerEls = useRef(new Map<number, HTMLButtonElement>());
   const [glError, setGlError] = useState(false);
 
   const f = frames[frame];
-  const findings = useMemo(() => bundle.findings ?? [], [bundle]);
+  const findings = useMemo(() => {
+    if (apiFindings === undefined) return bundle.findings ?? [];
+    return apiFindings.map((finding) => {
+      const min = [Infinity, Infinity, Infinity];
+      const max = [-Infinity, -Infinity, -Infinity];
+      const centroid = [0, 0, 0];
+      for (const point of finding.points) {
+        for (let axis = 0; axis < 3; axis++) {
+          min[axis] = Math.min(min[axis], point[axis]);
+          max[axis] = Math.max(max[axis], point[axis]);
+          centroid[axis] += point[axis] / finding.points.length;
+        }
+      }
+      return {
+        ...finding,
+        centroid,
+        bbox: { min, max },
+        frames: finding.evidence.map((evidence) => evidence.frame_id),
+      };
+    });
+  }, [bundle, apiFindings]);
   const selected = findings.find((x) => x.id === sel) ?? null;
-  const sevColor = (x: Finding) =>
+  const sevColor = (x: Pick<Finding, 'severity'>) =>
     x.severity === 'critical' ? 'var(--color-finding-critical)' : 'var(--color-finding-watch)';
   // a finding exists on the map once its first frame has played (always, with build-up off)
-  const seen = (x: Finding) => !opts.buildUp || !x.frames.length || x.frames[0] <= frame;
+  const seen = (x: { frames: number[] }) =>
+    !opts.buildUp || !x.frames.length || x.frames[0] <= frame;
   const tc = (i: number) => {
     const time = frameTime(frames[i]);
     return isImages ? `#${i}` : time === null ? t('pointInfo.noTimestamp') : fmtTime(time);
   };
   const canPlay = isImages || frames.every((frame) => frameTime(frame) !== null);
+
+  const onPick = useEffectEvent((p: number | null, layer: PointLayer = 'sparse') => {
+    setPicked(p === null ? null : { index: p, layer });
+    if (p !== null && layer === 'sparse') {
+      const finding = apiFindings?.find((finding) => finding.point_indices.includes(p));
+      if (finding) onFindingSelect?.(finding.id);
+    }
+  });
 
   // engine lifecycle
   useEffect(() => {
@@ -172,7 +210,7 @@ export function ViewerScreen({
     let eng: ViewerEngine;
     try {
       eng = new ViewerEngine(canvas, bundle, {
-        onPick: (p, layer = 'sparse') => setPicked(p === null ? null : { index: p, layer }),
+        onPick,
         onFlyModeChange: setFlyMode,
         onThirdPersonChange: setThirdPerson,
         onAlignModeChange: setAlignMode,
@@ -187,6 +225,13 @@ export function ViewerScreen({
     const ro = new ResizeObserver(() => eng.resize());
     ro.observe(canvas);
     eng.resize();
+    window.__qarau = {
+      pointsLoaded: true,
+      fps: 0,
+      bench: () => {},
+      denseLayer: () => ({ available: false, visible: false, count: 0 }),
+      densePointScreen: () => null,
+    };
     if (import.meta.env.DEV) {
       window.__qarau = {
         pointsLoaded: true,
@@ -223,9 +268,13 @@ export function ViewerScreen({
     return () => {
       ro.disconnect();
       eng.dispose();
+      delete window.__qarau;
     };
   }, [bundle, initialMode]);
 
+  useEffect(() => {
+    if (apiFindings !== undefined) engineRef.current?.setFindings(apiFindings);
+  }, [apiFindings, bundle]);
   useEffect(() => engineRef.current?.setFrame(frame), [frame, bundle]);
   useEffect(() => engineRef.current?.setOptions(opts), [opts, bundle]);
   useEffect(() => engineRef.current?.setFarVisible(showFarLayer), [showFarLayer, bundle]);
@@ -290,9 +339,10 @@ export function ViewerScreen({
     engineRef.current?.viewThroughFrame(i);
   };
 
-  const select = (x: Finding) => {
-    if (sel === x.id) return setSel(null);
-    setSel(x.id);
+  const select = (x: Pick<Finding, 'id' | 'bbox' | 'centroid'>) => {
+    if (apiFindings !== undefined) onFindingSelect?.(sel === x.id ? null : x.id);
+    else setSel(sel === x.id ? null : x.id);
+    if (sel === x.id) return;
     const d = x.bbox.max.map((v, k) => v - x.bbox.min[k]);
     engineRef.current?.flyToFinding(x.centroid, Math.hypot(d[0], d[1], d[2]));
   };
@@ -558,9 +608,10 @@ export function ViewerScreen({
 
               <section className="viewer-section" aria-label={t('findings.title')}>
                 <H2>{t('findings.title')}</H2>
-                {!m.findings ? (
+                {apiFindings === undefined && !m.findings ? (
                   <p className="viewer-small viewer-muted">{t('findings.notRun')}</p>
-                ) : bundle.findingsError ? null : findings.length === 0 ? (
+                ) : apiFindings === undefined && bundle.findingsError ? null : findings.length ===
+                  0 ? (
                   <p className="viewer-small viewer-muted">{t('findings.empty')}</p>
                 ) : (
                   <ul className="viewer-findings">
@@ -578,7 +629,10 @@ export function ViewerScreen({
                           </span>
                           <span className="viewer-finding-label">
                             <span className="truncate">
-                              {x.class} ·{' '}
+                              {apiFindings === undefined
+                                ? x.class
+                                : t(`evidence.class.${x.class}` as Key)}{' '}
+                              ·{' '}
                               {t(
                                 x.severity === 'critical' ? 'findings.critical' : 'findings.watch',
                               )}
@@ -586,11 +640,13 @@ export function ViewerScreen({
                             <span
                               className={`viewer-caption ${x.status === 'low_evidence' ? 'viewer-error' : 'viewer-muted'}`}
                             >
-                              {t(
-                                x.status === 'low_evidence'
-                                  ? 'findings.lowEvidence'
-                                  : 'findings.confirmed',
-                              )}
+                              {apiFindings === undefined
+                                ? t(
+                                    x.status === 'low_evidence'
+                                      ? 'findings.lowEvidence'
+                                      : 'findings.confirmed',
+                                  )
+                                : t(`evidence.status.${x.status}` as Key)}
                             </span>
                           </span>
                           <span className={`${mono} shrink-0 viewer-caption viewer-muted`}>

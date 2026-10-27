@@ -842,3 +842,85 @@
     width: 100%;
   }
 }
+
+/* The v8 finding card stays mounted beside either the loading view or the map. */
+.viewer-page {
+  position: relative;
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+.viewer-page > .viewer-screen,
+.viewer-page > .viewer-page-message {
+  flex: 1;
+  min-width: 0;
+}
+.evidence-panel {
+  position: relative;
+  inset: auto;
+  flex: none;
+  width: var(--layout-side-panel);
+  max-width: 100%;
+  margin-top: var(--layout-topbar);
+}
+.evidence-head {
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4) 0;
+}
+.evidence-body {
+  gap: var(--space-5);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+.evidence-facts {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  margin: 0;
+}
+.evidence-facts > div {
+  min-width: 0;
+  padding: var(--space-3);
+  gap: var(--space-1);
+}
+.evidence-facts dt {
+  color: var(--ink-muted);
+  font-size: var(--t-caption-size);
+}
+.evidence-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.evidence-area {
+  font-size: var(--t-heading-size);
+  font-weight: var(--font-weight-semibold);
+}
+.evidence-frames {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: var(--space-3) var(--space-2);
+}
+.evidence-frame {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  cursor: default;
+}
+.evidence-frame:first-child {
+  grid-column: 1 / -1;
+}
+.evidence-photo {
+  object-fit: contain;
+}
+@media (max-width: 767px) {
+  .evidence-panel {
+    position: absolute;
+    inset: var(--layout-topbar) 0 0 auto;
+    margin: 0;
+    width: min(100%, var(--layout-side-panel));
+  }
+  .evidence-head .qv-iconbtn {
+    width: calc(var(--space-8) + var(--space-3));
+    height: calc(var(--space-8) + var(--space-3));
+  }
+}

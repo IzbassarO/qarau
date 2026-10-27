@@ -126,6 +126,8 @@ void main() {
   gl_FragColor = vec4(vColor, 1.0);
 }`;
 
+type ApiMapFinding = Pick<import('../lib/findings').Finding, 'id' | 'severity' | 'point_indices'>;
+
 export interface Callbacks {
   onPick: (point: number | null, layer?: PointLayer) => void;
   onFlyModeChange?: (active: boolean) => void;
@@ -135,6 +137,7 @@ export interface Callbacks {
 }
 
 export class ViewerEngine {
+  private apiFindings?: readonly ApiMapFinding[];
   readonly renderer: WebGLRenderer;
   private gl: WebGL2RenderingContext;
   readonly scene = new Scene();
@@ -481,7 +484,31 @@ export class ViewerEngine {
     };
   }
 
+  /** Update real API labels without reloading geometry or resetting the camera. */
+  setFindings(findings: readonly ApiMapFinding[]) {
+    this.apiFindings = findings;
+    this.updateFindingColors(this.readSignalColors());
+    this.dirty = true;
+  }
+
   private updateFindingColors(signals: SignalColors) {
+    if (this.apiFindings !== undefined) {
+      const attribute = this.pointGeometry.getAttribute('findingColor') as BufferAttribute;
+      const colors = attribute.array as Uint8Array;
+      const ids = new Float32Array(this.b.manifest.points.count);
+      colors.fill(0);
+      for (const finding of this.apiFindings) {
+        const color = colorBytes(signals[finding.severity === 'critical' ? 'critical' : 'watch']);
+        for (const point of finding.point_indices) {
+          if (!Number.isSafeInteger(point) || point < 0 || point >= ids.length) continue;
+          colors.set(color, point * 3);
+          ids[point] = finding.id;
+        }
+      }
+      attribute.needsUpdate = true;
+      this.pointGeometry.setAttribute('fid', new BufferAttribute(ids, 1));
+      return;
+    }
     const { pointFinding, findings } = this.b;
     if (!pointFinding || !findings) return;
     const palette = new Map(
@@ -1066,8 +1093,13 @@ export class ViewerEngine {
       if (point !== undefined) this.alignToPoint(point);
       return;
     }
-    if (this.pointInfoActive) {
-      const point = this.pickInfoAt(e);
+    const findingsVisible = this.mat.uniforms.uFindings.value > 0.5;
+    if (!this.pointInfoActive && (!findingsVisible || !this.apiFindings?.length)) return;
+    const point = this.pickInfoAt(e);
+    const finding =
+      point?.layer === 'sparse' &&
+      this.apiFindings?.some((finding) => finding.point_indices.includes(point.index));
+    if (this.pointInfoActive || (findingsVisible && finding)) {
       if (point?.layer === 'dense') this.cb.onPick(point.index, 'dense');
       else this.cb.onPick(point?.index ?? null);
     }
