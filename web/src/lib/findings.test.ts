@@ -101,3 +101,25 @@ it('uses distinct query keys for the run, finding and append-only decisions', ()
   expect(findingKeys.detail(701)).toEqual(['findings', 'detail', 701]);
   expect(findingKeys.decisions(701)).toEqual(['findings', 'detail', 701, 'decisions']);
 });
+
+it('uses an explicit catalog run association without reading unrelated inspection runs', async () => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url === '/api/inspections')
+      return Response.json([
+        { id: 41, run_id: 'fixture-notre-dame-run' },
+        { id: 101, run_id: 'unrelated-failed-run' },
+      ]);
+    if (url === '/api/inspections/41/findings')
+      return Response.json([
+        fixture.finding,
+        { ...fixture.finding, id: 702, run_id: 'previous-run' },
+      ]);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  await expect(listFindingsForRun('fixture-notre-dame-run')).resolves.toEqual([fixture.finding]);
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+    '/api/inspections',
+    '/api/inspections/41/findings',
+  ]);
+});

@@ -95,3 +95,29 @@ for (const theme of ['light', 'dark'] as const) {
     await noHorizontalOverflow(page);
   });
 }
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`phone evidence leaves viewer menus reachable: ${theme}`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: theme });
+    await page.addInitScript(() => localStorage.setItem('qarau.lang', 'en'));
+    await page.goto('/viewer/notre-dame-p3e?finding=first');
+    const evidence = page.getByRole('complementary', { name: 'Evidence' });
+    await expect(evidence.getByRole('heading', { name: 'Corrosion' })).toBeVisible();
+    await expect(evidence.locator('.evidence-thumbnails img')).toHaveCount(3);
+    await expect(evidence.locator('.evidence-thumbnails polygon')).toHaveCount(3);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await noHorizontalOverflow(page);
+
+    // A normal tap must reach each menu while the evidence card is open.
+    await openDetails(page);
+    await expect(page.locator('.viewer-panel')).toBeVisible();
+    await page.locator('.viewer-settings > summary').click();
+    await expect(page.locator('.viewer-panel')).not.toBeVisible();
+    await expect(page.locator('.viewer-settings-panel')).toBeVisible();
+    await page.locator('.viewer-settings > summary').click();
+    await evidence.getByRole('button', { name: 'Close evidence' }).click();
+    await expect(evidence).toHaveCount(0);
+    await openDetails(page);
+    await expect(page.locator('.viewer-panel')).toBeVisible();
+  });
+}

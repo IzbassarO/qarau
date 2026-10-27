@@ -84,7 +84,17 @@ export async function postDecision(
  * There is no GET /runs/:id/findings in DEF1. Never infer an inspection from a filename.
  */
 export async function listFindingsForRun(runId: string, signal?: AbortSignal): Promise<Finding[]> {
-  const inspections = (await readApi('/api/inspections', signal)) as { id: number }[];
+  const inspections = (await readApi('/api/inspections', signal)) as {
+    id: number;
+    run_id?: string | null;
+  }[];
+  // S1 catalogs may already name the requested database run. Avoid fetching the
+  // run history of every unrelated inspection when this association is explicit.
+  const known = inspections.filter((inspection) => inspection.run_id === runId);
+  if (known.length) {
+    const findings = await Promise.all(known.map(({ id }) => listFindings(id, signal)));
+    return findings.flat().filter((finding) => finding.run_id === runId);
+  }
   const runs = await Promise.all(
     inspections.map(async ({ id }) => {
       const rows = (await readApi(`/api/inspections/${id}/runs`, signal)) as {

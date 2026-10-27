@@ -865,3 +865,50 @@ it('opens API evidence by clicking its numbered finding marker', async () => {
   expect(await screen.findByRole('heading', { name: 'Corrosion' })).toBeTruthy();
   expect(screen.queryByRole('region', { name: 'Point info' })).toBeNull();
 });
+
+it('keeps bundle-only findings on their existing timecode panel without requesting DEF1 detail', async () => {
+  const source = createDemo('en').bundle;
+  const bundle: bundleApi.Bundle = {
+    ...source,
+    runId: 'legacy-findings',
+    manifest: { ...source.manifest, findings: 'findings/findings.json' },
+    findings: [
+      {
+        id: 1,
+        class: 'corrosion',
+        severity: 'critical',
+        status: 'confirmed',
+        n_points: 3,
+        centroid: [0, 0, 2],
+        bbox: { min: [-1, -1, 1], max: [1, 1, 3] },
+        frames: [0, 1, 2],
+      },
+    ],
+  };
+  vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
+  vi.spyOn(bundleApi, 'loadBundle').mockResolvedValue(bundle);
+  const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
+  vi.stubGlobal('fetch', fetch);
+  renderViewer('legacy-findings');
+  fireEvent.click(await screen.findByRole('button', { name: 'Finding 1' }));
+  expect(screen.getByTestId('finding-detail')).toBeTruthy();
+  expect(screen.getAllByTestId('finding-timecode')).toHaveLength(3);
+  expect(screen.queryByRole('complementary', { name: 'Evidence' })).toBeNull();
+  expect(fetch.mock.calls.map(([url]) => url)).not.toContain('/api/findings/1');
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('closes an open details drawer when API evidence opens and keeps the summaries outside the card', async () => {
+  mockFindingViewer();
+  renderViewer('notre-dame-p3e');
+  const marker = await screen.findByRole('button', { name: 'Finding 701' });
+  const details = document.querySelector<HTMLDetailsElement>('.viewer-panel-drawer')!;
+  details.open = true;
+  fireEvent.click(marker);
+  const panel = await screen.findByRole('complementary', { name: 'Evidence' });
+  expect(await screen.findByRole('heading', { name: 'Corrosion' })).toBeTruthy();
+  expect(details.open).toBe(false);
+  expect(panel.parentElement?.className).toBe('viewer-overlays');
+  expect(details.closest('.viewer-chrome')?.parentElement).toBe(panel.parentElement);
+  expect(panel.contains(details.querySelector('summary'))).toBe(false);
+});

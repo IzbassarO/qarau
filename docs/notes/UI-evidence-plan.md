@@ -25,3 +25,9 @@ The local fixture preview is opt-in: the Vite API stand-in supplies the checked-
 - Literal contain-fit coordinates, scaled/unscaled area, fetch URLs/session headers, decision POST payloads, loading/error/retry/empty/loaded panel states, hidden confidence, natural image dimensions and resize, large finding IDs and point picking, marker selection and both deep links are covered.
 - All three fixture image files exist in the read-only notre-dame-p3e bundle. Preview middleware is covered without starting a server.
 - No servers, screenshots or Playwright runs were started. Kerege performs browser verification; full fixture e2e and phone work remain in part 3. Decision log/actions remain in part 2.
+
+## E2e repair round
+
+Kerege reported unrelated inspection-run discovery requests and phone controls blocked by evidence opened for legacy bundle findings. Resolve explicit inspection `run_id` metadata before scanning RunOut records, keep legacy-only findings on the existing timecode panel, and stack the mobile evidence panel below the controls. Add regression coverage and the new findings response to the existing inspection e2e mock; preserve all its assertions. Run the required local checks; browser execution remains with Kerege.
+
+Repair verification: lint and typecheck passed; all 804 Vitest tests in 43 files passed; production build passed. Existing test assertions are unchanged. Added phone Playwright coverage for opening viewer menus while evidence is visible in both themes; it awaits Kerege's browser run. Confirmed the two failing run bundles contain legacy findings IDs. No servers or screenshots were started.
