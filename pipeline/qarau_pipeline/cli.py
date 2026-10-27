@@ -1,5 +1,5 @@
 """CLI: python -m qarau_pipeline {run,step,quality,export,segment,project,dense-remote,
-finding-evidence,benchmark,refresh} ..."""
+finding-evidence,report,benchmark,refresh} ..."""
 
 from __future__ import annotations
 
@@ -196,6 +196,32 @@ def cmd_finding_evidence(a: argparse.Namespace) -> None:
           f"(scale not set), frames {[ev['frame'] for ev in frames]} -> {out}")  # fmt: skip
 
 
+def cmd_report(a: argparse.Namespace) -> None:
+    import os
+    from datetime import datetime
+
+    import sqlalchemy as sa
+
+    from .report import generate
+
+    url = a.db or os.environ.get("QARAU_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    if not url:
+        raise StageError("report needs --db URL or QARAU_DATABASE_URL (the API's database)")
+    try:
+        when = datetime.fromisoformat(a.report_time) if a.report_time else datetime.now()
+    except ValueError as err:
+        raise StageError(f"--report-time: {err}") from err
+    # naive: the machine's zone; whole seconds, so the printed time reproduces the file
+    when = (when.astimezone() if when.tzinfo is None else when).replace(microsecond=0)
+    engine = sa.create_engine(url)
+    try:
+        pdf, sha = generate(a.inspection, a.lang, when, engine)
+    finally:
+        engine.dispose()
+    Path(a.out).write_bytes(pdf)
+    print(f"report: {a.out} ({len(pdf)} bytes) sha256 {sha} report time {when.isoformat()}")
+
+
 def cmd_benchmark(a: argparse.Namespace) -> None:
     from .benchmark import run_benchmark
 
@@ -293,6 +319,14 @@ def main(argv: list[str] | None = None) -> None:
     fe.add_argument("--polygon", required=True, help="JSON: [[x, y, z], ...] (>= 3 vertices)")
     fe.add_argument("--out", required=True)
     fe.set_defaults(fn=cmd_finding_evidence)
+    rp = sub.add_parser("report", help="inspection -> PDF report (RPT1, ADR 0027)")
+    rp.add_argument("--inspection", type=int, required=True, help="inspection id in the API db")
+    rp.add_argument("--lang", choices=["ru", "kk", "en"], required=True)
+    rp.add_argument("--out", required=True, help="PDF file to write")
+    rp.add_argument("--report-time", help="ISO 8601, e.g. 2026-10-26T14:32:00+05:00 (default: "
+                    "now); the only clock in the PDF: same time, same file")  # fmt: skip
+    rp.add_argument("--db", help="SQLAlchemy URL (default: $QARAU_DATABASE_URL)")
+    rp.set_defaults(fn=cmd_report)
     b = sub.add_parser("benchmark", help="all reference videos -> <out>/results.json")
     b.add_argument("--data", required=True, help="dir with the reference videos (read-only)")
     b.add_argument("--out", required=True)
