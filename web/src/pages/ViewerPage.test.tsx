@@ -912,3 +912,71 @@ it('closes an open details drawer when API evidence opens and keeps the summarie
   expect(details.closest('.viewer-chrome')?.parentElement).toBe(panel.parentElement);
   expect(panel.contains(details.querySelector('summary'))).toBe(false);
 });
+
+it.each(['first', '701'])(
+  'loads the reference deep link %s when the real API list is empty',
+  async (id) => {
+    mockFindingViewer();
+    const fetch = vi.fn().mockResolvedValue(Response.json([]));
+    vi.stubGlobal('fetch', fetch);
+    renderViewer('notre-dame-p3e', `?finding=${id}`);
+    const heading = await screen.findByRole('heading', { name: 'Corrosion' });
+    const panel = heading.closest('aside')!;
+    expect(panel.querySelectorAll('.evidence-thumbnails img')).toHaveLength(3);
+    expect(panel.querySelectorAll('.evidence-thumbnails polygon')).toHaveLength(3);
+    expect(screen.getByText('Critical')).toBeTruthy();
+    expect(screen.getByText('1.2 m²')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText('No findings in this run.')).toBeNull();
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections']);
+  },
+);
+
+it('loads the bundled reference when preview answers API requests with HTML instead of JSON', async () => {
+  mockFindingViewer();
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response('<html></html>', { headers: { 'Content-Type': 'text/html' } }),
+      ),
+  );
+  renderViewer('notre-dame-p3e', '?finding=first');
+  expect(await screen.findByRole('heading', { name: 'Corrosion' })).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it.each([401, 403, 503])(
+  'keeps API failures (%s) visible instead of replacing them with reference findings',
+  async (status) => {
+    mockFindingViewer();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status })));
+    renderViewer('notre-dame-p3e', '?finding=first');
+    await waitFor(() => expect(screen.getAllByRole('alert').length).toBeGreaterThan(0));
+    expect(screen.queryByRole('heading', { name: 'Corrosion' })).toBeNull();
+  },
+);
+
+it('keeps real API findings authoritative on the reference deep link', async () => {
+  mockFindingViewer();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (url === '/api/inspections') return Response.json([{ id: 41, run_id: 'notre-dame-p3e' }]);
+      const actual = {
+        ...findingFixture.finding,
+        id: 900,
+        run_id: 'notre-dame-p3e',
+        class: 'crack',
+      };
+      if (url === '/api/inspections/41/findings') return Response.json([actual]);
+      if (url === '/api/findings/900') return Response.json(actual);
+      throw new Error(`Unexpected request ${url}`);
+    }),
+  );
+  renderViewer('notre-dame-p3e', '?finding=first');
+  expect(await screen.findByRole('heading', { name: 'Crack' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'Corrosion' })).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+});

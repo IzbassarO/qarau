@@ -34,6 +34,7 @@ import { EvidencePanel } from './EvidencePanel';
 import { withApiFindings } from './evidence';
 import { findingsForRunOptions } from '../lib/findings';
 import { ApiUnavailableError } from '../lib/api';
+import { referenceEvidenceFor } from '../fixtures/evidence';
 import { Minimap, type MinimapHandle } from './Minimap.tsx';
 import { canShowHumanFigure } from './observer';
 import { SessionImage } from '../auth/SessionImage';
@@ -110,9 +111,19 @@ export function ViewerScreen({
     ...findingsForRunOptions(sourceBundle.runId),
     enabled: sourceBundle.runId !== 'demo',
   });
+  const referenceCandidate = referenceEvidenceFor(sourceBundle.runId, initialFinding);
+  const previewFinding =
+    (!apiFindings.isError && apiFindings.data?.length === 0) ||
+    apiFindings.error instanceof ApiUnavailableError
+      ? referenceCandidate
+      : undefined;
+  const runFindings = useMemo(
+    () => (apiFindings.data?.length ? apiFindings.data : previewFinding ? [previewFinding] : []),
+    [apiFindings.data, previewFinding],
+  );
   const bundle = useMemo(
-    () => withApiFindings(sourceBundle, apiFindings.data ?? []),
-    [sourceBundle, apiFindings.data],
+    () => withApiFindings(sourceBundle, runFindings),
+    [sourceBundle, runFindings],
   );
   const [evidenceRequest, setEvidenceRequest] = useState<number | 'first' | null>(() =>
     initialFinding === 'first'
@@ -123,8 +134,7 @@ export function ViewerScreen({
         ? Number(initialFinding)
         : null,
   );
-  const evidenceId =
-    evidenceRequest === 'first' ? (apiFindings.data?.[0]?.id ?? null) : evidenceRequest;
+  const evidenceId = evidenceRequest === 'first' ? (runFindings[0]?.id ?? null) : evidenceRequest;
   const m = bundle.manifest;
   const frames = m.frames;
   const isImages = m.source.kind === 'images';
@@ -211,7 +221,7 @@ export function ViewerScreen({
         onFindingPick: (id) => {
           // Exported bundle IDs are not necessarily DEF1 database IDs. Keep
           // their existing timecodes unless the API identifies the same finding.
-          setEvidenceRequest(apiFindings.data?.some((finding) => finding.id === id) ? id : null);
+          setEvidenceRequest(runFindings.some((finding) => finding.id === id) ? id : null);
           setSel(id);
           setPicked(null);
           setPointInfoMode(false);
@@ -267,7 +277,7 @@ export function ViewerScreen({
       ro.disconnect();
       eng.dispose();
     };
-  }, [bundle, initialMode, apiFindings.data]);
+  }, [bundle, initialMode, runFindings]);
 
   useEffect(() => engineRef.current?.setFrame(frame), [frame, bundle]);
   useEffect(() => engineRef.current?.setOptions(opts), [opts, bundle]);
@@ -337,7 +347,7 @@ export function ViewerScreen({
   };
 
   const select = (x: Finding) => {
-    setEvidenceRequest(apiFindings.data?.some((finding) => finding.id === x.id) ? x.id : null);
+    setEvidenceRequest(runFindings.some((finding) => finding.id === x.id) ? x.id : null);
     setPicked(null);
     setPointInfoMode(false);
     if (sel === x.id) return setSel(null);
@@ -618,7 +628,7 @@ export function ViewerScreen({
                       {t('evidence.error')}
                     </p>
                   )}
-                  {!m.findings && !apiFindings.data?.length ? (
+                  {!m.findings && !runFindings.length ? (
                     <p className="viewer-small viewer-muted">{t('findings.notRun')}</p>
                   ) : bundle.findingsError ? null : findings.length === 0 ? (
                     <p className="viewer-small viewer-muted">{t('findings.empty')}</p>
@@ -774,9 +784,11 @@ export function ViewerScreen({
           {evidenceRequest !== null && (
             <EvidencePanel
               findingId={evidenceId}
+              previewFinding={previewFinding}
               frames={frames}
               listState={
-                evidenceRequest === 'first'
+                (evidenceRequest === 'first' || evidenceRequest === referenceCandidate?.id) &&
+                !previewFinding
                   ? apiFindings.isPending
                     ? 'loading'
                     : apiFindings.isError

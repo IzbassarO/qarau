@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import fixture from './src/test/fixtures/finding.json' with { type: 'json' };
 
-/** Explicit local evidence preview. Only a viewer URL with ?finding= opts in.
- * This middleware is absent when Vite proxies the API, and from production builds.
- * It never writes findings into a real inspection or replaces the inspection list UI.
+/** Legacy local API adapter for viewer finding previews. The client also bundles
+ * the reference finding, so this optional Referer-based shim is no longer required
+ * for screenshots, compiled deployments or proxied APIs. It never writes records.
  */
 export function serveEvidenceFixture(
   req: IncomingMessage,

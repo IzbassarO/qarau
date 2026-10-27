@@ -20,15 +20,23 @@ export function EvidencePanel({
   onClose,
   listState,
   onRetry,
+  previewFinding,
 }: {
   findingId: number | null;
   frames: readonly FrameInfo[];
   onClose: () => void;
   listState?: 'loading' | 'error';
   onRetry?: () => void;
+  /** Explicit reference-bundle preview; never cached as a real backend record. */
+  previewFinding?: Finding;
 }) {
   const { t } = useI18n();
-  const query = useQuery({ ...findingOptions(findingId ?? 0), enabled: findingId !== null });
+  const supplied = previewFinding?.id === findingId ? previewFinding : undefined;
+  const query = useQuery({
+    ...findingOptions(findingId ?? 0),
+    enabled: findingId !== null && !supplied && !listState,
+  });
+  const finding = supplied ?? query.data;
   return (
     <aside className="qv-detail evidence-panel" aria-label={t('evidence.title')}>
       <header className="qv-detail__head evidence-header">
@@ -54,9 +62,9 @@ export function EvidencePanel({
           </div>
         ) : findingId === null ? (
           <p role="status">{t('evidence.noFindings')}</p>
-        ) : query.isPending ? (
+        ) : !supplied && query.isPending ? (
           <p role="status">{t('evidence.loading')}</p>
-        ) : query.isError ? (
+        ) : !supplied && query.isError ? (
           <div role="alert" className="evidence-message">
             <p>{t('evidence.error')}</p>
             <button
@@ -67,9 +75,9 @@ export function EvidencePanel({
               {t('shell.retry')}
             </button>
           </div>
-        ) : (
-          <EvidenceContent key={query.data.id} finding={query.data} frames={frames} />
-        )}
+        ) : finding ? (
+          <EvidenceContent key={finding.id} finding={finding} frames={frames} />
+        ) : null}
       </div>
     </aside>
   );
