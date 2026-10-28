@@ -53,7 +53,7 @@ link also reaches the same API inspection report.
 
 Required local checks: `pnpm lint && pnpm typecheck`, `pnpm test && pnpm build`,
 Playwright discovery and `git diff --check`. The last code round passed all checks:
-47 Vitest files, 885 tests and 28 discovered desktop/phone report e2e cases. Kerege
+47 Vitest files, 887 tests and 28 discovered desktop/phone report e2e cases. Kerege
 runs browser e2e with its own fresh server (`reuseExistingServer: false`). Never
 start a local server or take developer screenshots for this task.
 
@@ -69,5 +69,25 @@ Installed package metadata: React/React DOM, react-router, TanStack Query, Vite,
 Vitest and Testing Library use MIT; Playwright uses Apache-2.0. Existing self-hosted
 fonts use OFL. All permit commercial use; no dependencies or tools were added.
 
-The size-gate correction consolidates repeated historical plans/results into this
-current note. Product code, tests, assertions and fixtures are unchanged.
+## Screenshot readiness correction
+
+Mark the inspection list busy during its initial API load. Keep `.report-state`
+busy until its Blob URL is attached to both preview and download, so capture cannot
+observe a ready PDF state before the iframe exists. New Vitest cases cover these
+transitions and clicking the list's Report link. Existing assertions are preserved.
+The six e2e navigation variants additionally check list readiness and viewport
+visibility of the preview, download/hash and all language buttons.
+
+Real backend verification runs in-process through FastAPI TestClient, without a
+listening port: migrate a scratch SQLite, exercise `/api/inspections/37/report.pdf`
+in ru/kk/en and verify PDF bytes, response headers and SHA-256. The original backend
+seed is also exercised on a separate scratch database with the original
+`notre-dame-p3e` bundle read-only. No backend code or data files are changed.
+FastAPI/SQLAlchemy/Alembic are MIT; httpx and WeasyPrint are BSD-3-Clause.
+Both backend checks passed; seeded PDFs returned 200 in 1.17–1.30 seconds across
+ru/kk/en. Lint, typecheck, all 887 Vitest tests, build, e2e discovery and diff-check
+passed after the readiness changes. No listening server was started.
+
+Screenshot evidence still must be supplied by the tester. The developer does not
+capture screenshots or modify protected tester routes/configuration. The prior
+size-gate correction consolidated historical notes; keep this note concise.

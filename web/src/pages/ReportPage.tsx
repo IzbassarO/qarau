@@ -92,7 +92,7 @@ export function ReportPage() {
         <section
           className="report-state"
           aria-label={t('report.pdf')}
-          aria-busy={state.state === 'generating'}
+          aria-busy={state.state === 'generating' || (state.state === 'ready' && !readyUrl)}
         >
           {state.state === 'generating' && <p role="status">{t('report.generating')}</p>}
           {state.state === 'ready' && <p role="status">{t('report.ready')}</p>}

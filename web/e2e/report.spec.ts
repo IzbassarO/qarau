@@ -187,8 +187,11 @@ for (const locale of locales) {
       }, locale.lang);
       const requests = await mockApi(page);
       await page.goto('/inspections');
+      await expect(page.locator('.inspections-start')).toHaveAttribute('aria-busy', 'false');
+      await expect(page.locator('[data-inspection-id="37"]')).toBeVisible();
       const reportLink = page.getByRole('link', { name: locale.reportLink, exact: true });
       await expect(reportLink).toHaveAttribute('href', '/inspections/37/report');
+      await expect(reportLink).toBeInViewport();
       await reportLink.click();
       await expect(page).toHaveURL('/inspections/37/report');
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
@@ -208,10 +211,17 @@ for (const locale of locales) {
       await expect(page.getByRole('status')).toHaveText(locale.ready);
       await expect(page.locator('iframe')).toHaveAttribute('title', locale.preview);
       await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
+      await expect(page.locator('iframe')).toBeInViewport();
+      const languageButtons = page
+        .getByRole('group', { name: locale.language })
+        .getByRole('button');
+      for (const button of await languageButtons.all()) await expect(button).toBeInViewport();
       const downloadLink = page.getByRole('link', { name: locale.download, exact: true });
       await expect(downloadLink).toHaveAttribute('download', `report-37-${locale.lang}.pdf`);
       await expect(downloadLink).toHaveAttribute('href', /^blob:/);
+      await expect(downloadLink).toBeInViewport();
       await expect(page.getByTitle(hash, { exact: true })).toHaveText('5e317abc851b…fef9fb6c');
+      await expect(page.getByTitle(hash, { exact: true })).toBeInViewport();
       await expect(page.getByRole('alert')).toHaveCount(0);
       await expect(page.locator('body')).not.toContainText(/\b(?:report|evidence)\.[a-zA-Z]/);
       expect(requests).toEqual([locale.lang]);

@@ -50,7 +50,11 @@ export function InspectionsStartPage({
   });
 
   return (
-    <section className="qv-page__inner inspections-start" aria-labelledby="inspections-title">
+    <section
+      className="qv-page__inner inspections-start"
+      aria-labelledby="inspections-title"
+      aria-busy={!demo && (query.isPending || action.isPending)}
+    >
       <header className="qv-page__head inspections-heading">
         <div>
           <h1 className="qv-title" id="inspections-title">

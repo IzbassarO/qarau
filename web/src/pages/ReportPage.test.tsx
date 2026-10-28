@@ -12,16 +12,17 @@ import { fixturePdf, mockReportApi } from '../test/reportApi';
 import { ReportPage } from './ReportPage';
 
 const clients: QueryClient[] = [];
-function renderReport(id = '37', signedIn = true) {
+function renderReport(id = '37', signedIn = true, entry = `/inspections/${id}/report`) {
   if (signedIn) sessionStorage.setItem('qarau.auth.session', 'Bearer test-report-session');
   const client = new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } });
   clients.push(client);
   return render(
     <QueryClientProvider client={client}>
       <AuthProvider>
-        <MemoryRouter initialEntries={[`/inspections/${id}/report`]}>
+        <MemoryRouter initialEntries={[entry]}>
           <Routes>
             <Route element={<RequireAuth />}>
+              <Route path="/inspections" element={<AppShell />} />
               <Route
                 path="/inspections/:id/report"
                 element={
@@ -83,6 +84,62 @@ it('renders fixture object, date, scale, severity groups, API statuses and decis
   expect(within(watch).getByText('Proposed')).toBeTruthy();
   expect(within(watch).getByText('No decision yet')).toBeTruthy();
   expect(screen.queryByText(/confidence/i)).toBeNull();
+});
+
+it('keeps the PDF section busy until the Blob URL is attached to preview and download', async () => {
+  mockReportApi();
+  vi.mocked(URL.createObjectURL).mockImplementationOnce(() => {
+    expect(screen.getByRole('region', { name: 'PDF preview' }).getAttribute('aria-busy')).toBe(
+      'true',
+    );
+    expect(document.querySelector('iframe')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Download PDF' })).toBeNull();
+    return 'blob:report-en';
+  });
+  renderReport();
+  const download = await screen.findByRole('link', { name: 'Download PDF' });
+  expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('region', { name: 'PDF preview' }).getAttribute('aria-busy')).toBe(
+    'false',
+  );
+  expect(screen.getByTitle('PDF preview').getAttribute('src')).toBe('blob:report-en');
+  expect(download.getAttribute('href')).toBe('blob:report-en');
+  expect(download.getAttribute('download')).toBe('report-37-en.pdf');
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('waits for the inspection list, then follows Report to a ready PDF without an error banner', async () => {
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fetch = mockReportApi();
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (input) => {
+    if (String(input) === '/api/inspections') await pending;
+    return original(input);
+  });
+  renderReport('37', true, '/inspections');
+  const list = screen.getByRole('region', { name: 'Inspections' });
+  expect(list.getAttribute('aria-busy')).toBe('true');
+  expect(screen.queryByRole('link', { name: 'Report' })).toBeNull();
+  await act(async () => release());
+  const report = await within(list).findByRole('link', { name: 'Report' });
+  expect(list.getAttribute('aria-busy')).toBe('false');
+  expect(report.getAttribute('href')).toBe('/inspections/37/report');
+  expect(within(list).getByText('Tank T-104, north wall')).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  fireEvent.click(report);
+  const download = await screen.findByRole('link', { name: 'Download PDF' });
+  expect(download.getAttribute('download')).toBe('report-37-en.pdf');
+  expect(screen.getByRole('region', { name: 'PDF preview' }).getAttribute('aria-busy')).toBe(
+    'false',
+  );
+  expect(screen.getByTitle('PDF preview').getAttribute('src')).toBe('blob:report-en');
+  expect(screen.getByTitle(fixture.hash).textContent).toBe('bf98d56a3f72…7263bc26');
+  expect(screen.getByRole('group', { name: 'PDF language' })).toBeTruthy();
+  expect(screen.getAllByText('Tank T-104, north wall')).toHaveLength(2);
+  expect(screen.queryByRole('alert')).toBeNull();
 });
 
 it('shows coverage not computed for the fixture’s null coverage', async () => {
