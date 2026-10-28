@@ -124,6 +124,16 @@ def test_ui_evidence_split_keeps_its_branch_and_bans_bundled_findings():
 
 
 @pytest.mark.backlog
+def test_demo1_purges_only_an_event_organization_with_an_immutable_flag():
+    """Owner 2026-10-28: decision and audit_log stay append-only in every other organization."""
+    goal = {t["id"]: t for t in real_backlog()}["DEMO1"]["goal"]
+    assert "except one created by `app.event create`" in goal
+    assert "immutable afterwards" in goal and "a DB trigger rejects" in goal
+    assert "normal organization still cannot be deleted or updated" in goal
+    assert "flag cannot be changed after creation" in goal
+
+
+@pytest.mark.backlog
 def test_p4a_2a_run_records_its_pr_and_the_notes_survive_a_redump():
     by = {t["id"]: t for t in real_backlog()}
     t = by["P4a-2a-run"]

@@ -1775,11 +1775,15 @@ tasks:
 
     3. Expired or unknown code -> 401; rate limits per IP and per code; each code use in the audit log.
 
-    decision and audit_log are append-only (migration 0001 triggers): purge may delete only the demo
+    decision and audit_log stay append-only (migration 0001 triggers) as today in every organization
 
-    organization''s guest rows, the guard stays for every other organization, and a code use is logged
+    except one created by `app.event create`: only that organization carries an event flag, set at
 
-    so that purge never has to delete an audit row. No invented demo data.
+    creation and immutable afterwards (no API or UI sets or clears it; a DB trigger rejects any change
+
+    of it). Purge deletes guest rows only in that organization; a code use is logged so that purge
+
+    never has to delete an audit row. No invented demo data.
 
 
     Not in this task: the web sign-in and banner (DEMO1-ui), deploy (D2), public sign-up.
@@ -1787,12 +1791,18 @@ tasks:
 
     Done when: tests show an expired code rejected; guest A reading guest B''s finding -> 404; a guest
 
-    upload -> 403; the rate limit -> 429; after purge no guest rows remain and a decision of another
+    upload -> 403; the rate limit -> 429; after purge no guest rows remain; a test proves a decision
 
-    organization still cannot be deleted; each code use is in the audit log; ruff, mypy, pytest pass.
+    in a normal organization still cannot be deleted or updated after the change; a test proves the
+
+    event flag cannot be changed after creation (set or cleared); each code use is in the audit log;
+
+    ruff, mypy, pytest pass.
 
 
-    Owner 2026-10-28: LaunchPad demo; risk high (guest access to a real system).
+    Owner 2026-10-28: LaunchPad demo; risk high (guest access to a real system); purge only in
+
+    an `app.event create` organization with an immutable event flag.
 
     '
   status: todo
