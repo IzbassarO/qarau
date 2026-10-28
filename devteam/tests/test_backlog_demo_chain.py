@@ -15,7 +15,9 @@ from devteam.graph import outside_paths
 
 CHAIN = [
     "B1", "U2", "S1", "DS1", "D1", "DEF1-api", "UI-inspections", "REV1-api", "UI-evidence",
-    "UI-evidence-b", "UI-evidence-c", "RPT1", "UI-mark", "UI-report", "D2", "COV1",
+    # owner, 2026-10-28 (LaunchPad demo, 2026-11-06): one queue per developer, in this order
+    "ME1", "UI-report", "UI-evidence-b", "CONF-fix", "UI-evidence-c", "RPT1", "COV1", "COV1-b",
+    "UI-mark", "DEMO1", "D2", "DEMO1-ui",
 ]  # fmt: skip
 DEPS = {
     "B1": [],
@@ -28,13 +30,18 @@ DEPS = {
     "REV1-api": ["DEF1-api"],
     "UI-evidence": ["DS1", "DEF1-api", "REV1-api"],
     # owner, 2026-10-27: UI-evidence split in three; its branch continues as the first part
-    "UI-evidence-b": ["UI-evidence"],
+    "ME1": [],
+    "UI-evidence-b": ["UI-evidence", "ME1"],  # the role from GET /api/me (2026-10-28)
+    "CONF-fix": [],
     "UI-evidence-c": ["UI-evidence-b"],
     "RPT1": ["REV1-api"],
     "UI-mark": ["UI-evidence-c"],
     "UI-report": ["RPT1", "DS1"],
     "D2": ["S1", "U2"],
     "COV1": ["RPT1"],
+    "COV1-b": ["COV1"],  # owner, 2026-10-28: COV1 split in two
+    "DEMO1": [],
+    "DEMO1-ui": ["DEMO1"],
 }
 LATER = [
     "P5a-1", "P5a-2", "P7", "P4a-2b", "P4c", "A7a", "A7", "O1a", "O1", "P5b", "P6", "UX-kk",
@@ -114,6 +121,16 @@ def test_ui_evidence_split_keeps_its_branch_and_bans_bundled_findings():
     assert "window.__qarau.pointsLoaded" in a["goal"] and "Demo site" in a["goal"]
     for tid in ("UI-evidence", "UI-evidence-b", "UI-evidence-c"):
         assert "Owner 2026-10-27:" in by[tid]["goal"], tid
+
+
+@pytest.mark.backlog
+def test_demo1_purges_only_an_event_organization_with_an_immutable_flag():
+    """Owner 2026-10-28: decision and audit_log stay append-only in every other organization."""
+    goal = {t["id"]: t for t in real_backlog()}["DEMO1"]["goal"]
+    assert "except one created by `app.event create`" in goal
+    assert "immutable afterwards" in goal and "a DB trigger rejects" in goal
+    assert "normal organization still cannot be deleted or updated" in goal
+    assert "flag cannot be changed after creation" in goal
 
 
 @pytest.mark.backlog
