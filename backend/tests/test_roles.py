@@ -48,6 +48,7 @@ READ_ROUTES = [
     ("GET", "/api/inspections/1/findings", "viewer"),
     ("GET", "/api/findings/1", "viewer"),
     ("GET", "/api/findings/1/decisions", "viewer"),
+    ("GET", "/api/me", "viewer"),
     ("GET", "/api/users", "admin"),
     ("GET", "/api/audit-log", "admin"),
 ]
