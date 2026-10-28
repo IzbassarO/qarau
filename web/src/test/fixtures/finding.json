@@ -1,0 +1,55 @@
+{
+  "finding": {
+    "id": 701,
+    "inspection_id": 41,
+    "run_id": "fixture-notre-dame-run",
+    "class": "corrosion",
+    "severity": "critical",
+    "status": "confirmed",
+    "comment": "Surface damage is visible in the source frames.",
+    "area_units": 3.5,
+    "area_m2": 1.234,
+    "scale": "reference: measured sheet",
+    "point_indices": [0, 1, 2],
+    "points": [
+      [0, 0, 0],
+      [0.1, 0, 0],
+      [0, 0.1, 0]
+    ],
+    "evidence": [
+      {
+        "frame_id": 0,
+        "image_url": "/api/runs/notre-dame-p3e/files/frames/000000.jpg",
+        "outline": [
+          [250, 100],
+          [320, 110],
+          [330, 240],
+          [260, 230]
+        ],
+        "confidence": 0.987654
+      },
+      {
+        "frame_id": 4,
+        "image_url": "/api/runs/notre-dame-p3e/files/frames/000004.jpg",
+        "outline": [
+          [240, 100],
+          [310, 110],
+          [320, 240],
+          [250, 230]
+        ],
+        "confidence": 0.987654
+      },
+      {
+        "frame_id": 7,
+        "image_url": "/api/runs/notre-dame-p3e/files/frames/000007.jpg",
+        "outline": [
+          [230, 100],
+          [300, 110],
+          [310, 240],
+          [240, 230]
+        ],
+        "confidence": 0.987654
+      }
+    ]
+  }
+}

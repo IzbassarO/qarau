@@ -266,6 +266,32 @@ describe('ViewerEngine GPU scheduling', () => {
 });
 
 describe('ViewerEngine point info tool', () => {
+  it('colours real API finding points and picks them with the info tool off', () => {
+    const { canvas, engine, onPick } = setup(navigationBundle());
+    const cloud = engine.scene.children.find(
+      (object) => object instanceof Points && object.name === '',
+    ) as Points;
+    const positions = cloud.geometry.getAttribute('position');
+    const camera = engine.camera.position.clone();
+    engine.setFindings([{ id: 701, severity: 'critical', point_indices: [5] }]);
+    expect(cloud.geometry.getAttribute('fid').getX(5)).toBe(701);
+    expect(cloud.geometry.getAttribute('fid').getX(1)).toBe(0);
+    expect(Array.from(cloud.geometry.getAttribute('findingColor').array).slice(15, 21)).toEqual([
+      196, 42, 24, 0, 0, 0,
+    ]);
+    const pixel = engine.project([1, -1, 1]);
+    pointer(canvas, 'pointerdown', pixel.x, pixel.y);
+    pointer(canvas, 'pointerup', pixel.x, pixel.y);
+    expect(onPick).toHaveBeenLastCalledWith(5);
+    engine.setFindings([]);
+    expect(cloud.geometry.getAttribute('fid').getX(5)).toBe(0);
+    expect(Array.from(cloud.geometry.getAttribute('findingColor').array)).toEqual([
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+    expect(cloud.geometry.getAttribute('position')).toBe(positions);
+    expect(engine.camera.position.equals(camera)).toBe(true);
+  });
+
   it('selects through the existing picker only when active and preserves orbit during drags', () => {
     const { canvas, engine, onPick } = setup(navigationBundle());
     const pixel = engine.project([1, -1, 1]);
