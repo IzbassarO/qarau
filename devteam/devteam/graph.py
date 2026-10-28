@@ -79,6 +79,7 @@ RELEASE_TAG = re.compile(r"refs/tags/release-\d{4}-\d{2}-\d{2}(\.\d+)?")  # push
 FORBIDDEN_BRANCH = {"-D", "-d", "--delete", "-M", "-m", "--move", "-f", "--force"}
 POLL_S = 5  # a running step is checked this often (limits, `devteam stop <task>`)
 CPU_EVERY_S = 60  # supervisor: how often a round's CPU use is sampled
+SLEPT_S = 60  # wall clock ahead of the monotonic one by more: the machine slept
 OWNER_STOP = "stopped by the owner"
 DEPS_WAIT = "waits for"  # blocked_reason of a task parked on its depends_on, e.g. "waits for A7a"
 CONFLICT = re.compile(rb"^(<{7}|>{7})( |$)", re.M)  # markers git leaves (not "=======": markdown)
@@ -647,13 +648,18 @@ class Team:
         env: dict | None = None,
         agent: str = "tester",
         watch=None,
+        again: bool = True,
     ) -> dict:
         """Runs in its own process group, registered so stop() can kill the whole tree. When it
         ends (any way), everything it started is killed; a port it left listening is a warning
         (owner rule: no agent leaves a server running).
         Every POLL_S: `devteam stop <task>` for the task of this thread, and `watch(new stdout
         bytes, seconds so far, CPU seconds by pid every CPU_EVERY_S or None)`; a reason from
-        either kills the step: TaskHalted."""
+        either kills the step: TaskHalted.
+        A step (not a watched developer run) that failed while the machine slept (the wall clock
+        ran over SLEPT_S ahead of the monotonic one, which stops in sleep) runs once more: its
+        servers and timeouts saw the clock jump (2026-10-27: a check failed across a Mac sleep)."""
+        wall0, mono0 = time.time(), time.monotonic()
         marker, task, halted = procs.new_marker(), getattr(self._ctx, "task", ""), ""
         env = {**(os.environ if env is None else env), procs.MARKER: marker}
         # Output goes to files, not pipes: a server the step leaves in the background keeps a
@@ -718,8 +724,19 @@ class Team:
         if halted:
             self.emit(agent, f"killed: {halted}", task=task)
             raise TaskHalted(halted, out)
+        ok = p.returncode == 0 and not note
+        slept = (time.time() - wall0) - (time.monotonic() - mono0)
+        if not ok and again and watch is None and slept > SLEPT_S:
+            label = cmd if isinstance(cmd, str) else " ".join(cmd[:3])
+            self.emit(
+                agent,
+                f"the machine slept {slept / 60:.0f} min during `{label[:80]}`, which failed: "
+                "running it once more instead of failing the round",
+                task=task,
+            )
+            return self.run_proc(cmd, cwd, timeout, input, env, agent, watch, again=False)
         return {
-            "ok": p.returncode == 0 and not note,
+            "ok": ok,
             "timed_out": bool(note),
             "code": p.returncode,
             "stdout": out,
