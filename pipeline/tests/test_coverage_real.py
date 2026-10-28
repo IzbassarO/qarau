@@ -1,6 +1,8 @@
 """Coverage on real footage: the notre-dame-p3e run (121 registered frames, 42 748 points).
-Skipped when the run is absent. The run's own files are never written: the test links them into
-a tmp run dir, adds the chapel-facade finding of test_findings_real.py there (the run has no
+A `slow` test (pyproject.toml: real footage, left out of the default run, as test_e2e.py; run
+it with `uv run pytest -m slow tests/test_coverage_real.py`); it fails, never passes silently,
+when the run is absent. The run's own files are never written: the test links them into a tmp
+run dir, adds the chapel-facade finding of test_findings_real.py there (the run has no
 findings/ of the project stage, so this manual finding, selected by findings.select_points, is
 its only finding) and writes coverage/ into that tmp dir."""
 
@@ -22,13 +24,11 @@ RUN = Path(os.environ.get("QARAU_RUNS_DIR", REPO / "data/runs")) / "notre-dame-p
 # the chapel facade polygon of test_findings_real.py
 FACADE = [[-0.076, -0.192, 0.009], [-0.708, -0.718, 0.812], [-1.313, -0.948, 0.185],
           [-0.681, -0.423, -0.618]]  # fmt: skip
-NO_RUN = pytest.mark.skipif(
-    not (RUN / "web/manifest.json").is_file(), reason="notre-dame-p3e run is absent"
-)
 
 
-@NO_RUN
+@pytest.mark.slow
 def test_notre_dame_regions_show_all_three_states(tmp_path: Path) -> None:
+    assert (RUN / "web/manifest.json").is_file(), f"notre-dame-p3e run is absent: {RUN}"
     run = tmp_path / "notre-dame-p3e"
     run.mkdir()
     for p in RUN.iterdir():
