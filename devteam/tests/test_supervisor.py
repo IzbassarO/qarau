@@ -464,8 +464,16 @@ def test_brain_and_tester_calls_cache_the_stable_prefix_and_log_hits(repo):
     }
     assert content[-1] == {"type": "text", "text": "open tasks"}  # the varying part comes last
     (row,) = costs.day_rows(team.home, costs._today())
-    agent, _m, _n, usd, billed, tokens_in, read, wrote, stale = row
-    assert (agent, billed, tokens_in, read, wrote, stale) == ("brain", 1, 9100, 9000, 0, 0)
+    agent, _m, _n, usd, billed, tokens_in, read, wrote, stale, prov = row
+    assert (agent, billed, tokens_in, read, wrote, stale, prov) == (
+        "brain",
+        1,
+        9100,
+        9000,
+        0,
+        0,
+        "anthropic",
+    )
     assert usd == pytest.approx((100 * 4.0 + 9000 * 0.2 + 10 * 20.0) / 1e6)
     html = D.render(D.collect(team, None))
     assert "Prompt cache hits" in html and "99 % (9,000 tok)" in html

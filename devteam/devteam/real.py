@@ -13,7 +13,7 @@ import httpx
 import yaml
 from PIL import Image
 
-from devteam import costs, procs
+from devteam import costs, kimi, procs
 from devteam import gates as G
 from devteam import supervise as SV
 from devteam.scope import REFERENCE_PNG, rewrite_allowed
@@ -324,14 +324,25 @@ Write `summary` and `how_to_try` for the owner in simple Russian: what changed i
 words (no jargon), and exact commands to try it."""
 
 
-class RealAgents:
-    """v1: brain (API), dev_pipeline (Claude Code headless, subscription), tester (API)."""
+class KimiFailed(RuntimeError):
+    """Kimi failed, hit a limit or a cap: the round goes to the developer's fallback."""
 
-    TOOLS = {"claude", "codex"}  # developer tools implemented
+
+def own_session(s: dict, dev: dict) -> str:
+    """The task's session if this round's provider made it (a round that fell back from Kimi to
+    Codex, or back, starts a fresh one)."""
+    sid = s.get("session", "")
+    return sid if sid.startswith("kimi:") == (dev["provider"] == costs.KIMI) else ""
+
+
+class RealAgents:
+    """Brain and tester on the API; developers on a CLI per config.yaml -> providers."""
+
+    TOOLS = {"claude_code": "claude", "codex_cli": "codex", "kimi_cli": "kimi"}  # provider: CLI
 
     def __init__(self):
         # absolute paths at run start; checked again before every round (tool())
-        self.paths = {t: shutil.which(t) for t in self.TOOLS}
+        self.paths = {t: shutil.which(t) for t in self.TOOLS.values()}
 
     def tool(self, team, name: str) -> str:
         """The developer CLI's absolute path, checked before each round. Gone (2026-10-18 23:39:
@@ -356,7 +367,7 @@ class RealAgents:
         devs = {
             n: d
             for n, d in team.cfg["developers"].items()
-            if d["tool"] in self.TOOLS and (devs is None or n in devs)
+            if d["provider"] in self.TOOLS and (devs is None or n in devs)
         }
         root = team.root
         read = lambda p: (root / p).read_text() if (root / p).exists() else "(missing)"  # noqa: E731
@@ -506,31 +517,46 @@ class RealAgents:
 
     # --- developers ----------------------------------------------------------------------
     def develop(self, team, s):
-        dev = team.cfg["developers"][s["assignee"]]
-        t0, halted = time.monotonic(), None
+        dev = kimi.pick(team, s["assignee"], s["task"])
+        if dev["provider"] == costs.KIMI:
+            try:
+                return self._develop(team, s, dev)
+            except KimiFailed as e:  # the same round on the fallback, on what Kimi left
+                dev = {**dev, "model": None, **dev["fallback"]}
+                team.emit(
+                    s["assignee"], f"kimi_cli -> {dev['provider']}: {e}", task=s["task"]["id"]
+                )
+        return self._develop(team, s, dev)
+
+    def _develop(self, team, s, dev):
+        t0, halted, prov = time.monotonic(), None, dev["provider"]
         try:
-            run = self._codex if dev["tool"] == "codex" else self._claude
+            run = {"codex_cli": self._codex, "kimi_cli": self._kimi}.get(prov, self._claude)
             out = run(team, s, dev)
         except TaskHalted as e:  # killed by the supervisor or the owner: its tokens still count
             halted, out = e, {"usage": getattr(e, "usage", {"in": 0, "out": 0, "usd": 0.0})}
         u = out.pop("usage")
-        costs.record(
-            team.home,
-            s["assignee"],
-            dev.get("model")
-            or {"claude": "claude-code"}.get(dev["tool"], dev["tool"]) + " (subscription)",
-            s["task"]["id"],
-            u["in"],
-            u["out"],
-            u["usd"],
-            billed=False,
-            secs=time.monotonic() - t0,
-        )
+        if prov != costs.KIMI:  # Kimi's calls are billed rows already, one per call (the proxy)
+            costs.record(
+                team.home,
+                s["assignee"],
+                dev.get("model")
+                or {"claude_code": "claude-code"}.get(prov, "codex") + " (subscription)",
+                s["task"]["id"],
+                u["in"],
+                u["out"],
+                u["usd"],
+                billed=False,
+                secs=time.monotonic() - t0,
+                provider=prov,
+            )
         if halted:
             raise halted
         out["tokens"] = u["in"] + u["out"]
         if out.pop("error", None):  # usage limit, auth, crash: stop; `devteam resume` retries
-            msg = f"{dev['tool']} failed: {team.redact(out['summary'][:800])}"
+            if prov == costs.KIMI:
+                raise KimiFailed(team.redact(out["summary"][:300]).replace("\n", " "))
+            msg = f"{self.TOOLS[prov]} failed: {team.redact(out['summary'][:800])}"
             hit, reset_at = costs.limit_reset(out["summary"])
             if hit:  # continuous mode waits for the reset, a single run stops
                 raise costs.SubscriptionLimit(msg, reset_at)
@@ -619,7 +645,7 @@ Rules:
         if dev.get("model"):
             cmd += ["--model", dev["model"]]
         prompt = self._prompt(team, s, dev)
-        if s.get("session") and (s.get("feedback") or s.get("conflicts")):
+        if own_session(s, dev) and (s.get("feedback") or s.get("conflicts")):
             cmd += ["--resume", s["session"]]
         r = self._run(team, s, dev, cmd, prompt, env, SV.ClaudeTokens())
         results = [
@@ -678,13 +704,27 @@ Rules:
         if dev.get("model"):
             cmd += ["-m", dev["model"]]
         prompt, resume = self._prompt(team, s, dev), ""
-        if s.get("session") and (s.get("feedback") or s.get("conflicts")):
+        if own_session(s, dev) and (s.get("feedback") or s.get("conflicts")):
             resume = s["session"]
             cmd += ["resume", resume, "-"]
         else:
             cmd += ["-"]
         r = self._run(team, s, dev, cmd, prompt, env, SV.CodexTokens(resume))
-        return parse_codex(r["stdout"], r["ok"], r["stderr"], s.get("session", ""))
+        return parse_codex(r["stdout"], r["ok"], r["stderr"], own_session(s, dev))
+
+    def _kimi(self, team, s, dev) -> dict:
+        """Kimi Code CLI in its sandbox, through Kerege's key proxy (devteam/kimi.py)."""
+        proxy = kimi.Proxy(team, s["assignee"], s["task"]["id"], dev["model"])
+        try:
+            prompt = self._prompt(team, s, dev)
+            cmd, env = kimi.command(team, s, dev, proxy, prompt, self.tool(team, "kimi"))
+            r = self._run(team, s, dev, cmd, None, env, proxy)
+        finally:
+            proxy.close()
+        out = kimi.parse(r["stdout"], r["ok"], r["stderr"])
+        if proxy.refused:
+            out |= {"summary": proxy.refused, "error": True}
+        return {**out, "usage": {**proxy.usage(), "usd": 0.0}}
 
     def _prompt(self, team, s, dev) -> str:
         if s.get("conflicts"):
@@ -697,7 +737,10 @@ Rules:
                 "nothing else (other edits are reverted). Do not commit, merge or abort: the "
                 "orchestrator concludes the merge. Finish with a one-line summary."
             )
-        if s.get("session") and s.get("feedback"):
+        if s.get("feedback") and not own_session(s, dev):  # a fresh session (e.g. a fallback)
+            brief = self._brief(team, s, dev)
+            return f"{brief}\n\nThe last round was sent back:\n\n{s['feedback']}"
+        if s.get("feedback"):
             return (
                 f"The tester or the merge gates sent your work back:\n\n{s['feedback']}"
                 "\n\nFix it in the code, run the checks again, and finish with a short summary. "

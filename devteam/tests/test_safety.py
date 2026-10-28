@@ -668,7 +668,7 @@ def test_old_cost_db_is_migrated_once_even_by_racing_threads(tmp_path):
         t.join()
     assert errors == []
     cols = [r[1] for r in costs._db(tmp_path).execute("pragma table_info(usage)")]
-    assert cols[-4:] == ["state", "secs", "cache_read", "cache_write"]
+    assert cols[-5:] == ["state", "secs", "cache_read", "cache_write", "provider"]
 
 
 # --- 5. stale cost reservations ---------------------------------------------------------------
@@ -686,7 +686,7 @@ def test_a_reservation_left_open_past_two_hours_becomes_stale_at_its_worst_case(
     costs.release(tmp_path, rid)  # only open reservations are released
     assert costs.spent_24h(tmp_path) == pytest.approx(0.75)
     (row,) = costs.day_rows(tmp_path, costs._today())
-    assert row[-1] == 1
+    assert row[-2] == 1
     console = Console(record=True, width=200)
     costs.report(tmp_path, console)
     assert "1 stale: billing unknown, counted at max" in console.export_text()
