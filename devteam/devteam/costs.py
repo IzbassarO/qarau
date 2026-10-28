@@ -254,6 +254,21 @@ def day_rows(home: Path, day: str) -> list[tuple]:
         db.close()
 
 
+def task_usd(home: Path) -> dict[str, float]:
+    """API $ per task, all time. A brain call plans several tasks ("T-001,T-002"): split evenly."""
+    db = _db(home)
+    try:
+        rows = db.execute("select task, sum(usd) from usage where billed group by task").fetchall()
+    finally:
+        db.close()
+    out: dict[str, float] = {}
+    for task, usd in rows:
+        ids = [t for t in (task or "").split(",") if t]
+        for t in ids:
+            out[t] = out.get(t, 0.0) + usd / len(ids)
+    return out
+
+
 def agent_tokens(home: Path, day: str) -> dict[str, int]:
     """Tokens in + out per agent today (API and subscription)."""
     db = _db(home)
