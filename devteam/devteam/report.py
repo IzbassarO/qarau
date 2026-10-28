@@ -75,7 +75,7 @@ def metrics(team, now: float | None = None, days: int = 7) -> dict:
         "done": len(done),
         "first_round": mean([float(x) for x in accepted]),
         "parts": len(accepted),
-        "rounds_per_task": mean([rounds.get(t, 0) for t in done]),
+        "rounds_per_task": mean([rounds[t] for t in done if t in rounds]),  # else: no log
         "usd_per_task": mean([usd.get(t, 0.0) for t in done]),
         "blocked": sum(t["status"] == "blocked" for t in tasks),
         "tester_errors": len(_jsonl(team, "tester_errors.jsonl", since)),
