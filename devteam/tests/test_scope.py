@@ -116,7 +116,16 @@ def test_skip_checks_have_no_false_alarms_seen_on_real_prs():
         ("web/playwright.config.ts", "  retries: 2,"),
         ("web/vite.config.ts", "  test: { retry: 2 },"),
         ("web/src/a.test.ts", "it('x', { retry: 5 }, () => {"),
+        ("web/src/a.test.ts", "test(name, { retry: 2, timeout: 9 }, async () => {"),
+        ("web/src/a.test.ts", "describe.concurrent('suite', { retry }, () => {"),
+        ("web/e2e/viewer.spec.ts", "test.describe.configure({ mode: 'serial', retries });"),
+        ("web/src/a.test.ts", "jest.retryTimes(3);"),
+        ("web/vitest.config.ts", "    retry: 1,"),
+        ("web/e2e/run.sh", "pnpm exec playwright test --retries=4"),
         ("backend/tests/test_seed.py", "@pytest.mark.flaky(reruns=3)"),
+        ("backend/tests/test_seed.py", "@pytest.mark.flaky"),
+        ("pipeline/tests/test_x.py", "    pytest.main(['--reruns', '2'])"),
+        ("pipeline/conftest.py", "    config.option.reruns = 2"),
     ],
 )
 def test_retries_set_in_code_are_refused(path, line):
@@ -124,6 +133,60 @@ def test_retries_set_in_code_are_refused(path, line):
     # retries in the code would turn a test that keeps failing into a pass
     (f,) = SC.bypass(diff(path, plus=[line]), [path], rewrite_ok=[path])
     assert f.startswith(f"sets test retries in {path}")
+
+
+def test_vitest_options_over_several_lines_are_refused():
+    path = "web/src/a.test.ts"
+    lines = [
+        "test(",
+        "  'loads',",
+        "  {",
+        "    timeout: 5000,",
+        "    retry: 3,",
+        "  },",
+        "  () => {",
+    ]
+    (f,) = SC.bypass(diff(path, plus=lines), [path])
+    assert f == f"sets test retries in {path}: test("
+
+
+# UI-evidence, 2026-10-27: React Query's own retry is off in test QueryClients (a stricter test),
+# yet the RETRY rule flagged it and dev_app removed it twice
+QUERY_CLIENT = [
+    "const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });",
+    "  const qc = new QueryClient({",
+    "    defaultOptions: {",
+    "      queries: { retry: false },",
+    "      mutations: { retry: 0 },",
+    "    },",
+    "  });",
+    "  it('shows the panel', () => {",
+    "    const q = useQuery({ queryKey: ['f'], queryFn, retry: 2 });",
+    "test('retries a failed fetch', async () => {",
+    "  render(<App qc={new QueryClient({ defaultOptions: { queries: { retry: false } } })} />);",
+]
+
+
+@pytest.mark.parametrize("path", ["web/src/pages/ViewerPage.test.tsx", "web/e2e/viewer.spec.ts"])
+def test_library_retry_options_in_tests_are_not_runner_retries(path):
+    assert SC.bypass(diff(path, plus=QUERY_CLIENT), [path]) == []
+
+
+def test_js_focus_helpers_apply_only_to_js_test_files():
+    # RPT1, 2026-10-27: a Python call fit(...) in pipeline/tests was flagged as a focused test
+    path = "pipeline/tests/test_report_snapshot.py"
+    py = ["    model = fit(points, frames)", "    xtest(a)", "    t = it.skip", "describe.only = 1"]
+    assert SC.bypass(diff(path, plus=py), [path]) == []
+    (f,) = SC.bypass(
+        diff(path, plus=["@pytest.mark.skipif(sys.platform == 'darwin', reason='x')"]), [path]
+    )
+    assert f.startswith(f"skips or focuses a test in {path}")
+    for ext in SC.JS_EXT:
+        js = f"web/src/a.test{ext}"
+        for line in ["fit('x', () => {})", "fdescribe('x', () => {", "xdescribe('x', () => {",
+                     "xtest('x', () => {})", "test.fixme('x', async () => {})"]:  # fmt: skip
+            (f,) = SC.bypass(diff(js, plus=[line]), [js])
+            assert f.startswith(f"skips or focuses a test in {js}"), (js, line)
 
 
 def test_reading_the_retry_number_is_not_setting_retries():

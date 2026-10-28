@@ -1,7 +1,9 @@
 """Manual finding on real footage: a literal polygon over the chapel facade of the
 notre-dame-p3e run (found once by a plane fit of the facade's points in frame 42). Skipped when
-the run is absent. Renders the evidence frames with the outline (OpenCV) under
-QARAU_OUT_DIR (default <repo>/data/findings-check, gitignored) for a visual check."""
+the run is absent. Renders the evidence frames with the outline (OpenCV) into the test's tmp_path,
+or under QARAU_OUT_DIR when set, for a visual check. Never into the repo: Kerege points
+QARAU_RUNS_DIR at the real runs, and the 3 frames landed in the worktree's data/ (reverted as
+forbidden files in every round of D1, REV1-api, RPT1)."""
 
 from __future__ import annotations
 
@@ -17,15 +19,28 @@ from qarau_pipeline.findings import evidence_for, load_bundle, region_area, sele
 
 REPO = Path(__file__).resolve().parents[2]
 RUN = Path(os.environ.get("QARAU_RUNS_DIR", REPO / "data/runs")) / "notre-dame-p3e"
-OUT = Path(os.environ.get("QARAU_OUT_DIR", REPO / "data/findings-check")) / "notre-dame-p3e"
 FACADE = [[-0.076, -0.192, 0.009], [-0.708, -0.718, 0.812], [-1.313, -0.948, 0.185],
           [-0.681, -0.423, -0.618]]  # fmt: skip
 
 MANIFEST = RUN / "web/manifest.json"
-pytestmark = pytest.mark.skipif(not MANIFEST.is_file(), reason="notre-dame-p3e run is absent")
+NO_RUN = pytest.mark.skipif(not MANIFEST.is_file(), reason="notre-dame-p3e run is absent")
 
 
-def test_facade_polygon_gives_three_frames_with_outlines_on_the_wall() -> None:
+def out_dir(tmp_path: Path) -> Path:
+    return Path(os.environ.get("QARAU_OUT_DIR") or tmp_path) / "notre-dame-p3e"
+
+
+def test_frames_go_to_tmp_path_unless_qarau_out_dir_is_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("QARAU_OUT_DIR", raising=False)
+    assert out_dir(tmp_path) == tmp_path / "notre-dame-p3e"
+    monkeypatch.setenv("QARAU_OUT_DIR", "/tmp/check")
+    assert out_dir(tmp_path) == Path("/tmp/check/notre-dame-p3e")
+
+
+@NO_RUN
+def test_facade_polygon_gives_three_frames_with_outlines_on_the_wall(tmp_path: Path) -> None:
     bundle = load_bundle(RUN)
     sel = select_points(bundle.positions, FACADE)
     assert 300 <= len(sel) <= 800, len(sel)
@@ -33,7 +48,8 @@ def test_facade_polygon_gives_three_frames_with_outlines_on_the_wall() -> None:
     ev = evidence_for(bundle, sel)
     assert len(ev) == 3
     assert len({e["frame"] for e in ev}) == 3
-    OUT.mkdir(parents=True, exist_ok=True)
+    out = out_dir(tmp_path)
+    out.mkdir(parents=True, exist_ok=True)
     pt = np.repeat(np.arange(len(bundle.positions)), np.diff(bundle.offsets))
     for e in ev:
         cam = bundle.cameras[e["frame"]]
@@ -54,4 +70,4 @@ def test_facade_polygon_gives_three_frames_with_outlines_on_the_wall() -> None:
         assert img is not None
         cv2.polylines(img, [outline.round().astype(np.int32).reshape(-1, 1, 2)], True,
                       (0, 0, 255), 2)  # fmt: skip
-        cv2.imwrite(str(OUT / f"frame_{e['frame']:06d}.png"), img)
+        cv2.imwrite(str(out / f"frame_{e['frame']:06d}.png"), img)

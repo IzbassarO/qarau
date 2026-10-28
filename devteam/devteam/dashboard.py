@@ -17,6 +17,7 @@ from devteam import costs
 from devteam import watchdog as W
 from devteam.continuous import runs_of_day
 from devteam.graph import AGENTS, OWNER_STOP, Team, waits_on_dependencies
+from devteam.report import metric_lines, metrics
 
 GH_CACHE_S = 60
 EVENTS_TAIL = 400_000  # bytes of events.log read per refresh
@@ -152,7 +153,10 @@ def blocked_action(t: dict, by_id: dict) -> str | None:
     if reason.startswith(OWNER_STOP):
         return f"You stopped it. Run `devteam resume {tid}` when it should go on."
     if reason.startswith("needs a split"):
-        return "Split it in devteam/backlog.yaml: one task per developer, with depends_on."
+        return (
+            "Split it in devteam/backlog.yaml: one task per developer, at most 3 parts each, "
+            "with depends_on."
+        )
     if OWNER_WAIT.search(reason):
         return f"It waits for your decision. Once made, run `devteam resume {tid}`."
     return (
@@ -364,6 +368,7 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
         "log": log,
         "attention": attention,
         "violations": violations,
+        "metrics": metrics(team, now),
         "last_run": last_run,
         "heartbeat": hb,
         "hb_stale": hb_stale,
@@ -856,6 +861,12 @@ def _violations(d: dict) -> str:
     )
 
 
+def _metrics(d: dict) -> str:
+    bold = re.compile(r"\*\*(.+?)\*\*")
+    items = "".join(f"<li>{bold.sub(r'<b>\1</b>', _e(x))}</li>" for x in metric_lines(d["metrics"]))
+    return f"<div class='box'><ul>{items}</ul></div>"
+
+
 def _costs(d: dict) -> str:
     rows = (
         "".join(
@@ -989,6 +1000,8 @@ def render(d: dict) -> str:
             _cards(d),
             "<h2>Queue</h2>",
             _queue(d),
+            f"<h2>Metrics, last {d['metrics']['days']} days</h2>",
+            _metrics(d),
             "<h2>Today</h2>",
             _timeline(d),
             "<div class='two'><div><h2>Subscription tokens per task today</h2>",
