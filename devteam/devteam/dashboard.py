@@ -309,9 +309,8 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
         reset = (
             next((r[3] for r in limits if r[1] == a and r[3]), None) if state == "waiting" else None
         )
-        tool = (
-            devs[a]["tool"] + " (subscription)" if a in devs else models.get(a, {}).get("model", "")
-        )
+        m = devs.get(a) or models.get(a, {})
+        tool = " · ".join(x for x in (m.get("provider"), m.get("model")) if x)
         office[a] = {
             "room": ROOMS.get(a, a),
             "role": ROLE.get(a, ""),
@@ -355,6 +354,7 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
         "spent": spent,
         "budget": cap,
         "cost_rows": costs.day_rows(team.home, day),
+        "kimi": (*costs.kimi_spend(team.home), (team.cfg.get("providers") or {}).get(costs.KIMI)),
         "sub_rows": sub_rows,
         "sub_tokens": sum(task_tokens.values()),
         "task_tokens": sorted(task_tokens.items(), key=lambda kv: -kv[1]),
@@ -664,11 +664,26 @@ def _summary(d: dict) -> str:
         f"<div class='s'>of ${d['budget']:.2f} per day ({pct:.0f} %)</div>"
         f"<div class='meter'><i class='{'hot' if pct > 80 else ''}' "
         f"style='width:{min(pct, 100):.0f}%'></i></div></div>"
-        f"<div><div class='k'>Subscription tokens today</div><div class='v'>"
-        f"{_tok(d['sub_tokens'])}</div><div class='s'>Claude Code and Codex rounds</div></div>"
+        f"{_kimi(d)}<div><div class='k'>Subscription tokens today</div><div class='v'>"
+        f"{_tok(d['sub_tokens'])}</div><div class='s'>developer rounds</div></div>"
         f"<div><div class='k'>{'Running for' if d['active'] else 'Last run lasted'}</div>"
         f"<div class='v'>{_dur(r['secs'])}</div><div class='s'>{_e(d['now'][11:16])} now</div>"
         "</div></section>"
+    )
+
+
+def _kimi(d: dict) -> str:
+    """Kimi's own caps (owner 2026-10-28): per 24 h and per calendar month."""
+    day, month, p = d["kimi"]
+    if not p:
+        return ""
+    pct = max(day / p["daily_usd"], month / p["monthly_usd"]) * 100
+    return (
+        f"<div><div class='k'>Kimi API, 24 h</div><div class='v'>${day:.2f}</div>"
+        f"<div class='s'>of ${p['daily_usd']:.2f} per day; ${month:.2f} of "
+        f"${p['monthly_usd']:.2f} this month{'' if p.get('enabled') else ' (off)'}</div>"
+        f"<div class='meter'><i class='{'hot' if pct > 80 else ''}' "
+        f"style='width:{min(pct, 100):.0f}%'></i></div></div>"
     )
 
 
@@ -870,7 +885,7 @@ def _metrics(d: dict) -> str:
 def _costs(d: dict) -> str:
     rows = (
         "".join(
-            f"<tr><td>{_e(a)}</td><td>{_e(m)}</td><td>{n}</td>"
+            f"<tr><td>{_e(a)}</td><td>{_e(prov or '')}</td><td>{_e(m)}</td><td>{n}</td>"
             + (
                 f"<td>${usd:.3f}"
                 + (f" <span class='muted'>({_e(costs.stale_note(stale))})</span>" if stale else "")
@@ -885,12 +900,13 @@ def _costs(d: dict) -> str:
                 else "<td class='faint'>—</td><td class='faint'>—</td>"
             )
             + "</tr>"
-            for a, m, n, usd, billed, ti, cr, cw, stale in d["cost_rows"]
+            for a, m, n, usd, billed, ti, cr, cw, stale, prov in d["cost_rows"]
         )
-        or "<tr><td colspan='7' class='muted'>No calls today.</td></tr>"
+        or "<tr><td colspan='8' class='muted'>No calls today.</td></tr>"
     )
     return (
-        "<div class='box'><table><tr><th>Agent</th><th>Model</th><th>Calls</th><th>$</th>"
+        "<div class='box'><table><tr><th>Agent</th><th>Provider</th><th>Model</th><th>Calls</th>"
+        "<th>$</th>"
         "<th>Billing</th><th>Prompt cache hits</th><th>Cache writes</th></tr>"
         f"{rows}</table></div>"
     )

@@ -3,6 +3,8 @@
 import time
 from pathlib import Path
 
+from devteam import kimi
+
 
 class FakeAgents:
     """Brain plans by area, devs write a stub file, tester fails round 1, passes round 2."""
@@ -35,6 +37,7 @@ class FakeAgents:
         return out
 
     def develop(self, team, s) -> dict:
+        dev = kimi.pick(team, s["assignee"], s["task"], real=False)  # as a real run chooses
         time.sleep(self.delay)
         folder = team.cfg["developers"][s["assignee"]]["owns"][0]
         stub = Path(s["worktree"]) / folder / f"devteam-fake-{s['task']['id']}.txt"
@@ -42,7 +45,7 @@ class FakeAgents:
         stub.write_text(f"round {s.get('rounds', 0) + 1}\n")
         return {
             "session": s.get("session") or f"fake-{s['task']['id']}",
-            "summary": f"wrote {stub.name}",
+            "summary": f"{dev['provider']} wrote {stub.name}",
         }
 
     def judge(self, team, s, checks: list[dict]) -> dict:
