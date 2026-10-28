@@ -1,11 +1,56 @@
 import { queryOptions } from '@tanstack/react-query';
-import { readApi } from './api';
+import { ApiError, readApi, requestApi } from './api';
 import type { Key } from '../i18n';
 
 /** Read-only DEF1 findings contract, with effective status supplied by REV1. */
 export type FindingClass = 'corrosion' | 'crack' | 'leak' | 'deformation' | 'coating' | 'other';
 export type Severity = 'critical' | 'watch';
 export type Polygon = readonly (readonly number[])[];
+
+export type Verdict = 'confirm' | 'reject' | 'reclass';
+export interface Decision {
+  id: number;
+  finding_id: number;
+  user_id: number;
+  user: string;
+  verdict: Verdict;
+  comment: string | null;
+  new_class: FindingClass | null;
+  new_severity: Severity | null;
+  created_at: string;
+}
+
+export interface DecisionInput {
+  verdict: Verdict;
+  comment: string;
+  newClass?: FindingClass;
+}
+
+export function decisionErrorKey(error: unknown): Key {
+  if (error instanceof ApiError) {
+    if (error.status === 401) return 'decisions.error.session';
+    if (error.status === 403) return 'decisions.error.permission';
+    if (error.status === 404) return 'decisions.error.missing';
+    if (error.status === 422) return 'decisions.error.validation';
+  }
+  return 'decisions.error.connection';
+}
+
+export async function fetchDecisions(findingId: number, signal?: AbortSignal): Promise<Decision[]> {
+  return (await readApi(`/api/findings/${findingId}/decisions`, signal)) as Decision[];
+}
+
+export async function postDecision(findingId: number, input: DecisionInput): Promise<Decision> {
+  return (await requestApi(`/api/findings/${findingId}/decisions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      verdict: input.verdict,
+      comment: input.comment,
+      ...(input.newClass === undefined ? {} : { new_class: input.newClass }),
+    }),
+  })) as Decision;
+}
 
 /** EvidenceOut has no dimensions; use the run manifest or the natural image size. */
 export interface EvidenceFrame {
@@ -38,7 +83,15 @@ export const findingKeys = {
   inspection: (id: number) => ['findings', 'inspection', id] as const,
   run: (runId: string) => ['findings', 'run', runId] as const,
   detail: (id: number) => ['findings', 'detail', id] as const,
+  decisions: (id: number) => ['decisions', id] as const,
 };
+
+export const decisionsOptions = (id: number) =>
+  queryOptions({
+    queryKey: findingKeys.decisions(id),
+    queryFn: ({ signal }) => fetchDecisions(id, signal),
+    retry: false,
+  });
 
 async function listInspectionFindings(
   inspectionId: number,

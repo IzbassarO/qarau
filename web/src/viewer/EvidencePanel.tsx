@@ -1,9 +1,42 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '../auth/AuthProvider';
 import { SessionImage } from '../auth/SessionImage';
 import { useI18n, type Key } from '../i18n';
 import type { Manifest } from '../lib/bundle';
-import { formatArea, type EvidenceFrame, type Finding } from '../lib/findings';
+import {
+  decisionErrorKey,
+  decisionsOptions,
+  formatArea,
+  type EvidenceFrame,
+  type Finding,
+} from '../lib/findings';
 import { containFit, polygonPoints } from '../lib/outline';
+import { DecisionLog } from './DecisionLog';
+import { DecisionForm } from './DecisionForm';
+
+function Decisions({ findingId }: { findingId: number }) {
+  const { t } = useI18n();
+  const { role, roleError } = useAuth({ resolveRole: true });
+  const query = useQuery(decisionsOptions(findingId));
+  return (
+    <>
+      {query.isError ? (
+        <p role="alert">{t(decisionErrorKey(query.error))}</p>
+      ) : query.isPending ? (
+        <p role="status" className="qv-caption qv-muted">
+          {t('decisions.loading')}
+        </p>
+      ) : (
+        <DecisionLog decisions={query.data} />
+      )}
+      {roleError && <p role="alert">{t('decisions.roleError')}</p>}
+      {(role === 'engineer' || role === 'admin') && (
+        <DecisionForm key={findingId} findingId={findingId} />
+      )}
+    </>
+  );
+}
 
 function EvidenceImage({
   evidence,
@@ -130,6 +163,7 @@ export function EvidencePanel({
                 />
               ))}
             </div>
+            <Decisions key={finding.id} findingId={finding.id} />
           </>
         )}
       </div>

@@ -3,6 +3,22 @@ export interface Credentials {
   password: string;
 }
 
+export type Role = 'viewer' | 'engineer' | 'admin';
+
+/** No identity endpoint yet: use the existing read-only admin route and its explicit
+ * role denial (backend/app/auth.py). Never infer permissions from a username/token.
+ */
+export async function fetchSessionRole(signal?: AbortSignal): Promise<Role> {
+  const response = await fetch('/api/users', { signal, headers: authHeader() });
+  const body: unknown = await response.json();
+  if (response.ok && Array.isArray(body)) return 'admin';
+  if (response.status === 403 && body && typeof body === 'object' && 'detail' in body) {
+    if (body.detail === "role 'viewer' may not use a 'admin' route") return 'viewer';
+    if (body.detail === "role 'engineer' may not use a 'admin' route") return 'engineer';
+  }
+  throw new AuthError('connection');
+}
+
 export class AuthError extends Error {
   constructor(public code: 'required' | 'invalidCredentials' | 'connection' | 'storage') {
     super(code);

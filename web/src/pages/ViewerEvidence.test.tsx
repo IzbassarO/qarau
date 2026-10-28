@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { AuthProvider } from '../auth/AuthProvider';
 import { createDemo } from '../fixtures/demo';
 import { setLang } from '../i18n';
 import { loadBundle, loadManifest, type Manifest } from '../lib/bundle';
@@ -42,19 +43,21 @@ function openViewer(path = '/viewer/notre-dame-p3e?finding=first') {
   const client = new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } });
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route
-            path="/viewer/:runId"
-            element={
-              <>
-                <ViewerPage />
-                <Location />
-              </>
-            }
-          />
-        </Routes>
-      </MemoryRouter>
+      <AuthProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route
+              path="/viewer/:runId"
+              element={
+                <>
+                  <ViewerPage />
+                  <Location />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>
     </QueryClientProvider>,
   );
   return client;
@@ -62,6 +65,7 @@ function openViewer(path = '/viewer/notre-dame-p3e?finding=first') {
 
 function mockFindings(result: 'loaded' | 'error' | 'empty') {
   const fetch = vi.fn(async (url: string) => {
+    if (url === '/api/findings/701/decisions') return Response.json([]);
     if (url === '/api/inspections') return Response.json([{ id: 41 }]);
     if (url === '/api/inspections/41/runs')
       return Response.json([

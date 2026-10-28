@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PerspectiveCamera, Vector3 } from 'three';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createDemo } from '../fixtures/demo';
+import { AuthProvider } from '../auth/AuthProvider';
 import { login, logout } from '../auth/auth';
 import { LANGS, setLang, type Lang } from '../i18n';
 import * as bundleApi from '../lib/bundle';
@@ -83,11 +84,13 @@ afterEach(() => {
 function renderViewer(runId: string, query = '') {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } })}>
-      <MemoryRouter initialEntries={[`/viewer/${runId}${query}`]}>
-        <Routes>
-          <Route path="/viewer/:runId" element={<ViewerPage />} />
-        </Routes>
-      </MemoryRouter>
+      <AuthProvider>
+        <MemoryRouter initialEntries={[`/viewer/${runId}${query}`]}>
+          <Routes>
+            <Route path="/viewer/:runId" element={<ViewerPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>
     </QueryClientProvider>,
   );
 }

@@ -32,6 +32,10 @@ test('production evidence preview opens the first API finding with three outline
       image_url: `/api/runs/notre-dame-p3e/files/${manifest.frames[evidence.frame_id].image}`,
     })),
   };
+  await page.route('**/api/users', (route) =>
+    route.fulfill({ status: 403, json: { detail: "role 'engineer' may not use a 'admin' route" } }),
+  );
+  await page.route('**/api/findings/701/decisions', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/inspections', (route) => route.fulfill({ json: [{ id: 41 }] }));
   await page.route('**/api/inspections/41/runs', (route) =>
     route.fulfill({
@@ -72,6 +76,10 @@ test('production evidence preview opens the first API finding with three outline
       .toBeGreaterThan(0);
   }
   await expect(panel).not.toContainText(/confidence|%|0\.987654|98\.7/i);
+  await expect(panel.getByText('No decisions yet')).toBeVisible();
+  for (const name of ['Confirm', 'Reject', 'Reclass'])
+    await expect(panel.getByRole('button', { name, exact: true })).toBeVisible();
+  await expect(panel.getByRole('textbox', { name: 'Comment' })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
   await panel.getByRole('button', { name: 'Close finding' }).click();
   await expect(panel).toHaveCount(0);
