@@ -14,7 +14,7 @@ import { ReportPage } from './ReportPage';
 const clients: QueryClient[] = [];
 function renderReport(id = '37', signedIn = true) {
   if (signedIn) sessionStorage.setItem('qarau.auth.session', 'Bearer test-report-session');
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const client = new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } });
   clients.push(client);
   return render(
     <QueryClientProvider client={client}>

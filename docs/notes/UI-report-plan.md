@@ -65,3 +65,16 @@ coverage, three states, exact hash/error words, authentication, the named demo U
 unknown IDs, language switching and stale response isolation. Translation-key and
 noLiterals checks passed with the full suite. No servers were started. Screenshots
 remain with the tester. Part 2 is intentionally pending acceptance of this part.
+
+## Gate correction
+
+Removed the redundant query-retry setting from the ReportPage test client, which the
+scope gate rejected as a test-retry override. All assertions and fixture expectations
+are unchanged; the page's own API-query behavior remains exercised by the tests.
+Repeated lint, typecheck, the full suite (45 files, 835 passing tests), build and
+diff whitespace validation successfully. The named report-route test still verifies
+the summary and language choice without an error banner. No server was started.
+
+The returned review also reports missing tester screenshots for
+`/inspections/notre-dame/report`. Visual acceptance remains pending tester capture
+in light/dark and ru/kk/en; the task explicitly reserves screenshots for the tester.
