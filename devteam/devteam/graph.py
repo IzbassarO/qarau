@@ -131,6 +131,9 @@ VISUAL = re.compile(r"\b(viewer|screenshots?)\b", re.I)  # criteria the tester m
 PAGE_PATH = re.compile(
     r"(?<![\w.:/])/(?!api\b|health\b)(?:[a-z][\w-]*(?:/[\w-]+)*|\?signed-out)(?![\w.-])"
 )
+# A whole API path, its {id} / <id> parts included: no word in it is a page (COV1, 2026-10-27:
+# "GET /api/inspections/{id}/coverage" asked for routes because of "/coverage").
+API_PATH = re.compile(r"/(?:api|health)\b[\w./{}<>:-]*")
 
 
 def needs_routes(criteria: list, dev_cfg: dict):
@@ -140,7 +143,7 @@ def needs_routes(criteria: list, dev_cfg: dict):
     sc = dev_cfg.get("screenshots")
     if not sc:
         return None
-    text = " ".join(map(str, criteria))
+    text = API_PATH.sub(" ", " ".join(map(str, criteria)))
     web = "{runs}" not in sc.get("serve", "")  # pipeline tasks serve the quick benchmark output
     return (web and VISUAL.search(text)) or PAGE_PATH.search(text)
 

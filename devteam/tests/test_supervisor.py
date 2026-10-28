@@ -852,6 +852,23 @@ def test_a_backend_task_may_mention_the_viewer_without_routes_a_page_path_needs_
     assert GR.PAGE_PATH.search("web/src/x.ts, data/runs/<run>/video.mp4, ru/kk/en, a / b") is None
 
 
+@pytest.mark.parametrize("dev", ["dev_app", "dev_pipeline"])
+@pytest.mark.parametrize(
+    ("criterion", "needs"),
+    [
+        ("GET /api/inspections/{id}/coverage returns 200 with the coverage", False),  # COV1
+        ("`/api/inspections/<id>/decisions` and /api/runs/:run/findings list them", False),
+        ("POST /api/inspections/{id}/report renders the PDF; /health stays 200", False),
+        ("/viewer/<run> shows the coverage", True),
+        ("/inspections lists every inspection", True),
+        ("/inspections/<id>/report shows the PDF preview", True),
+    ],
+)
+def test_an_api_path_never_needs_routes_a_page_does(dev, criterion, needs):
+    """2026-10-27 (COV1): '/coverage' inside an API path was taken for a page to screenshot."""
+    assert bool(GR.needs_routes([criterion], CFG["developers"][dev])) is needs
+
+
 # --- 5. parts: a big task is built in 2-3 parts inside the task, each accepted by the tester ----
 PARTS = [
     {"title": "the fps option", "plan": "add --fps", "criteria": ["--fps exists"], "routes": []},
