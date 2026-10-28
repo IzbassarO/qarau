@@ -101,6 +101,11 @@ for (const locale of locales) {
       await expect(page.locator('html')).toHaveAttribute('lang', locale.lang);
       expect(await page.evaluate(() => localStorage.getItem('qarau.lang'))).toBe('en');
       await expect(page.getByRole('heading', { level: 1 })).toHaveText(locale.title);
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+        // Sign-in may have scrolled its form into view; inspect the report at its top.
+        window.scrollTo(0, 0);
+      });
       await expect(page.getByText('Tank T-104, north wall', { exact: true })).toHaveCount(2);
       const critical = page.getByRole('region', { name: locale.critical, exact: true });
       await expect(critical.getByText('Course 3, 2.1 m from the north seam')).toBeVisible();
@@ -110,12 +115,30 @@ for (const locale of locales) {
       await expect(page.getByText(locale.coverage, { exact: true })).toBeVisible();
       const languages = page.getByRole('group', { name: locale.language });
       await expect(languages.getByRole('button')).toHaveCount(3);
+      await expect(
+        page.getByRole('banner').getByRole('group', { name: locale.language }),
+      ).toBeVisible();
+      await expect(languages).toBeInViewport();
       const preview = page.locator('iframe');
       await expect(preview).toHaveAttribute('title', locale.preview);
       await expect(preview).toHaveAttribute('src', /^blob:/);
+      // At the page top, an iframe below the findings fails this viewport check.
+      await expect(preview).toBeInViewport();
+      const previewBox = (await preview.boundingBox())!;
+      expect(previewBox.y).toBeGreaterThanOrEqual(0);
+      expect(previewBox.y + previewBox.height).toBeLessThanOrEqual(page.viewportSize()!.height);
       const hashLabel = page.getByTitle(hash, { exact: true });
-      await expect(hashLabel).toHaveText(hash);
+      await expect(hashLabel).toHaveAttribute('title', hash);
+      await expect(hashLabel).toHaveText('5e317abc851b…fef9fb6c');
+      await expect(hashLabel).toBeInViewport();
       const downloadButton = page.getByRole('button', { name: locale.download, exact: true });
+      const downloadBox = (await downloadButton.boundingBox())!;
+      const hashBox = (await page.locator('.report-hash').boundingBox())!;
+      expect(hashBox.y).toBeGreaterThanOrEqual(downloadBox.y);
+      expect(hashBox.y + hashBox.height).toBeLessThanOrEqual(downloadBox.y + downloadBox.height);
+      await expect(page.locator('.report-hash')).toHaveCSS('white-space', 'nowrap');
+      await expect(page.locator('.report-hash')).toHaveCSS('text-overflow', 'ellipsis');
+      await expect(downloadButton).toHaveCSS('white-space', 'nowrap');
       await preview.scrollIntoViewIfNeeded();
       await expect(downloadButton).toBeInViewport();
       await expect(downloadButton).toBeEnabled();
@@ -172,5 +195,7 @@ test('named demo report resolves its API id, switches PDF language and shows unk
   await page.goto('/inspections/unknown/report');
   await expect(page.getByRole('alert')).toContainText('inspection not found');
   await expect(page.locator('iframe')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Download PDF', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Download PDF', exact: true })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Download PDF', exact: true })).toBeDisabled();
+  await expect(page.getByTitle(hash, { exact: true })).toHaveCount(0);
 });

@@ -98,7 +98,8 @@ it('previews and downloads the same PDF Blob with the header hash and route file
   const frame = screen.getByTitle('PDF preview');
   expect(frame.tagName).toBe('IFRAME');
   expect(frame.getAttribute('src')).toBe('blob:report-en');
-  const hash = screen.getByText(fixture.hash);
+  const hash = screen.getByTitle(fixture.hash);
+  expect(hash.textContent).toBe('bf98d56a3f72…7263bc26');
   expect(hash.getAttribute('title')).toBe(fixture.hash);
   expect(hash.className).toBe('qv-mono');
   const createdBlob = vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob;
@@ -137,7 +138,11 @@ it('revokes the old preview on language change, hides it while generating and do
   );
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:report-en');
   expect(screen.queryByTitle('PDF preview')).toBeNull();
-  expect(screen.queryByRole('button', { name: 'Download PDF' })).toBeNull();
+  const unavailableDownload = screen.getByRole('button', { name: 'Download PDF' });
+  expect((unavailableDownload as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(unavailableDownload);
+  expect(click).not.toHaveBeenCalled();
+  expect(screen.queryByTitle(fixture.hash)).toBeNull();
   expect(screen.getByRole('status').textContent).toBe('Generating report…');
   await act(async () => finish(fixturePdf()));
   await waitFor(() =>
@@ -169,6 +174,7 @@ it('renders an available coverage line verbatim without calculating coverage', a
 });
 
 it('shows generating while the synchronous PDF request is pending, then ready', async () => {
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   let finish!: (response: Response) => void;
   const pending = new Promise<Response>((resolve) => {
     finish = resolve;
@@ -177,7 +183,11 @@ it('shows generating while the synchronous PDF request is pending, then ready', 
   renderReport();
   expect(screen.getByRole('status').textContent).toBe('Generating report…');
   expect(screen.queryByTitle('PDF preview')).toBeNull();
-  expect(screen.queryByRole('button', { name: 'Download PDF' })).toBeNull();
+  const unavailableDownload = screen.getByRole('button', { name: 'Download PDF' });
+  expect((unavailableDownload as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(unavailableDownload);
+  expect(click).not.toHaveBeenCalled();
+  expect(screen.queryByTitle(fixture.hash)).toBeNull();
   await waitFor(() =>
     expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=en', expect.anything()),
   );
@@ -191,6 +201,7 @@ it('shows generating while the synchronous PDF request is pending, then ready', 
     'false',
   );
   expect(screen.queryByRole('alert')).toBeNull();
+  await waitFor(() => expect((unavailableDownload as HTMLButtonElement).disabled).toBe(false));
 });
 
 it('shows generating for an accepted response without displaying a ready state', async () => {
@@ -204,6 +215,7 @@ it('shows generating for an accepted response without displaying a ready state',
 });
 
 it('shows the failed PDF state with the API’s words while keeping the summary', async () => {
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   mockReportApi(() => Response.json(fixture.failure, { status: 500 }));
   renderReport();
   const alert = await screen.findByRole('alert');
@@ -211,7 +223,11 @@ it('shows the failed PDF state with the API’s words while keeping the summary'
   expect(within(alert).getByText(fixture.failure.detail)).toBeTruthy();
   expect(screen.getByText(fixture.findings[0].comment)).toBeTruthy();
   expect(screen.queryByTitle('PDF preview')).toBeNull();
-  expect(screen.queryByRole('button', { name: 'Download PDF' })).toBeNull();
+  const unavailableDownload = screen.getByRole('button', { name: 'Download PDF' });
+  expect((unavailableDownload as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(unavailableDownload);
+  expect(click).not.toHaveBeenCalled();
+  expect(screen.queryByTitle(fixture.hash)).toBeNull();
 });
 
 it('requests report.pdf?lang=kk when Қазақша is chosen and keeps the UI language', async () => {
@@ -408,12 +424,15 @@ it('renders an explicit Kazakh month on the page instead of a raw ICU month code
   expect(date?.textContent).not.toMatch(/\bM\d{1,2}\b/);
 });
 
-it('places the working PDF language selector and ready state in the body before the summary', async () => {
+it('places the working PDF language selector in the top bar and the ready state before the summary', async () => {
   const fetch = mockReportApi();
   renderReport();
   const ready = await screen.findByText('Report is ready.');
   const main = screen.getByRole('main');
-  const languages = within(main).getByRole('group', { name: 'PDF language' });
+  const topbar = screen.getByRole('banner');
+  const languages = within(topbar).getByRole('group', { name: 'PDF language' });
+  expect(within(topbar).getByRole('button', { name: 'Download PDF' })).toBeTruthy();
+  expect(within(topbar).getByTitle(fixture.hash).textContent).toBe('bf98d56a3f72…7263bc26');
   const heading = within(main).getByRole('heading', { name: 'Summary' });
   expect(languages.compareDocumentPosition(heading)).toBe(4);
   expect(ready.compareDocumentPosition(heading)).toBe(4);
@@ -421,4 +440,16 @@ it('places the working PDF language selector and ready state in the body before 
   await waitFor(() =>
     expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=kk', expect.anything()),
   );
+});
+
+it('places the inline preview before the full summary so it can occupy the first viewport', async () => {
+  mockReportApi();
+  renderReport();
+  const download = await screen.findByRole('button', { name: 'Download PDF' });
+  await waitFor(() => expect((download as HTMLButtonElement).disabled).toBe(false));
+  const preview = screen.getByTitle('PDF preview');
+  const summary = screen.getByRole('article', { name: 'Summary' });
+  expect(preview.compareDocumentPosition(summary)).toBe(4);
+  expect(screen.getByRole('region', { name: 'PDF preview' }).contains(preview)).toBe(true);
+  expect(screen.getByRole('main').contains(preview)).toBe(true);
 });

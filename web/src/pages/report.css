@@ -16,19 +16,24 @@
 .report-download {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  min-width: 0;
+  gap: var(--space-2);
+}
+.report-download .qv-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .report-hash {
-  max-width: var(--layout-side-panel);
+  max-width: var(--layout-sidebar);
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .report-preview {
   display: block;
-  width: min(100%, var(--layout-report-document));
-  height: var(--layout-dialog-max);
-  margin: var(--space-6) auto 0;
+  width: 100%;
+  height: min(var(--layout-side-panel), 65dvh);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
 }
@@ -36,6 +41,9 @@
   min-width: 0;
 }
 .report-main {
+  display: grid;
+  align-items: start;
+  gap: var(--space-6);
   padding: var(--space-8) var(--space-6);
 }
 .report-document {
@@ -95,16 +103,33 @@
   margin-top: var(--space-2);
 }
 .report-state {
-  margin-block: var(--space-4) var(--space-6);
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--line);
+  width: min(100%, var(--layout-report-document));
+  min-width: 0;
+  margin-inline: auto;
+}
+.report-state > p {
+  margin: 0 0 var(--space-3);
 }
 .report-controls {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  margin-bottom: var(--space-3);
+  flex-shrink: 0;
+}
+@media (min-width: 1280px) {
+  .report-main {
+    grid-template-columns: minmax(0, var(--layout-report-document)) minmax(0, 1fr);
+  }
+  .report-document {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .report-state {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .report-preview {
+    height: calc(100dvh - var(--layout-topbar) - var(--space-8) * 3);
+  }
 }
 @media (max-width: 767px) {
   .report-main {
@@ -123,14 +148,13 @@
   .report-topbar .qv-btn {
     min-height: calc(var(--space-8) + var(--space-3));
     height: auto;
-    white-space: normal;
   }
   .report-download {
     width: 100%;
     justify-content: space-between;
   }
-  .report-preview {
-    height: var(--layout-side-panel);
+  .report-controls {
+    width: 100%;
   }
   .report-controls .qv-segment {
     display: flex;

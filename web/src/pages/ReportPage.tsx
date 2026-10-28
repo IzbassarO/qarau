@@ -63,21 +63,52 @@ export function ReportPage() {
           {t('shell.emptyTitle')}
         </Link>
         <span className="qv-topbar__title">{t('report.title')}</span>
-        {state.state === 'ready' && (
-          <div className="report-download">
-            <button type="button" className="qv-btn" disabled={!readyUrl} onClick={download}>
-              {t('report.download')}
-            </button>
+        <div className="report-controls">
+          <div className="qv-segment" role="group" aria-label={t('report.language')}>
+            {(['ru', 'kk', 'en'] as const).map((locale) => (
+              <button
+                type="button"
+                key={locale}
+                aria-pressed={locale === pdfLanguage}
+                onClick={() => setChosenLanguage(locale)}
+              >
+                {t(`report.language.${locale}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="report-download">
+          <button type="button" className="qv-btn" disabled={!readyUrl} onClick={download}>
+            {t('report.download')}
+          </button>
+          {state.state === 'ready' && (
             <span className="qv-caption qv-muted report-hash">
               {t('report.hash')}{' '}
               <code className="qv-mono" title={state.hash}>
-                {state.hash}
+                {state.hash.slice(0, 12)}…{state.hash.slice(-8)}
               </code>
             </span>
-          </div>
-        )}
+          )}
+        </div>
       </header>
       <main className="report-main" id="report-main">
+        <section
+          className="report-state"
+          aria-label={t('report.pdf')}
+          aria-busy={state.state === 'generating'}
+        >
+          {state.state === 'generating' && <p role="status">{t('report.generating')}</p>}
+          {state.state === 'ready' && <p role="status">{t('report.ready')}</p>}
+          {state.state === 'failed' && (
+            <div role="alert">
+              <h2>{t('report.failed')}</h2>
+              <p>{state.message || t('report.failureFallback')}</p>
+            </div>
+          )}
+          {state.state === 'ready' && readyUrl && (
+            <iframe className="report-preview" title={t('report.pdf')} src={readyUrl} />
+          )}
+        </section>
         <article
           className="qv-doc report-document"
           data-theme="light"
@@ -87,35 +118,6 @@ export function ReportPage() {
             <Wordmark />
           </div>
           <h1 className="qv-doc__title">{t('report.title')}</h1>
-          <section
-            className="report-state"
-            aria-label={t('report.pdf')}
-            aria-busy={state.state === 'generating'}
-          >
-            <div className="report-controls">
-              <span className="qv-caption">{t('report.language')}</span>
-              <div className="qv-segment" role="group" aria-label={t('report.language')}>
-                {(['ru', 'kk', 'en'] as const).map((locale) => (
-                  <button
-                    type="button"
-                    key={locale}
-                    aria-pressed={locale === pdfLanguage}
-                    onClick={() => setChosenLanguage(locale)}
-                  >
-                    {t(`report.language.${locale}`)}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {state.state === 'generating' && <p role="status">{t('report.generating')}</p>}
-            {state.state === 'ready' && <p role="status">{t('report.ready')}</p>}
-            {state.state === 'failed' && (
-              <div role="alert">
-                <h2>{t('report.failed')}</h2>
-                <p>{state.message || t('report.failureFallback')}</p>
-              </div>
-            )}
-          </section>
           {data && (
             <>
               <p className="qv-doc__subtitle">{data.object ?? t('report.objectUnavailable')}</p>
@@ -212,9 +214,6 @@ export function ReportPage() {
             </>
           )}
         </article>
-        {state.state === 'ready' && readyUrl && (
-          <iframe className="report-preview" title={t('report.pdf')} src={readyUrl} />
-        )}
       </main>
     </div>
   );

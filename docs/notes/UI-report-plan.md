@@ -187,3 +187,49 @@ Playwright report-spec discovery (14 desktop/phone cases), `git diff --check` an
 the fixture's SHA-256 against the fixed e2e header literal. No servers started,
 no screenshots taken, no dependencies added. Browser e2e execution and screenshots
 remain with Kerege/tester as instructed.
+
+## Visual correction requested by the tester
+
+Keep the v8 document, components and tokens. Put PDF language selection alongside
+download in the top bar, shorten the visible hash (full header value remains in its
+title), and prevent the download/hash pair wrapping. Keep download visible but
+disabled during generation/failure, so the top bar remains stable. At desktop widths,
+place the PDF beside the summary; on phones/tablets put it directly below the controls,
+before the summary, to expose the iframe in the initial viewport without hiding data.
+
+Retain fixture summary, API states/messages, session, language, Blob lifecycle,
+download byte/size and full hash checks. Adapt only assertions tied to the explicitly
+requested markup: toolbar location, shortened visible text plus exact full title, and
+disabled download instead of an absent button. Add checks for no download while
+disabled, first-viewport preview, single-row hash/button and toolbar language controls.
+Expected hashes remain fixed fixture literals, never calculated with product code.
+
+Rechecked installed licences: React, TanStack Query, Vitest and Testing Library are
+MIT; Playwright is Apache-2.0. No dependencies added. Run the full required checks
+and Playwright discovery; browser execution/screenshots remain with Kerege/tester.
+
+### Visual correction result
+
+Moved the existing language segment into the sticky toolbar next to download.
+The toolbar shows a short hash on one line with ellipsis overflow and the complete
+API header value in its title. Download remains visible and disabled until a PDF
+Blob URL is ready, including generation, language replacement and failure.
+
+Moved the PDF state/iframe ahead of the summary in the DOM. At 1280 px and wider,
+the v8 summary document occupies the left column and the preview the right column,
+with preview height fitted to the viewport. Smaller screens stack preview before
+summary. The phone retains 44 px controls and one download/hash row. No colours,
+fonts or component definitions changed; the full summary remains available.
+
+All pre-existing functional checks remain: fixture summary/coverage/status/error,
+API language, exact full hash, shared Blob URL, URL revocation, filename, PDF bytes
+and size. Markup expectations now match the explicitly requested locations and short
+visible hash; disabled-state assertions additionally click the button and assert no
+download or stale hash. New e2e assertions require the entire iframe in the initial
+viewport at page top, toolbar language controls, and a non-wrapping download/hash row
+across light/dark, ru/kk/en and desktop/phone. No fixture expectations use product code.
+
+Passed: `pnpm lint && pnpm typecheck`, `pnpm test && pnpm build` (47 files,
+879 tests, including i18n keys and noLiterals), Playwright report discovery (14 cases)
+and `git diff --check`. No servers started and no screenshots taken. Kerege/tester
+still runs browser e2e and confirms the visual result against `report-light.png`.
