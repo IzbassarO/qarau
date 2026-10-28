@@ -1678,11 +1678,15 @@ tasks:
     frustum check, the thresholds and the API; ruff, mypy, pytest pass.
 
     '
-  status: in_progress
+  status: blocked
   depends_on:
   - RPT1
   owner: dev_pipeline
   run: cont-20261027-232407-dev_pipeline-1
+  branch: devteam/COV1
+  blocked_reason: 'supervisor: this round used 16.5 M subscription tokens (limit 16 M per round). Raise
+    the `supervisor` limits in devteam/config.yaml (or the task''s own `supervisor:` in backlog.yaml)
+    or split the task, then `devteam resume COV1`'
 - id: P5a-1
   area: core
   title: Metric scale from a measured distance, and gravity
