@@ -6,6 +6,10 @@
 // Credentials come only from the environment (QARAU_TEST_USER / QARAU_TEST_PASSWORD, from
 // devteam/.env) and are never printed. Without them, or for a route with `?signed-out` (the
 // login page itself), the page is shot as it is.
+// After the fixed wait it waits until the page is ready, up to QARAU_SHOOT_READY_S (config
+// gates.screenshot_ready_timeout_s, 30 s): no [aria-busy="true"] or [data-loading] element and
+// no request in flight for 500 ms (UI-report, 2026-10-28: the report was shot while its PDF was
+// still being made). Still busy then: shot anyway, and stdout says `NOT READY after N s: why`.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -42,9 +46,34 @@ try {
         throw new Error('sign-in failed: check QARAU_TEST_USER / QARAU_TEST_PASSWORD in devteam/.env');
     }
   }
+  let inflight = 0;
+  let quiet = Date.now();
+  const settle = () => {
+    if (--inflight <= 0) [inflight, quiet] = [0, Date.now()];
+  };
+  page.on('request', () => inflight++);
+  page.on('requestfinished', settle);
+  page.on('requestfailed', settle);
   await page.goto(url); // same tab: the session (sessionStorage) carries over
   await page.waitForTimeout(Number(wait));
+  const readyS = Number(process.env.QARAU_SHOOT_READY_S || 30);
+  const busy = page.locator('[aria-busy="true"], [data-loading]');
+  const end = Date.now() + readyS * 1000;
+  let why;
+  for (;;) {
+    const n = await busy.count();
+    why = [
+      n && `${n} element(s) with aria-busy="true" or data-loading`,
+      (inflight || Date.now() - quiet < 500) && `network not idle (${inflight} request(s) in flight)`,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    if (!why || Date.now() > end) break;
+    await page.waitForTimeout(250);
+  }
   await page.screenshot({ path: png });
+  // stdout carries only this line, never the login
+  if (why) process.stdout.write(`NOT READY after ${readyS} s: ${why}\n`);
 } finally {
   await browser.close();
 }
