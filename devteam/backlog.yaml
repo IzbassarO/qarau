@@ -14,9 +14,11 @@ notes: 'Demo chain (owner, 2026-10-22). Product first, then metres: website + de
 
   Queue for the brain (todo tasks, file order): B1, U2, S1, DS1, D1, DEF1-api, UI-inspections, REV1-api,
 
-  UI-evidence, UI-evidence-b, UI-evidence-c,
+  UI-evidence, ME1, UI-report, UI-evidence-b, CONF-fix, UI-evidence-c, RPT1, COV1, COV1-b, UI-mark,
 
-  RPT1, UI-mark, UI-report, D2, COV1. Then LATER: status `later`, off the demo chain; the
+  DEMO1, D2, DEMO1-ui (owner 2026-10-28, LaunchPad demo 2026-11-06; D2 held until the owner''s local
+
+  review). Then LATER: status `later`, off the demo chain; the
 
   brain never plans it, dependencies never un-block it, `devteam resume` does not touch it. A task comes
 
@@ -1333,6 +1335,91 @@ tasks:
   branch: devteam/UI-evidence
   pr: https://github.com/IzbassarO/qarau/pull/85
   done_at: '2026-10-27'
+- id: ME1
+  area: core
+  title: 'Current user endpoint: GET /api/me'
+  goal: 'Today the backend has no "current user" route: the web app guesses the role from GET /api/users
+    and
+
+    its 403 texts, and UI-evidence-b was blocked on it (night 2026-10-27: the tester''s session did not
+
+    resolve to a role).
+
+
+    Build (backend/ only): GET /api/me, role viewer (any signed-in user): the caller''s id, display name
+
+    (user.name), role and organization (id, name). Never the token, its hash or salt, or any other
+
+    secret. In OpenAPI with a "Role: viewer" description like the other routes.
+
+
+    Not in this task: the web app''s use of it (UI-evidence-b), profile editing, sessions or tokens.
+
+
+    Done when: tests call GET /api/me as a viewer, an engineer and an admin and get each one''s fixture
+
+    id, name, role and organization; a test asserts no secret_hash, salt or token field is in the body;
+
+    no token and an unknown token -> 401; /openapi.json lists GET /api/me; ruff, mypy, pytest pass.
+
+
+    Owner 2026-10-28: for the LaunchPad demo (2026-11-06); UI-evidence-b depends on it.
+
+    '
+  status: done
+  owner: dev_pipeline
+  run: cont-20261028-185246-dev_pipeline-1
+  branch: devteam/ME1
+  pr: https://github.com/IzbassarO/qarau/pull/91
+  done_at: '2026-10-28'
+- id: UI-report
+  area: app
+  title: Report preview page and PDF download
+  goal: 'Today there is no report in the web app. RPT1 gives GET /api/inspections/{id}/report.pdf?lang=
+    (its hash in
+
+    the headers); DS1 gives the v8 look.
+
+
+    Build (web/ only): a report page per inspection (/inspections/:id/report): a summary of what the PDF
+
+    contains (object, date, findings by severity with status and who decided, scale source, the coverage
+    line
+
+    or "coverage not computed"), a language choice (ru/kk/en -> the PDF''s lang), an inline preview (the
+
+    browser''s PDF viewer in an iframe) and "Download PDF" with the hash shown next to it. States: generating,
+
+    ready, failed with the API''s message. Linked from the inspections list ("Report" when done) and the
+    viewer.
+
+    Not in this task: editing the report, XLSX, e-mail.
+
+    Done when: Vitest for the summary and the three states with a mocked API; a Playwright e2e opens the
+    page on
+
+    a mocked API and downloads a fixture PDF; i18n ru/kk/en; tester screenshots of the page in light and
+    dark,
+
+    ru/kk/en.
+
+    Reference: docs/design/screens/report-light.png (design system v8); match it, adjust only alignment
+    and size; phone layout per DESIGN.md Responsive (reference docs/design/screens/evidence-phone-light.png
+    at 390x844; same functions, layout may differ).
+
+    '
+  status: blocked
+  depends_on:
+  - RPT1
+  - DS1
+  owner: dev_app
+  run: cont-20261028-185246-dev_app-1
+  branch: devteam/UI-report
+  blocked_reason: 'the tester sent it back twice in a row for the same reason, so no new round was started:
+    Criterion 4 is unmet because there are no screenshots of the report page (/inspections/<id>/report).
+    Every attached screenshot shows /inspections or /viewer/notre-dame. The report page was not captured,
+    so I could not compare it to docs/design/screens/report-light.png. In the inspections screenshots,
+    the Report link in the row (inspections-1440x900-light-ru.png) is also stacked above ''Открыть карт'
 - id: UI-evidence-b
   area: app
   title: Decision log and actions in the evidence panel
@@ -1345,7 +1432,8 @@ tasks:
 
     for reject and reclass) -> POST decision via web/src/lib/findings.ts, then the log and the status
 
-    refresh. Viewers (role) see the panel without the buttons. Data only from the real API (the dev
+    refresh. Viewers (role) see the panel without the buttons; use GET /api/me for the role (ME1). Data
+    only from the real API (the dev
 
     seed''s demo finding has an empty log); test decisions only in mocks and test fixtures.
 
@@ -1378,8 +1466,37 @@ tasks:
   status: in_progress
   depends_on:
   - UI-evidence
+  - ME1
   owner: dev_app
-  run: cont-20261027-232407-dev_app-1
+  run: cont-20261028-185246-dev_app-2
+  branch: devteam/UI-evidence-b
+- id: CONF-fix
+  area: app
+  title: No confidence number in the point info panel
+  goal: 'Today the point info panel (web/src/viewer/PointInfoPanel.tsx) shows a model confidence number
+
+    (0.800 for the test fixture) next to height and distance.
+
+
+    Build (web/ only): remove the confidence number from the point info panel; height and distance
+
+    stay as they are.
+
+
+    Not in this task: the evidence panel (UI-evidence-c), point confidence computation (P6, LATER).
+
+
+    Done when: a Vitest test renders the panel with the fixture confidence 0.8 and asserts "0.800" is
+
+    absent (PointInfoPanel.test.tsx''s check that it is shown becomes this check); lint, tsc and Vitest
+
+    pass.
+
+
+    Owner 2026-10-28: LaunchPad demo; a number the user cannot act on.
+
+    '
+  status: todo
 - id: UI-evidence-c
   area: app
   title: 'Evidence panel: phone layout, ru/kk/en, full e2e'
@@ -1494,6 +1611,93 @@ tasks:
   branch: devteam/RPT1
   pr: https://github.com/IzbassarO/qarau/pull/86
   done_at: '2026-10-27'
+- id: COV1
+  area: core
+  title: 'Coverage: inspected_ok / finding / not_seen regions'
+  goal: 'Today coverage is not computed. CLAUDE.md fixes the states: inspected_ok (blue), finding (red/orange),
+
+    not_seen (gray); not_seen is never presented as OK; docs/design/viewer-3d.md plans the coverage layer.
+
+
+    Build (pipeline/, backend/ for the workflow step, docs/): a `coverage` step after export in the S1
+
+    workflow: the bundle''s points are split into regions (a voxel grid in bundle units, size in
+
+    pipeline/config.yaml); a region is inspected_ok when enough frames see it with usable quality
+
+    (camera frustums from the COLMAP poses + the quality report + a point-density threshold, all in
+
+    config), finding when a Finding''s points fall in it, else not_seen. Written as
+
+    <run>/coverage/regions.json (bounds, state, frame count).
+
+
+    Not in this task (COV1-b): the CoverageRegion table and migration, GET /api/inspections/{id}/coverage,
+
+    the bundle''s per-point coverage array, the report''s "Not-seen areas" section. Also not: viewer UI
+    for
+
+    the layer, dense-based coverage, comparing inspections (M4).
+
+
+    Done when: a synthetic test with a known frustum proves the geometry (a point inside is seen, one
+
+    outside is not); tests for each threshold; on notre-dame-p3e regions.json shows all three states;
+
+    ruff, mypy, pytest pass.
+
+
+    Owner 2026-10-28: split in two (COV1 was killed at 16.5 M tokens in one round); this is part 1 and
+
+    keeps the devteam/COV1 branch; per-task token limit by size, not a global raise.
+
+    '
+  supervisor:
+    max_tokens_per_round: 24000000
+  status: in_progress
+  depends_on:
+  - RPT1
+  owner: dev_pipeline
+  run: cont-20261028-185246-dev_pipeline-2
+  branch: devteam/COV1
+- id: COV1-b
+  area: core
+  title: 'Coverage: regions in the database, API, bundle array and report section'
+  goal: 'Today (after COV1) <run>/coverage/regions.json holds the regions with state and frame count.
+
+
+    Build (backend/, pipeline/, docs/):
+
+    1. CoverageRegion rows (new Alembic migration) filled from regions.json by the workflow step.
+
+    2. GET /api/inspections/{id}/coverage (viewer): the regions with state and totals (% per state).
+
+    3. The bundle gets a per-point coverage array (ADR 0003 arrays) so a later UI task can colour it.
+
+    4. RPT1''s "Not-seen areas" section lists the not_seen regions (count, bounds, nearest frames)
+
+    instead of "coverage not computed".
+
+
+    Not in this task: the coverage computation (COV1), viewer UI for the layer, dense-based coverage.
+
+
+    Done when: the migration upgrades and downgrades; API tests return fixture regions and totals for
+    a
+
+    viewer and 401 without a token; a test reads the per-point array from a fixture bundle; the report
+
+    for notre-dame-p3e lists its not-seen regions in ru, kk and en; ruff, mypy, pytest pass.
+
+
+    Owner 2026-10-28: part 2 of the COV1 split.
+
+    '
+  supervisor:
+    max_tokens_per_round: 24000000
+  status: todo
+  depends_on:
+  - COV1
 - id: UI-mark
   area: app
   title: Mark a region on the 3D map as a finding
@@ -1537,46 +1741,65 @@ tasks:
   status: todo
   depends_on:
   - UI-evidence-c
-- id: UI-report
-  area: app
-  title: Report preview page and PDF download
-  goal: 'Today there is no report in the web app. RPT1 gives GET /api/inspections/{id}/report.pdf?lang=
-    (its hash in
+- id: DEMO1
+  area: core
+  risk: high
+  tags:
+  - guest
+  - auth
+  title: 'Event codes: guest access for the LaunchPad demo'
+  goal: 'Today only users created by an admin can sign in. The LaunchPad demo (2026-11-06) needs guests.
 
-    the headers); DS1 gives the v8 look.
+
+    Build (backend/ only):
+
+    1. `uv run python -m app.event create --name launchpad --expires 2026-11-06T23:59-05:00
+
+    --max-guests 300 --runs <ids>` prints a short code; `uv run python -m app.event purge --name
+
+    launchpad` deletes all guest data.
+
+    2. A guest enters the code and gets a session in a separate organization "LaunchPad demo", in a
+
+    sandbox of their own: their findings and decisions are visible only to them. The listed runs are
+
+    real processed runs, shared read-only. Guests may view runs, mark a finding, decide and get the PDF;
+
+    no upload, no processing, no other organizations or sandboxes.
+
+    3. Expired or unknown code -> 401; rate limits per IP and per code; each code use in the audit log.
+
+    decision and audit_log stay append-only (migration 0001 triggers) as today in every organization
+
+    except one created by `app.event create`: only that organization carries an event flag, set at
+
+    creation and immutable afterwards (no API or UI sets or clears it; a DB trigger rejects any change
+
+    of it). Purge deletes guest rows only in that organization; a code use is logged so that purge
+
+    never has to delete an audit row. No invented demo data.
 
 
-    Build (web/ only): a report page per inspection (/inspections/:id/report): a summary of what the PDF
+    Not in this task: the web sign-in and banner (DEMO1-ui), deploy (D2), public sign-up.
 
-    contains (object, date, findings by severity with status and who decided, scale source, the coverage
-    line
 
-    or "coverage not computed"), a language choice (ru/kk/en -> the PDF''s lang), an inline preview (the
+    Done when: tests show an expired code rejected; guest A reading guest B''s finding -> 404; a guest
 
-    browser''s PDF viewer in an iframe) and "Download PDF" with the hash shown next to it. States: generating,
+    upload -> 403; the rate limit -> 429; after purge no guest rows remain; a test proves a decision
 
-    ready, failed with the API''s message. Linked from the inspections list ("Report" when done) and the
-    viewer.
+    in a normal organization still cannot be deleted or updated after the change; a test proves the
 
-    Not in this task: editing the report, XLSX, e-mail.
+    event flag cannot be changed after creation (set or cleared); each code use is in the audit log;
 
-    Done when: Vitest for the summary and the three states with a mocked API; a Playwright e2e opens the
-    page on
+    ruff, mypy, pytest pass.
 
-    a mocked API and downloads a fixture PDF; i18n ru/kk/en; tester screenshots of the page in light and
-    dark,
 
-    ru/kk/en.
+    Owner 2026-10-28: LaunchPad demo; risk high (guest access to a real system); purge only in
 
-    Reference: docs/design/screens/report-light.png (design system v8); match it, adjust only alignment
-    and size; phone layout per DESIGN.md Responsive (reference docs/design/screens/evidence-phone-light.png
-    at 390x844; same functions, layout may differ).
+    an `app.event create` organization with an immutable event flag.
 
     '
   status: todo
-  depends_on:
-  - RPT1
-  - DS1
 - id: D2
   area: core
   title: 'Deploy staging: one VM, compose, HTTPS, backups'
@@ -1611,6 +1834,13 @@ tasks:
 
     0 only when the map is served.
 
+    5. The event-code sign-in (DEMO1, DEMO1-ui) works behind the proxy: a guest with a code reaches
+
+    it with no other password. The VM is temporary (the LaunchPad demo, 2026-11-06): the docs say
+
+    how to take it down.
+
+
     Not in this task: Kubernetes, GPU workers, SSO, monitoring stacks, a paid account of any kind.
 
     Done when: everything above runs locally (Docker Compose on the dev machine, Caddy with internal TLS)
@@ -1625,64 +1855,48 @@ tasks:
 
     '
   licence: Caddy (Apache-2.0), Docker Compose. No paid service is created by Kerege.
-  status: todo
+  status: blocked
   depends_on:
   - S1
   - U2
   owner: dev_pipeline
   run: cont-20261024-035848-dev_pipeline-2
   branch: devteam/D2
-- id: COV1
-  area: core
-  title: 'Coverage: inspected_ok / finding / not_seen regions'
-  goal: 'Today coverage is not computed. CLAUDE.md fixes the states: inspected_ok (blue), finding (red/orange),
+  blocked_reason: 'owner: deploy only after the local review'
+- id: DEMO1-ui
+  area: app
+  title: Event code sign-in and guest mode in the web app
+  goal: 'Today (after DEMO1) the API gives a guest session for an event code.
 
-    not_seen (gray); not_seen is never presented as OK; docs/design/viewer-3d.md plans the coverage layer.
+
+    Build (web/ only): "I have an event code" on the sign-in page (enter the code -> guest session); a
+
+    quiet "Demo access until 23:59" banner for guests; upload and processing hidden for guests; every
+
+    new string in ru/kk/en; desktop and 390x844.
 
 
-    Build (pipeline/, backend/, docs/):
+    Not in this task: the API (DEMO1), deploy (D2), guest data in the client: all of it comes from the
+    API.
 
-    1. A `coverage` step after export in the S1 workflow: the bundle''s points are split into regions
-    (a voxel
 
-    grid in bundle units, size in pipeline/config.yaml); a region is inspected_ok when enough frames see
-    it with
+    Done when: Vitest tests assert the code form posts the entered code to the mocked API, an expired
 
-    usable quality (camera frustums from the COLMAP poses + the quality report + a point-density threshold,
-    all
+    code shows the API''s error and a guest sees the banner and no upload or processing control; a
 
-    in config), finding when a Finding''s points fall in it, else not_seen. Written as
+    Playwright e2e with a mocked API signs in with a code and opens a run; en.json, ru.json and kk.json
 
-    <run>/coverage/regions.json (bounds, state, frame count) and as CoverageRegion rows (new Alembic
+    have every new key with non-identical ru/kk values; lint, tsc, Vitest and the e2e pass; tester
 
-    migration).
+    screenshots of the sign-in page and a guest''s viewer, light and dark, ru/kk/en, desktop and 390x844.
 
-    2. GET /api/inspections/{id}/coverage (viewer): the regions with state and totals (% per state). The
-    bundle
 
-    gets a per-point coverage array (ADR 0003 arrays) so a later UI task can colour it.
-
-    3. RPT1''s "Not-seen areas" section lists the not_seen regions (count, bounds, nearest frames) instead
-    of the
-
-    placeholder.
-
-    Not in this task: viewer UI for the layer, dense-based coverage, comparing inspections (M4).
-
-    Done when: on notre-dame-p3e regions.json shows all three states and the report lists the not-seen
-    regions
-
-    (a synthetic test with a known frustum proves the geometry; a real run proves the plumbing); tests
-    for the
-
-    frustum check, the thresholds and the API; ruff, mypy, pytest pass.
+    Owner 2026-10-28: LaunchPad demo (2026-11-06).
 
     '
-  status: in_progress
+  status: todo
   depends_on:
-  - RPT1
-  owner: dev_pipeline
-  run: cont-20261027-232407-dev_pipeline-1
+  - DEMO1
 - id: P5a-1
   area: core
   title: Metric scale from a measured distance, and gravity

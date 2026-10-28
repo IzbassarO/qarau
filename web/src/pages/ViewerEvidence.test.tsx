@@ -40,7 +40,7 @@ function Location() {
 }
 
 function openViewer(path = '/viewer/notre-dame-p3e?finding=first') {
-  const client = new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   render(
     <QueryClientProvider client={client}>
       <AuthProvider>

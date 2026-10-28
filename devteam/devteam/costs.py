@@ -7,6 +7,8 @@ reservation is settled to the real cost. A reservation that is never settled (cr
 network error with unknown billing) keeps counting at its worst case; after STALE_H it is
 marked `stale` (owner, 2026-10-21: billing unknown, still counted at max, no longer open).
 Subscription runs (Claude Code, Codex) are logged with billed=0, for information only.
+Each row names its provider (config.yaml -> providers); a cap counts only its own provider's rows:
+daily_budget_usd is Anthropic's, Kimi has its own day (24 h) and calendar-month caps.
 """
 
 import datetime as dt
@@ -18,6 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from rich.table import Table
 
+KIMI = "kimi_cli"  # the provider with its own caps (config.yaml -> providers.kimi_cli)
 STALE_H = 2  # no call stays open this long: 4 tries, 255 s of waits between them, the stream
 
 
@@ -87,6 +90,7 @@ def _db(home: Path) -> sqlite3.Connection:
         ("secs", "real default 0"),
         ("cache_read", "int default 0"),
         ("cache_write", "int default 0"),
+        ("provider", "text"),
     ):
         if col not in cols:
             try:
@@ -110,30 +114,53 @@ def _since_24h(now: float | None = None) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t))
 
 
-def _spent(db, since: str) -> float:
+def _spent(db, since: str, provider: str = "anthropic") -> float:
     return db.execute(
-        "select coalesce(sum(usd), 0) from usage where billed and day || 'T' || ts >= ?",
-        (since,),
+        # no provider: a row from before providers (K1), when every billed call was Anthropic's
+        "select coalesce(sum(usd), 0) from usage where billed "
+        "and coalesce(provider, 'anthropic') = ? "
+        "and day || 'T' || ts >= ?",
+        (provider, since),
     ).fetchone()[0]
 
 
-def reserve(home: Path, cap: float, agent: str, model: str, task: str, max_usd: float) -> int:
-    """Atomically check the cap and hold max_usd. Returns the reservation id."""
+def _month_start() -> str:
+    return time.strftime("%Y-%m-01T00:00:00")
+
+
+def reserve(
+    home: Path,
+    cap: float,
+    agent: str,
+    model: str,
+    task: str,
+    max_usd: float,
+    provider: str = "anthropic",
+    month_cap: float | None = None,
+) -> int:
+    """Atomically check the provider's caps (24 h, and the calendar month when given) and hold
+    max_usd. Returns the reservation id."""
     db = _db(home)
     try:
         db.execute("begin immediate")
-        spent = _spent(db, _since_24h())
-        if spent + max_usd > cap:
+        spent = _spent(db, _since_24h(), provider)
+        month = _spent(db, _month_start(), provider) if month_cap is not None else 0.0
+        if spent + max_usd > cap or (month_cap is not None and month + max_usd > month_cap):
             db.execute("rollback")
+            over = (
+                f"${spent:.2f} spent or reserved in the last 24 h of ${cap:.2f}"
+                if spent + max_usd > cap
+                else f"${month:.2f} spent or reserved this month of ${month_cap:.2f}"
+            )
             raise BudgetExceeded(
-                f"API budget: ${spent:.2f} spent or reserved in the last 24 h of ${cap:.2f}, this "
-                f"call may cost up to ${max_usd:.2f}. `devteam resume` once older calls leave the "
-                "24 h window, or raise daily_budget_usd in config.yaml"
+                f"{provider} budget: {over}, this call may cost up to ${max_usd:.2f}. "
+                "`devteam resume` once older calls leave the window, or raise the cap in "
+                "config.yaml"
             )
         cur = db.execute(
             "insert into usage (day, ts, agent, model, task, tokens_in, tokens_out, usd, billed, "
-            "state) values (?,?,?,?,?,0,0,?,1,'reserved')",
-            (_today(), time.strftime("%H:%M:%S"), agent, model, task, max_usd),
+            "state, provider) values (?,?,?,?,?,0,0,?,1,'reserved',?)",
+            (_today(), time.strftime("%H:%M:%S"), agent, model, task, max_usd, provider),
         )
         db.execute("commit")
         return cur.lastrowid
@@ -188,11 +215,12 @@ def record(
     usd: float,
     billed: bool,
     secs: float = 0,
+    provider: str = "",
 ):
     with _db(home) as db:
         db.execute(
             "insert into usage (day, ts, agent, model, task, tokens_in, tokens_out, usd, billed, "
-            "state, secs) values (?,?,?,?,?,?,?,?,?,'settled',?)",
+            "state, secs, provider) values (?,?,?,?,?,?,?,?,?,'settled',?,?)",
             (
                 _today(),
                 time.strftime("%H:%M:%S"),
@@ -204,12 +232,14 @@ def record(
                 usd,
                 int(billed),
                 secs,
+                provider,
             ),
         )
 
 
 def spent_24h(home: Path, now: float | None = None) -> float:
-    """What the budget counts: billed spend and open reservations of the last 24 h."""
+    """What daily_budget_usd counts: Anthropic's billed spend and open reservations of the last
+    24 h."""
     db = _db(home)
     try:
         return _spent(db, _since_24h(now))
@@ -217,22 +247,35 @@ def spent_24h(home: Path, now: float | None = None) -> float:
         db.close()
 
 
-def report(home: Path, console):
-    t = Table("day", "agent", "model", "calls", "tokens in", "tokens out", "$", "billed")
+def kimi_spend(home: Path) -> tuple[float, float]:
+    """Kimi's billed spend and open reservations: (last 24 h, this calendar month)."""
     db = _db(home)
-    rows = db.execute("""select day, agent, model, count(*), sum(tokens_in), sum(tokens_out),
-        sum(usd), billed, sum(state = 'reserved'), sum(state = 'stale') from usage
-        group by day, agent, model, billed order by day desc, agent""").fetchall()
+    try:
+        return _spent(db, _since_24h(), KIMI), _spent(db, _month_start(), KIMI)
+    finally:
+        db.close()
+
+
+def report(home: Path, console):
+    t = Table(
+        "day", "agent", "provider", "model", "calls", "tokens in", "tokens out", "$", "billed"
+    )
+    db = _db(home)
+    rows = db.execute("""select day, agent, provider, model, count(*), sum(tokens_in),
+        sum(tokens_out), sum(usd), billed, sum(state = 'reserved'), sum(state = 'stale') from usage
+        group by day, agent, provider, model, billed order by day desc, agent""").fetchall()
     db.close()
-    for day, agent, model, n, ti, to, usd, billed, open_, stale in rows:
+    for day, agent, prov, model, n, ti, to, usd, billed, open_, stale in rows:
         kind = "API" if billed else "subscription"
         if open_:
             kind += f" ({open_} unsettled, counted at max)"
         if stale:
             kind += f" ({stale_note(stale)})"
-        t.add_row(day, agent, model, str(n), f"{ti:,}", f"{to:,}", f"{usd:.3f}", kind)
+        t.add_row(day, agent, prov, model, str(n), f"{ti:,}", f"{to:,}", f"{usd:.3f}", kind)
     console.print(t)
     console.print(f"API spend, last 24 h (incl. reservations): ${spent_24h(home):.2f}")
+    day, month = kimi_spend(home)
+    console.print(f"Kimi API spend: ${day:.2f} last 24 h, ${month:.2f} this month")
 
 
 def stale_note(n: int) -> str:
@@ -240,18 +283,33 @@ def stale_note(n: int) -> str:
 
 
 def day_rows(home: Path, day: str) -> list[tuple]:
-    """(agent, model, calls, usd, billed, tokens_in, cache_read, cache_write, stale) per
-    agent/model."""
+    """(agent, model, calls, usd, billed, tokens_in, cache_read, cache_write, stale, provider)
+    per agent/provider/model."""
     db = _db(home)
     try:
         return db.execute(
             """select agent, model, count(*), sum(usd), billed, sum(tokens_in),
-            sum(cache_read), sum(cache_write), sum(state = 'stale') from usage
-            where day = ? group by agent, model, billed order by agent""",
+            sum(cache_read), sum(cache_write), sum(state = 'stale'), provider from usage
+            where day = ? group by agent, provider, model, billed order by agent""",
             (day,),
         ).fetchall()
     finally:
         db.close()
+
+
+def task_usd(home: Path) -> dict[str, float]:
+    """API $ per task, all time. A brain call plans several tasks ("T-001,T-002"): split evenly."""
+    db = _db(home)
+    try:
+        rows = db.execute("select task, sum(usd) from usage where billed group by task").fetchall()
+    finally:
+        db.close()
+    out: dict[str, float] = {}
+    for task, usd in rows:
+        ids = [t for t in (task or "").split(",") if t]
+        for t in ids:
+            out[t] = out.get(t, 0.0) + usd / len(ids)
+    return out
 
 
 def agent_tokens(home: Path, day: str) -> dict[str, int]:

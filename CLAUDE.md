@@ -151,6 +151,12 @@ Kazakhstan stays on servers in Kazakhstan.
 only visual source of truth: agents never invent or change colours, fonts, components or
 layout; `docs/design/viewer-3d.md` describes only how the 3D viewer behaves.
 
+A page or part of a page with async content (data loading, a file such as the PDF report being
+made) marks itself `aria-busy="true"` until its data or file is ready, then clears it: screen
+readers need it, and the tester's screenshots wait for it (up to 30 s). A page still busy then
+is shot anyway and labelled `NOT-READY`: a developer fix (make it ready sooner, or clear
+`aria-busy` when it is), not a tester's problem.
+
 ## How we work: you own the engineering
 
 This is a startup building a SaaS product, not a pet project. The owner (Izbassar) sets

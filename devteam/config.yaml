@@ -16,6 +16,9 @@ max_fix_loops: 3          # times a task (each part of it, when the brain planne
 
 gates:
   ci_timeout_min: 40
+  # shoot.mjs waits, after the fixed wait, until the page is ready (no aria-busy="true" or
+  # [data-loading], network idle); still busy then: shot anyway, labelled NOT-READY.
+  screenshot_ready_timeout_s: 30
   # No agent may change these; devteam/, .github/, backlog.yaml, CLAUDE.md and AGENTS.md are
   # always protected (devteam/scope.py). A change is a hard fail, the task is blocked.
   protected:
@@ -78,7 +81,24 @@ gates:
   # Run on the backlog every status commit would push to dev, before it is pushed: a failure
   # keeps the status local and warns (778e072 `backlog: A9-fix done (#41)` turned dev CI red).
   backlog_check: uv run --quiet pytest -q -m backlog -p no:cacheprovider tests
-daily_budget_usd: 15.0
+daily_budget_usd: 15.0   # Anthropic API (brain, tester), over any 24 h
+
+# Providers (Kerege v3 K1, owner 2026-10-28). A role (models.*) or a developer names its
+# provider; the developer's CLI follows from it. anthropic: API, pay per use (daily_budget_usd).
+# claude_code / codex_cli: the subscriptions, not billed per call. kimi_cli: Kimi Code CLI on the
+# Kimi Open Platform key (pay per use, its own caps, devteam/kimi.py). openai_compatible: named
+# for the API roles, not built yet. Off (or no key, a cap reached, Kimi failing): the developer's
+# `fallback` takes the round, logged in one line; kimi_cli off = Kerege v2.
+providers:
+  kimi_cli:
+    enabled: true
+    key: MOONSHOT_API_KEY             # devteam/.env; Open Platform key, not a Kimi Code plan
+    upstream: https://api.moonshot.ai # the CLI talks only to Kerege's proxy, which adds the key
+    daily_usd: 5.0                    # any 24 h (owner 2026-10-28)
+    monthly_usd: 50.0                 # calendar month; at a cap dev_app falls back to Codex
+    price_in: 2.0                     # $ per 1M tokens, kimi-k3.1-pro (Open Platform, 2026-10)
+    price_out: 10.0
+    price_cache_read: 0.2
 
 # `devteam run --continuous` (Kerege): per developer, plan the next task when one ends.
 # A developer with 2 tasks in a row blocked pauses; the run stops when no developer can take a
@@ -121,7 +141,7 @@ models:
 
 developers:
   dev_pipeline:
-    tool: claude           # Claude Code headless, your subscription (CLAUDE_CODE_OAUTH_TOKEN)
+    provider: claude_code  # Claude Code headless, your subscription (CLAUDE_CODE_OAUTH_TOKEN)
     model: claude-opus-5-5 # owner 2026-10-24: the subscription's Fable weekly limit is used up
     areas: [core]          # backlog tasks with this area may go to this developer
     owns: [pipeline/, backend/, infra/, docs/]   # enforced on the diff (scope gate)
@@ -157,7 +177,10 @@ developers:
       - cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy .
       - cd backend && uv run pytest -q
   dev_app:
-    tool: codex            # Codex CLI, your saved ChatGPT login
+    provider: kimi_cli     # Kimi Code CLI on MOONSHOT_API_KEY (owner 2026-10-28)
+    model: kimi-k3.1-pro   # Open Platform id (k3.1-pro is the Kimi Code plan's: another key)
+    fallback:              # Codex CLI, your saved ChatGPT login
+      provider: codex_cli
     areas: [app]
     owns: [web/, docs/decisions/*.md, docs/notes/*.md]   # web/ + markdown plans and ADRs
     timeout_min: 60

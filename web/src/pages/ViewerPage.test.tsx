@@ -83,7 +83,9 @@ afterEach(() => {
 
 function renderViewer(runId: string, query = '') {
   return render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } })}>
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}
+    >
       <AuthProvider>
         <MemoryRouter initialEntries={[`/viewer/${runId}${query}`]}>
           <Routes>
