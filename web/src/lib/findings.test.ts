@@ -4,7 +4,7 @@ import fixture from '../test/fixtures/finding.json';
 import decisions from '../test/fixtures/decisions.json';
 import { ApiError } from './api';
 import {
-  fetchDecisions,
+  getDecisions,
   postDecision,
   decisionErrorKey,
   findingKeys,
@@ -196,7 +196,7 @@ it('fetches decisions from the exact API path with the session header and abort 
   const fetch = vi.fn().mockResolvedValue(Response.json(decisions));
   vi.stubGlobal('fetch', fetch);
   const signal = new AbortController().signal;
-  await expect(fetchDecisions(701, signal)).resolves.toEqual(decisions);
+  await expect(getDecisions(701, signal)).resolves.toEqual(decisions);
   expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/findings/701/decisions', {
     signal,
     headers: { Authorization: 'Bearer test-session' },
@@ -212,7 +212,7 @@ it.each([
     {
       verdict: 'reclass' as const,
       comment: 'Coating has peeled away.',
-      newClass: 'coating' as const,
+      new_class: 'coating' as const,
     },
     { verdict: 'reclass', comment: 'Coating has peeled away.', new_class: 'coating' },
   ],
@@ -240,7 +240,7 @@ it.each([401, 403, 404, 422, 503])(
       vi.fn(async () => Response.json({ detail: 'Could not record this decision.' }, { status })),
     );
     for (const request of [
-      fetchDecisions(701),
+      getDecisions(701),
       postDecision(701, { verdict: 'reject', comment: 'Rust is paint' }),
     ]) {
       try {

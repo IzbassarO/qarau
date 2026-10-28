@@ -5,12 +5,15 @@ log, and engineer/admin actions below the evidence. Require a comment for reject
 offer the API's class choices for reclass, and invalidate finding and decision queries after
 a successful write. Keep the existing v8 components and tokens. Add all copy in en/ru/kk.
 
-The current auth context has no role and the backend has no identity endpoint. Within this
-web-only task, resolve the session role with the existing read-only GET /api/users: 200
-identifies admin; the documented auth dependency's 403 detail explicitly identifies viewer
-or engineer. Unknown responses fail closed with a visible message. Never infer a role from
-the entered username or bearer value. A dedicated identity endpoint is a future backend
-improvement; no backend changes are made here.
+Continuation after round 3 and the dev merge: keep the existing log, form, status refresh,
+translations and v8 layout. ME1 now supplies GET /api/me, so replace the previous
+GET /api/users denial parsing with its explicit role. Unknown or failed responses remain
+read-only with a visible message. Keep all backend files unchanged.
+
+Remaining work: expose getDecisions and the API-shaped new_class input; keep the log section
+mounted and aria-busy while decisions or identity load; test delayed success and terminal
+errors, viewer/engineer roles through mocked /api/me, and a delayed finding refetch to prove
+the displayed status comes from the server. Update the existing preview e2e's identity mock.
 
 Role resolution is lazy: only an opened finding requests it, so offline demo views retain
 their existing behavior. The context stays read-only while resolution is pending or fails.
@@ -34,9 +37,20 @@ misalign the outline. Smaller phone frame heights leave room for the same contro
 colors, fonts or tokens changed.
 
 Added session integration coverage in en/ru/kk: the real AuthProvider consumes a mocked
-GET /api/users engineer denial, sends the session header, displays all three actions and
+identity response, sends the session header, displays all three actions and
 the comment before the log, and shows no alert. Existing assertions are unchanged. The
 existing preview e2e now additionally requires the comment, actions and empty log to be
 fully inside the viewport without scrolling. Kerege runs that browser check and captures
 screenshots; no local screenshots or server were started. Rechecked pnpm lint, typecheck,
 test (47 files, 842 tests) and build successfully.
+
+Continuation complete: role reads now use GET /api/me; getDecisions and postDecision expose
+the requested API contract, including new_class. The log section remains mounted through
+loading and errors and tracks initial and repeated identity/decision reads with aria-busy.
+Tests cover mocked viewer/engineer identities, pending/error readiness, the absence of any
+log controls, and the unchanged status until the delayed finding GET returns rejected.
+The preview e2e mock now serves /api/me. Final pnpm lint (ESLint + Prettier), typecheck,
+test (47 files, 853 tests) and build pass; the existing bundle-size advisory remains.
+Installed React, TanStack Query, Testing Library and Vitest licence files were checked:
+MIT permits commercial use. No new dependency, server, screenshot or real API write.
+Kerege still owns browser e2e and screenshot verification.

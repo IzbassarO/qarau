@@ -36,8 +36,17 @@ it('renders the out-of-order fixture oldest first with fixed user/comment order'
 it('has no edit or delete button, link or menu item anywhere in the log', () => {
   render(<DecisionLog decisions={decisions as Decision[]} />);
   for (const role of ['button', 'link', 'menuitem']) {
-    expect(screen.queryByRole(role, { name: /edit|delete|изменить|удалить/i })).toBeNull();
+    expect(
+      screen.queryByRole(role, { name: /edit|delete|изменить|удалить/i, hidden: true }),
+    ).toBeNull();
   }
+  expect(
+    screen
+      .getByRole('region', { name: 'Decision log' })
+      .querySelector(
+        'button, a, input, textarea, select, [contenteditable="true"], [role="button"], [role="menuitem"]',
+      ),
+  ).toBeNull();
 });
 
 it('shows the empty state for the real seed’s empty log', () => {

@@ -7,7 +7,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import {
   fetchSessionRole,
   login,
@@ -21,6 +21,7 @@ import {
 interface AuthContextValue {
   signedIn: boolean;
   role: Role | null;
+  roleLoading: boolean;
   roleError: boolean;
   loadRole: () => Promise<void>;
   signIn: (credentials: Credentials) => Promise<void>;
@@ -31,6 +32,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const roleLoading = useIsFetching({ queryKey: ['session-role'] }) > 0;
   const header = useSyncExternalStore(subscribeToAuth, sessionHeader, () => null);
   const [identity, setIdentity] = useState<{
     session: string;
@@ -59,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         signedIn: header !== null,
         role: header === null ? 'viewer' : (current?.role ?? null),
+        roleLoading: header !== null && roleLoading,
         roleError: header !== null && current?.error === true,
         loadRole,
         signIn: async (credentials) => {

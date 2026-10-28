@@ -23,7 +23,7 @@ export interface Decision {
 export interface DecisionInput {
   verdict: Verdict;
   comment: string;
-  newClass?: FindingClass;
+  new_class?: FindingClass;
 }
 
 export function decisionErrorKey(error: unknown): Key {
@@ -36,7 +36,7 @@ export function decisionErrorKey(error: unknown): Key {
   return 'decisions.error.connection';
 }
 
-export async function fetchDecisions(findingId: number, signal?: AbortSignal): Promise<Decision[]> {
+export async function getDecisions(findingId: number, signal?: AbortSignal): Promise<Decision[]> {
   return (await readApi(`/api/findings/${findingId}/decisions`, signal)) as Decision[];
 }
 
@@ -47,7 +47,7 @@ export async function postDecision(findingId: number, input: DecisionInput): Pro
     body: JSON.stringify({
       verdict: input.verdict,
       comment: input.comment,
-      ...(input.newClass === undefined ? {} : { new_class: input.newClass }),
+      ...(input.new_class === undefined ? {} : { new_class: input.new_class }),
     }),
   })) as Decision;
 }
@@ -89,7 +89,7 @@ export const findingKeys = {
 export const decisionsOptions = (id: number) =>
   queryOptions({
     queryKey: findingKeys.decisions(id),
-    queryFn: ({ signal }) => fetchDecisions(id, signal),
+    queryFn: ({ signal }) => getDecisions(id, signal),
     retry: false,
   });
 

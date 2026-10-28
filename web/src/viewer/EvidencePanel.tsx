@@ -17,7 +17,7 @@ import { DecisionForm } from './DecisionForm';
 
 function Decisions({ findingId }: { findingId: number }) {
   const { t } = useI18n();
-  const { role, roleError } = useAuth({ resolveRole: true });
+  const { role, roleLoading, roleError } = useAuth({ resolveRole: true });
   const query = useQuery(decisionsOptions(findingId));
   return (
     <>
@@ -25,15 +25,12 @@ function Decisions({ findingId }: { findingId: number }) {
       {(role === 'engineer' || role === 'admin') && (
         <DecisionForm key={findingId} findingId={findingId} />
       )}
-      {query.isError ? (
-        <p role="alert">{t(decisionErrorKey(query.error))}</p>
-      ) : query.isPending ? (
-        <p role="status" className="qv-caption qv-muted">
-          {t('decisions.loading')}
-        </p>
-      ) : (
-        <DecisionLog decisions={query.data} />
-      )}
+      <DecisionLog
+        decisions={query.data ?? []}
+        busy={query.isFetching || roleLoading || (role === null && !roleError)}
+        loading={query.isPending}
+        error={query.isError ? t(decisionErrorKey(query.error)) : undefined}
+      />
     </>
   );
 }

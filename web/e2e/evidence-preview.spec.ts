@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve, basename, extname } from 'node:path';
 import { expect, test } from '@playwright/test';
 import fixture from '../src/test/fixtures/finding.json' with { type: 'json' };
+import me from '../src/test/fixtures/me.json' with { type: 'json' };
 import type { Manifest } from '../src/lib/bundle';
 
 // Playwright collects each file once in its coordinator, then imports it in workers
@@ -32,9 +33,7 @@ test('production evidence preview opens the first API finding with three outline
       image_url: `/api/runs/notre-dame-p3e/files/${manifest.frames[evidence.frame_id].image}`,
     })),
   };
-  await page.route('**/api/users', (route) =>
-    route.fulfill({ status: 403, json: { detail: "role 'engineer' may not use a 'admin' route" } }),
-  );
+  await page.route('**/api/me', (route) => route.fulfill({ json: me }));
   await page.route('**/api/findings/701/decisions', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/inspections', (route) => route.fulfill({ json: [{ id: 41 }] }));
   await page.route('**/api/inspections/41/runs', (route) =>

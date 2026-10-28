@@ -1,7 +1,17 @@
 import { useI18n } from '../i18n';
 import type { Decision } from '../lib/findings';
 
-export function DecisionLog({ decisions }: { decisions: readonly Decision[] }) {
+export function DecisionLog({
+  decisions,
+  busy = false,
+  loading = false,
+  error,
+}: {
+  decisions: readonly Decision[];
+  busy?: boolean;
+  loading?: boolean;
+  error?: string;
+}) {
   const { t, lang } = useI18n();
   const ordered = [...decisions].sort(
     (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id,
@@ -12,9 +22,15 @@ export function DecisionLog({ decisions }: { decisions: readonly Decision[] }) {
   });
   const time = new Intl.DateTimeFormat(lang, { hour: '2-digit', minute: '2-digit', hour12: false });
   return (
-    <section className="decision-log" aria-label={t('decisions.title')}>
+    <section className="decision-log" aria-label={t('decisions.title')} aria-busy={busy}>
       <h3 className="qv-heading">{t('decisions.title')}</h3>
-      {ordered.length === 0 ? (
+      {error ? (
+        <p role="alert">{error}</p>
+      ) : loading ? (
+        <p role="status" className="qv-caption qv-muted">
+          {t('decisions.loading')}
+        </p>
+      ) : ordered.length === 0 ? (
         <p className="qv-caption qv-muted">{t('decisions.empty')}</p>
       ) : (
         <ol className="qv-log decision-entries">

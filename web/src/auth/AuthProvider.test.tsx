@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AuthProvider, useAuth } from './AuthProvider';
+import me from '../test/fixtures/me.json';
 
 function Identity({ resolveRole }: { resolveRole: boolean }) {
   const auth = useAuth({ resolveRole });
@@ -57,14 +58,7 @@ it.each(['viewer', 'engineer', 'admin'] as const)(
     sessionStorage.setItem('qarau.auth.session', 'Bearer test-session');
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        role === 'admin'
-          ? Response.json([])
-          : Response.json(
-              { detail: `role '${role}' may not use a 'admin' route` },
-              { status: 403 },
-            ),
-      ),
+      vi.fn(async () => Response.json({ ...me, role })),
     );
     mount();
     expect(await screen.findByText(role)).toBeTruthy();

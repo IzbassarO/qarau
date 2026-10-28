@@ -54,7 +54,7 @@ export function DecisionForm({ findingId }: { findingId: number }) {
     mutation.mutate({
       verdict,
       comment,
-      ...(verdict === 'reclass' && newClass ? { newClass } : {}),
+      ...(verdict === 'reclass' && newClass ? { new_class: newClass } : {}),
     });
   };
   return (
