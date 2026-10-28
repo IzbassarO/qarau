@@ -265,3 +265,33 @@ Passed `pnpm lint && pnpm typecheck`, `pnpm test && pnpm build` (47 files, 885 t
 Playwright report discovery (16 desktop/phone cases) and `git diff --check`. No server
 started, screenshots taken or dependencies added. Full browser e2e execution and
 light/dark ru/kk/en screenshot comparison remain with Kerege and the tester.
+
+## Returned gate: language-switch download and screenshot navigation
+
+The named-demo e2e previously accepted any Blob iframe after switching language,
+including the previous English preview. Preserve its existing request/iframe/filename
+assertions, and additionally wait for the native anchor's literal
+`download="report-notre-dame-kk.pdf"` and Blob href before clicking it. Verify the
+download failure, fixed 606-byte size and original PDF bytes as well.
+
+Add six navigation scenarios (ru/kk/en, light/dark), at both configured viewports,
+which start at `/inspections`, click the localized Report link, and reach
+`/inspections/37/report` through the mocked API. Assert the summary, locale/theme,
+language choice, ready state, iframe, named download and hash with no error banner
+or raw translation keys. No existing assertions or fixture expectations removed.
+Playwright's installed Apache-2.0 licence permits commercial use; no new dependencies.
+
+Tester capture flow: use an authenticated seeded API session and the desired saved
+UI language plus light/dark system theme; open `/inspections`, click the done
+inspection's localized Report action, and wait for its PDF section to clear
+`aria-busy` and show the preview/download. Capture the report route at 1440x900 and
+390x844 for all six theme/language combinations. The mocked version of this same
+flow is covered by `report reached from inspections` in `web/e2e/report.spec.ts`.
+Screenshot production and pipeline changes remain with the tester; this task forbids
+developer screenshots and changes to the pipeline's protected configuration.
+
+Verified this correction: `pnpm lint && pnpm typecheck`, `pnpm test && pnpm build`
+(47 files, 885 tests) and `git diff --check` all passed. Playwright discovers 28
+report cases, including the added twelve desktop/phone navigation cases. Browser
+execution and the required report screenshots still run in Kerege/tester, as directed.
+No servers were started and no screenshots were produced by the developer.

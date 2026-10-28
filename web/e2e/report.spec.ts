@@ -63,6 +63,9 @@ const locales = [
     signIn: 'Sign in',
     username: 'Username',
     password: 'Password',
+    reportLink: 'Report',
+    summary: 'Summary',
+    ready: 'Report is ready.',
   },
   {
     lang: 'ru',
@@ -77,6 +80,9 @@ const locales = [
     signIn: 'Войти',
     username: 'Имя пользователя',
     password: 'Пароль',
+    reportLink: 'Отчёт',
+    summary: 'Сводка',
+    ready: 'Отчёт готов.',
   },
   {
     lang: 'kk',
@@ -91,6 +97,9 @@ const locales = [
     signIn: 'Кіру',
     username: 'Пайдаланушы аты',
     password: 'Құпиясөз',
+    reportLink: 'Есеп',
+    summary: 'Қорытынды',
+    ready: 'Есеп дайын.',
   },
 ] as const;
 
@@ -169,6 +178,44 @@ for (const locale of locales) {
       expect(requests).toEqual([locale.lang]);
       await expect(page.getByRole('alert')).toHaveCount(0);
     });
+
+    test(`report reached from inspections: ${locale.lang}, ${theme}`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      await page.addInitScript((lang) => {
+        localStorage.setItem('qarau.lang', lang);
+        sessionStorage.setItem('qarau.auth.session', 'Bearer report-test-session');
+      }, locale.lang);
+      const requests = await mockApi(page);
+      await page.goto('/inspections');
+      const reportLink = page.getByRole('link', { name: locale.reportLink, exact: true });
+      await expect(reportLink).toHaveAttribute('href', '/inspections/37/report');
+      await reportLink.click();
+      await expect(page).toHaveURL('/inspections/37/report');
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      await expect(page.locator('html')).toHaveAttribute('lang', locale.lang);
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(locale.title);
+      const summary = page.getByRole('article', { name: locale.summary, exact: true });
+      await expect(summary.getByText('Tank T-104, north wall', { exact: true })).toHaveCount(2);
+      await expect(summary.getByText('reference: Letter sheet, frame 18')).toBeVisible();
+      await expect(summary.getByText(locale.coverage, { exact: true })).toBeVisible();
+      await expect(
+        page.getByRole('group', { name: locale.language }).getByRole('button'),
+      ).toHaveCount(3);
+      await expect(page.getByRole('region', { name: locale.preview, exact: true })).toHaveAttribute(
+        'aria-busy',
+        'false',
+      );
+      await expect(page.getByRole('status')).toHaveText(locale.ready);
+      await expect(page.locator('iframe')).toHaveAttribute('title', locale.preview);
+      await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
+      const downloadLink = page.getByRole('link', { name: locale.download, exact: true });
+      await expect(downloadLink).toHaveAttribute('download', `report-37-${locale.lang}.pdf`);
+      await expect(downloadLink).toHaveAttribute('href', /^blob:/);
+      await expect(page.getByTitle(hash, { exact: true })).toHaveText('5e317abc851b…fef9fb6c');
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      await expect(page.locator('body')).not.toContainText(/\b(?:report|evidence)\.[a-zA-Z]/);
+      expect(requests).toEqual([locale.lang]);
+    });
   }
 }
 
@@ -200,9 +247,18 @@ test('named demo report resolves its API id, switches PDF language and shows unk
   await page.getByRole('button', { name: 'Қазақша', exact: true }).click();
   await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
   await expect.poll(() => requests).toEqual(['en', 'en', 'kk']);
+  // A blob iframe can still belong to the previous language. Wait for the native
+  // download anchor to carry the Kazakh filename before dispatching its click.
+  const downloadLink = page.getByRole('link', { name: 'Download PDF', exact: true });
+  await expect(downloadLink).toHaveAttribute('download', 'report-notre-dame-kk.pdf');
+  await expect(downloadLink).toHaveAttribute('href', /^blob:/);
   const downloadEvent = page.waitForEvent('download');
-  await page.getByRole('link', { name: 'Download PDF', exact: true }).click();
-  expect((await downloadEvent).suggestedFilename()).toBe('report-notre-dame-kk.pdf');
+  await downloadLink.click();
+  const download = await downloadEvent;
+  expect(download.suggestedFilename()).toBe('report-notre-dame-kk.pdf');
+  expect(await download.failure()).toBeNull();
+  expect((await stat((await download.path())!)).size).toBe(606);
+  expect(await readFile((await download.path())!)).toEqual(pdf);
   await page.goto('/inspections/unknown/report');
   await expect(page.getByRole('alert')).toContainText('inspection not found');
   await expect(page.locator('iframe')).toHaveCount(0);
