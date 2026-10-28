@@ -1366,9 +1366,12 @@ tasks:
     Owner 2026-10-28: for the LaunchPad demo (2026-11-06); UI-evidence-b depends on it.
 
     '
-  status: in_progress
+  status: done
   owner: dev_pipeline
   run: cont-20261028-185246-dev_pipeline-1
+  branch: devteam/ME1
+  pr: https://github.com/IzbassarO/qarau/pull/91
+  done_at: '2026-10-28'
 - id: UI-report
   area: app
   title: Report preview page and PDF download
