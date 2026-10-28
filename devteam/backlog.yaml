@@ -1463,12 +1463,12 @@ tasks:
     Owner 2026-10-27: part 2 of the UI-evidence split; starts from UI-evidence''s merged panel.
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - UI-evidence
   - ME1
   owner: dev_app
-  run: cont-20261027-232407-dev_app-1
+  run: cont-20261028-185246-dev_app-2
   branch: devteam/UI-evidence-b
 - id: CONF-fix
   area: app
