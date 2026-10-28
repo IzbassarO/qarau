@@ -8,10 +8,10 @@ The finding's status, class and severity are replayed from its append-only decis
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Protocol
 
 import sqlalchemy as sa
 
@@ -57,53 +57,6 @@ class InspectionInput:
 
 
 @dataclass(frozen=True)
-class RegionInput:
-    """A not-seen map region (COV1): the voxel cell in bundle units and where to look from."""
-
-    key: str
-    bounds: tuple[tuple[float, float, float], tuple[float, float, float]]  # min xyz, max xyz
-    point_count: int
-    nearest_frames: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class CoverageInput:
-    """Coverage of the inspection's latest run with coverage: region counts per state and the
-    not-seen regions, most points first."""
-
-    inspected_ok: int
-    finding: int
-    not_seen: tuple[RegionInput, ...]
-
-
-def coverage_input(regions: Iterable[Mapping[str, Any]]) -> CoverageInput:
-    """From region dicts as regions.json carries them (key `id`) or coverage_region rows (key
-    `region_key`; their `id` is the row's): state, bounds, point_count, nearest_frames."""
-    regions = list(regions)
-    gone = [
-        RegionInput(
-            key=str(r["region_key"] if "region_key" in r else r["id"]),
-            bounds=(_xyz(r["bounds"][0]), _xyz(r["bounds"][1])),
-            point_count=int(r["point_count"]),
-            nearest_frames=tuple(str(f) for f in r["nearest_frames"] or ()),
-        )
-        for r in regions
-        if r["state"] == "not_seen"
-    ]
-    gone.sort(key=lambda r: (-r.point_count, r.key))
-    return CoverageInput(
-        inspected_ok=sum(r["state"] == "inspected_ok" for r in regions),
-        finding=sum(r["state"] == "finding" for r in regions),
-        not_seen=tuple(gone),
-    )
-
-
-def _xyz(v: Iterable[float]) -> tuple[float, float, float]:
-    x, y, z = (float(c) for c in v)
-    return x, y, z
-
-
-@dataclass(frozen=True)
 class VersionEntry:
     version: int
     time: datetime  # aware
@@ -124,7 +77,7 @@ class ReportInput:
     findings: tuple[FindingInput, ...]
     versions: tuple[VersionEntry, ...]  # document control, oldest first
     verification_id: str
-    coverage: CoverageInput | None = None  # None: coverage not computed (never "all seen")
+    coverage: None = None  # not-seen areas; COV1 fills it, until then "coverage not computed"
     run_dirs: tuple[str, ...] = ()  # the inspection's runs by id; the map: the last exported
 
 
@@ -182,11 +135,6 @@ decision = sa.table(
     sa.column("new_severity"), sa.column("created_at", _tz),
 )  # fmt: skip
 user = sa.table("user", sa.column("id"), sa.column("name"))
-coverage_region = sa.table(
-    "coverage_region", sa.column("id"), sa.column("run_id"), sa.column("region_key"),
-    sa.column("state"), sa.column("bounds", sa.JSON), sa.column("point_count"),
-    sa.column("nearest_frames", sa.JSON),
-)  # fmt: skip
 
 
 def _aware(t: datetime) -> datetime:
@@ -243,19 +191,6 @@ def load_report_input(engine: sa.Engine, inspection_id: int, report_time: dateti
                 new_severity=d.new_severity, time=_aware(d.created_at),
             )  # fmt: skip
             decs[d.finding_id].append(entry)
-        # ponytail: "latest" = the highest run id, as for the map; order by date when runs get one
-        cov_run = c.execute(
-            sa.select(sa.func.max(coverage_region.c.run_id))
-            .select_from(coverage_region)
-            .join(run, run.c.id == coverage_region.c.run_id)
-            .where(run.c.inspection_id == inspection_id)
-        ).scalar()
-        coverage = None if cov_run is None else coverage_input(
-            r._mapping for r in c.execute(
-                sa.select(coverage_region).where(coverage_region.c.run_id == cov_run)
-                .order_by(coverage_region.c.id)
-            )
-        )  # fmt: skip
     findings = []
     for r in rows:
         proposed = (r.status, r._mapping["class"], r.severity)
@@ -275,7 +210,6 @@ def load_report_input(engine: sa.Engine, inspection_id: int, report_time: dateti
         organization=head[0], site=head[1], asset=None, inspection=insp, capture_date=insp.date,
         report_number=number, version=1, engineer=engineer, report_time=report_time,
         findings=found, versions=(VersionEntry(1, report_time, engineer),),
-        verification_id=verification_id(number, 1, report_time.isoformat(), engineer, found,
-                                        coverage),
-        coverage=coverage, run_dirs=run_dirs,
+        verification_id=verification_id(number, 1, report_time.isoformat(), engineer, found),
+        run_dirs=run_dirs,
     )  # fmt: skip

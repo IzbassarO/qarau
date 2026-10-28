@@ -1,7 +1,8 @@
 """The RQ job that runs an inspection's workflow steps and mirrors their state to Postgres.
 
-`run_inspection(run_id, from_step)` runs the pipeline steps in order, one subprocess per step
-(`python -m qarau_pipeline step <name> --run <dir> [--force]`, ADR 0022), so the backend
+`run_inspection(run_id, from_step)` runs the pipeline steps in order (S1, the pipeline's
+`product_steps`: probe -> frames -> sparse -> export -> coverage [-> dense]), one subprocess
+per step (`python -m qarau_pipeline step <name> --run <dir> [--force]`, ADR 0022), so the backend
 environment never imports pycolmap. After every transition it writes Run.status
 (queued | running | done | failed), current_step, progress (finished steps / total, 0-100), error
 and the `steps` list (one {name, status, started_at, finished_at, duration_s, error} per step),
@@ -27,7 +28,6 @@ from redis import Redis
 from rq import Queue
 from sqlalchemy.orm import Session
 
-from .coverage import import_regions
 from .db import engine_for
 from .models import Inspection, Run
 from .settings import get_settings
@@ -180,12 +180,6 @@ def run_inspection(run_id: str, from_step: str | None = None) -> str:
             log.exception("step %s of run %s crashed", name, run_id)
             doc = {"status": "failed", "error": f"{type(e).__name__}: {e}"}
         ok = doc.get("status") == "done"
-        if ok and name == "coverage":  # COV1: the regions become coverage_region rows
-            try:
-                _write(lambda db: import_regions(db, run_id, run_dir))
-            except Exception as e:  # noqa: BLE001 - a coverage file we cannot store fails the step
-                log.exception("coverage import of run %s failed", run_id)
-                ok, doc = False, {**doc, "error": f"coverage import: {type(e).__name__}: {e}"}
         _set_step(
             run_id, name,
             status="done" if ok else "failed",

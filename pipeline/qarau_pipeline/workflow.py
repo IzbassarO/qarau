@@ -6,9 +6,9 @@ atomically). A step whose marker says `done` is a no-op unless `ctx.force`; a st
 leaves no marker, so the next run redoes exactly that step. Steps know nothing about queues: the
 RQ runner in backend/ (and Temporal later) only calls `python -m qarau_pipeline step <name>`.
 
-Product steps: probe -> frames (+ quality report) -> sparse (COLMAP) -> export [-> dense, only
-when config.yaml `workflow.dense` is true; fake provider only, never a paid run] -> coverage
-(last, so it marks the bundle that dense may have re-exported).
+Product steps: probe -> frames (+ quality report) -> sparse (COLMAP) -> export -> coverage
+(regions of the sparse map, COV1) [-> dense, only when config.yaml `workflow.dense` is true;
+fake provider only, never a paid run].
 
 Storage (ADR 0024): with `QARAU_S3_BUCKET` set, the run dir is a cache of
 `<org>/<site>/<inspection>/{video,frames,sparse,dense,bundle}/` in S3. Before a step runs, the
@@ -41,8 +41,10 @@ WORKFLOW_JSON = "workflow.json"  # `run` records its input and parameters here f
 READS = {"probe": ("video",), "frames": ("video",), "sparse": ("frames",),
          "export": ("frames", "sparse"), "dense": ("frames", "sparse"),
          "coverage": ("frames", "bundle")}  # fmt: skip
+# ponytail: coverage/ is not a storage kind yet (like findings/): a wiped cache recomputes it;
+# add a kind when COV1-b stores the regions.
 WRITES = {"probe": ("video",), "frames": ("frames",), "sparse": ("sparse",),
-          "export": ("bundle",), "dense": ("dense", "bundle"), "coverage": ("bundle",)}  # fmt: skip
+          "export": ("bundle",), "dense": ("dense", "bundle")}  # fmt: skip
 
 Log = Callable[[str], None]
 OnEvent = Callable[[str, str, "StepResult | None"], None]
@@ -276,10 +278,9 @@ def dense_enabled(config: dict[str, Any]) -> bool:
 
 def product_steps(config: dict[str, Any]) -> list[Step]:
     steps = [Step("probe", probe), Step("frames", frames), Step("sparse", sparse),
-             Step("export", export)]  # fmt: skip
+             Step("export", export), Step("coverage", coverage)]  # fmt: skip
     if dense_enabled(config):
         steps.append(Step("dense", dense))
-    steps.append(Step("coverage", coverage))
     return steps
 
 
@@ -475,8 +476,8 @@ def dense(ctx: StepContext) -> StepResult:
 
 
 def coverage(ctx: StepContext) -> StepResult:
-    """Coverage state per map region (coverage.py, COV1) -> coverage/regions.json and the
-    bundle's points.coverage.u8; voxel size and thresholds from config.yaml `coverage:`."""
+    """Coverage state per map region (coverage.py, COV1) -> coverage/regions.json; voxel size
+    and thresholds from config.yaml `coverage:`."""
     from .coverage import run_coverage
 
     metrics = run_coverage(ctx.run_dir, ctx.config)

@@ -24,7 +24,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from markupsafe import Markup
 
 from ..interfaces import StageError
-from .inputs import DecisionEntry, FindingInput, RegionInput, ReportInput, load_report_input
+from .inputs import DecisionEntry, FindingInput, ReportInput, load_report_input
 from .snapshot import Plate, Visuals, load_visuals
 
 HERE = Path(__file__).resolve().parent
@@ -33,8 +33,6 @@ LANGS = ("ru", "kk", "en")
 SEVERITY_ORDER = {"critical": 0, "watch": 1}
 # SVG markers and outlines (v8 light `critical`, `watch`; `map-text` for a rejected outline)
 COLOURS = {"critical": "#c42a18", "watch": "#a65400", "rejected": "#ededeb"}
-# Not-seen regions printed (most map points first); the count and the API carry the rest.
-MAX_NOT_SEEN_ROWS = 50
 
 
 def load_strings(lang: str) -> dict[str, Any]:
@@ -145,31 +143,13 @@ def _context(inp: ReportInput, s: dict[str, Any], lang: str) -> dict[str, Any]:
         (t("summary_proposed"), str(sum(f.status == "proposed" for f in inp.findings))),
         (t("summary_area"), fmt_area(sum(measured), s) if measured else t("scale_not_set")),
         (t("summary_no_scale"), str(len(confirmed) - len(measured))),
-        (t("summary_not_seen"), t("coverage_not_computed") if inp.coverage is None
-         else str(len(inp.coverage.not_seen))),
-    ]  # fmt: skip
-
-    def coord(x: float) -> str:
-        return f"{x:.2f}".replace(".", s["decimal"])
-
-    def bounds(r: RegionInput) -> str:
-        (x0, y0, z0), (x1, y1, z1) = r.bounds
-        return t("region_bounds", x0=coord(x0), x1=coord(x1), y0=coord(y0), y1=coord(y1),
-                 z0=coord(z0), z1=coord(z1))  # fmt: skip
-
-    def nearest(r: RegionInput) -> str:
-        """Frame names are the frame index (frames/000012.jpg -> "Frame 12")."""
-        stems = (Path(n).stem for n in r.nearest_frames)
-        return ", ".join(t("evidence_frame", frame=int(x)) if x.isdigit() else x for x in stems)
-
-    not_seen = inp.coverage.not_seen if inp.coverage is not None else ()
+        (t("summary_not_seen"), t("coverage_not_computed")),
+    ]
     engineer = inp.engineer or t("engineer_none")
     return {
         "lang": lang, "s": s, "inp": inp, "t": t, "word": word, "when": when, "area": area,
         "verdict": verdict, "decided": decided, "plate_caption": plate_caption, "colours": COLOURS,
         "findings": findings, "summary": summary,
-        "bounds": bounds, "nearest": nearest, "not_seen_rows": not_seen[:MAX_NOT_SEEN_ROWS],
-        "not_seen_more": max(0, len(not_seen) - MAX_NOT_SEEN_ROWS),
         "engineer": engineer,
         "header": css_content(str(s["header"]), number=inp.report_number, version=inp.version),
         "footer": css_content(str(s["footer"]), engineer=engineer, time=when(inp.report_time)),

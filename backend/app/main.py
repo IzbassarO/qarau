@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import coverage, crud, decisions, findings, health, inspections, reports, runs, upload
+from . import crud, decisions, findings, health, inspections, reports, runs, upload
 from .settings import get_settings
 
 app = FastAPI(title="Qarau Vision API")
@@ -19,4 +19,3 @@ app.include_router(upload.router)
 app.include_router(findings.router)
 app.include_router(decisions.router)
 app.include_router(reports.router)
-app.include_router(coverage.router)

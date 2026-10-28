@@ -15,7 +15,6 @@ from .interfaces import StageError
 from .keyframes import MODES
 from .segmentation import GroundedSam2, ManualMasks, SamApiSegmenter, parse_prompt, segment_stage
 from .workflow import (
-    Step,
     export_run,
     make_context,
     product_steps,
@@ -125,14 +124,13 @@ def cmd_project(a: argparse.Namespace) -> None:
 
 
 def cmd_coverage(a: argparse.Namespace) -> None:
-    """The coverage step of a run, always redone (after `project`, so new findings count)."""
-    from .workflow import coverage
+    """Coverage of a run, always redone (after `project`, so new findings count); prints the
+    state counts. --out writes <out>/coverage/regions.json and leaves the run dir untouched."""
+    from .coverage import run_coverage
 
     run = Path(a.run).resolve()
-    res = run_step(Step("coverage", coverage), make_context(run, run_config(run), force=True))
-    if res.status == "failed":
-        raise StageError(f"coverage: {res.error}")
-    print(f"coverage: {run / 'coverage' / 'regions.json'}")
+    out = Path(a.out).resolve() if a.out else None
+    print("coverage:", run_coverage(run, run_config(run), out))
 
 
 def cmd_dense_remote(a: argparse.Namespace) -> None:
@@ -283,7 +281,7 @@ def main(argv: list[str] | None = None) -> None:
                    help="extract features in the sky too (pre-P3b, ADR 0013)")  # fmt: skip
     r.set_defaults(fn=cmd_run)
     st = sub.add_parser("step", help="run exactly one workflow step of a run dir (ADR 0022)")
-    st.add_argument("name", nargs="?", help="probe | frames | sparse | export [| dense] | coverage")
+    st.add_argument("name", nargs="?", help="probe | frames | sparse | export | coverage [| dense]")
     st.add_argument("--run", help="run dir: <run>/video.<ext> or <run>/workflow.json names the "
                     "input")  # fmt: skip
     st.add_argument("--force", action="store_true", help="redo the step even if step.json is done")
@@ -319,10 +317,10 @@ def main(argv: list[str] | None = None) -> None:
     pj.set_defaults(fn=cmd_project)
     cv = sub.add_parser(
         "coverage",
-        help="coverage state per map region -> <run>/coverage/"
-        "regions.json + the bundle's points.coverage.u8 (always redone)",
+        help="coverage state per map region -> <run>/coverage/regions.json (always redone)",
     )
     cv.add_argument("--run", required=True, help="run dir with an exported bundle")
+    cv.add_argument("--out", help="write <out>/coverage/regions.json instead (run dir untouched)")
     cv.set_defaults(fn=cmd_coverage)
     dr = sub.add_parser("dense-remote", help="COLMAP dense on a remote GPU worker (ADR 0016)")
     dr.add_argument("--provider", choices=["fake", "modal"], default="fake",

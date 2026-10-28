@@ -1,54 +1,40 @@
-# COV1 — coverage: inspected_ok / finding / not_seen regions
+# COV1 (part 1) — coverage regions: inspected_ok / finding / not_seen
 
-Goal: every region of the sparse map gets exactly one coverage state (CLAUDE.md trust rules,
-ADR 0002), stored as a file and as DB rows, served by the API, listed in the PDF report.
-Not in this task: the viewer layer, dense-based coverage, comparing inspections (M4).
+Goal: every region of the sparse map gets exactly one coverage state (CLAUDE.md trust rules),
+written to `<run>/coverage/regions.json` by a `coverage` workflow step directly after `export`.
+Format and rules: docs/architecture.md, "Coverage regions".
 
-## Design
+Out of scope (COV1-b): `CoverageRegion` table + migration, `GET /api/inspections/{id}/coverage`,
+the bundle's per-point coverage array, the report's "Not-seen areas" section (round 1 of this
+branch, commit c211cc7, built a first version of these: reuse it there). Also not: viewer layer,
+dense-based coverage, comparing inspections (M4).
 
-- **Regions** (`coverage.voxel_regions`): an axis-aligned voxel grid in bundle units, cell
-  `floor(p / voxel_size)`; only occupied cells are regions. Region id = the integer voxel key
-  `"ix_iy_iz"`; bounds = the cell, `[[ix, iy, iz] * size, ([ix, iy, iz] + 1) * size]`.
-- **A frame counts for a region** when all hold:
-  1. it is *usable*: registered, kept (not a quality-drop bridge) and in no quality-report
-     issue of a kind listed in `coverage.unusable_issues` (blur, too_fast, low_texture);
-  2. the region centroid is inside its frustum (`point_in_frustum`: COLMAP world-to-camera
-     `x_c = R x + t`, depth in `(near, far]`, projection with K inside the image; far =
-     `coverage.max_view_distance` or no limit);
-  3. it observed at least one of the region's points (COLMAP tracks). The frustum alone
-     cannot see a wall in between; a track proves the point was matched in that frame. This
-     only removes frames, so it can only turn a region towards `not_seen`, never towards OK.
-- **State**: `finding` if a point of a finding (`findings/points.finding.u16`, the project
-  stage) is in the region; else `inspected_ok` if frame count >= `min_frames` and point count
-  >= `min_points_per_region`; else `not_seen`. Too few frames, points or good frames never
-  give `inspected_ok`.
-- **nearest_frames**: up to 3 frame image names, nearest camera centre first, among the frames
-  whose frustum contains the centroid (any quality); a region no frame looks at gets the 3
-  nearest registered frames (where to re-shoot from).
-- **Outputs**: `<run>/coverage/regions.json` (schema_version 1, voxel_size, thresholds,
-  regions, totals = count and percent of regions per state) and
-  `export/web/points.coverage.u8` (0 not_seen, 1 inspected_ok, 2 finding; manifest
-  `points.coverage`, ADR 0003 addendum).
-- **Workflow**: step `coverage` after export (after dense when dense is on, since dense
-  re-exports the bundle); CLI `python -m qarau_pipeline coverage --run DIR` always recomputes
-  (run it after `project` so new findings are counted).
-- **Backend**: migration 0006 `coverage_region` (run FK, region_key, state CHECK, bounds JSON,
-  frame_count, point_count, nearest_frames JSON, created_at; unique run+key). The worker
-  imports regions.json after the coverage step (delete + insert per run: idempotent).
-  `GET /api/inspections/{id}/coverage` (viewer): the latest run with rows; `not_computed`
-  with a plain message when there are none.
-- **Report**: section 5 lists the not_seen regions (count, bounds, nearest frames) from the DB
-  rows; no rows: "Coverage not computed." (never "everything was seen").
+## Steps
 
-## Known limits (accepted for this task)
+1. `pipeline/config.yaml` → `coverage:` voxel_size, min_frames, min_frame_quality, min_points,
+   near, far, unusable_issues. No thresholds in code.
+2. `coverage.py`: `points_in_frustum`, `voxelize`, `classify_regions`, `run_coverage`. Poses
+   come from the bundle manifest, which export already wrote in the gravity-aligned bundle frame
+   (the same transform as the points), so no extra transform is needed.
+3. Workflow step `coverage` after `export` (`product_steps`), CLI `coverage --run [--out]`.
+4. Tests: synthetic frustum, one test per threshold at its boundary, findings, regions.json
+   schema; `test_coverage_real.py` on notre-dame-p3e (skipped without the run).
+5. Docs: architecture.md.
 
-- `voxel_size` is in bundle units, and COLMAP's scale differs per run; one value does not fit
-  every video. Tuned on notre-dame below; a scale-relative size comes with a metric scale.
-- Manual findings (DB, ADR 0023) do not flip a region to `finding`: the pipeline step cannot
-  read the DB. Same for an engineer's reject. Add when coverage is recomputed on finding and
-  decision changes.
-- Radial distortion is ignored in the frustum test (K only): mild for phone/drone video.
+## Decisions
 
-## Results on real data
+- A frame counts for a point only when the point is in its frustum **and** COLMAP tracked it in
+  that frame: the frustum alone cannot see a wall in between. This only removes frames, so it
+  can only move a region towards `not_seen`.
+- Frame quality = the frame check's blur score (Laplacian variance, `frames[].blur`), plus the
+  quality report's issues (`unusable_issues`); not-kept bridge frames never count.
+- notre-dame-p3e has no project-stage findings; the real test uses the chapel-facade manual
+  finding of test_findings_real.py (selected by `findings.select_points`), written into a tmp
+  copy of the run (symlinks), never into the run itself.
 
-(filled in after the runs)
+## Known limits
+
+- `voxel_size` is in bundle units; COLMAP's scale differs per run. Scale-relative size comes
+  with a metric scale.
+- Manual findings in the DB (ADR 0023) do not reach the step yet (COV1-b).
+- Radial distortion ignored in the frustum test.
