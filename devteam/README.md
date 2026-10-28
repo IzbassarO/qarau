@@ -125,7 +125,24 @@ then unattended (`run --continuous` overnight).
   which come later; the tester judges only the current part's criteria. A part accepted by the
   tester starts the next one in a fresh round (new session, full brief); send-backs
   (`max_fix_loops`) and loop detection count per part; the gates, PR and merge come once, after
-  the last part. The packet lists the parts with the accepted ones ticked.
+  the last part. The packet lists the parts with the accepted ones ticked. Accepted parts are
+  kept in `.state/parts/<task>.json` (stage A, 2026-10-27; DS1 re-planned an accepted part 1 on
+  resume): a resumed task plans only the remaining parts, unless its goal changed (then the
+  whole task again, said in the events log); merged, the file goes.
+- Task size (stage A, 2026-10-27; DS1 got 16 criteria in 2 parts for 5 in its entry): at most 8
+  criteria per part, 5 in part 1 of several; a goal with "Done when:" lists N criteria (its
+  `;`-clauses plus Owner additions) and the plan has at most N + 3, each extra one in
+  `added_criteria` with why (shown in the plan). More than 3 parts: `needs_split`, as is a task
+  still too big after the one re-plan.
+- Tester verdicts are complete or they do not pass (stage A): `criteria` must give each number
+  1..N of the part's criteria exactly once. Otherwise the tester is asked once more with what
+  was missing, repeated or out of range; still incomplete, the round does not pass, it is
+  logged in `.state/tester_errors.jsonl` and not counted against the developer (twice in a row
+  ends the task). The judged diff leaves out lockfiles and generated files (`uv.lock`,
+  `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `*.min.js`, `*.map`; still in `--stat`);
+  over 120 000 characters it is not judged and cannot pass ("too large to review").
+- A check that fails while the machine slept (wall clock over 60 s ahead of the monotonic one,
+  `run_proc`) runs once more, and the events log says so; watched developer runs never do.
 - Loop detection: the tester's reason is the set of unmet criteria, failing checks and missing
   screenshots. Sent back twice in a row for the same reason: no new round, `blocked`.
 - Tester send-backs name the exact place (owner, 2026-10-23: U2 was sent back three times on
@@ -150,8 +167,12 @@ then unattended (`run --continuous` overnight).
   round (its own docs/ attempts are only reverted). Anti-bypass checks on the diff: new
   `test.skip` / `.only` / `xfail` / `pytest.mark.skip` (a skip only while a data file is
   missing is allowed), fewer assertions or tests, looser thresholds in tests, `.patch` /
-  `.diff` files, code under docs/, test retries set in code or test config (`retries:`,
-  `retry:`, `--reruns`, `pytest.mark.flaky`) → sent back with the reason (twice → blocked). Every
+  `.diff` files, code under docs/, test-runner retries set in code or test config (Playwright
+  `retries:` in its config or `describe.configure({ retries })`, `--retries`, `jest.retryTimes`,
+  Vitest `retry:` in its config or test options, `--reruns` / `reruns=` /
+  `pytest.mark.flaky`; never a library's own option like React Query's `retry: false`). The JS
+  helpers (`xit`, `fit`, `fdescribe`, `xtest`, `xdescribe`, `.only`, `.skip`) count only in
+  .ts/.tsx/.js/.jsx/.mjs/.cjs test files → sent back with the reason (twice → blocked). Every
   violation goes to `.state/violations.jsonl`, "Needs your attention" and the daily report.
 - Owner-approved test rewrites (`gates.test_rewrite_allowed`, per task; owner 2026-10-24 for
   DS1: tests that pin the old look move to the v8 values): in the listed test files, fewer
@@ -311,7 +332,9 @@ then unattended (`run --continuous` overnight).
 - A task is `done` only when this run's commits went through a PR that passed CI and was
   merged. A branch already merged with nothing new is blocked as "nothing to merge, already
   done", never marked done.
-- Daily report: merged / blocked tasks, API cost, **subscription load per task** (rounds,
+- Daily report: metrics over the last 7 days (tasks done, parts accepted on the first round,
+  rounds and API $ per done task, blocked, tester errors, flaky tests with counts; also on the
+  dashboard), merged / blocked tasks, API cost, **subscription load per task** (rounds,
   minutes, tokens, ≈ API $), latest benchmark, last release.
 - Models, budget, gates, developer folders and checks: `config.yaml`.
 - Keys: `.env` (gitignored), template `.env.example`.
