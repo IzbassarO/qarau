@@ -12,6 +12,7 @@ dependencies = [
     "pyyaml>=6",
     "rich>=13",
     "python-dotenv>=1",
+    "pillow>=11",  # MIT-CMU: downscales the tester's images to the API's size limit
 ]
 
 [project.scripts]

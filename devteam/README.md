@@ -138,7 +138,9 @@ then unattended (`run --continuous` overnight).
   1..N of the part's criteria exactly once. Otherwise the tester is asked once more with what
   was missing, repeated or out of range; still incomplete, the round does not pass, it is
   logged in `.state/tester_errors.jsonl` and not counted against the developer (twice in a row
-  ends the task). The judged diff is the current part's: part 1 (and a task in one piece) the
+  ends the task). The API refusing the tester's request (HTTP 400 `invalid_request_error`) is a
+  tester error too: logged, tried once more with every image at half size, then the task is
+  blocked with "tester error: ..." (not a send-back). The judged diff is the current part's: part 1 (and a task in one piece) the
   whole branch against dev; later parts from the commit the previous part was accepted at
   (recorded in `.state/parts/<task>.json`, also used on resume), with the dev merged into the
   branch since then left out. `--stat` stays the whole branch. It leaves out lockfiles and
@@ -259,7 +261,8 @@ then unattended (`run --continuous` overnight).
   comments or whitespace.
 - Screenshots: a web task whose criteria mention the viewer or screenshots lists `routes`; any
   task whose criteria name an app page path (`/viewer/<run>`, `/inspections`; never an API route
-  like `/api/...` or a file like `/openapi.json`) lists it too. A backend task may say "the
+  like `/api/...`, nor a word inside one such as `/coverage` in
+  `GET /api/inspections/{id}/coverage`, or a file like `/openapi.json`) lists it too. A backend task may say "the
   viewer must not break" without routes (B1, S1 and DEF1-api lost their first plan to that
   check, 2026-10-23). The tester
   screenshots them (pipeline tasks: the viewer on the quick benchmark output) at every
@@ -269,7 +272,9 @@ then unattended (`run --continuous` overnight).
   first theme in kk and en; `dev-*` in ru only), as
   `<route>-<viewport>[-<theme>][-<locale>].png` in `.state/packets/<task>/`, emptied at the
   start of each round. Screenshots over the API request limit (90 images, 24 MB; `dev-*` go
-  first) are named to the tester as not attached, never silently cut. A missing screenshot fails
+  first) are named to the tester as not attached, never silently cut; an image over 2000 px a
+  side (the API's limit with over 20 images) is sent scaled down to fit (Pillow, MIT-CMU),
+  aspect kept, with its label. A missing screenshot fails
   the task even if the judge passed. `dev-*.png` are the "before": pipeline
   tasks, the same routes on dev's cached gate benchmark; web tasks, the same routes built from a
   fresh checkout of dev. The tester signs in first (`devteam/shoot.mjs`, A1b login) with

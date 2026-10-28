@@ -3,6 +3,7 @@ plans inside the developer's folders, stop / resume one task, dashboard from the
 prompt caching, `writable` data folders; CPU work as progress, a blocked streak pauses one
 developer, loop detection by criterion number, routes and Owner additions in plans, Codex."""
 
+import base64
 import copy
 import json
 import os
@@ -474,7 +475,9 @@ def test_every_image_follows_its_own_label_and_labels_are_costed(repo, tmp_path,
     """DS1 (2026-10-26): with names listed once for dozens of images the tester read the v8
     "after" shots as the dev-* "before" and blocked the task."""
     team, _ = make(repo)
-    png = b"\x89PNG\r\n\x1a\n"
+    png = base64.b64decode(  # a real 1x1 PNG: every image goes through Pillow (MAX_SIDE)
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGP4DwABAQEAWk1v8QAAAABJRU5ErkJggg=="
+    )
     (tmp_path / "docs/design/screens").mkdir(parents=True)
     paths = [tmp_path / "signed-out-1440x900-light-ru.png", tmp_path / "dev-root-390x844.png"]
     paths.append(tmp_path / "docs/design/screens/sign-in-light.png")

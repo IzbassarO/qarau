@@ -1,6 +1,7 @@
 """Real agents. Every pay-per-use model call goes through llm_call (budget + cost log)."""
 
 import base64
+import io
 import json
 import os
 import shutil
@@ -10,6 +11,7 @@ from pathlib import Path
 import anthropic
 import httpx
 import yaml
+from PIL import Image
 
 from devteam import costs, procs
 from devteam import gates as G
@@ -25,6 +27,9 @@ CACHE = {"type": "ephemeral", "ttl": "1h"}
 CACHE_WRITE_X = 2.0
 # Messages API limits per request: 100 images, 32 MB; kept under both with room for the text.
 MAX_IMAGES, MAX_IMAGE_BYTES = 90, 24e6
+# ... and with over 20 images, at most 2000 px a side (cont-20261027-232407: a v8 reference,
+# light and dark stacked, was rejected with HTTP 400): a longer image is scaled down to fit.
+MAX_SIDE = 2000
 # The judged diff: a part larger than this cannot be reviewed whole, so it cannot pass (a cut diff
 # could hide what the tester never saw). Lockfiles and generated files are in --stat only.
 MAX_DIFF = 120_000
@@ -52,6 +57,28 @@ def transient(e: Exception) -> bool:
     )  # a mid-stream error event arrives with HTTP 200, the kind is in the body
 
 
+def invalid_request(e: Exception) -> bool:
+    """The API refused the request itself (HTTP 400 invalid_request_error)."""
+    if not isinstance(e, anthropic.APIStatusError):
+        return False
+    err = e.body.get("error") if isinstance(e.body, dict) else None
+    return e.status_code == 400 or (
+        isinstance(err, dict) and err.get("type") == "invalid_request_error"
+    )
+
+
+def png_data(path: str, scale: float = 1.0) -> bytes:
+    """The PNG as sent: scaled to fit MAX_SIDE (aspect kept), then by `scale`."""
+    with Image.open(path) as im:
+        f = min(1.0, MAX_SIDE / max(im.size)) * scale
+        if f >= 1:
+            return Path(path).read_bytes()
+        size = (max(1, round(im.width * f)), max(1, round(im.height * f)))
+        buf = io.BytesIO()
+        im.resize(size, Image.Resampling.LANCZOS).save(buf, "PNG")
+        return buf.getvalue()
+
+
 def image_label(path: str) -> str:
     """The text block right before an image: its file name and what it is."""
     name = Path(path).name
@@ -73,6 +100,7 @@ def llm_call(
     client=None,
     images: list[str] = (),
     context: str = "",
+    image_scale: float = 1.0,
 ) -> dict:
     """One structured-output call for `role` (a key of config.models). Reserves the
     worst-case cost first, settles to the real usage after. No SDK retries: transient failures
@@ -81,7 +109,8 @@ def llm_call(
     Prompt caching: `system` and `context` (the stable part of the user turn: repository
     rules, the task and its criteria) are cached; images and `prompt` come after them.
     Each image follows its own text label (file name and role), so a judge with dozens of
-    images never maps them to names by position (DS1: "after" shots read as dev-* "before")."""
+    images never maps them to names by position (DS1: "after" shots read as dev-* "before").
+    Every image is sent through png_data (at most MAX_SIDE a side, times `image_scale`)."""
     system, context, prompt = map(procs.clean_text, (system, context, prompt))
     labels = [image_label(i) for i in images]
     m = team.cfg["models"][role]
@@ -107,7 +136,7 @@ def llm_call(
                 "source": {
                     "type": "base64",
                     "media_type": "image/png",
-                    "data": base64.b64encode(Path(i).read_bytes()).decode(),
+                    "data": base64.b64encode(png_data(i, image_scale)).decode(),
                 },
             },
         ]
@@ -815,17 +844,37 @@ Rules:
                 + "\n</owner_approved_test_rewrites>\n\n"
                 + prompt
             )
-        n = len(s["criteria"])
-        ask = lambda extra="": llm_call(  # noqa: E731
-            team,
-            "tester",
-            s["task"]["id"],
-            TESTER_SYSTEM,
-            team.redact(prompt + extra),
-            schema,
-            images=shots,
-            context=team.redact(context),
-        )
+        n, tid, scale = len(s["criteria"]), s["task"]["id"], 1.0
+
+        def ask(extra=""):
+            # the API refusing the request is the tester's error, never the developer's: logged,
+            # tried once more with every image at half size, then the task is blocked
+            nonlocal scale
+            try:
+                return llm_call(
+                    team,
+                    "tester",
+                    tid,
+                    TESTER_SYSTEM,
+                    team.redact(prompt + extra),
+                    schema,
+                    images=shots,
+                    context=team.redact(context),
+                    image_scale=scale,
+                )
+            except anthropic.APIStatusError as e:
+                if not invalid_request(e):
+                    raise
+                again = scale == 1.0
+                team.tester_error(
+                    tid,
+                    f"API error: {e}" + ("; retrying with images at half size" if again else ""),
+                )
+                if not again:
+                    raise TaskHalted(f"tester error: {e}") from e
+                scale = 0.5
+                return ask(extra)
+
         v = ask()
         if gaps := verdict_gaps(v, n):  # asked once more, with what was wrong
             v = ask(

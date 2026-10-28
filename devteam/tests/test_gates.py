@@ -12,10 +12,13 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import anthropic
+import httpx
 import pytest
 import yaml
 from conftest import CFG, HERE, git, remote_of, team_for
 from langgraph.checkpoint.sqlite import SqliteSaver
+from PIL import Image
 
 from devteam import costs
 from devteam import gates as G
@@ -1281,6 +1284,106 @@ def test_tester_errors_twice_in_a_row_end_the_task(repo):
     t = {t["id"]: t for t in team.load_backlog()}["T-001"]
     assert t["status"] == "blocked" and "twice in a row" in t["blocked_reason"]
     assert len((team.home / "tester_errors.jsonl").read_text().splitlines()) == 2
+
+
+# --- tester images and API rejections (cont-20261027-232407, 2026-10-28) --------------------
+def png(path: Path, w: int, h: int) -> str:
+    Image.new("RGB", (w, h), "white").save(path)
+    return str(path)
+
+
+def sent_size(data: bytes) -> tuple[int, int]:
+    from io import BytesIO
+
+    with Image.open(BytesIO(data)) as im:
+        assert im.format == "PNG"
+        return im.size
+
+
+def test_a_tall_image_is_scaled_to_2000_px_aspect_kept(tmp_path):
+    """24 screenshots + v8 references: the API refused a reference over 2000 px (HTTP 400)."""
+    tall, small = png(tmp_path / "ref.png", 1440, 3600), png(tmp_path / "root.png", 1440, 900)
+    assert sent_size(R.png_data(tall)) == (800, 2000)
+    assert sent_size(R.png_data(tall, 0.5)) == (400, 1000)
+    assert R.png_data(small) == Path(small).read_bytes()  # under the limit: sent as it is
+    assert sent_size(R.png_data(small, 0.5)) == (720, 450)
+
+
+def test_llm_call_sends_every_image_scaled_with_its_label(repo, tmp_path):
+    from test_safety import StubClient
+
+    team = team_for(repo)
+    shots = [png(tmp_path / "root.png", 1440, 3600), png(tmp_path / "dev-root.png", 1440, 900)]
+    seen = []
+    client = StubClient()
+    create = client.create
+    client.create = lambda **kw: seen.append(kw) or create(**kw)
+    R.llm_call(team, "tester", "T", "s", "p", {}, client=client, images=shots)
+    blocks = seen[0]["messages"][0]["content"]
+    images = [b for b in blocks if b["type"] == "image"]
+    labels = [b["text"] for b in blocks if b["type"] == "text"]
+    assert len(images) == 2 and labels[:2] == [R.image_label(i) for i in shots]
+    sizes = [sent_size(R.base64.b64decode(i["source"]["data"])) for i in images]
+    assert sizes == [(800, 2000), (1440, 900)]
+
+
+def rejected() -> anthropic.BadRequestError:
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    body = {"type": "error", "error": {"type": "invalid_request_error", "message": "too big"}}
+    return anthropic.BadRequestError(
+        "too big", response=httpx.Response(400, request=req), body=body
+    )
+
+
+def judge_rejected(monkeypatch, answers: list) -> tuple[dict | Exception, list, list]:
+    """The tester's API call answers in turn: an exception is raised, a verdict returned."""
+    scales, errors = [], []
+
+    def fake_llm_call(team, role, task, system, prompt, schema, **kw):
+        scales.append(kw["image_scale"])
+        a = answers[len(scales) - 1]
+        if isinstance(a, Exception):
+            raise a
+        return copy.deepcopy(a)
+
+    monkeypatch.setattr(R, "llm_call", fake_llm_call)
+    team = SimpleNamespace(
+        remote_name="origin", cfg=CFG, git=lambda *a, **k: "", redact=str, root=HERE.parent,
+        tester_error=lambda tid, detail: errors.append((tid, detail)),
+    )  # fmt: skip
+    s = {"task": {"id": "T-1", "title": "t"}, "plan": "p", "worktree": ".", "criteria": ["c1"]}
+    try:
+        return R.RealAgents().judge(team, s, []), scales, errors
+    except Exception as e:
+        return e, scales, errors
+
+
+def test_an_api_rejection_is_a_tester_error_retried_once_at_half_size(monkeypatch):
+    v, scales, errors = judge_rejected(monkeypatch, [rejected(), verdict(1)])
+    assert v["passed"] is True and scales == [1.0, 0.5]
+    ((tid, detail),) = errors
+    assert tid == "T-1" and detail == "API error: too big; retrying with images at half size"
+    e, scales, errors = judge_rejected(monkeypatch, [rejected(), rejected()])
+    assert isinstance(e, R.TaskHalted) and str(e).startswith("tester error: ")
+    assert scales == [1.0, 0.5] and len(errors) == 2
+    e, scales, errors = judge_rejected(monkeypatch, [anthropic.APIConnectionError(
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))])  # fmt: skip
+    assert isinstance(e, anthropic.APIConnectionError) and errors == []  # not the request's fault
+
+
+class TesterRejected(Fast):
+    def judge(self, team, s, checks):
+        raise R.TaskHalted("tester error: Error code: 400 - invalid_request_error")
+
+
+def test_a_tester_rejected_twice_blocks_the_task_not_as_a_developer_return(repo):
+    agents = TesterRejected()
+    agents.plan = only("T-001", "dev_pipeline")
+    team, graph = make_team(repo, agents, max_fix_loops=3)
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})
+    t = {t["id"]: t for t in team.load_backlog()}["T-001"]
+    assert t["status"] == "blocked" and t["blocked_reason"].startswith("tester error: ")
+    assert "sent back" not in events(team)
 
 
 def task_status(team, tid):
