@@ -19,7 +19,15 @@ const read = (): Lang => {
 };
 
 let lang: Lang = read();
+let languageOverride: Lang | null = null;
 const subs = new Set<() => void>();
+
+/** A URL presentation override never changes the saved language preference. */
+export function setLanguageOverride(value: Lang | null) {
+  languageOverride = value;
+  document.documentElement.lang = languageOverride ?? lang;
+  subs.forEach((f) => f());
+}
 
 export function setLang(l: Lang) {
   lang = l;
@@ -28,7 +36,7 @@ export function setLang(l: Lang) {
   } catch {
     /* ignore */
   }
-  document.documentElement.lang = l;
+  document.documentElement.lang = languageOverride ?? l;
   subs.forEach((f) => f());
 }
 
@@ -36,7 +44,7 @@ export function setLang(l: Lang) {
 export function useI18n() {
   const l = useSyncExternalStore(
     (f) => (subs.add(f), () => subs.delete(f)),
-    () => lang,
+    () => languageOverride ?? lang,
   );
   return { lang: l, t: (k: Key) => LANGS[l][k] ?? en[k] ?? k };
 }

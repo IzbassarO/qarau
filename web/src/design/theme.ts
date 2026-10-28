@@ -1,8 +1,8 @@
-/** Apply the system theme before rendering, and keep it in sync with system changes. */
-export function followSystemTheme(): () => void {
+/** Follow the system theme unless the URL supplies a temporary presentation override. */
+export function followSystemTheme(override?: 'light' | 'dark'): () => void {
   const preference = window.matchMedia('(prefers-color-scheme: dark)');
   const apply = () => {
-    document.documentElement.dataset.theme = preference.matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = override ?? (preference.matches ? 'dark' : 'light');
   };
 
   apply();

@@ -118,9 +118,11 @@ it.each(['notre-dame', 'notre-dame-p3e'])(
   },
 );
 
-it('offers no report link for a local viewer without an API inspection', () => {
+it('links /viewer/demo to the seeded demo report route', () => {
   renderDemo();
-  expect(screen.queryByRole('link', { name: 'Report' })).toBeNull();
+  expect(screen.getByRole('link', { name: 'Report' }).getAttribute('href')).toBe(
+    '/inspections/demo/report',
+  );
 });
 
 it.each([

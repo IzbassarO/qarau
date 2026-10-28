@@ -11,15 +11,12 @@ import '@fontsource/lora/400-italic.css';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import './index.css';
-import { followSystemTheme } from './design/theme';
 import { AppShell } from './shell/AppShell';
+import { PresentationOverrides } from './shell/PresentationOverrides';
 import { ViewerPage } from './pages/ViewerPage';
 import { ReportPage } from './pages/ReportPage';
 import { AuthProvider } from './auth/AuthProvider';
 import { RequireAuth } from './auth/RequireAuth';
-
-const stopFollowingSystemTheme = followSystemTheme();
-if (import.meta.hot) import.meta.hot.dispose(stopFollowingSystemTheme);
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -28,6 +25,7 @@ createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrowserRouter>
+          <PresentationOverrides />
           <Routes>
             <Route element={<RequireAuth />}>
               <Route path="/" element={<AppShell />} />

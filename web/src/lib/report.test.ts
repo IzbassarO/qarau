@@ -94,13 +94,16 @@ it('loads literal summary fields and decision histories from the existing JSON e
   ]);
 });
 
-it('resolves the notre-dame route through the seeded run’s API association', async () => {
-  const fetch = mockReportApi();
-  const summary = await fetchReportSummary('notre-dame');
-  expect(summary.inspectionId).toBe(37);
-  expect(summary.object).toBe(fixture.sites[0].name);
-  expect(fetch).toHaveBeenCalledWith('/api/inspections/37/runs', expect.anything());
-});
+it.each(['demo', 'notre-dame'])(
+  'resolves route %s through the seeded run’s API association',
+  async (id) => {
+    const fetch = mockReportApi();
+    const summary = await fetchReportSummary(id);
+    expect(summary.inspectionId).toBe(37);
+    expect(summary.object).toBe(fixture.sites[0].name);
+    expect(fetch).toHaveBeenCalledWith('/api/inspections/37/runs', expect.anything());
+  },
+);
 
 it.each(['notre-dame', 'notre-dame-p3e'])(
   'resolves viewer %s to the fixture inspection for its report link',

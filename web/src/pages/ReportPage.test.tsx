@@ -98,7 +98,7 @@ it('previews and downloads the same PDF Blob with the header hash and route file
   const frame = screen.getByTitle('PDF preview');
   expect(frame.tagName).toBe('IFRAME');
   expect(frame.getAttribute('src')).toBe('blob:report-en');
-  const hash = screen.getByText('bf98d56a3f72…7263bc26');
+  const hash = screen.getByText(fixture.hash);
   expect(hash.getAttribute('title')).toBe(fixture.hash);
   expect(hash.className).toBe('qv-mono');
   const createdBlob = vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob;
@@ -276,15 +276,18 @@ it.each<[Lang, string, string]>([
   },
 );
 
-it('opens /inspections/notre-dame/report with the API summary and language choice, without a banner', async () => {
-  const fetch = mockReportApi();
-  renderReport('notre-dame');
-  await screen.findByText('Report is ready.');
-  expect(screen.getAllByText(fixture.sites[0].name)).toHaveLength(2);
-  expect(screen.getByRole('group', { name: 'PDF language' })).toBeTruthy();
-  expect(screen.queryByRole('alert')).toBeNull();
-  expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=en', expect.anything());
-});
+it.each(['demo', 'notre-dame'])(
+  'opens /inspections/%s/report with the API summary and language choice, without a banner',
+  async (id) => {
+    const fetch = mockReportApi();
+    renderReport(id);
+    await screen.findByText('Report is ready.');
+    expect(screen.getAllByText(fixture.sites[0].name)).toHaveLength(2);
+    expect(screen.getByRole('group', { name: 'PDF language' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=en', expect.anything());
+  },
+);
 
 it.each(['999', 'unknown'])(
   'shows the API failure for unknown id %s rather than a blank page',

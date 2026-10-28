@@ -6,7 +6,7 @@ export function mockReportApi(pdf: () => Response | Promise<Response> = fixtureP
   const fetch = vi.fn(async (input: string | URL | Request) => {
     const path = String(input);
     if (path.startsWith('/api/inspections/37/report.pdf?lang=')) return pdf();
-    if (path === '/api/inspections/notre-dame')
+    if (path === '/api/inspections/notre-dame' || path === '/api/inspections/demo')
       return Response.json(fixture.validation, { status: 422 });
     if (path === '/api/inspections/37') return Response.json(fixture.inspection);
     if (path === '/api/inspections') return Response.json([fixture.inspection]);

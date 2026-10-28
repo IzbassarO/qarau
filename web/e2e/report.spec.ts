@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import fixture from '../src/test/fixtures/report-summary.json' with { type: 'json' };
 
 // Original, hand-authored one-page PDF. No third-party document content.
-const pdf = readFileSync(new URL('./fixtures/report.pdf', import.meta.url));
+const pdf = readFileSync(new URL('../src/test/fixtures/report.pdf', import.meta.url));
 const hash = '5e317abc851bdb197835b4a473d2fed04bb0051eed5c8956234256cbfef9fb6c';
 
 async function mockApi(page: Page) {
@@ -16,7 +16,7 @@ async function mockApi(page: Page) {
     if (url.pathname === '/api/runs') return route.fulfill({ json: [] });
     if (url.pathname === '/api/inspections/demo-id' || url.pathname === '/api/inspections/37')
       return route.fulfill({ json: fixture.inspection });
-    if (url.pathname === '/api/inspections/notre-dame')
+    if (url.pathname === '/api/inspections/notre-dame' || url.pathname === '/api/inspections/demo')
       return route.fulfill({ status: 422, json: fixture.validation });
     if (url.pathname === '/api/inspections') return route.fulfill({ json: [fixture.inspection] });
     if (url.pathname === '/api/inspections/37/runs') return route.fulfill({ json: fixture.runs });
@@ -87,16 +87,19 @@ const locales = [
 for (const locale of locales) {
   for (const theme of ['light', 'dark'] as const) {
     test(`report preview and fixture download: ${locale.lang}, ${theme}`, async ({ page }) => {
-      await page.emulateMedia({ colorScheme: theme });
-      await page.addInitScript((lang) => localStorage.setItem('qarau.lang', lang), locale.lang);
+      // URL overrides must take precedence over saved language and system theme.
+      await page.emulateMedia({ colorScheme: theme === 'light' ? 'dark' : 'light' });
+      await page.addInitScript(() => localStorage.setItem('qarau.lang', 'en'));
       const requests = await mockApi(page);
       // Authenticate through the form and retain the requested report URL.
-      await page.goto('/inspections/demo-id/report');
+      await page.goto(`/inspections/37/report?theme=${theme}&lang=${locale.lang}`);
       await page.getByLabel(locale.username).fill('report-engineer');
       await page.getByLabel(locale.password).fill('report-test-session');
       await page.getByRole('button', { name: locale.signIn, exact: true }).click();
-      await expect(page).toHaveURL('/inspections/demo-id/report');
+      await expect(page).toHaveURL(`/inspections/37/report?theme=${theme}&lang=${locale.lang}`);
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      await expect(page.locator('html')).toHaveAttribute('lang', locale.lang);
+      expect(await page.evaluate(() => localStorage.getItem('qarau.lang'))).toBe('en');
       await expect(page.getByRole('heading', { level: 1 })).toHaveText(locale.title);
       await expect(page.getByText('Tank T-104, north wall', { exact: true })).toHaveCount(2);
       const critical = page.getByRole('region', { name: locale.critical, exact: true });
@@ -111,7 +114,7 @@ for (const locale of locales) {
       await expect(preview).toHaveAttribute('title', locale.preview);
       await expect(preview).toHaveAttribute('src', /^blob:/);
       const hashLabel = page.getByTitle(hash, { exact: true });
-      await expect(hashLabel).toHaveText('5e317abc851b…fef9fb6c');
+      await expect(hashLabel).toHaveText(hash);
       const downloadButton = page.getByRole('button', { name: locale.download, exact: true });
       await preview.scrollIntoViewIfNeeded();
       await expect(downloadButton).toBeInViewport();
@@ -124,10 +127,11 @@ for (const locale of locales) {
       const downloadEvent = page.waitForEvent('download');
       await downloadButton.click();
       const download = await downloadEvent;
-      expect(download.suggestedFilename()).toBe(`report-demo-id-${locale.lang}.pdf`);
+      expect(download.suggestedFilename()).toBe(`report-37-${locale.lang}.pdf`);
       expect(await download.failure()).toBeNull();
       // Literal known fixture size: never compute the expectation from the downloaded data.
       expect((await stat((await download.path())!)).size).toBe(606);
+      expect(await readFile((await download.path())!)).toEqual(pdf);
       expect(requests).toEqual([locale.lang]);
       await expect(page.getByRole('alert')).toHaveCount(0);
     });
@@ -147,11 +151,21 @@ test('named demo report resolves its API id, switches PDF language and shows unk
     'href',
     '/inspections/37/report',
   );
+  await page.goto('/viewer/demo');
+  const reportLink = page.getByRole('link', { name: 'Report', exact: true });
+  await expect(reportLink).toHaveAttribute('href', '/inspections/demo/report');
+  await expect(reportLink).toBeInViewport();
+  if (page.viewportSize()!.width === 390)
+    expect((await reportLink.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await reportLink.click();
+  await expect(page).toHaveURL('/inspections/demo/report');
+  await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
+  await expect(page.getByRole('alert')).toHaveCount(0);
   await page.goto('/inspections/notre-dame/report');
   await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
   await page.getByRole('button', { name: 'Қазақша', exact: true }).click();
   await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
-  await expect.poll(() => requests).toEqual(['en', 'kk']);
+  await expect.poll(() => requests).toEqual(['en', 'en', 'kk']);
   const downloadEvent = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download PDF', exact: true }).click();
   expect((await downloadEvent).suggestedFilename()).toBe('report-notre-dame-kk.pdf');

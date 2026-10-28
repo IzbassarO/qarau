@@ -92,7 +92,7 @@ async function inspectionForReport(id: string, signal?: AbortSignal): Promise<In
       throw error;
     // The tester's named route refers to seed.py's run, not an integer DB key.
     // Confirm the association returned by the API; never hard-code the inspection ID.
-    const runName = id === 'notre-dame' ? 'notre-dame-p3e' : id;
+    const runName = id === 'demo' || id === 'notre-dame' ? 'notre-dame-p3e' : id;
     const inspections = await json<Inspection[]>('/api/inspections', signal);
     const runs = await Promise.all(
       inspections.map((inspection) =>

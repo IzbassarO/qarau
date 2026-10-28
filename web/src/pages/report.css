@@ -20,6 +20,8 @@
   gap: var(--space-2) var(--space-4);
 }
 .report-hash {
+  max-width: var(--layout-side-panel);
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 .report-preview {

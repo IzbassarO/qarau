@@ -71,7 +71,7 @@ export function ReportPage() {
             <span className="qv-caption qv-muted report-hash">
               {t('report.hash')}{' '}
               <code className="qv-mono" title={state.hash}>
-                {state.hash.slice(0, 12)}…{state.hash.slice(-8)}
+                {state.hash}
               </code>
             </span>
           </div>

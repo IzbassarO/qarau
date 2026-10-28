@@ -146,3 +146,44 @@ Verified: `pnpm lint` (ESLint and Prettier), `pnpm typecheck`, `pnpm test` (46 f
 867 tests passed), `pnpm build`, Playwright discovery (`--list`) and `git diff --check`.
 No new dependencies. No server was started and no screenshots were taken. The full
 Playwright run and light/dark ru/kk/en screenshots remain with Kerege and the tester.
+
+## Continuation after round 4
+
+Read the four task commits and the latest packet at `.state/packets/UI-report.md`.
+The last gate stopped on the tester's oversized-image API request, not a reported
+application regression. Preserve the existing page, summary, states and v8 styles.
+
+Close the remaining current acceptance gaps: resolve `/inspections/demo/report`
+through the seeded `notre-dame-p3e` run association, expose that route from
+`/viewer/demo`, and add temporary `?theme=light|dark&lang=ru|kk|en` presentation
+overrides without changing saved preferences. Show the complete header hash beside
+download, wrapping it within the existing toolbar. Move the original valid PDF
+fixture into `src/test/fixtures` and strengthen e2e to compare downloaded bytes,
+keeping its literal size check. Exercise the actual demo route and URL overrides.
+
+Installed package metadata rechecked: React, react-router, TanStack Query, Vitest
+and Testing Library use MIT; Playwright uses Apache-2.0. All permit commercial use.
+No dependencies or models added. Run lint, typecheck, full Vitest, build and e2e
+discovery. Kerege runs browser e2e and screenshots; do not start a server here.
+
+### Continuation result
+
+Implemented the demo alias and viewer link, the full visible hash with wrapping,
+and read-only URL presentation overrides shared by all routes. The demo viewer's
+Report link has a 44 px phone touch target. Existing numeric and notre-dame routes
+and the summary/state behavior are preserved. Example tester URL:
+`/inspections/demo/report?theme=dark&lang=kk` (using the normal authenticated session).
+
+The valid original 606-byte PDF now lives at `web/src/test/fixtures/report.pdf`.
+E2e retains its literal size/hash checks and additionally compares every downloaded
+byte with that fixture. It covers numeric report routes across all six theme/language
+variants, URL overrides against different stored/system preferences, and navigation
+from the demo viewer to the seeded report. Vitest adds demo alias regressions and
+temporary override, navigation, fallback and invalid-value cases.
+
+Verified after the final code change: `pnpm lint && pnpm typecheck`,
+`pnpm test && pnpm build` (47 files, 878 tests passed, including keys/noLiterals),
+Playwright report-spec discovery (14 desktop/phone cases), `git diff --check` and
+the fixture's SHA-256 against the fixed e2e header literal. No servers started,
+no screenshots taken, no dependencies added. Browser e2e execution and screenshots
+remain with Kerege/tester as instructed.

@@ -402,8 +402,11 @@ export function ViewerScreen({
             <span className="qv-mono qv-muted viewer-run-id">{bundle.runId}</span>
             <span className="qv-caption">{t('nav.viewer')}</span>
           </div>
-          {inspectionId !== undefined && (
-            <Link className="qv-btn qv-btn--secondary" to={`/inspections/${inspectionId}/report`}>
+          {(inspectionId !== undefined || bundle.runId === 'demo') && (
+            <Link
+              className="qv-btn qv-btn--secondary viewer-report-link"
+              to={`/inspections/${inspectionId ?? 'demo'}/report`}
+            >
               {t('report.link')}
             </Link>
           )}
