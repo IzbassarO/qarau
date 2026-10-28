@@ -97,3 +97,52 @@ Implemented and verified this correction: lint, typecheck, all 46 Vitest files
 assertions and fixture expectations were preserved; 22 regression cases were added.
 The Kazakh formatter is also tested with Intl locale data unavailable. No server
 was started and no screenshots were taken; visual confirmation remains with the tester.
+
+## Part 2 plan
+
+Build on the accepted summary, language selector and API states without replacing them.
+Use the returned PDF Blob for one object URL shared by the iframe and download; revoke
+it when the PDF changes, the language changes or the page unmounts. Show a shortened
+header hash beside the download with its complete value in a title. Keep the summary
+above the preview and the download in the sticky top bar, including at 390 × 844.
+
+Add localized Report links for done inspections and for viewers with a known inspection
+association. Preserve API-backed numeric inspection IDs and the existing demo report alias.
+Add `/inspections` as a list route. Extend the current Vitest coverage for Blob URL
+lifecycle, download filename/hash and both entry links. Add a hand-authored PDF under
+2 KB and a Playwright spec mocking authentication, JSON and PDF routes; exercise download
+filename and literal fixture byte size at both configured viewports in all three languages
+and light/dark. Kerege runs the e2e suite; no local server or screenshots will be started.
+
+Licence check (installed package metadata): React 19.3.0, react-router 8.4.0 and
+TanStack Query 5.104.2 are MIT; Playwright 1.64.0 is Apache-2.0. All permit commercial
+use. No dependencies, models, plugins or downloaded tools are added. The fixture PDF
+contains only original test text.
+
+Run lint (ESLint + Prettier), typecheck, full Vitest and build. Validate the Playwright
+spec through TypeScript and test discovery without starting its server. Screenshot and
+e2e execution results remain with Kerege/tester, as required by this task.
+
+## Part 2 result
+
+Added the inline browser PDF iframe and download from the same Blob URL, with the
+route/language filename, shortened SHA-256 beside the button, and full header value
+in its title. URL cleanup runs on PDF, route or language change and on unmount; a
+pending or failed replacement cannot retain the previous preview/download. The
+sticky v8 top bar keeps the download reachable on phones, with touch-size controls
+and the summary stacked above the preview. Replaced the ready placeholder sentence
+with localized ready copy now that the preview exists.
+
+Added done-only list Report links, `/inspections` as a list route, and a viewer link
+using API inspection/run associations (including the named demo and inspections
+without findings). Expanded the existing Vitest tests for links, states, the hash,
+filename, shared Blob and URL cleanup. Added `web/e2e/report.spec.ts` and an original
+606-byte one-page PDF. Its mocked-API scenarios cover sign-in, summary, hash, language,
+actual fixture download and literal byte size, phone control reachability, the demo
+alias and unknown-id API errors. The existing Playwright config discovers 14 cases
+across its desktop/phone projects; its fresh-server configuration is unchanged.
+
+Verified: `pnpm lint` (ESLint and Prettier), `pnpm typecheck`, `pnpm test` (46 files,
+867 tests passed), `pnpm build`, Playwright discovery (`--list`) and `git diff --check`.
+No new dependencies. No server was started and no screenshots were taken. The full
+Playwright run and light/dark ru/kk/en screenshots remain with Kerege and the tester.

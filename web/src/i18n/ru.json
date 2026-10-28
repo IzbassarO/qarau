@@ -345,7 +345,7 @@
   "report.language.en": "English",
   "report.pdf": "Предпросмотр PDF",
   "report.generating": "Отчёт формируется…",
-  "report.ready": "Отчёт готов. Здесь появится предпросмотр PDF.",
+  "report.ready": "Отчёт готов.",
   "report.failed": "Не удалось сформировать отчёт",
   "report.failureFallback": "Не удалось загрузить отчёт. Проверьте соединение и повторите попытку.",
   "report.datePattern": "{day} {month} {year} г. в {time}",
@@ -360,5 +360,8 @@
   "report.month.september": "сентября",
   "report.month.october": "октября",
   "report.month.november": "ноября",
-  "report.month.december": "декабря"
+  "report.month.december": "декабря",
+  "report.download": "Скачать PDF",
+  "report.hash": "SHA-256",
+  "report.link": "Отчёт"
 }

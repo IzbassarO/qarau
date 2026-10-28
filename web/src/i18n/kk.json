@@ -345,7 +345,7 @@
   "report.language.en": "English",
   "report.pdf": "PDF алдын ала қарау",
   "report.generating": "Есеп жасалуда…",
-  "report.ready": "Есеп дайын. PDF алдын ала қарау осында пайда болады.",
+  "report.ready": "Есеп дайын.",
   "report.failed": "Есепті жасау мүмкін болмады",
   "report.failureFallback": "Есепті жүктеу мүмкін болмады. Байланысты тексеріп, қайталап көріңіз.",
   "report.datePattern": "{year} жылғы {day} {month}, {time}",
@@ -360,5 +360,8 @@
   "report.month.september": "қыркүйек",
   "report.month.october": "қазан",
   "report.month.november": "қараша",
-  "report.month.december": "желтоқсан"
+  "report.month.december": "желтоқсан",
+  "report.download": "PDF жүктеп алу",
+  "report.hash": "SHA-256",
+  "report.link": "Есеп"
 }

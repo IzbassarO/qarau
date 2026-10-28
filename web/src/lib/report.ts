@@ -53,6 +53,33 @@ async function json<T>(path: string, signal?: AbortSignal): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** Resolve a viewer's run to an inspection, including inspections without findings. */
+export async function reportInspectionForRun(runId: string, signal?: AbortSignal) {
+  const inspections = await json<{ id: number; run_id?: string | null }[]>(
+    '/api/inspections',
+    signal,
+  );
+  const known = inspections.find((inspection) => inspection.run_id === runId);
+  if (known) return known.id;
+  const runs = (
+    await Promise.all(
+      inspections.map(({ id }) =>
+        json<{ id: string; run_dir: string; inspection_id: number }[]>(
+          `/api/inspections/${id}/runs`,
+          signal,
+        ),
+      ),
+    )
+  ).flat();
+  const exact = runs.find((run) => run.id === runId || run.run_dir === runId);
+  if (exact) return exact.inspection_id;
+  // The same named demo compatibility route as inspectionForReport below.
+  return runId === 'notre-dame'
+    ? (runs.find((run) => run.id === 'notre-dame-p3e' || run.run_dir === 'notre-dame-p3e')
+        ?.inspection_id ?? null)
+    : null;
+}
+
 async function inspectionForReport(id: string, signal?: AbortSignal): Promise<Inspection> {
   try {
     return await json<Inspection>(`/api/inspections/${encodeURIComponent(id)}`, signal);

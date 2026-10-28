@@ -41,6 +41,13 @@ function renderReport(id = '37', signedIn = true) {
 beforeEach(() => {
   sessionStorage.clear();
   setLang('en');
+  vi.stubGlobal(
+    'URL',
+    class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:report-en');
+      static revokeObjectURL = vi.fn();
+    },
+  );
 });
 afterEach(() => {
   clients.splice(0).forEach((client) => client.clear());
@@ -82,6 +89,71 @@ it('shows coverage not computed for the fixture’s null coverage', async () => 
   expect(await screen.findByText('Coverage not computed')).toBeTruthy();
 });
 
+it('previews and downloads the same PDF Blob with the header hash and route filename', async () => {
+  const fetch = mockReportApi();
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const view = renderReport();
+  const download = await screen.findByRole('button', { name: 'Download PDF' });
+  await waitFor(() => expect((download as HTMLButtonElement).disabled).toBe(false));
+  const frame = screen.getByTitle('PDF preview');
+  expect(frame.tagName).toBe('IFRAME');
+  expect(frame.getAttribute('src')).toBe('blob:report-en');
+  const hash = screen.getByText('bf98d56a3f72…7263bc26');
+  expect(hash.getAttribute('title')).toBe(fixture.hash);
+  expect(hash.className).toBe('qv-mono');
+  const createdBlob = vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob;
+  expect(await createdBlob.text()).toBe(fixture.pdf);
+  fireEvent.click(download);
+  expect(click).toHaveBeenCalledTimes(1);
+  const link = click.mock.contexts[0] as HTMLAnchorElement;
+  expect(link.getAttribute('href')).toBe('blob:report-en');
+  expect(link.download).toBe('report-37-en.pdf');
+  expect(link.isConnected).toBe(false);
+  expect(fetch.mock.calls.filter(([path]) => String(path).includes('report.pdf'))).toHaveLength(1);
+  view.unmount();
+  expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:report-en');
+});
+
+it('revokes the old preview on language change, hides it while generating and downloads the new PDF', async () => {
+  const fetch = mockReportApi();
+  vi.mocked(URL.createObjectURL)
+    .mockReturnValueOnce('blob:report-en')
+    .mockReturnValueOnce('blob:report-kk');
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const view = renderReport();
+  await waitFor(() =>
+    expect(screen.getByTitle('PDF preview').getAttribute('src')).toBe('blob:report-en'),
+  );
+  let finish!: (response: Response) => void;
+  fetch.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Қазақша' }));
+  await waitFor(() =>
+    expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=kk', expect.anything()),
+  );
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:report-en');
+  expect(screen.queryByTitle('PDF preview')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Download PDF' })).toBeNull();
+  expect(screen.getByRole('status').textContent).toBe('Generating report…');
+  await act(async () => finish(fixturePdf()));
+  await waitFor(() =>
+    expect(screen.getByTitle('PDF preview').getAttribute('src')).toBe('blob:report-kk'),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  const link = click.mock.contexts[0] as HTMLAnchorElement;
+  expect(link.getAttribute('href')).toBe('blob:report-kk');
+  expect(link.download).toBe('report-37-kk.pdf');
+  view.unmount();
+  expect(vi.mocked(URL.revokeObjectURL).mock.calls).toEqual([
+    ['blob:report-en'],
+    ['blob:report-kk'],
+  ]);
+});
+
 it('renders an available coverage line verbatim without calculating coverage', async () => {
   mockReportApi();
   vi.spyOn(reportApi, 'fetchReportSummary').mockResolvedValue({
@@ -104,6 +176,8 @@ it('shows generating while the synchronous PDF request is pending, then ready', 
   const fetch = mockReportApi(() => pending);
   renderReport();
   expect(screen.getByRole('status').textContent).toBe('Generating report…');
+  expect(screen.queryByTitle('PDF preview')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Download PDF' })).toBeNull();
   await waitFor(() =>
     expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=en', expect.anything()),
   );
@@ -112,21 +186,21 @@ it('shows generating while the synchronous PDF request is pending, then ready', 
     'true',
   );
   await act(async () => finish(fixturePdf()));
-  expect(await screen.findByText('Report is ready. PDF preview will appear here.')).toBeTruthy();
+  expect(await screen.findByText('Report is ready.')).toBeTruthy();
   expect(screen.getByRole('region', { name: 'PDF preview' }).getAttribute('aria-busy')).toBe(
     'false',
   );
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
-it('shows generating for an accepted response without displaying a ready placeholder', async () => {
+it('shows generating for an accepted response without displaying a ready state', async () => {
   const fetch = mockReportApi(() => new Response(null, { status: 202 }));
   renderReport();
   await waitFor(() =>
     expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=en', expect.anything()),
   );
   expect(screen.getByRole('status').textContent).toBe('Generating report…');
-  expect(screen.queryByText('Report is ready. PDF preview will appear here.')).toBeNull();
+  expect(screen.queryByText('Report is ready.')).toBeNull();
 });
 
 it('shows the failed PDF state with the API’s words while keeping the summary', async () => {
@@ -136,12 +210,14 @@ it('shows the failed PDF state with the API’s words while keeping the summary'
   expect(within(alert).getByRole('heading').textContent).toBe('Could not generate report');
   expect(within(alert).getByText(fixture.failure.detail)).toBeTruthy();
   expect(screen.getByText(fixture.findings[0].comment)).toBeTruthy();
+  expect(screen.queryByTitle('PDF preview')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Download PDF' })).toBeNull();
 });
 
 it('requests report.pdf?lang=kk when Қазақша is chosen and keeps the UI language', async () => {
   const fetch = mockReportApi();
   renderReport();
-  await screen.findByText('Report is ready. PDF preview will appear here.');
+  await screen.findByText('Report is ready.');
   const languages = screen.getByRole('group', { name: 'PDF language' });
   expect(
     within(languages).getByRole('button', { name: 'English' }).getAttribute('aria-pressed'),
@@ -176,7 +252,7 @@ it('clears the previous PDF state during a language refetch and ignores its late
   expect(await screen.findByText(fixture.failure.detail)).toBeTruthy();
   await act(async () => finish(fixturePdf()));
   expect(screen.getByRole('alert').textContent).toContain(fixture.failure.detail);
-  expect(screen.queryByText('Report is ready. PDF preview will appear here.')).toBeNull();
+  expect(screen.queryByText('Report is ready.')).toBeNull();
 });
 
 it.each<[Lang, string, string]>([
@@ -203,7 +279,7 @@ it.each<[Lang, string, string]>([
 it('opens /inspections/notre-dame/report with the API summary and language choice, without a banner', async () => {
   const fetch = mockReportApi();
   renderReport('notre-dame');
-  await screen.findByText('Report is ready. PDF preview will appear here.');
+  await screen.findByText('Report is ready.');
   expect(screen.getAllByText(fixture.sites[0].name)).toHaveLength(2);
   expect(screen.getByRole('group', { name: 'PDF language' })).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
@@ -244,7 +320,7 @@ const reportLabels = [
     rejected: 'Отклонено',
     lowEvidence: 'Нужно больше свидетельств',
     empty: 'Находок нет',
-    ready: 'Отчёт готов. Здесь появится предпросмотр PDF.',
+    ready: 'Отчёт готов.',
   },
   {
     lang: 'kk',
@@ -261,7 +337,7 @@ const reportLabels = [
     rejected: 'Қабылданбаған',
     lowEvidence: 'Қосымша дәлел қажет',
     empty: 'Ақаулар жоқ',
-    ready: 'Есеп дайын. PDF алдын ала қарау осында пайда болады.',
+    ready: 'Есеп дайын.',
   },
 ] as const;
 
@@ -321,7 +397,7 @@ it('renders an explicit Kazakh month on the page instead of a raw ICU month code
   setLang('kk');
   mockReportApi();
   const view = renderReport();
-  await screen.findByText('Есеп дайын. PDF алдын ала қарау осында пайда болады.');
+  await screen.findByText('Есеп дайын.');
   const date = view.container.querySelector('time');
   expect(date?.getAttribute('datetime')).toBe(fixture.inspection.created_at);
   expect(date?.textContent).toContain('2026 жылғы');
@@ -329,10 +405,10 @@ it('renders an explicit Kazakh month on the page instead of a raw ICU month code
   expect(date?.textContent).not.toMatch(/\bM\d{1,2}\b/);
 });
 
-it('places the working PDF language selector and ready placeholder in the body before the summary', async () => {
+it('places the working PDF language selector and ready state in the body before the summary', async () => {
   const fetch = mockReportApi();
   renderReport();
-  const ready = await screen.findByText('Report is ready. PDF preview will appear here.');
+  const ready = await screen.findByText('Report is ready.');
   const main = screen.getByRole('main');
   const languages = within(main).getByRole('group', { name: 'PDF language' });
   const heading = within(main).getByRole('heading', { name: 'Summary' });

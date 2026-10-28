@@ -31,6 +31,7 @@ createRoot(document.getElementById('root')!).render(
           <Routes>
             <Route element={<RequireAuth />}>
               <Route path="/" element={<AppShell />} />
+              <Route path="/inspections" element={<AppShell />} />
               <Route path="/inspections/demo" element={<AppShell demo />} />
               <Route path="/inspections/:id" element={<AppShell />} />
               <Route

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useI18n, type Lang } from '../i18n';
@@ -34,14 +34,48 @@ export function ReportPage() {
       ? { state: 'failed', message: '' }
       : (pdf.data ?? { state: 'generating' });
   const data = summary.data;
+  const blob = state.state === 'ready' ? state.blob : null;
+  const [pdfUrl, setPdfUrl] = useState<{ blob: Blob; url: string } | null>(null);
+  useEffect(() => {
+    if (!blob) {
+      setPdfUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    setPdfUrl({ blob, url });
+    return () => URL.revokeObjectURL(url);
+  }, [blob, id, pdfLanguage]);
+  const readyUrl = pdfUrl?.blob === blob ? pdfUrl?.url : undefined;
+  const download = () => {
+    if (!readyUrl) return;
+    const link = document.createElement('a');
+    link.href = readyUrl;
+    link.download = `report-${id}-${pdfLanguage}.pdf`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+  };
 
   return (
     <div className="qv-screen report-screen">
       <header className="qv-topbar report-topbar">
-        <Link className="qv-btn qv-btn--quiet" to="/">
+        <Link className="qv-btn qv-btn--quiet" to="/inspections">
           {t('shell.emptyTitle')}
         </Link>
         <span className="qv-topbar__title">{t('report.title')}</span>
+        {state.state === 'ready' && (
+          <div className="report-download">
+            <button type="button" className="qv-btn" disabled={!readyUrl} onClick={download}>
+              {t('report.download')}
+            </button>
+            <span className="qv-caption qv-muted report-hash">
+              {t('report.hash')}{' '}
+              <code className="qv-mono" title={state.hash}>
+                {state.hash.slice(0, 12)}…{state.hash.slice(-8)}
+              </code>
+            </span>
+          </div>
+        )}
       </header>
       <main className="report-main" id="report-main">
         <article
@@ -178,6 +212,9 @@ export function ReportPage() {
             </>
           )}
         </article>
+        {state.state === 'ready' && readyUrl && (
+          <iframe className="report-preview" title={t('report.pdf')} src={readyUrl} />
+        )}
       </main>
     </div>
   );

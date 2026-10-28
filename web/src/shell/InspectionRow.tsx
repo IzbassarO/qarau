@@ -1,3 +1,4 @@
+import { Link } from 'react-router';
 import { useI18n } from '../i18n';
 import type { InspectionSummary } from '../lib/inspections';
 import { StatusBadge } from './StatusBadge';
@@ -47,6 +48,14 @@ export function InspectionRow({
           : new Intl.NumberFormat(locale).format(inspection.findingsCount)}
       </span>
       <span className="inspections-list-action" role="cell">
+        {inspection.status === 'done' && (
+          <Link
+            className="qv-btn qv-btn--quiet"
+            to={`/inspections/${encodeURIComponent(inspection.id)}/report`}
+          >
+            {t('report.link')}
+          </Link>
+        )}
         <button
           type="button"
           className="qv-btn qv-btn--secondary"

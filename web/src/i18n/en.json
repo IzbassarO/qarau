@@ -345,7 +345,7 @@
   "report.language.en": "English",
   "report.pdf": "PDF preview",
   "report.generating": "Generating report…",
-  "report.ready": "Report is ready. PDF preview will appear here.",
+  "report.ready": "Report is ready.",
   "report.failed": "Could not generate report",
   "report.failureFallback": "The report could not be loaded. Check your connection and try again.",
   "report.datePattern": "{day} {month} {year} at {time}",
@@ -360,5 +360,8 @@
   "report.month.september": "September",
   "report.month.october": "October",
   "report.month.november": "November",
-  "report.month.december": "December"
+  "report.month.december": "December",
+  "report.download": "Download PDF",
+  "report.hash": "SHA-256",
+  "report.link": "Report"
 }

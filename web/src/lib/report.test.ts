@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { fetchReportPdf, fetchReportSummary } from './report';
+import { fetchReportPdf, fetchReportSummary, reportInspectionForRun } from './report';
 import fixture from '../test/fixtures/report-summary.json';
 import { mockReportApi } from '../test/reportApi';
 
@@ -100,6 +100,34 @@ it('resolves the notre-dame route through the seeded run’s API association', a
   expect(summary.inspectionId).toBe(37);
   expect(summary.object).toBe(fixture.sites[0].name);
   expect(fetch).toHaveBeenCalledWith('/api/inspections/37/runs', expect.anything());
+});
+
+it.each(['notre-dame', 'notre-dame-p3e'])(
+  'resolves viewer %s to the fixture inspection for its report link',
+  async (runId) => {
+    mockReportApi();
+    await expect(reportInspectionForRun(runId)).resolves.toBe(37);
+  },
+);
+
+it('uses an explicit viewer run association without reading other inspection histories', async () => {
+  const fetch = vi.fn().mockResolvedValue(
+    Response.json([
+      { id: 37, run_id: 'notre-dame-p3e' },
+      { id: 38, run_id: 'another-run' },
+    ]),
+  );
+  vi.stubGlobal('fetch', fetch);
+  await expect(reportInspectionForRun('notre-dame-p3e')).resolves.toBe(37);
+  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/inspections', {
+    signal: undefined,
+    headers: {},
+  });
+});
+
+it('returns no inspection for an unassociated viewer instead of inventing a report target', async () => {
+  mockReportApi();
+  await expect(reportInspectionForRun('unknown')).resolves.toBeNull();
 });
 
 it('preserves the original API message when no inspection/run association matches', async () => {
