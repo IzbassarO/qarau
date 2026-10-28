@@ -1375,9 +1375,11 @@ tasks:
     Owner 2026-10-27: part 2 of the UI-evidence split; starts from UI-evidence''s merged panel.
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - UI-evidence
+  owner: dev_app
+  run: cont-20261027-232407-dev_app-1
 - id: UI-evidence-c
   area: app
   title: 'Evidence panel: phone layout, ru/kk/en, full e2e'
