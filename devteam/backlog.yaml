@@ -1582,12 +1582,17 @@ tasks:
     at 390x844; same functions, layout may differ).
 
     '
-  status: in_progress
+  status: blocked
   depends_on:
   - RPT1
   - DS1
   owner: dev_app
   run: cont-20261027-232407-dev_app-2
+  branch: devteam/UI-report
+  blocked_reason: 'CRASHED in test at _base_client.py:1330: Error code: 400 - {''type'': ''error'', ''error'':
+    {''type'': ''invalid_request_error'', ''message'': ''messages.0.content.50.image.source.base64.data:
+    At least one of the image dimensions exceed max allowed size for many-image requests: 3000 pixels''},
+    ''request_id'': ''req_011CgU2Yh1Ec8ix37phDMFqw''}. Fix it, then `devteam resume UI-report`'
 - id: D2
   area: core
   title: 'Deploy staging: one VM, compose, HTTPS, backups'
