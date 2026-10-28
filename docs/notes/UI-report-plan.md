@@ -78,3 +78,22 @@ the summary and language choice without an error banner. No server was started.
 The returned review also reports missing tester screenshots for
 `/inspections/notre-dame/report`. Visual acceptance remains pending tester capture
 in light/dark and ru/kk/en; the task explicitly reserves screenshots for the tester.
+
+## Localization and visible state correction
+
+The tester found English placeholders in the shared evidence labels used by this
+page and an ICU fallback month code in the Kazakh date. Translate the report-used
+evidence labels in ru/kk, and format Kazakh dates with explicit translated month
+names and local date/time fields. Keep English and Russian document dates localized
+through their supported regional locales. No new dependency is needed.
+
+Move the existing language segment and PDF state above the summary, inside the
+document, so both are available before lengthy findings. Keep v8 components and
+tokens. Preserve every existing test assertion, and add literal regression cases
+for translated labels, date text, and controls/state preceding the summary.
+
+Implemented and verified this correction: lint, typecheck, all 46 Vitest files
+(857 passing tests), build and diff whitespace validation passed. Existing test
+assertions and fixture expectations were preserved; 22 regression cases were added.
+The Kazakh formatter is also tested with Intl locale data unavailable. No server
+was started and no screenshots were taken; visual confirmation remains with the tester.

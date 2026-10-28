@@ -73,9 +73,16 @@
   margin-top: var(--space-2);
 }
 .report-state {
-  margin-top: var(--space-8);
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--line);
+  margin-block: var(--space-4) var(--space-6);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+.report-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-3);
 }
 @media (max-width: 767px) {
   .report-main {
@@ -88,15 +95,11 @@
     padding-inline: var(--space-4);
     gap: var(--space-2);
   }
-  .report-topbar .qv-topbar__right {
-    flex-basis: 100%;
-    margin-left: 0;
-  }
-  .report-topbar .qv-segment {
+  .report-controls .qv-segment {
     display: flex;
     width: 100%;
   }
-  .report-topbar .qv-segment button {
+  .report-controls .qv-segment button {
     flex: 1;
     height: auto;
     min-height: calc(var(--space-8) + var(--space-3));

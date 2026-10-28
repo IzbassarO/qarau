@@ -227,3 +227,119 @@ it('requires a session before fetching any report data', () => {
   expect(fetch).not.toHaveBeenCalled();
   expect(screen.queryByRole('article')).toBeNull();
 });
+
+const reportLabels = [
+  {
+    lang: 'ru',
+    critical: 'Критично',
+    watch: 'Наблюдать',
+    finding: 'Находка',
+    status: 'Статус',
+    corrosion: 'Коррозия',
+    crack: 'Трещина',
+    coating: 'Покрытие',
+    other: 'Другое',
+    proposed: 'Предложено',
+    confirmed: 'Подтверждено',
+    rejected: 'Отклонено',
+    lowEvidence: 'Нужно больше свидетельств',
+    empty: 'Находок нет',
+    ready: 'Отчёт готов. Здесь появится предпросмотр PDF.',
+  },
+  {
+    lang: 'kk',
+    critical: 'Сындарлы',
+    watch: 'Бақылау',
+    finding: 'Ақау',
+    status: 'Күйі',
+    corrosion: 'Тоттану',
+    crack: 'Жарық',
+    coating: 'Жабын',
+    other: 'Басқа',
+    proposed: 'Ұсынылған',
+    confirmed: 'Расталған',
+    rejected: 'Қабылданбаған',
+    lowEvidence: 'Қосымша дәлел қажет',
+    empty: 'Ақаулар жоқ',
+    ready: 'Есеп дайын. PDF алдын ала қарау осында пайда болады.',
+  },
+] as const;
+
+it.each(reportLabels)(
+  'translates finding groups, columns, classes and statuses in $lang',
+  async (labels) => {
+    setLang(labels.lang);
+    mockReportApi();
+    renderReport();
+    await screen.findByText(labels.ready);
+    expect(screen.getAllByRole('columnheader', { name: labels.finding })).toHaveLength(2);
+    expect(screen.getAllByRole('columnheader', { name: labels.status })).toHaveLength(2);
+    const critical = screen.getByRole('region', { name: labels.critical });
+    expect(within(critical).getByText(labels.corrosion)).toBeTruthy();
+    expect(within(critical).getByText(labels.confirmed)).toBeTruthy();
+    const watch = screen.getByRole('region', { name: labels.watch });
+    for (const text of [labels.crack, labels.coating, labels.proposed, labels.rejected])
+      expect(within(watch).getByText(text)).toBeTruthy();
+    for (const text of [
+      'Critical',
+      'Watch',
+      'Finding',
+      'Status',
+      'Proposed',
+      'Confirmed',
+      'Rejected',
+    ])
+      expect(screen.queryByText(text, { exact: true })).toBeNull();
+  },
+);
+
+it.each(reportLabels)(
+  'translates Other, needs-evidence status and empty groups in $lang',
+  async (labels) => {
+    setLang(labels.lang);
+    const fetch = mockReportApi();
+    const original = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (input) => {
+      if (String(input) === '/api/inspections/37/findings')
+        return Response.json([{ ...fixture.findings[2], class: 'other', status: 'low_evidence' }]);
+      return original(input);
+    });
+    renderReport();
+    await screen.findByText(labels.ready);
+    const watch = screen.getByRole('region', { name: labels.watch });
+    expect(within(watch).getByText(labels.other)).toBeTruthy();
+    expect(within(watch).getByText(labels.lowEvidence)).toBeTruthy();
+    expect(
+      within(screen.getByRole('region', { name: labels.critical })).getByText(labels.empty),
+    ).toBeTruthy();
+    expect(screen.queryByText('Other', { exact: true })).toBeNull();
+    expect(screen.queryByText('No findings', { exact: true })).toBeNull();
+  },
+);
+
+it('renders an explicit Kazakh month on the page instead of a raw ICU month code', async () => {
+  setLang('kk');
+  mockReportApi();
+  const view = renderReport();
+  await screen.findByText('Есеп дайын. PDF алдын ала қарау осында пайда болады.');
+  const date = view.container.querySelector('time');
+  expect(date?.getAttribute('datetime')).toBe(fixture.inspection.created_at);
+  expect(date?.textContent).toContain('2026 жылғы');
+  expect(date?.textContent).toContain('қазан');
+  expect(date?.textContent).not.toMatch(/\bM\d{1,2}\b/);
+});
+
+it('places the working PDF language selector and ready placeholder in the body before the summary', async () => {
+  const fetch = mockReportApi();
+  renderReport();
+  const ready = await screen.findByText('Report is ready. PDF preview will appear here.');
+  const main = screen.getByRole('main');
+  const languages = within(main).getByRole('group', { name: 'PDF language' });
+  const heading = within(main).getByRole('heading', { name: 'Summary' });
+  expect(languages.compareDocumentPosition(heading)).toBe(4);
+  expect(ready.compareDocumentPosition(heading)).toBe(4);
+  fireEvent.click(within(languages).getByRole('button', { name: 'Қазақша' }));
+  await waitFor(() =>
+    expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=kk', expect.anything()),
+  );
+});

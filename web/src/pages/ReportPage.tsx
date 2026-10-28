@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useI18n, type Lang } from '../i18n';
 import { fetchReportPdf, fetchReportSummary, type ReportPdf } from '../lib/report';
+import { formatReportDate } from '../lib/reportDate';
 import { Wordmark } from '../shell/ShellIdentity';
 import './report.css';
 
@@ -41,20 +42,6 @@ export function ReportPage() {
           {t('shell.emptyTitle')}
         </Link>
         <span className="qv-topbar__title">{t('report.title')}</span>
-        <div className="qv-topbar__right">
-          <div className="qv-segment" role="group" aria-label={t('report.language')}>
-            {(['ru', 'kk', 'en'] as const).map((locale) => (
-              <button
-                type="button"
-                key={locale}
-                aria-pressed={locale === pdfLanguage}
-                onClick={() => setChosenLanguage(locale)}
-              >
-                {t(`report.language.${locale}`)}
-              </button>
-            ))}
-          </div>
-        </div>
       </header>
       <main className="report-main" id="report-main">
         <article
@@ -66,6 +53,35 @@ export function ReportPage() {
             <Wordmark />
           </div>
           <h1 className="qv-doc__title">{t('report.title')}</h1>
+          <section
+            className="report-state"
+            aria-label={t('report.pdf')}
+            aria-busy={state.state === 'generating'}
+          >
+            <div className="report-controls">
+              <span className="qv-caption">{t('report.language')}</span>
+              <div className="qv-segment" role="group" aria-label={t('report.language')}>
+                {(['ru', 'kk', 'en'] as const).map((locale) => (
+                  <button
+                    type="button"
+                    key={locale}
+                    aria-pressed={locale === pdfLanguage}
+                    onClick={() => setChosenLanguage(locale)}
+                  >
+                    {t(`report.language.${locale}`)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {state.state === 'generating' && <p role="status">{t('report.generating')}</p>}
+            {state.state === 'ready' && <p role="status">{t('report.ready')}</p>}
+            {state.state === 'failed' && (
+              <div role="alert">
+                <h2>{t('report.failed')}</h2>
+                <p>{state.message || t('report.failureFallback')}</p>
+              </div>
+            )}
+          </section>
           {data && (
             <>
               <p className="qv-doc__subtitle">{data.object ?? t('report.objectUnavailable')}</p>
@@ -79,10 +95,7 @@ export function ReportPage() {
                     <td>{t('report.date')}</td>
                     <td>
                       <time dateTime={data.date}>
-                        {new Intl.DateTimeFormat(lang, {
-                          dateStyle: 'long',
-                          timeStyle: 'short',
-                        }).format(new Date(data.date))}
+                        {formatReportDate(new Date(data.date), lang, t)}
                       </time>
                     </td>
                   </tr>
@@ -164,20 +177,6 @@ export function ReportPage() {
               <p>{data.coverage ?? t('report.coverageNotComputed')}</p>
             </>
           )}
-          <section
-            className="report-state"
-            aria-label={t('report.pdf')}
-            aria-busy={state.state === 'generating'}
-          >
-            {state.state === 'generating' && <p role="status">{t('report.generating')}</p>}
-            {state.state === 'ready' && <p role="status">{t('report.ready')}</p>}
-            {state.state === 'failed' && (
-              <div role="alert">
-                <h2>{t('report.failed')}</h2>
-                <p>{state.message || t('report.failureFallback')}</p>
-              </div>
-            )}
-          </section>
         </article>
       </main>
     </div>
