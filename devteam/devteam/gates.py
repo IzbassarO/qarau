@@ -240,6 +240,7 @@ def bench_table(res: dict) -> str:
 SHOOT = Path(__file__).with_name("shoot.mjs")  # {shoot}: signs in, then screenshots one page
 TEST_LOGIN = ("QARAU_TEST_USER", "QARAU_TEST_PASSWORD")  # devteam/.env: the tester's test user
 VIEWPORTS = ["1440x900", "390x844"]  # screenshots.viewports when not set: desktop and phone
+NOT_READY = re.compile(r"NOT READY after (\d+) s: (.*)")  # shoot.mjs: still busy, shot anyway
 
 
 def variants(sc: dict, before: bool = False) -> list[tuple[str, str, str]]:
@@ -344,6 +345,7 @@ def screenshots(
         if why := up(start(sc["serve"]), sc["url"], "serve", 60):
             return [], [why]
         vs = variants(sc, before)
+        ready_s = team.cfg["gates"].get("screenshot_ready_timeout_s", 30)
         for route, (size, theme, lang) in itertools.product(routes, vs):
             name = prefix + (re.sub(r"[^A-Za-z0-9]+", "-", route).strip("-") or "root")
             if len(vs) > 1:
@@ -359,9 +361,20 @@ def screenshots(
                     lang=shlex.quote(lang),
                 ),
                 cwd=s["worktree"],
-                timeout=120,
-                env={**os.environ, **login},  # never on the command line, never printed
+                timeout=120 + ready_s,
+                # never on the command line, never printed
+                env={**os.environ, **login, "QARAU_SHOOT_READY_S": str(ready_s)},
             )
+            if r["ok"] and png.exists() and (busy := NOT_READY.search(r["output"])):
+                # the tester sees the file name as the image's label: a slow page is a fix for
+                # the developer, never a silent bad picture (UI-report, 2026-10-28)
+                png = png.rename(png.with_name(f"{name}-NOT-READY-after-{busy[1]}s.png"))
+                problems.append(
+                    f"{png.name}: page not ready after {busy[1]} s ({busy[2]}), shot anyway. "
+                    'Developer issue: a page with async content marks itself aria-busy="true" '
+                    "until its data or file is ready and clears it then; this page was still "
+                    "busy, so make it ready sooner or clear aria-busy when it is."
+                )
             if r["ok"] and png.exists():
                 paths.append(str(png))
             else:

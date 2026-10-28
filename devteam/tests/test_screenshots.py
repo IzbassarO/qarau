@@ -3,8 +3,10 @@ routes on the runs dir, a fresh packet folder each round, the server stopped aft
 
 import copy
 import json
+import os
 import socket
 import sqlite3
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -300,3 +302,63 @@ def test_screenshots_stop_the_server_and_report_failures(repo, tmp_path):
     probe = socket.socket()
     assert probe.connect_ex(("127.0.0.1", n)) != 0  # port free for the next round
     probe.close()
+
+
+# --- 7. a page still loading is shot labelled NOT-READY, never silently (UI-report, 2026-10-28)
+def test_a_not_ready_page_is_labelled_in_its_file_name_and_named_for_the_developer(repo, tmp_path):
+    seen = tmp_path / "ready.txt"
+    shoot = f"echo $QARAU_SHOOT_READY_S > {seen}; touch {{png}}; "
+    shoot += "case {url} in *report*) echo 'NOT READY after 7 s: 1 element(s) busy';; esac"
+    team, _ = make(repo, developers=web_shots(tmp_path, shoot))
+    team.cfg["gates"]["screenshot_ready_timeout_s"] = 7
+    s = {"task": {"id": "T-002"}, "assignee": "dev_app", "worktree": str(repo)}
+    shots, problems = G.screenshots(team, s, ["/", "/inspections/demo/report"])
+    assert [Path(p).name for p in shots] == [
+        "root.png",
+        "inspections-demo-report-NOT-READY-after-7s.png",
+    ]
+    assert all(Path(p).exists() for p in shots) and seen.read_text().strip() == "7"
+    assert len(problems) == 1
+    assert problems[0].startswith("inspections-demo-report-NOT-READY-after-7s.png: page not ready")
+    assert 'aria-busy="true"' in problems[0] and "1 element(s) busy" in problems[0]
+
+
+WEB = HERE.parent / "web"
+BUSY_PAGE = '<html><body><main aria-busy="true">Отчёт формируется…</main>{script}</body></html>'
+
+
+@pytest.mark.skipif(
+    not (WEB / "node_modules" / "@playwright" / "test").exists(),
+    reason="needs web/node_modules (pnpm install) and Playwright's Chromium",
+)
+@pytest.mark.parametrize(
+    ("script", "ready"),
+    [
+        (
+            "<script>setTimeout(() => document.querySelector('main').ariaBusy = 'false', 2000)"
+            "</script>",
+            True,
+        ),
+        ("", False),
+    ],
+    ids=["clears-after-2s", "never-clears"],
+)
+def test_shoot_waits_for_the_page_to_clear_aria_busy(tmp_path, script, ready):
+    page, png = tmp_path / "page.html", tmp_path / "page.png"
+    page.write_text(BUSY_PAGE.format(script=script))
+    env = {k: v for k, v in os.environ.items() if not k.startswith("QARAU_TEST_")}
+    r = subprocess.run(
+        ["node", str(G.SHOOT), page.as_uri(), str(png), "800,600", "0"],
+        cwd=WEB,
+        env={**env, "QARAU_SHOOT_READY_S": "6"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert r.returncode == 0, r.stderr
+    assert png.exists()
+    out = G.NOT_READY.search(r.stdout)
+    if ready:
+        assert out is None, r.stdout
+    else:
+        assert out and out[1] == "6" and 'aria-busy="true"' in out[2]
