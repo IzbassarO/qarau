@@ -31,7 +31,7 @@ export function ReportPage() {
   const state: ReportPdf = summary.isError
     ? { state: 'failed', message: summary.error.message }
     : pdf.isError
-      ? { state: 'failed', message: '' }
+      ? { state: 'failed', message: pdf.error.message }
       : (pdf.data ?? { state: 'generating' });
   const data = summary.data;
   const blob = state.state === 'ready' ? state.blob : null;
@@ -46,15 +46,6 @@ export function ReportPage() {
     return () => URL.revokeObjectURL(url);
   }, [blob, id, pdfLanguage]);
   const readyUrl = pdfUrl?.blob === blob ? pdfUrl?.url : undefined;
-  const download = () => {
-    if (!readyUrl) return;
-    const link = document.createElement('a');
-    link.href = readyUrl;
-    link.download = `report-${id}-${pdfLanguage}.pdf`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-  };
 
   return (
     <div className="qv-screen report-screen">
@@ -78,14 +69,20 @@ export function ReportPage() {
           </div>
         </div>
         <div className="report-download">
-          <button type="button" className="qv-btn" disabled={!readyUrl} onClick={download}>
-            {t('report.download')}
-          </button>
+          {readyUrl ? (
+            <a className="qv-btn" href={readyUrl} download={`report-${id}-${pdfLanguage}.pdf`}>
+              {t('report.download')}
+            </a>
+          ) : (
+            <button type="button" className="qv-btn" disabled>
+              {t('report.download')}
+            </button>
+          )}
           {state.state === 'ready' && (
             <span className="qv-caption qv-muted report-hash">
               {t('report.hash')}{' '}
-              <code className="qv-mono" title={state.hash}>
-                {state.hash.slice(0, 12)}…{state.hash.slice(-8)}
+              <code className="qv-mono" title={state.sha256}>
+                {state.sha256.slice(0, 12)}…{state.sha256.slice(-8)}
               </code>
             </span>
           )}
@@ -103,6 +100,13 @@ export function ReportPage() {
             <div role="alert">
               <h2>{t('report.failed')}</h2>
               <p>{state.message || t('report.failureFallback')}</p>
+              <button
+                type="button"
+                className="qv-btn qv-btn--secondary"
+                onClick={() => void (summary.isError ? summary.refetch() : pdf.refetch())}
+              >
+                {t('report.retry')}
+              </button>
             </div>
           )}
           {state.state === 'ready' && readyUrl && (
@@ -159,6 +163,14 @@ export function ReportPage() {
               {(['critical', 'watch'] as const).map((severity) => (
                 <section key={severity} aria-label={t(`evidence.severity.${severity}`)}>
                   <h3>{t(`evidence.severity.${severity}`)}</h3>
+                  <p className="qv-caption">
+                    {t('report.findingCount').replace(
+                      '{count}',
+                      String(
+                        data.findings.filter((finding) => finding.severity === severity).length,
+                      ),
+                    )}
+                  </p>
                   {data.findings.some((finding) => finding.severity === severity) ? (
                     <table className="data report-findings">
                       <thead>

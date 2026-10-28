@@ -327,6 +327,8 @@
   "evidence.severity.watch": "Наблюдать",
   "report.title": "Отчёт об инспекции",
   "report.summary": "Сводка",
+  "report.findingCount": "Находки: {count}",
+  "report.retry": "Повторить попытку",
   "report.object": "Площадка и объект",
   "report.objectUnavailable": "Название объекта недоступно",
   "report.date": "Дата инспекции",

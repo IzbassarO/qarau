@@ -14,7 +14,7 @@ it('maps 200 to a PDF Blob and the exact hash from X-Report-SHA256, using the se
   const result = await fetchReportPdf(37, 'ru');
   expect(result.state).toBe('ready');
   if (result.state !== 'ready') throw new Error('Expected ready');
-  expect(result.hash).toBe(fixture.hash);
+  expect(result.sha256).toBe(fixture.hash);
   expect(result.blob).toBeInstanceOf(Blob);
   expect(result.blob.type).toBe('application/pdf');
   expect(await result.blob.text()).toBe(fixture.pdf);
@@ -30,26 +30,26 @@ it('maps 202 to generating, not to an empty PDF', async () => {
 });
 
 it.each([400, 401, 403, 404, 409, 500, 503])(
-  'maps HTTP %i to failed with the API’s literal error message',
+  'throws HTTP %i with the API’s literal error message and status',
   async (status) => {
     mockReportApi(() => Response.json(fixture.failure, { status }));
-    await expect(fetchReportPdf(37, 'en')).resolves.toEqual({
-      state: 'failed',
+    await expect(fetchReportPdf(37, 'en')).rejects.toMatchObject({
       message: fixture.failure.detail,
+      status,
     });
   },
 );
 
 it('keeps FastAPI validation words and plain server error text', async () => {
   mockReportApi(() => Response.json(fixture.validation, { status: 422 }));
-  await expect(fetchReportPdf(37, 'en')).resolves.toEqual({
-    state: 'failed',
+  await expect(fetchReportPdf(37, 'en')).rejects.toMatchObject({
     message: fixture.validation.detail[0].msg,
+    status: 422,
   });
   mockReportApi(() => new Response('Internal Server Error', { status: 500 }));
-  await expect(fetchReportPdf(37, 'en')).resolves.toEqual({
-    state: 'failed',
+  await expect(fetchReportPdf(37, 'en')).rejects.toMatchObject({
     message: 'Internal Server Error',
+    status: 500,
   });
 });
 

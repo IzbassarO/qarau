@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
+import { readDenseFixture } from '../src/fixtures/dense-bundle/readFixture';
 import fixture from '../src/test/fixtures/report-summary.json' with { type: 'json' };
 
 // Original, hand-authored one-page PDF. No third-party document content.
@@ -9,11 +10,20 @@ const hash = '5e317abc851bdb197835b4a473d2fed04bb0051eed5c8956234256cbfef9fb6c';
 
 async function mockApi(page: Page) {
   const pdfLanguages: string[] = [];
+  const { manifest, files } = readDenseFixture();
   await page.route('**/api/**', (route) => {
     const request = route.request();
     const url = new URL(request.url());
     expect(request.headers().authorization).toBe('Bearer report-test-session');
     if (url.pathname === '/api/runs') return route.fulfill({ json: [] });
+    if (url.pathname === '/api/runs/notre-dame/manifest.json')
+      return route.fulfill({ json: { ...manifest, run_id: 'notre-dame' } });
+    const bundleFile = files.get(url.pathname.replace('/api/runs/notre-dame/files/', ''));
+    if (bundleFile)
+      return route.fulfill({
+        body: bundleFile,
+        contentType: url.pathname.endsWith('.svg') ? 'image/svg+xml' : 'application/octet-stream',
+      });
     if (url.pathname === '/api/inspections/demo-id' || url.pathname === '/api/inspections/37')
       return route.fulfill({ json: fixture.inspection });
     if (url.pathname === '/api/inspections/notre-dame' || url.pathname === '/api/inspections/demo')
@@ -131,7 +141,8 @@ for (const locale of locales) {
       await expect(hashLabel).toHaveAttribute('title', hash);
       await expect(hashLabel).toHaveText('5e317abc851b…fef9fb6c');
       await expect(hashLabel).toBeInViewport();
-      const downloadButton = page.getByRole('button', { name: locale.download, exact: true });
+      const downloadButton = page.getByRole('link', { name: locale.download, exact: true });
+      await expect(downloadButton).toHaveAttribute('download', `report-37-${locale.lang}.pdf`);
       const downloadBox = (await downloadButton.boundingBox())!;
       const hashBox = (await page.locator('.report-hash').boundingBox())!;
       expect(hashBox.y).toBeGreaterThanOrEqual(downloadBox.y);
@@ -190,7 +201,7 @@ test('named demo report resolves its API id, switches PDF language and shows unk
   await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
   await expect.poll(() => requests).toEqual(['en', 'en', 'kk']);
   const downloadEvent = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Download PDF', exact: true }).click();
+  await page.getByRole('link', { name: 'Download PDF', exact: true }).click();
   expect((await downloadEvent).suggestedFilename()).toBe('report-notre-dame-kk.pdf');
   await page.goto('/inspections/unknown/report');
   await expect(page.getByRole('alert')).toContainText('inspection not found');
@@ -198,4 +209,37 @@ test('named demo report resolves its API id, switches PDF language and shows unk
   await expect(page.getByRole('button', { name: 'Download PDF', exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Download PDF', exact: true })).toBeDisabled();
   await expect(page.getByTitle(hash, { exact: true })).toHaveCount(0);
+});
+
+test('inspection list and /viewer/notre-dame links open the same API inspection report', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('qarau.lang', 'en');
+    sessionStorage.setItem('qarau.auth.session', 'Bearer report-test-session');
+  });
+  const requests = await mockApi(page);
+  await page.goto('/inspections');
+  const listLink = page.getByRole('link', { name: 'Report', exact: true });
+  await expect(listLink).toHaveAttribute('href', '/inspections/37/report');
+  await listLink.click();
+  await expect(page).toHaveURL('/inspections/37/report');
+  await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
+  await expect(page.getByText('Tank T-104, north wall', { exact: true })).toHaveCount(2);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  await page.goto('/viewer/notre-dame');
+  const viewerLink = page.getByRole('link', { name: 'Report', exact: true });
+  await expect(viewerLink).toHaveAttribute('href', '/inspections/37/report');
+  await expect(viewerLink).toBeInViewport();
+  await viewerLink.click();
+  await expect(page).toHaveURL('/inspections/37/report');
+  await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
+  await expect(page.getByTitle(hash, { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Download PDF', exact: true })).toHaveAttribute(
+    'download',
+    'report-37-en.pdf',
+  );
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(requests).toEqual(['en', 'en']);
 });

@@ -327,6 +327,8 @@
   "evidence.severity.watch": "Бақылау",
   "report.title": "Инспекция есебі",
   "report.summary": "Қорытынды",
+  "report.findingCount": "Ақаулар: {count}",
+  "report.retry": "Қайталап көру",
   "report.object": "Алаң және нысан",
   "report.objectUnavailable": "Нысан атауы қолжетімсіз",
   "report.date": "Инспекция күні",

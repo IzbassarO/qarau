@@ -233,3 +233,35 @@ Passed: `pnpm lint && pnpm typecheck`, `pnpm test && pnpm build` (47 files,
 879 tests, including i18n keys and noLiterals), Playwright report discovery (14 cases)
 and `git diff --check`. No servers started and no screenshots taken. Kerege/tester
 still runs browser e2e and confirms the visual result against `report-light.png`.
+
+## Current acceptance completion
+
+Preserve the six earlier commits, including the tester-requested toolbar, shortened
+hash and responsive preview positioning. Complete the remaining contract gaps:
+throw PDF HTTP errors carrying the API detail/status, expose the header as `sha256`,
+offer a retry for both summary and PDF failures, use a native download anchor when
+ready, and show the number of API findings in each severity group. Keep all existing
+summary, state, language and Blob lifecycle checks; update download assertions for
+the native anchor and add regression tests for retries, literal counts/date text,
+and navigation from both required entry points.
+
+Installed React/TanStack Query (MIT) and Playwright (Apache-2.0) metadata checked;
+commercial use is allowed. No new libraries, models, tools or fonts. Run lint,
+typecheck, all Vitest tests, build and Playwright discovery. Browser execution and
+screenshots remain with Kerege/tester under the task's explicit sandbox rule.
+
+### Current completion result
+
+Added localized retries for summary/PDF errors and literal severity counts. The PDF
+helper now throws HTTP errors with the API message/status and exposes `sha256` from
+the verified `X-Report-SHA256` header. Ready downloads use a native anchor with the
+same Blob URL as the preview; the existing disabled control, shortened toolbar hash,
+full hash title and v8 layout remain. Tests now verify the native anchor attributes,
+hash adjacency, retry states in all three languages, all PDF language choices and
+literal visible inspection date/counts. Playwright additionally clicks both the
+inspection-list and `/viewer/notre-dame` links, using an existing local map fixture.
+
+Passed `pnpm lint && pnpm typecheck`, `pnpm test && pnpm build` (47 files, 885 tests),
+Playwright report discovery (16 desktop/phone cases) and `git diff --check`. No server
+started, screenshots taken or dependencies added. Full browser e2e execution and
+light/dark ru/kk/en screenshot comparison remain with Kerege and the tester.

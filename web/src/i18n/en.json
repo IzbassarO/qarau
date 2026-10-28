@@ -327,6 +327,8 @@
   "evidence.severity.watch": "Watch",
   "report.title": "Inspection report",
   "report.summary": "Summary",
+  "report.findingCount": "Findings: {count}",
+  "report.retry": "Try again",
   "report.object": "Site and object",
   "report.objectUnavailable": "Object name unavailable",
   "report.date": "Inspection date",

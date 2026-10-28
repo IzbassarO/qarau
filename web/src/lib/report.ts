@@ -4,7 +4,7 @@ import type { Finding, FindingClass, Severity } from './findings';
 
 export type ReportPdf =
   | { state: 'generating' }
-  | { state: 'ready'; blob: Blob; hash: string }
+  | { state: 'ready'; blob: Blob; sha256: string }
   | { state: 'failed'; message: string };
 
 export interface ReportDecision {
@@ -139,13 +139,13 @@ export async function fetchReportPdf(
       signal,
     );
     if (response.status === 202) return { state: 'generating' };
-    if (!response.ok) return { state: 'failed', message: await apiErrorMessage(response) };
-    const hash = response.headers.get('X-Report-SHA256');
-    if (!hash || !response.headers.get('Content-Type')?.includes('application/pdf'))
+    if (!response.ok) throw new ReportApiError(await apiErrorMessage(response), response.status);
+    const sha256 = response.headers.get('X-Report-SHA256');
+    if (!sha256 || !response.headers.get('Content-Type')?.includes('application/pdf'))
       return { state: 'failed', message: '' };
-    return { state: 'ready', blob: await response.blob(), hash };
+    return { state: 'ready', blob: await response.blob(), sha256 };
   } catch (error) {
-    if (signal?.aborted) throw error;
+    if (signal?.aborted || error instanceof ReportApiError) throw error;
     return { state: 'failed', message: '' };
   }
 }
