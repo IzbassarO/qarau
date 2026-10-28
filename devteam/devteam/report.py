@@ -137,21 +137,32 @@ def write_report(team, day: str | None = None) -> Path:
         "",
         "## Cost",
         "",
-        "| Agent | Model | Calls | $ | Billing | Cache hits |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| Agent | Model | Calls | $ | Billing | Cache hits | Provider |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     rows = costs.day_rows(team.home, day)
     lines += [
         f"| {a} | {m} | {n} | {usd:.3f} | {'API' if billed else 'subscription'}"
         f"{f' ({costs.stale_note(stale)})' if stale else ''} | "
-        f"{costs.cache_hits(ti, cr) if billed else '—'} |"
-        for a, m, n, usd, billed, ti, cr, _cw, stale in rows
-    ] or ["| — | — | 0 | 0 | — | — |"]
+        f"{costs.cache_hits(ti, cr) if billed else '—'} | {prov or '—'} |"
+        for a, m, n, usd, billed, ti, cr, _cw, stale, prov in rows
+    ] or ["| — | — | 0 | 0 | — | — | — |"]
+    anthropic = sum(r[3] for r in rows if r[4] and (r[9] or "anthropic") == "anthropic")
     lines += [
         "",
-        f"API spend this day: **${sum(r[3] for r in rows if r[4]):.2f}**; the cap is "
+        f"Anthropic API spend this day: **${anthropic:.2f}**; the cap is "
         f"${team.cfg['daily_budget_usd']:.2f} over any 24 h",
     ]
+    if k := (team.cfg.get("providers") or {}).get(costs.KIMI):
+        kimi_day = sum(r[3] for r in rows if r[4] and r[9] == costs.KIMI)
+        line = f"Kimi API spend this day: **${kimi_day:.2f}**"
+        if day == time.strftime("%Y-%m-%d"):  # the caps' windows are now, not that day
+            last_24h, month = costs.kimi_spend(team.home)
+            line += (
+                f" (last 24 h ${last_24h:.2f} of ${k['daily_usd']:.2f}; this month "
+                f"${month:.2f} of ${k['monthly_usd']:.2f})"
+            )
+        lines.append(line)
 
     lines += [
         "",
