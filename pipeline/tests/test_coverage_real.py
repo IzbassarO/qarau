@@ -1,33 +1,25 @@
 """Coverage on real footage: the notre-dame-p3e run (121 registered frames, 42 748 points).
-Runs in the default `pytest -q` wherever the run exists; skipped only when the run is absent
-(as test_findings_real.py). The run's own files are never written: the test links them into a tmp
-run dir, adds the chapel-facade finding of test_findings_real.py there (the run has no
-findings/ of the project stage, so this manual finding, selected by findings.select_points, is
-its only finding) and writes coverage/ into that tmp dir."""
+Runs in the default `pytest -q` wherever the run exists. The run, its absent-run condition
+(NO_RUN) and the chapel-facade polygon come from test_findings_real.py, one definition for both
+real-run tests. The run's own files are never written: the test links them into a tmp run dir,
+adds the facade finding there (the run has no findings/ of the project stage, so this manual
+finding, selected by findings.select_points, is its only finding) and writes coverage/ into
+that tmp dir."""
 
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import numpy as np
-import pytest
+from test_findings_real import FACADE, NO_RUN, RUN
 
 from qarau_pipeline import workflow
 from qarau_pipeline.coverage import run_coverage
 from qarau_pipeline.findings import load_bundle, select_points
 
-REPO = Path(__file__).resolve().parents[2]
-RUN = Path(os.environ.get("QARAU_RUNS_DIR", REPO / "data/runs")) / "notre-dame-p3e"
-# the chapel facade polygon of test_findings_real.py
-FACADE = [[-0.076, -0.192, 0.009], [-0.708, -0.718, 0.812], [-1.313, -0.948, 0.185],
-          [-0.681, -0.423, -0.618]]  # fmt: skip
 
-
-@pytest.mark.skipif(
-    not (RUN / "web/manifest.json").is_file(), reason="notre-dame-p3e run is absent"
-)
+@NO_RUN
 def test_notre_dame_regions_show_all_three_states(tmp_path: Path) -> None:
     run = tmp_path / "notre-dame-p3e"
     run.mkdir()
