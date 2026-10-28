@@ -1587,7 +1587,8 @@ tasks:
   - RPT1
   - DS1
   owner: dev_app
-  run: cont-20261027-232407-dev_app-2
+  run: run-20261028-134116
+  branch: devteam/UI-report
 - id: D2
   area: core
   title: 'Deploy staging: one VM, compose, HTTPS, backups'

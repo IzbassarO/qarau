@@ -3,6 +3,7 @@ plans inside the developer's folders, stop / resume one task, dashboard from the
 prompt caching, `writable` data folders; CPU work as progress, a blocked streak pauses one
 developer, loop detection by criterion number, routes and Owner additions in plans, Codex."""
 
+import base64
 import copy
 import json
 import os
@@ -33,7 +34,7 @@ from devteam.graph import (
     owner_additions,
     validate_plan,
 )
-from devteam.real import RealAgents, llm_call, parse_codex
+from devteam.real import RealAgents, added_note, llm_call, parse_codex
 from devteam.supervise import TaskHalted
 
 STREAM = (HERE / "tests" / "claude-stream.jsonl").read_text()  # real claude 2.1.302 output
@@ -474,7 +475,9 @@ def test_every_image_follows_its_own_label_and_labels_are_costed(repo, tmp_path,
     """DS1 (2026-10-26): with names listed once for dozens of images the tester read the v8
     "after" shots as the dev-* "before" and blocked the task."""
     team, _ = make(repo)
-    png = b"\x89PNG\r\n\x1a\n"
+    png = base64.b64decode(  # a real 1x1 PNG: every image goes through Pillow (MAX_SIDE)
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGP4DwABAQEAWk1v8QAAAABJRU5ErkJggg=="
+    )
     (tmp_path / "docs/design/screens").mkdir(parents=True)
     paths = [tmp_path / "signed-out-1440x900-light-ru.png", tmp_path / "dev-root-390x844.png"]
     paths.append(tmp_path / "docs/design/screens/sign-in-light.png")
@@ -852,6 +855,23 @@ def test_a_backend_task_may_mention_the_viewer_without_routes_a_page_path_needs_
     assert GR.PAGE_PATH.search("web/src/x.ts, data/runs/<run>/video.mp4, ru/kk/en, a / b") is None
 
 
+@pytest.mark.parametrize("dev", ["dev_app", "dev_pipeline"])
+@pytest.mark.parametrize(
+    ("criterion", "needs"),
+    [
+        ("GET /api/inspections/{id}/coverage returns 200 with the coverage", False),  # COV1
+        ("`/api/inspections/<id>/decisions` and /api/runs/:run/findings list them", False),
+        ("POST /api/inspections/{id}/report renders the PDF; /health stays 200", False),
+        ("/viewer/<run> shows the coverage", True),
+        ("/inspections lists every inspection", True),
+        ("/inspections/<id>/report shows the PDF preview", True),
+    ],
+)
+def test_an_api_path_never_needs_routes_a_page_does(dev, criterion, needs):
+    """2026-10-27 (COV1): '/coverage' inside an API path was taken for a page to screenshot."""
+    assert bool(GR.needs_routes([criterion], CFG["developers"][dev])) is needs
+
+
 # --- 5. parts: a big task is built in 2-3 parts inside the task, each accepted by the tester ----
 PARTS = [
     {"title": "the fps option", "plan": "add --fps", "criteria": ["--fps exists"], "routes": []},
@@ -907,7 +927,10 @@ class PartsBrain(Fast):
     def develop(self, team, s):
         if s["task"]["id"] == "T-001":
             PartsBrain.seen.append(
-                {k: s.get(k) for k in ("stage", "plan", "criteria", "feedback", "rounds")}
+                {
+                    k: s.get(k)
+                    for k in ("stage", "plan", "criteria", "feedback", "rounds", "part_base")
+                }  # fmt: skip
             )
         return super().develop(team, s)
 
@@ -919,6 +942,7 @@ def test_a_task_planned_in_parts_is_built_part_by_part_and_merged_once(repo):
     assert statuses(team)["T-001"] == "done"
     seen = PartsBrain.seen
     assert [(x["stage"], x["rounds"]) for x in seen] == [(0, 0), (0, 1), (1, 2)]
+    assert not seen[0]["part_base"] and seen[2]["part_base"]  # part 2 judged from part 1's end
     assert seen[1]["feedback"] == "stub file must say round 2"  # part 1 sent back once
     assert seen[2]["feedback"] == "" and seen[2]["criteria"] == ["--max-frames exists",
                                                                  "ruff passes"]  # fmt: skip
@@ -1090,3 +1114,160 @@ def test_a_v8_reference_screen_in_criteria_is_read_only_not_outside():
     assert outside_paths(["docs/design/DESIGN.md is updated"], "dev_app", CFG, t) == [
         "docs/design/DESIGN.md"
     ]
+
+
+# --- task size (owner, 2026-10-27: DS1 got 16 criteria in 2 parts for 5 in its entry) ---------
+DONE5 = "Build it.\n\nDone when: a; b; c; d; e.\n\nNot in this task: f; g."
+
+
+def crit(n: int, tag: str = "c") -> list[str]:
+    return [f"{tag}{i}" for i in range(n)]
+
+
+def sized(parts: list[int], top: int = 0, added: int = 0) -> dict:
+    ps = [{"title": f"p{k}", "plan": "x", "criteria": crit(n, f"p{k}-"), "routes": []}
+          for k, n in enumerate(parts)]  # fmt: skip
+    why = [{"criterion": f"x{i}", "why": "needed"} for i in range(added)]
+    return parts_plan(parts=ps, criteria=crit(top, "top"), added_criteria=why)
+
+
+def test_the_listed_criteria_are_the_done_when_clauses_and_owner_additions():
+    assert GR.listed_criteria(DONE5) == 5  # "Not in this task" is another paragraph
+    assert GR.listed_criteria(DONE5 + "\n\nOwner additions (2026-10-27):\n- one\n- two\n") == 7
+    assert GR.listed_criteria("Build it.\n\nOwner additions (2026-10-27):\n- one\n") == 0
+    assert GR.listed_criteria("") == 0
+
+
+@pytest.mark.parametrize(
+    ("plan", "error"),
+    [
+        (sized([9]), r"T-001 \(part 1\): 9 criteria, too big \(at most 8 per part\)"),
+        (sized([3, 6], top=3), r"T-001 \(part 2\): 9 criteria, too big"),  # top counts in last
+        (sized([6, 2]), r"T-001 \(part 1\): 6 criteria, too big \(part 1 of several"),
+        (sized([5, 4], added=4), "T-001: 9 criteria for a backlog entry that lists 5, too big"),
+        (sized([3, 4], added=1), "lists 5: explain each added one in added_criteria"),
+    ],
+)
+def test_an_oversized_plan_is_rejected(plan, error):
+    todo = [{"id": "T-001", "area": "core", "goal": DONE5}]
+    with pytest.raises(PlanError, match=error):
+        validate_plan([plan], todo, CFG)
+
+
+def test_a_plan_close_to_the_backlog_entry_passes():
+    todo = [{"id": "T-001", "area": "core", "goal": DONE5}]
+    (a,) = validate_plan([sized([5, 3], added=3)], todo, CFG)  # 8 = 5 listed + 3 explained
+    assert [len(s["criteria"]) for s in a["stages"]] == [5, 3]
+    (a,) = validate_plan([sized([], top=8)], [{"id": "T-001", "area": "core"}], CFG)
+    assert len(a["criteria"]) == 8  # one part, no "Done when": only the per-part cap
+    assert "Criteria added to the backlog entry's:\n- x0: needed" in added_note(
+        {"added_criteria": [{"criterion": "x0", "why": "needed"}]}
+    )
+    assert added_note({"added_criteria": []}) == ""
+
+
+class Brain(Fast):
+    """The brain returns `plans` (one list per call) for T-001; T-002 as the fake plans it."""
+
+    def __init__(self, *plans):
+        self.plans, self.calls = list(plans), []
+
+    def plan(self, team, todo, feedback=None, devs=None):
+        self.calls.append({"todo": copy.deepcopy(todo), "feedback": feedback})
+        p = self.plans[min(len(self.calls), len(self.plans)) - 1]
+        return [p] + [
+            x for x in super().plan(team, todo, feedback, devs) if x["task_id"] != "T-001"
+        ]
+
+
+def test_a_task_that_needs_more_than_three_parts_goes_to_needs_split(repo):
+    brain = Brain(sized([1, 1, 1, 1]))
+    team, graph = make(repo, brain)
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})
+    t = {t["id"]: t for t in team.load_backlog()}
+    assert t["T-001"]["status"] == "blocked" and "needs a split" in t["T-001"]["blocked_reason"]
+    assert "it needs 4 parts (max 3)" in t["T-001"]["blocked_reason"]
+    assert t["T-002"]["status"] == "done" and len(brain.calls) == 1  # no re-plan for it
+
+
+def test_a_task_still_too_big_after_the_re_plan_goes_to_needs_split(repo):
+    brain = Brain(sized([9]), sized([10]))
+    team, graph = make(repo, brain)
+    team.update_task("T-001", goal=DONE5)
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})
+    assert "9 criteria, too big" in brain.calls[1]["feedback"]
+    t = {t["id"]: t for t in team.load_backlog()}
+    assert t["T-001"]["status"] == "blocked"
+    why = "it does not fit in 3 parts: T-001 (part 1): 10 criteria, too big (at most 8 per part)"
+    assert why in t["T-001"]["blocked_reason"]
+    assert t["T-002"]["status"] == "done"
+
+
+# --- resume keeps accepted parts (DS1, 2026-10-26: a resume re-planned part 1) -----------------
+def test_accepted_parts_are_kept_and_only_the_rest_is_planned():
+    kept = copy.deepcopy(PARTS[:1])
+    todo = [{"id": "T-001", "area": "core", "accepted_parts": kept}]
+    rest = [{"title": "the frame cap", "plan": "add it", "criteria": ["cap"], "routes": []}]
+    (a,) = validate_plan([parts_plan(parts=rest)], todo, CFG)
+    assert [s["title"] for s in a["stages"]] == ["the fps option", "the frame cap"]
+    assert a["stage"] == 1 and a["criteria"] == ["cap", "ruff passes"]
+    assert "Parts already done and accepted" in a["plan"] and "  1. the fps option" in a["plan"]
+    (a,) = validate_plan([parts_plan(parts=[])], todo, CFG)  # one piece left
+    assert a["stage"] == 1 and a["stages"][1]["title"] and a["criteria"] == ["ruff passes"]
+    with pytest.raises(PlanError, match=r"parts \['the fps option'\] were accepted already"):
+        validate_plan([parts_plan()], todo, CFG)
+    with pytest.raises(PlanError, match="4 parts; plan at most 3"):
+        validate_plan([parts_plan(parts=copy.deepcopy(PARTS) + rest)], todo, CFG)
+
+
+class CrashInPart2(PartsBrain):
+    """Part 1 is accepted, then part 2 crashes once: the task ends blocked."""
+
+    crashed = False
+
+    def plan(self, team, todo, feedback=None, devs=None):
+        self.todo = copy.deepcopy(todo)
+        out = super().plan(team, todo, feedback, devs)
+        if any(t.get("accepted_parts") for t in todo):  # resumed: only the rest
+            out = [{**p, "parts": PARTS[1:]} if p["task_id"] == "T-001" else p for p in out]
+        return out
+
+    def develop(self, team, s):
+        if s["task"]["id"] == "T-001" and s.get("stage") == 1 and not CrashInPart2.crashed:
+            CrashInPart2.crashed = True
+            raise RuntimeError("crash in part 2")
+        return super().develop(team, s)
+
+
+def test_a_resumed_task_keeps_its_accepted_parts(repo):
+    PartsBrain.seen.clear()
+    brain = CrashInPart2()
+    team, graph = make(repo, brain)
+    graph.invoke({}, {"configurable": {"thread_id": "r1"}})
+    assert statuses(team)["T-001"] == "blocked"
+    kept = json.loads((team.home / "parts" / "T-001.json").read_text())
+    assert [p["title"] for p in kept["parts"]] == ["the fps option"]
+    wt = team.home / "worktrees" / "T-001"  # accepted on round 2 (the fake fails round 1)
+    assert git(wt, "log", "-1", "--format=%s", kept["base"]).strip().endswith("(round 2)")
+    PartsBrain.seen.clear()
+    team.update_task("T-001", status="todo", blocked_reason=None)  # `devteam resume T-001`
+    graph.invoke({}, {"configurable": {"thread_id": "r2"}})
+    (t,) = [t for t in brain.todo if t["id"] == "T-001"]
+    assert [p["title"] for p in t["accepted_parts"]] == ["the fps option"]
+    assert statuses(team)["T-001"] == "done"
+    assert {x["stage"] for x in PartsBrain.seen} == {1}  # part 1 never built again
+    assert {x["part_base"] for x in PartsBrain.seen} == {kept["base"]}  # judged from there
+    assert not (team.home / "parts" / "T-001.json").exists()  # merged: forgotten
+
+
+def test_a_changed_goal_drops_the_accepted_parts_and_says_why(repo):
+    team = team_for(repo)
+    task = {"id": "T-001", "goal": "old goal"}
+    team.accept_parts(task, copy.deepcopy(PARTS[:1]), "abc123")
+    parts, base = team.accepted_parts(task)
+    assert [p["title"] for p in parts] == ["the fps option"] and base == "abc123"
+    assert team.accepted_parts({**task, "goal": "new goal"}) == ([], "")
+    assert not (team.home / "parts" / "T-001.json").exists()
+    (e,) = yaml.safe_load((team.home / "events.log").read_text())
+    assert e["msg"].startswith("the goal changed since parts ['the fps option'] were accepted")
+    assert team.accepted_parts(task) == ([], "")

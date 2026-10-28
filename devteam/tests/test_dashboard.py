@@ -18,6 +18,7 @@ from devteam import costs
 from devteam import dashboard as D
 from devteam.agents import FakeAgents
 from devteam.graph import Team
+from devteam.report import metric_lines, metrics, write_report
 
 SECRET = "sk-ant-oat01-very-secret-token"
 
@@ -255,3 +256,60 @@ def test_dashboard_never_suggests_resume_for_an_owner_only_task():
     assert "devteam resume" in D.blocked_action(t, {})  # what it said before
     do = D.blocked_action({**t, "owner_only": True}, {})
     assert "devteam resume" not in do and "Owner-only" in do
+
+
+# --- metrics (Kerege v2 stage A): daily report and dashboard, from existing state only ---------
+def test_metrics_come_from_the_backlog_events_costs_and_logs(team):
+
+    now = time.mktime(time.strptime("2026-10-27T12:00:00", "%Y-%m-%dT%H:%M:%S"))
+    team.update_task("T-001", status="done", done_at="2026-10-27")
+    team.update_task("T-002", status="done", done_at="2026-10-19")  # before the 7 days
+    team.update_task("T-003", status="blocked", blocked_reason="x")
+    day = "2026-10-26T1"
+    write_events(team, [
+        # T-001: part 1 sent back once, then accepted; part 2 accepted on its first round, then
+        # the benchmark gate sent it back and it passed again (part 2 not first-round any more)
+        ev("tester", "idle", "T-001", day + "0:00:00", "sent back (1/3): criterion 2"),
+        ev("tester", "idle", "T-001", day + "1:00:00", "part 1/2 accepted; part 2 next: b"),
+        ev("tester", "idle", "T-001", day + "2:00:00", "local checks and criteria pass"),
+        ev("tester", "idle", "T-001", day + "3:00:00", "sent back: benchmark regression vs dev"),
+        ev("tester", "idle", "T-001", day + "4:00:00", "local checks and criteria pass"),
+        # T-004 (open): a tester error, then the loop guard; one part accepted first time
+        ev("tester", "idle", "T-004", day + "5:00:00", "part 1/2 accepted; part 2 next: b"),
+        ev("tester", "idle", "T-004", day + "6:00:00", "TESTER ERROR (not counted ...): x"),
+        ev("dev_app", "idle", "T-004", day + "7:00:00", "BLOCKED: the tester sent it back twice"),
+        ev("tester", "idle", "T-001", day + "8:00:00", "ok   cd web && pnpm test"),  # no verdict
+        ev("tester", "idle", "T-002", "2026-10-18T10:00:00", "part 1/2 accepted; part 2 next"),
+    ])  # fmt: skip
+    costs.record(team.home, "brain", "m", "T-001,T-004", 1, 1, 1.0, True)
+    costs.record(team.home, "tester", "m", "T-001", 1, 1, 0.5, True)
+    costs.record(team.home, "dev_pipeline", "m", "T-001", 1, 1, 9.0, False)  # subscription
+    rows = [{"ts": "2026-10-25T10:00:00", "task": "T-001", "tests": ["a", "b"]},
+            {"ts": "2026-10-26T10:00:00", "task": "T-002", "tests": ["a"]},
+            {"ts": "2026-10-01T10:00:00", "task": "T-002", "tests": ["old"]}]  # fmt: skip
+    (team.home / "flaky.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    errs = [{"ts": "2026-10-26T16:00:00", "task": "T-004", "detail": "x"},
+            {"ts": "2026-10-02T16:00:00", "task": "T-004", "detail": "old"}]  # fmt: skip
+    (team.home / "tester_errors.jsonl").write_text("".join(json.dumps(r) + "\n" for r in errs))
+
+    m = metrics(team, now)
+    assert m["since"] == "2026-10-21" and m["done"] == 1  # T-002 was done before the window
+    assert m["parts"] == 3 and m["first_round"] == pytest.approx(1 / 3)  # T-004 part 1 only
+    assert m["rounds_per_task"] == 5  # T-001: every verdict and send-back
+    assert m["usd_per_task"] == pytest.approx(1.0)  # half the brain call + its tester call
+    assert m["blocked"] == 1 and m["tester_errors"] == 1
+    assert m["flaky"] == [("a", 2), ("b", 1)]
+    lines = metric_lines(m)
+    assert "Parts accepted on the first round: **33% of 3**" in lines
+    assert "Flaky tests: a ×2, b ×1" in lines and "API $ per done task: **$1.00**" in lines
+    report = write_report(team, "2026-10-27").read_text()
+    assert "## Metrics (last 7 days, since 2026-10-21)\n\n- Tasks done: **1**" in report
+    html = D.render(D.collect(team, fake_gh([], []), now))
+    assert "<h2>Metrics, last 7 days</h2>" in html and "<li>Blocked now: <b>1</b></li>" in html
+
+
+def test_metrics_with_no_state_say_so(team):
+
+    m = metrics(team)
+    assert m["done"] == 0 and m["first_round"] is None and m["flaky"] == []
+    assert "Mean rounds per done task: **—**" in metric_lines(m)

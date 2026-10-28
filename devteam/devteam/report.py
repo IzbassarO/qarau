@@ -2,12 +2,101 @@
 
 import datetime as dt
 import json
+import re
 import time
+from collections import Counter
 from pathlib import Path
+
+import yaml
 
 from devteam import costs
 from devteam.continuous import runs_of_day, summary_lines
 from devteam.gates import bench_table
+
+# Tester verdicts in the events log (agent "tester"), by how each starts: a part accepted, the
+# whole task's checks and criteria passed, or a send-back of any kind (a gate's too).
+ACCEPT_PART = re.compile(r"^part \d+/\d+ accepted")
+ACCEPT_LAST = "local checks and criteria pass"
+SENT_BACK = ("sent back", "out of fix loops", "TESTER ERROR", LOOP := "BLOCKED: the tester sent")
+
+
+def _jsonl(team, log: str, since: str) -> list[dict]:
+    try:
+        lines = (team.home / log).read_text().splitlines()
+    except FileNotFoundError:
+        return []
+    return [r for r in map(json.loads, lines) if r["ts"] >= since]
+
+
+def _events(team) -> list[dict]:
+    try:
+        text = (team.home / "events.log").read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return []
+    return yaml.load(text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader)) or []
+
+
+def metrics(team, now: float | None = None, days: int = 7) -> dict:
+    """The last `days` days, from existing state only: the backlog, events.log, costs.sqlite,
+    flaky.jsonl, tester_errors.jsonl. A part counts as accepted on its first round when no
+    send-back came between it and the previous acceptance (or the task's start); a gate's
+    send-back after the last part re-opens that part.
+    ponytail: rounds come from the tester's log lines; a part with no line (a crash) is unseen."""
+    now = time.time() if now is None else now
+    since = time.strftime("%Y-%m-%d", time.localtime(now - (days - 1) * 86400))
+    tasks = team.load_backlog()
+    done = [t["id"] for t in tasks if t["status"] == "done" and t.get("done_at", "") >= since]
+    rounds: dict[str, int] = {}
+    parts: dict[str, list[list]] = {}  # task -> [[ts, first round], ...]
+    fails: dict[str, int] = {}
+    last_open: dict[str, bool] = {}  # the last acceptance was the whole task's: a gate may undo
+    for e in _events(team):
+        tid, msg, ts = e.get("task") or "", str(e.get("msg", "")), str(e.get("ts") or "")
+        if not tid or (e.get("agent") != "tester" and not msg.startswith(LOOP)):
+            continue  # the loop guard's block is said by the developer's agent
+        if msg.startswith(SENT_BACK):
+            rounds[tid] = rounds.get(tid, 0) + 1
+            fails[tid] = fails.get(tid, 0) + 1
+        elif ACCEPT_PART.match(msg) or msg == ACCEPT_LAST:
+            rounds[tid] = rounds.get(tid, 0) + 1
+            row = [ts, not fails.get(tid)]
+            if msg == ACCEPT_LAST and last_open.get(tid) and fails.get(tid):
+                parts[tid][-1] = [ts, False]  # the same last part, accepted again
+            else:
+                parts.setdefault(tid, []).append(row)
+            fails[tid], last_open[tid] = 0, msg == ACCEPT_LAST
+    accepted = [first for rows in parts.values() for ts, first in rows if ts[:10] >= since]
+    usd = costs.task_usd(team.home)
+    flaky = Counter(t for r in _jsonl(team, "flaky.jsonl", since) for t in r["tests"])
+    mean = lambda xs: sum(xs) / len(xs) if xs else None  # noqa: E731
+    return {
+        "days": days,
+        "since": since,
+        "done": len(done),
+        "first_round": mean([float(x) for x in accepted]),
+        "parts": len(accepted),
+        "rounds_per_task": mean([rounds[t] for t in done if t in rounds]),  # else: no log
+        "usd_per_task": mean([usd.get(t, 0.0) for t in done]),
+        "blocked": sum(t["status"] == "blocked" for t in tasks),
+        "tester_errors": len(_jsonl(team, "tester_errors.jsonl", since)),
+        "flaky": flaky.most_common(),
+    }
+
+
+def metric_lines(m: dict) -> list[str]:
+    """The metrics as plain lines: the daily report shows them, the dashboard too."""
+    pct = "—" if m["first_round"] is None else f"{m['first_round']:.0%} of {m['parts']}"
+    per = lambda x, f: "—" if x is None else f.format(x)  # noqa: E731
+    return [
+        f"Tasks done: **{m['done']}**",
+        f"Parts accepted on the first round: **{pct}**",
+        f"Mean rounds per done task: **{per(m['rounds_per_task'], '{:.1f}')}**",
+        f"API $ per done task: **{per(m['usd_per_task'], '${:.2f}')}**",
+        f"Blocked now: **{m['blocked']}**",
+        f"Tester errors (incomplete verdicts): **{m['tester_errors']}**",
+        "Flaky tests: "
+        + (", ".join(f"{name} ×{n}" for name, n in m["flaky"]) if m["flaky"] else "none"),
+    ]
 
 
 def write_report(team, day: str | None = None) -> Path:
@@ -23,6 +112,9 @@ def write_report(team, day: str | None = None) -> Path:
         f"Done today: **{len(done)}** · blocked: **{len(blocked)}** · open: {len(open_)}",
         "",
     ]
+    m = metrics(team, time.mktime(time.strptime(day, "%Y-%m-%d")) + 86399)
+    lines += [f"## Metrics (last {m['days']} days, since {m['since']})", ""]
+    lines += [f"- {x}" for x in metric_lines(m)] + [""]
     lines += ["## Merged into dev", ""]
     lines += [f"- {t['id']} {t['title']} — {t.get('pr', '')}" for t in done] or ["- none"]
     lines += ["", "## Scope and bypass violations", ""]
