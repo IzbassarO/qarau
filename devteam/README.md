@@ -13,7 +13,7 @@ A red GitHub CI check sends back the last 150 lines of `gh run view <id> --log-f
 `dev` → `main` is a weekly release PR, merged only if CI and the full benchmark are green.
 
 ```bash
-cd devteam && uv sync          # also needs: gitleaks (brew install gitleaks), gh, claude, codex
+cd devteam && uv sync          # also needs: gitleaks (brew install gitleaks), gh, claude, codex, kimi
 uv run devteam run             # one round: brain plans, developers build, tester + gates decide
 uv run devteam run --continuous  # keep going: next task per developer until a stop condition
 uv run devteam dashboard       # read-only status page on http://127.0.0.1:8765 (--port N)
@@ -229,7 +229,7 @@ then unattended (`run --continuous` overnight).
 - Subprocess output and git output are decoded as UTF-8 with replacement, never
   `surrogateescape`: a lone surrogate (a binary file in a diff) can't be written to the events,
   the backlog, a packet, the checkpoint or the API (2026-10-21, UX-dense's `dense.color.u8`).
-- `claude` / `codex` are resolved to absolute paths at run start and checked before every
+- `claude` / `codex` / `kimi` are resolved to absolute paths at run start and checked before every
   round; a missing one is looked up on PATH again, then once more after 30 s, then the round
   crashes (2026-10-18 23:39: `claude` vanished in a failed self-update and stopped the run).
 - `writable: [data/runs]` on a task lets its developer add new files there (extra `--add-dir`);
@@ -250,8 +250,30 @@ then unattended (`run --continuous` overnight).
   its timeout. Screenshots refuse to run when the URL already answers before Kerege starts its
   own dev server (a stale server), and stop the server afterwards.
 - Developers, in parallel: `dev_pipeline` = Claude Code (`claude -p`, subscription token in
-  `.env`), `dev_app` = Codex (`codex exec`, your saved ChatGPT login; `codex login` once; no
-  API key is ever passed). Codex has no network in its sandbox: `setup` installs first.
+  `.env`), `dev_app` = Kimi Code CLI with Codex as its fallback (below). Codex: `codex exec`,
+  your saved ChatGPT login (`codex login` once; no API key is ever passed), no network in its
+  sandbox: `setup` installs first.
+- Providers (Kerege v3 K1, owner 2026-10-28; `config.yaml` → `providers`, ADR 0033): every role
+  and developer names its `provider` (`anthropic`, `claude_code`, `codex_cli`, `kimi_cli`;
+  `openai_compatible` is named, not built). `dev_app` runs on `kimi_cli` (Kimi Code CLI,
+  `npm i -g @moonshot-ai/kimi-code@2.3.3`, MIT) with `kimi-k3.1-pro` on the Kimi Open Platform
+  key `MOONSHOT_API_KEY` in `.env` (pay per use; not a Kimi Code plan key). The round goes to
+  its `fallback` (Codex), logged in one line `kimi_cli -> codex_cli: <why>`, when Kimi is off
+  (`enabled: false` = Kerege v2), the key or `kimi` / `sandbox-exec` is missing, the task has
+  `writable` (data/ never goes to Moonshot), a cap is reached, or Kimi fails or hits a limit
+  (then on what Kimi left in the worktree; a fresh Codex session gets the brief and feedback).
+  Caps: `daily_usd` 5 over any 24 h, `monthly_usd` 50 per calendar month; Anthropic keeps
+  `daily_budget_usd` 15 alone (every cost row names its provider). Isolation
+  (`devteam/kimi.py`): the CLI runs under macOS `sandbox-exec` (writes only in the worktree,
+  not its .git, the task's scratch folder and `.state/kimi/<task>`; no reads in the home folder
+  outside these and the repo's .git, so no `devteam/.env`, `data/`, logins; network only to
+  localhost; `HOME` is its own empty folder; environment: PATH, locale, shell only). It talks
+  to a per-round proxy on 127.0.0.1 that adds the key (never in the CLI's process, env or
+  config), reserves each call's worst case against both caps (over a cap: HTTP 403, the round
+  falls back) and records each call as a billed row with its real tokens and $ (cache reads at
+  `price_cache_read`). The supervisor counts those tokens live and kills the round's process
+  group as for the others. `devteam costs`, the report and the dashboard show the provider of
+  each row and Kimi's spend for the last 24 h and this month.
 - Benchmark: developers run only the quick set (`quick_only`); the full set runs at the merge
   gate and at release, cached per `pipeline/` tree; a task may set its own `quick_only`. Only
   a clean result is cached as final: a run where a gated video failed, or one the gate found
