@@ -509,6 +509,7 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
                 "assignee": p["assignee"],
                 "overview": overview,
                 "stages": stages,
+                "part_base": task.get("part_base", "") if accepted else "",
                 **stage_state(overview, stages, len(accepted)),
             }
         )
@@ -557,6 +558,7 @@ class TaskState(TypedDict, total=False):
     stages: list[dict]  # the parts the brain planned inside the task (one when it planned none)
     stage: int  # the part being built
     part_done: bool  # the tester accepted a part that is not the last: the next one follows
+    part_base: str  # commit the previous part was accepted at ("" in part 1): real.part_base
     worktree: str
     branch: str
     session: str
@@ -893,21 +895,24 @@ class Team:
         self.emit("tester", f"FLAKY e2e (passed on retry, not blocking): {tests[:5]}", task=task_id)
 
     # --- parts the tester accepted: kept when the task is planned again (resume) ------------
-    def accept_parts(self, task: dict, parts: list[dict]):
+    def accept_parts(self, task: dict, parts: list[dict], base: str):
         """After the tester accepts a part that is not the last (DS1, 2026-10-26: a resume
-        re-planned part 1, accepted the day before, and spent a round on it)."""
+        re-planned part 1, accepted the day before, and spent a round on it). `base`: the commit
+        it was accepted at, where the next part's judged diff starts (real.part_base)."""
         f = self.home / "parts" / f"{task['id']}.json"
         f.parent.mkdir(exist_ok=True)
-        f.write_text(json.dumps({"goal": task.get("goal", ""), "parts": parts}, indent=1))
+        kept = {"goal": task.get("goal", ""), "parts": parts, "base": base}
+        f.write_text(json.dumps(kept, indent=1))
 
-    def accepted_parts(self, task: dict) -> list[dict]:
-        """The accepted parts of an earlier run, or [] (none, or the goal changed since: then
-        the whole task is planned again, and the events log says why)."""
+    def accepted_parts(self, task: dict) -> tuple[list[dict], str]:
+        """The accepted parts of an earlier run and the commit the last one was accepted at, or
+        ([], "") (none, or the goal changed since: then the whole task is planned again, and
+        the events log says why)."""
         f = self.home / "parts" / f"{task['id']}.json"
         try:
             kept = json.loads(f.read_text())
         except FileNotFoundError:
-            return []
+            return [], ""
         if kept["goal"] != task.get("goal", ""):
             f.unlink()
             titles = [x["title"] for x in kept["parts"]]
@@ -917,8 +922,8 @@ class Team:
                 "again",
                 task=task["id"],
             )
-            return []
-        return kept["parts"]
+            return [], ""
+        return kept["parts"], kept.get("base", "")
 
     def tester_error(self, task_id: str, detail: str):
         """The tester's verdict stayed incomplete after one re-ask: the round does not pass, and
@@ -1817,7 +1822,7 @@ def build_graph(team: Team, checkpointer):
             return {**out, "verdict": verdict, "fixes": fixes, "snap": snap, "last_sendback": key}
         stages, nxt = s.get("stages") or [], s.get("stage", 0) + 1
         if verdict["passed"] and nxt < len(stages):
-            team.accept_parts(s["task"], stages[:nxt])
+            team.accept_parts(s["task"], stages[:nxt], head)
             # a part accepted: the next one starts in a fresh round (no feedback, so a new
             # session with the full brief); send-backs and loop detection start again with it
             team.emit(
@@ -1836,6 +1841,7 @@ def build_graph(team: Team, checkpointer):
                 "last_sendback": "",
                 "feedback": "",
                 "part_done": True,
+                "part_base": head,  # the next part's judged diff starts here
                 "tested_head": head,
             }
         if verdict["passed"]:
@@ -2193,8 +2199,10 @@ def build_graph(team: Team, checkpointer):
         for t in todo:  # merged_tasks() fetched the task branches
             if work := team.prior_work(t["id"]):
                 t["previous_work"] = work
-            if parts := team.accepted_parts(t):  # kept on resume: only the rest is planned
-                t["accepted_parts"] = accepted[t["id"]] = parts
+            parts, part_base = team.accepted_parts(t)
+            if parts:  # kept on resume: only the rest is planned, judged from part_base on
+                t["accepted_parts"], t["part_base"] = parts, part_base
+                accepted[t["id"]] = parts
             if team.writes_runs(t):  # routes must name runs it makes, never these
                 t["runs_before_task"] = team.runs_before_task(t)
         if team.only:  # `devteam run --only P1`

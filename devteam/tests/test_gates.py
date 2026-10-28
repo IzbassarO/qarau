@@ -1289,3 +1289,76 @@ def task_status(team, tid):
 
 def events(team):
     return (team.home / "events.log").read_text()
+
+
+# --- the judged diff of a part (PR #87 review: whole-branch diffs of RPT1, U2, REV1-api, DS1
+# were 154-359 k characters, so step 0 would have failed each last part as too large) ----------
+def commit(repo, name: str, chars: int, branch="feat") -> str:
+    git(repo, "checkout", "-q", branch)
+    line = f"export const {name.replace('-', '_')} = 'x';\n"
+    (repo / "web" / f"{name}.ts").write_text(line * (chars // len(line)))
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", name)
+    return git(repo, "rev-parse", "HEAD").strip()
+
+
+def judged(monkeypatch, team, repo, part_base="") -> tuple[dict, list]:
+    return judge_seq(monkeypatch, [verdict(1)], n=1, team=team, worktree=str(repo),
+                     part_base=part_base)  # fmt: skip
+
+
+@pytest.mark.parametrize("chars", [60_000, 100_000])
+def test_each_part_is_judged_on_its_own_diff(repo, monkeypatch, chars):
+    """3 parts of ~60 k / ~100 k: the whole branch is ~180 k / ~300 k, over MAX_DIFF, yet every
+    part fits; --stat still shows the whole branch."""
+    team = team_for(repo)
+    team.fetch("dev")
+    git(repo, "checkout", "-qb", "feat")
+    base = ""
+    for k in (1, 2, 3):
+        head = commit(repo, f"part{k}", chars)
+        v, calls = judged(monkeypatch, team, repo, base)
+        assert v["passed"] is True and len(calls) == 1, k
+        assert f"export const part{k}" in calls[0]
+        assert all(f"export const part{i}" not in calls[0] for i in range(1, k))  # accepted ones
+        assert all(f"web/part{i}.ts" in calls[0] for i in range(1, k + 1))  # --stat: all parts
+        base = head  # the tester accepted part k here
+    whole = team.git("diff", f"{team.remote_name}/dev...HEAD", cwd=repo)
+    assert len(whole) > R.MAX_DIFF  # judged whole, the last part would have failed
+
+
+def test_a_part_over_the_limit_still_fails(repo, monkeypatch):
+    team = team_for(repo)
+    team.fetch("dev")
+    git(repo, "checkout", "-qb", "feat")
+    accepted = commit(repo, "part1", 10_000)
+    commit(repo, "part2", 130_000)
+    v, calls = judged(monkeypatch, team, repo, accepted)
+    assert calls == [] and v["passed"] is False and "too large to review" in v["feedback"]
+    v, calls = judged(monkeypatch, team, repo)  # a task in one piece: the whole branch, as before
+    assert calls == [] and v["passed"] is False
+
+
+def test_a_dev_merge_between_parts_does_not_enlarge_the_part_diff(repo, monkeypatch):
+    team = team_for(repo)
+    team.fetch("dev")
+    git(repo, "checkout", "-qb", "feat")
+    accepted = commit(repo, "part1", 60_000)
+    commit(repo, "from-dev", 150_000, branch="dev")  # someone else's 150 k lands on dev
+    git(repo, "push", "-q", remote_of(repo), "dev")
+    team.fetch("dev")
+    git(repo, "checkout", "-q", "feat")
+    git(repo, "merge", "-q", "--no-edit", f"{team.remote_name}/dev")  # Kerege merges dev in
+    commit(repo, "part2", 20_000)
+    v, calls = judged(monkeypatch, team, repo, accepted)
+    assert v["passed"] is True and len(calls) == 1
+    assert "export const part2" in calls[0]
+    assert "export const from_dev" not in calls[0] and "export const part1" not in calls[0]
+    # dev merged in before the part's first commit: the part diff is still only the part
+    commit(repo, "more-dev", 150_000, branch="dev")
+    git(repo, "push", "-q", remote_of(repo), "dev")
+    team.fetch("dev")
+    git(repo, "checkout", "-q", "feat")
+    git(repo, "merge", "-q", "--no-edit", f"{team.remote_name}/dev")
+    v, calls = judged(monkeypatch, team, repo, accepted)
+    assert v["passed"] is True and "export const more_dev" not in calls[0]

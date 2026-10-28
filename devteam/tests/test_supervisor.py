@@ -907,7 +907,10 @@ class PartsBrain(Fast):
     def develop(self, team, s):
         if s["task"]["id"] == "T-001":
             PartsBrain.seen.append(
-                {k: s.get(k) for k in ("stage", "plan", "criteria", "feedback", "rounds")}
+                {
+                    k: s.get(k)
+                    for k in ("stage", "plan", "criteria", "feedback", "rounds", "part_base")
+                }  # fmt: skip
             )
         return super().develop(team, s)
 
@@ -919,6 +922,7 @@ def test_a_task_planned_in_parts_is_built_part_by_part_and_merged_once(repo):
     assert statuses(team)["T-001"] == "done"
     seen = PartsBrain.seen
     assert [(x["stage"], x["rounds"]) for x in seen] == [(0, 0), (0, 1), (1, 2)]
+    assert not seen[0]["part_base"] and seen[2]["part_base"]  # part 2 judged from part 1's end
     assert seen[1]["feedback"] == "stub file must say round 2"  # part 1 sent back once
     assert seen[2]["feedback"] == "" and seen[2]["criteria"] == ["--max-frames exists",
                                                                  "ruff passes"]  # fmt: skip
@@ -1221,8 +1225,10 @@ def test_a_resumed_task_keeps_its_accepted_parts(repo):
     team, graph = make(repo, brain)
     graph.invoke({}, {"configurable": {"thread_id": "r1"}})
     assert statuses(team)["T-001"] == "blocked"
-    kept = json.loads((team.home / "parts" / "T-001.json").read_text())["parts"]
-    assert [p["title"] for p in kept] == ["the fps option"]
+    kept = json.loads((team.home / "parts" / "T-001.json").read_text())
+    assert [p["title"] for p in kept["parts"]] == ["the fps option"]
+    wt = team.home / "worktrees" / "T-001"  # accepted on round 2 (the fake fails round 1)
+    assert git(wt, "log", "-1", "--format=%s", kept["base"]).strip().endswith("(round 2)")
     PartsBrain.seen.clear()
     team.update_task("T-001", status="todo", blocked_reason=None)  # `devteam resume T-001`
     graph.invoke({}, {"configurable": {"thread_id": "r2"}})
@@ -1230,16 +1236,18 @@ def test_a_resumed_task_keeps_its_accepted_parts(repo):
     assert [p["title"] for p in t["accepted_parts"]] == ["the fps option"]
     assert statuses(team)["T-001"] == "done"
     assert {x["stage"] for x in PartsBrain.seen} == {1}  # part 1 never built again
+    assert {x["part_base"] for x in PartsBrain.seen} == {kept["base"]}  # judged from there
     assert not (team.home / "parts" / "T-001.json").exists()  # merged: forgotten
 
 
 def test_a_changed_goal_drops_the_accepted_parts_and_says_why(repo):
     team = team_for(repo)
     task = {"id": "T-001", "goal": "old goal"}
-    team.accept_parts(task, copy.deepcopy(PARTS[:1]))
-    assert [p["title"] for p in team.accepted_parts(task)] == ["the fps option"]
-    assert team.accepted_parts({**task, "goal": "new goal"}) == []
+    team.accept_parts(task, copy.deepcopy(PARTS[:1]), "abc123")
+    parts, base = team.accepted_parts(task)
+    assert [p["title"] for p in parts] == ["the fps option"] and base == "abc123"
+    assert team.accepted_parts({**task, "goal": "new goal"}) == ([], "")
     assert not (team.home / "parts" / "T-001.json").exists()
     (e,) = yaml.safe_load((team.home / "events.log").read_text())
     assert e["msg"].startswith("the goal changed since parts ['the fps option'] were accepted")
-    assert team.accepted_parts(task) == []
+    assert team.accepted_parts(task) == ([], "")

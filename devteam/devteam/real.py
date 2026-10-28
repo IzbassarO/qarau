@@ -267,7 +267,10 @@ or replaces a fixed expected value with one computed by the code under test; tha
 task whatever else passes. Updating an expected value to a new fixed literal that the
 criteria require is not weakening.
 A <plan> that says "part k of n": the brain planned this task in parts; the earlier parts were
-accepted already and the diff still shows the whole branch. Judge only this part's
+accepted already. From part 2 on, <diff> shows only this part's changes (since the previous part
+was accepted, without what came in from dev); <diffstat> is the whole branch, and the earlier
+parts' code is on it: never fail a criterion only because that code is not in <diff>.
+Judge only this part's
 <acceptance_criteria>; never fail it for later parts not being there yet.
 Design (owner, 2026-10-24): design system v8 (docs/design/DESIGN.md and its reference screens)
 is the source of truth for the UI. Images listed as "reference" are those screens, light theme
@@ -702,7 +705,7 @@ Rules:
     def judge(self, team, s, checks):
         base = f"{team.remote_name}/{team.cfg['base_branch']}"
         diff = team.git(  # Team.git takes pathspecs literally; these need :(exclude,glob)
-            "diff", f"{base}...HEAD", "--", *JUDGED, cwd=s["worktree"],
+            "diff", part_base(team, s, base), "HEAD", "--", *JUDGED, cwd=s["worktree"],
             env={"GIT_LITERAL_PATHSPECS": "0"},
         )  # fmt: skip
         if len(diff) > MAX_DIFF:  # no tester call: it could only judge a cut diff
@@ -845,6 +848,22 @@ Rules:
                 "of a fixture). Restore them and fix the code.\n\n" + v.get("feedback", "")
             )
         return v
+
+
+def part_base(team, s: dict, base: str) -> str:
+    """What the judged diff starts from. Part 1 (and a task in one piece): the merge base with
+    dev, the whole branch. Later parts: the commit at which the previous part was accepted,
+    with the dev the branch has merged since then merged into it (a tree, never committed), so
+    dev's changes are not this part's (owner, 2026-10-27: whole-branch diffs of RPT1, U2,
+    REV1-api and DS1 were 154-359 k characters, over MAX_DIFF in their last part)."""
+    wt, accepted = s["worktree"], s.get("part_base")
+    if not accepted:
+        return team.git("merge-base", base, "HEAD", cwd=wt).strip()
+    dev_in_branch = team.git("merge-base", base, "HEAD", cwd=wt).strip()
+    try:
+        return team.git("merge-tree", "--write-tree", accepted, dev_in_branch, cwd=wt).split()[0]
+    except RuntimeError:  # ponytail: dev conflicted with the accepted part; the plain base
+        return accepted  # then shows dev's changes too: larger, never missing anything
 
 
 def added_note(a: dict) -> str:

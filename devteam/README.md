@@ -138,9 +138,13 @@ then unattended (`run --continuous` overnight).
   1..N of the part's criteria exactly once. Otherwise the tester is asked once more with what
   was missing, repeated or out of range; still incomplete, the round does not pass, it is
   logged in `.state/tester_errors.jsonl` and not counted against the developer (twice in a row
-  ends the task). The judged diff leaves out lockfiles and generated files (`uv.lock`,
-  `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `*.min.js`, `*.map`; still in `--stat`);
-  over 120 000 characters it is not judged and cannot pass ("too large to review").
+  ends the task). The judged diff is the current part's: part 1 (and a task in one piece) the
+  whole branch against dev; later parts from the commit the previous part was accepted at
+  (recorded in `.state/parts/<task>.json`, also used on resume), with the dev merged into the
+  branch since then left out. `--stat` stays the whole branch. It leaves out lockfiles and
+  generated files (`uv.lock`, `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `*.min.js`,
+  `*.map`; still in `--stat`); a part diff over 120 000 characters is not judged and cannot pass
+  ("too large to review").
 - A check that fails while the machine slept (wall clock over 60 s ahead of the monotonic one,
   `run_proc`) runs once more, and the events log says so; watched developer runs never do.
 - Loop detection: the tester's reason is the set of unmet criteria, failing checks and missing
