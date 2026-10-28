@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .auth import Identity, hash_token, new_salt, require_role
+from .auth import UNAUTHORIZED, Identity, hash_token, new_salt, require_role
 from .db import get_db
 from .models import AuditLog, Inspection, Mode, Organization, Role, Run, Site, User
 
@@ -109,6 +109,13 @@ class UserCreated(UserOut):
     token: str  # shown once; only its scrypt hash is stored
 
 
+class MeOut(BaseModel):
+    id: int
+    name: str
+    role: Role
+    organization: OrgOut
+
+
 class AuditOut(Out):
     id: int
     user_id: int
@@ -200,6 +207,23 @@ def list_inspection_runs(inspection_id: int, db: Db, _: Viewer) -> list[RunOut]:
 
 
 # --- users -----------------------------------------------------------------------------------
+
+
+@router.get(
+    "/me",
+    summary="Current user",
+    description="Role: viewer. The signed-in user: id, name, role and organization (never "
+    "secrets). 401 without a user token (also for the shared dev token, which has no user).",
+    responses={401: {"description": "Missing or unknown token, or no user behind it"}},
+)
+def read_me(db: Db, who: Viewer) -> MeOut:
+    user = db.get(User, who.user_id) if who.user_id is not None else None
+    if user is None:
+        raise HTTPException(401, "invalid or missing token", UNAUTHORIZED)
+    org = db.get(Organization, user.org_id)
+    return MeOut(
+        id=user.id, name=user.name, role=user.role, organization=OrgOut.model_validate(org)
+    )
 
 
 @router.get("/users", description="Role: admin. List users (never their secrets).")
