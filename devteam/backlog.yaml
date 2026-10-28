@@ -1484,12 +1484,14 @@ tasks:
   licence: 'WeasyPrint (BSD-3-Clause) + Jinja2 (BSD-3-Clause), Pango (LGPL-2.1+, system library); IBM
     Plex fonts (OFL-1.1); pyphen (WeasyPrint''s hyphenation): owner 2026-10-27 accepts it under LGPL-2.1+/MPL-1.1,
     not GPL.'
-  status: in_progress
+  status: done
   depends_on:
   - REV1-api
   owner: dev_pipeline
   run: run-20261027-183321
   branch: devteam/RPT1
+  pr: https://github.com/IzbassarO/qarau/pull/86
+  done_at: '2026-10-27'
 - id: UI-mark
   area: app
   title: Mark a region on the 3D map as a finding
