@@ -25,6 +25,11 @@ CACHE = {"type": "ephemeral", "ttl": "1h"}
 CACHE_WRITE_X = 2.0
 # Messages API limits per request: 100 images, 32 MB; kept under both with room for the text.
 MAX_IMAGES, MAX_IMAGE_BYTES = 90, 24e6
+# The judged diff: a part larger than this cannot be reviewed whole, so it cannot pass (a cut diff
+# could hide what the tester never saw). Lockfiles and generated files are in --stat only.
+MAX_DIFF = 120_000
+NOT_JUDGED = ("uv.lock", "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "*.min.js", "*.map")
+JUDGED = (".", *(f":(exclude,glob)**/{p}" for p in NOT_JUDGED))
 
 
 def transient(e: Exception) -> bool:
@@ -671,12 +676,24 @@ Rules:
     # --- tester --------------------------------------------------------------------------
     def judge(self, team, s, checks):
         base = f"{team.remote_name}/{team.cfg['base_branch']}"
-        diff = team.git("diff", f"{base}...HEAD", cwd=s["worktree"])
-        limit = 120_000
-        note = ""
-        if len(diff) > limit:  # said out loud, never silent
-            note = f"\n[diff truncated: showing {limit} of {len(diff)} characters]"
-            diff = diff[:limit]
+        diff = team.git(  # Team.git takes pathspecs literally; these need :(exclude,glob)
+            "diff", f"{base}...HEAD", "--", *JUDGED, cwd=s["worktree"],
+            env={"GIT_LITERAL_PATHSPECS": "0"},
+        )  # fmt: skip
+        if len(diff) > MAX_DIFF:  # no tester call: it could only judge a cut diff
+            return {
+                "passed": False,
+                "criteria": [],
+                "tests_weakened": False,
+                "summary": "",
+                "how_to_try": "",
+                "feedback": (
+                    f"This part's diff is too large to review: {len(diff):,} characters without "
+                    f"lockfiles and generated files, over the limit of {MAX_DIFF:,}. Keep the "
+                    "change within the plan of this part: drop unrelated edits, reformatting "
+                    "and generated or copied files."
+                ),
+            }
         stat = team.git("diff", "--stat", f"{base}...HEAD", cwd=s["worktree"])
         check_text = (
             "\n\n".join(
@@ -720,7 +737,7 @@ Rules:
                 else ""
             )
             + f"<diffstat>\n{stat}</diffstat>\n\n"
-            f"<diff>\n{diff}{note}\n</diff>"
+            f"<diff>\n{diff}\n</diff>"
         )
         schema = {
             "type": "object",
@@ -770,17 +787,31 @@ Rules:
                 + "\n</owner_approved_test_rewrites>\n\n"
                 + prompt
             )
-        v = llm_call(
+        n = len(s["criteria"])
+        ask = lambda extra="": llm_call(  # noqa: E731
             team,
             "tester",
             s["task"]["id"],
             TESTER_SYSTEM,
-            team.redact(prompt),
+            team.redact(prompt + extra),
             schema,
             images=shots,
             context=team.redact(context),
         )
-        v["passed"] = v["passed"] and all(c["met"] for c in v["criteria"])
+        v = ask()
+        if gaps := verdict_gaps(v, n):  # asked once more, with what was wrong
+            v = ask(
+                f"\n\n<incomplete_verdict>\nYour verdict's `criteria` {gaps}. Answer again: "
+                f"one entry for each number 1..{n} of <acceptance_criteria>, each exactly once."
+                "\n</incomplete_verdict>"
+            )
+        if gaps := verdict_gaps(v, n):  # never a pass; not the developer's fault either
+            v["tester_error"] = f"the tester's verdict {gaps} (asked twice)"
+            v["feedback"] = (
+                f"Kerege: {v['tester_error']}; this round is not counted against you. "
+                "Unmet criteria the tester did name are below.\n\n" + v.get("feedback", "")
+            )
+        v["passed"] = v["passed"] and not gaps and all(c["met"] for c in v["criteria"])
         if v.get("tests_weakened") and s.get("test_changes"):
             v["passed"] = False
             v["feedback"] = (
@@ -789,6 +820,19 @@ Rules:
                 "of a fixture). Restore them and fix the code.\n\n" + v.get("feedback", "")
             )
         return v
+
+
+def verdict_gaps(v: dict, n: int) -> str:
+    """ "" when the verdict's `criteria` gives each number 1..n exactly once, else what is wrong
+    (2026-10-27: a verdict that left a criterion out passed, all() of the rest being met)."""
+    nums = [c.get("number") for c in v.get("criteria") or []]
+    ok = [x for x in nums if type(x) is int and 1 <= x <= n]
+    gaps = [
+        ("misses numbers", [i for i in range(1, n + 1) if i not in ok]),
+        ("repeats numbers", sorted({x for x in ok if ok.count(x) > 1})),
+        (f"has numbers outside 1..{n}", [x for x in nums if x not in ok]),
+    ]
+    return "; ".join(f"{what} {xs}" for what, xs in gaps if xs)
 
 
 def _json(line: str) -> dict:

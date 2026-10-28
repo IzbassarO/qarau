@@ -163,7 +163,7 @@ QUERY_CLIENT = [
     "  it('shows the panel', () => {",
     "    const q = useQuery({ queryKey: ['f'], queryFn, retry: 2 });",
     "test('retries a failed fetch', async () => {",
-    "  render(<App client={new QueryClient({ defaultOptions: { queries: { retry: false } } })} />);",
+    "  render(<App qc={new QueryClient({ defaultOptions: { queries: { retry: false } } })} />);",
 ]
 
 
@@ -173,7 +173,7 @@ def test_library_retry_options_in_tests_are_not_runner_retries(path):
 
 
 def test_js_focus_helpers_apply_only_to_js_test_files():
-    # RPT1, 2026-10-27: a Python call fit(...) in pipeline/tests was flagged as a focused Jasmine test
+    # RPT1, 2026-10-27: a Python call fit(...) in pipeline/tests was flagged as a focused test
     path = "pipeline/tests/test_report_snapshot.py"
     py = ["    model = fit(points, frames)", "    xtest(a)", "    t = it.skip", "describe.only = 1"]
     assert SC.bypass(diff(path, plus=py), [path]) == []

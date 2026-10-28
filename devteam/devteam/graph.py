@@ -803,6 +803,16 @@ class Team:
             f.write(json.dumps(row) + "\n")
         self.emit("tester", f"FLAKY e2e (passed on retry, not blocking): {tests[:5]}", task=task_id)
 
+    def tester_error(self, task_id: str, detail: str):
+        """The tester's verdict stayed incomplete after one re-ask: the round does not pass, and
+        it is not counted against the developer. Kept for the report and the dashboard."""
+        row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "task": task_id, "detail": detail}
+        with self._lock, open(self.home / "tester_errors.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
+        self.emit(
+            "tester", f"TESTER ERROR (not counted against the developer): {detail}", task=task_id
+        )
+
     @contextlib.contextmanager
     def clean_checkout(self, s):
         """A fresh detached checkout of the task's committed HEAD: the tester's checks never
@@ -1662,11 +1672,17 @@ def build_graph(team: Team, checkpointer):
             verdict["feedback"] = f"{verdict.get('feedback', '')}\n\nFailing checks:\n{logs}"
         verdict["checks"] = checks
         snap = team.snapshot(s["worktree"])  # files the checks made are not the developer's
-        fixes = s.get("fixes", 0) + (0 if verdict["passed"] else 1)
+        if verdict.get("tester_error"):
+            team.tester_error(tid, verdict["tester_error"])
+        # only the tester's fault when nothing else failed: then not counted as a send-back
+        tester_error = bool(verdict.get("tester_error")) and not failed and not no_shots
+        fixes = s.get("fixes", 0) + (0 if verdict["passed"] or tester_error else 1)
         # the reason, comparable between rounds: the judge's wording changes, these do not
         key = (
             ""
             if verdict["passed"]
+            else "tester error"  # twice in a row ends the task: tester errors never loop
+            if tester_error
             else "\n".join(
                 sorted(criterion_key(c, s["criteria"]) for c in verdict["criteria"] if not c["met"])
                 + sorted(f"check: {c['cmd']}" for c in failed)
@@ -1708,6 +1724,8 @@ def build_graph(team: Team, checkpointer):
             team.emit(
                 "tester", "local checks and criteria pass", task=tid, to="gates", status="idle"
             )
+        elif tester_error:
+            pass  # said by team.tester_error; the developer gets the verdict's feedback
         elif fixes <= max_fixes:
             team.emit(
                 "tester",
