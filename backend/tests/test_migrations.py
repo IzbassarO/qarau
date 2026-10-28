@@ -28,6 +28,7 @@ EXPECTED_TABLES = [
     "inspection",
     "observation",
     "organization",
+    "report",
     "run",
     "scale_reference",
     "site",
@@ -159,6 +160,46 @@ def test_v0004_adds_reclass_columns_and_keeps_the_append_only_trigger(db_url: st
         )
     with pytest.raises(DBAPIError, match="append-only"), engine.begin() as conn:
         conn.execute(text("UPDATE decision SET comment = 'edited'"))
+
+
+REPORT_COLUMNS = ["created_by", "generated_at", "id", "inspection_id", "lang", "report_number",
+                  "sha256", "version"]  # fmt: skip
+
+
+def test_v0005_creates_the_report_table_and_downgrades(db_url: str) -> None:
+    """0005 adds `report` (one row per generated PDF) with foreign keys to inspection and user;
+    downgrade to 0004 drops it and leaves the other tables, upgrade brings it back."""
+    from conftest import alembic_config
+
+    from alembic import command
+
+    engine = engine_for(db_url)
+    insp = inspect(engine)
+    cols = {c["name"]: c for c in insp.get_columns("report")}
+    assert sorted(cols) == REPORT_COLUMNS
+    assert cols["created_by"]["nullable"]
+    assert not any(cols[c]["nullable"] for c in REPORT_COLUMNS if c != "created_by")
+    assert getattr(cols["sha256"]["type"], "length", None) == 64
+    fks = {
+        fk["constrained_columns"][0]: fk["referred_table"] for fk in insp.get_foreign_keys("report")
+    }
+    assert fks == {"inspection_id": "inspection", "created_by": "user"}
+    seed_one_decision_and_audit_row(db_url)
+    row = ("INSERT INTO report (inspection_id, lang, sha256, generated_at, report_number, "
+           "version, created_by) VALUES (1, 'en', :sha, CURRENT_TIMESTAMP, 'QV-2026-0001', 1, "
+           "NULL)")  # fmt: skip
+    with engine.begin() as conn:
+        conn.execute(text(row), {"sha": "a" * 64})
+    with pytest.raises(DBAPIError), engine.begin() as conn:  # no such inspection
+        conn.execute(text(row.replace("(1, 'en'", "(99, 'en'")), {"sha": "b" * 64})
+
+    command.downgrade(alembic_config(db_url), "0004")
+    tables = sorted(inspect(engine).get_table_names())
+    assert tables == [t for t in EXPECTED_TABLES if t != "report"]
+    command.upgrade(alembic_config(db_url), "head")
+    assert sorted(inspect(engine).get_table_names()) == EXPECTED_TABLES
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM report")).scalar() == 0
 
 
 @pytest.mark.parametrize("sql", FORBIDDEN_SQL)

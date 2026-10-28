@@ -193,7 +193,7 @@ makes every result reproducible and every failure local.
 | change detection | findings now vs baseline/previous | `changes.json` (new / grew / shrank / stable) |
 | coverage | poses, usable frames, cloud | per-point/voxel state: inspected_ok / finding / not_seen |
 | risk ranking | findings, changes, asset data | severity + reason text per finding |
-| report | everything above | `report.pdf`, `report.xlsx`, work-order drafts |
+| report | the API database: inspection, site, organization, findings with observations (evidence frame + outline), decisions, scale source | PDF only so far (RPT1, ADR 0027): `qarau_pipeline.report.generate(inspection_id, lang, report_time, engine, runs_dir)` → `Generated(pdf, sha256, input)`, called by both the CLI and `GET /api/inspections/{id}/report.pdf` ("Inspection report" below); CLI `python -m qarau_pipeline report --inspection N --lang ru\|kk\|en --out F [--report-time ISO] [--db URL] [--runs-dir DIR]` (runs dir default `QARAU_RUNS_DIR`; without one: no map, no frame images, said in the PDF). `report/snapshot.py` (ADR 0032) draws the map of the inspection's last exported run with a NumPy point rasterizer (orthographic, fixed camera 30° above the filmed side, z-buffer, PNG via Pillow, no GL) and reads each finding's first 3 evidence frames; the template puts numbered SVG markers over the map, a crop around the marker in each card and the outline as an SVG `<polygon>` over each frame (viewBox in frame pixels). `report/inputs.py` reads the tables with SQLAlchemy Core into a frozen `ReportInput` (status/class/severity replayed from the decision log by `replay_decisions`, the same function `backend/app/decisions.py` uses; report number, version, version history and verification ID; the report time); `report/render.py` (`render_report(input, lang, runs_dir)`, reads only the run dirs) fills the Jinja2 template `report/templates/report.html.j2` + `report.css` and WeasyPrint writes an A4 PDF/A-3b: cover (company, site, asset, capture date, report number, version), executive summary, map snapshot with numbered findings, findings table by severity, one card per finding (class, severity, status, map location, area in m² with uncertainty or "uncertainty not estimated", or "scale not set"; scale source; the 3 evidence frames with outlines; who decided and when; its decision log), not inspected areas ("coverage not computed" until COV1), method and limitations, sign-off (prepared / checked / approved), document control (version history, verification ID); `@page` header with the report number and footer with the engineer, report time and "page X of Y" on every page. All strings in `report/translations.toml` (ru/kk/en), v8 fonts embedded from `report/fonts/` (OFL). The report time is the only clock in the file (PDF and XMP dates), so the same input gives byte-identical files. XLSX and work orders: later |
 
 ## Key techniques
 
@@ -326,6 +326,19 @@ list) computes `status`, `class` and `severity` by replaying the finding's decis
 `confirm` or `reclass` → `confirmed`; a `reclass` sets the class and/or severity it carries and a
 field it does not carry keeps its previous value; later decisions keep the reclassified values.
 No decision → the proposed values. Nothing is written back to `finding` or to an earlier decision.
+
+**Inspection report (`backend/app/reports.py`, RPT1, ADR 0027).**
+`GET /api/inspections/{id}/report.pdf?lang=ru|kk|en` (viewer) returns the PDF/A report
+(`application/pdf`, `Content-Disposition: inline; filename="<number>-v<version>-<lang>.pdf"`).
+It calls the same `qarau_pipeline.report.generate` as the CLI with `QARAU_RUNS_DIR` and the
+report time from the `report_clock` dependency (now, server zone, whole seconds; tests override
+it), so the CLI with the same `--report-time` writes byte-identical files. Headers
+`X-Report-SHA256` (hex of the body) and `X-Report-Generated-At` (the report time, ISO 8601, the
+only clock in the PDF). Every generation inserts a row in `report` (migration 0005: inspection,
+lang, sha256, `generated_at` in UTC, report number, version, `created_by` = the user, null for the
+shared read-only token); the row never feeds back into the PDF, so the same data, language and
+report time always give the same hash. 404 for an unknown inspection, 422 for a missing or unknown
+`lang`, 401 without a valid token. Every report is version 1 until reports are issued (signed off).
 
 ## Benchmark
 

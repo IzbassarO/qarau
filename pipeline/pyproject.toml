@@ -11,6 +11,8 @@ dependencies = [
   "pyyaml>=6.0.3",
   "scipy>=1.14",
   "boto3>=1.35",  # Apache-2.0; S3-compatible object storage (storage.py, ADR 0024)
+  "sqlalchemy>=2.0",  # MIT; the report reads the API's tables (report/inputs.py)
+  "psycopg[binary]>=3.2",  # LGPL-3.0, unmodified, as in backend/; Postgres driver for the CLI
   # The PDF report (RPT1, owner 2026-10-27): Jinja2 HTML -> WeasyPrint, sharing design system v8
   # CSS and fonts. WeasyPrint BSD-3-Clause, Jinja2 BSD-3-Clause; needs Pango (LGPL-2.1+, a
   # system library: Homebrew on the Mac, apt in CI and infra/worker).

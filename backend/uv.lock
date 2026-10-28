@@ -906,6 +906,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pypdf"
+version = "6.21.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/29/5c99ad4d9c3d942d3cf0439d633b98e2723757ec863d6f287ffd85465368/pypdf-6.21.3.tar.gz", hash = "sha256:11e1ca6d6cc8ca322558a3a974078d5ebc0f3a2104b8e673eee25621ee97abd8", size = 7106770, upload-time = "2026-10-27T12:16:53.179Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/e2/84ba4c41a3ceb69de4f4066a784eb34ecbf97e3a315152e17d7ea17ef499/pypdf-6.21.3-py3-none-any.whl", hash = "sha256:c8ca4d9a360dbd5d4b9bb7a8389e2a9ae6a106bee722b496f918040ba2daa17e", size = 409554, upload-time = "2026-10-27T12:16:50.585Z" },
+]
+
+[[package]]
 name = "pyphen"
 version = "0.18.1"
 source = { registry = "https://pypi.org/simple" }
@@ -992,6 +1001,7 @@ dev = [
     { name = "httpx" },
     { name = "moto", extra = ["s3"] },
     { name = "mypy" },
+    { name = "pypdf" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -1016,6 +1026,7 @@ dev = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "moto", extras = ["s3"], specifier = ">=5" },
     { name = "mypy", specifier = ">=1.11" },
+    { name = "pypdf", specifier = ">=5" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.6" },
 ]
@@ -1030,9 +1041,11 @@ dependencies = [
     { name = "laspy", extra = ["lazrs"] },
     { name = "numpy" },
     { name = "opencv-python-headless" },
+    { name = "psycopg", extra = ["binary"] },
     { name = "pycolmap" },
     { name = "pyyaml" },
     { name = "scipy" },
+    { name = "sqlalchemy" },
     { name = "weasyprint" },
 ]
 
@@ -1044,9 +1057,11 @@ requires-dist = [
     { name = "modal", marker = "extra == 'modal'", specifier = "==1.6.2" },
     { name = "numpy", specifier = ">=2" },
     { name = "opencv-python-headless", specifier = ">=4.10" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pycolmap", specifier = "==4.2.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "scipy", specifier = ">=1.14" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "weasyprint", specifier = ">=66" },
 ]
 provides-extras = ["modal"]

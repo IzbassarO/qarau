@@ -13,6 +13,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
+from qarau_pipeline.report.inputs import replay_decisions
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -69,14 +70,12 @@ def derive_finding_state(
     """(status, class, severity) after replaying `decisions` oldest first. The status is that of
     the latest decision: reject -> rejected; confirm and reclass -> confirmed. A reclass sets the
     class and/or severity it carries (a field it does not carry keeps its previous value) and
-    later decisions keep them. No decision: the proposed values stored on the finding."""
-    status, class_, severity = finding.status, finding.class_, finding.severity
-    for d in decisions:
-        status = "rejected" if d.verdict == Verdict.reject else "confirmed"
-        if d.verdict == Verdict.reclass:
-            class_ = d.new_class or class_
-            severity = d.new_severity or severity
-    return status, class_, severity
+    later decisions keep them. No decision: the proposed values stored on the finding.
+    The rule itself lives in qarau_pipeline.report.inputs, so the PDF report replays the same."""
+    status, class_, severity = replay_decisions(
+        finding.status, finding.class_, finding.severity, decisions
+    )
+    return status, class_, Severity(severity)
 
 
 def state_of(db: Session, finding: Finding) -> tuple[str, str, Severity]:
