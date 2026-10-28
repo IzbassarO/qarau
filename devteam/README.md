@@ -125,7 +125,30 @@ then unattended (`run --continuous` overnight).
   which come later; the tester judges only the current part's criteria. A part accepted by the
   tester starts the next one in a fresh round (new session, full brief); send-backs
   (`max_fix_loops`) and loop detection count per part; the gates, PR and merge come once, after
-  the last part. The packet lists the parts with the accepted ones ticked.
+  the last part. The packet lists the parts with the accepted ones ticked. Accepted parts are
+  kept in `.state/parts/<task>.json` (stage A, 2026-10-27; DS1 re-planned an accepted part 1 on
+  resume): a resumed task plans only the remaining parts, unless its goal changed (then the
+  whole task again, said in the events log); merged, the file goes.
+- Task size (stage A, 2026-10-27; DS1 got 16 criteria in 2 parts for 5 in its entry): at most 8
+  criteria per part, 5 in part 1 of several; a goal with "Done when:" lists N criteria (its
+  `;`-clauses plus Owner additions) and the plan has at most N + 3, each extra one in
+  `added_criteria` with why (shown in the plan). More than 3 parts: `needs_split`, as is a task
+  still too big after the one re-plan.
+- Tester verdicts are complete or they do not pass (stage A): `criteria` must give each number
+  1..N of the part's criteria exactly once. Otherwise the tester is asked once more with what
+  was missing, repeated or out of range; still incomplete, the round does not pass, it is
+  logged in `.state/tester_errors.jsonl` and not counted against the developer (twice in a row
+  ends the task). The API refusing the tester's request (HTTP 400 `invalid_request_error`) is a
+  tester error too: logged, tried once more with every image at half size, then the task is
+  blocked with "tester error: ..." (not a send-back). The judged diff is the current part's: part 1 (and a task in one piece) the
+  whole branch against dev; later parts from the commit the previous part was accepted at
+  (recorded in `.state/parts/<task>.json`, also used on resume), with the dev merged into the
+  branch since then left out. `--stat` stays the whole branch. It leaves out lockfiles and
+  generated files (`uv.lock`, `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `*.min.js`,
+  `*.map`; still in `--stat`); a part diff over 120 000 characters is not judged and cannot pass
+  ("too large to review").
+- A check that fails while the machine slept (wall clock over 60 s ahead of the monotonic one,
+  `run_proc`) runs once more, and the events log says so; watched developer runs never do.
 - Loop detection: the tester's reason is the set of unmet criteria, failing checks and missing
   screenshots. Sent back twice in a row for the same reason: no new round, `blocked`.
 - Tester send-backs name the exact place (owner, 2026-10-23: U2 was sent back three times on
@@ -150,8 +173,12 @@ then unattended (`run --continuous` overnight).
   round (its own docs/ attempts are only reverted). Anti-bypass checks on the diff: new
   `test.skip` / `.only` / `xfail` / `pytest.mark.skip` (a skip only while a data file is
   missing is allowed), fewer assertions or tests, looser thresholds in tests, `.patch` /
-  `.diff` files, code under docs/, test retries set in code or test config (`retries:`,
-  `retry:`, `--reruns`, `pytest.mark.flaky`) → sent back with the reason (twice → blocked). Every
+  `.diff` files, code under docs/, test-runner retries set in code or test config (Playwright
+  `retries:` in its config or `describe.configure({ retries })`, `--retries`, `jest.retryTimes`,
+  Vitest `retry:` in its config or test options, `--reruns` / `reruns=` /
+  `pytest.mark.flaky`; never a library's own option like React Query's `retry: false`). The JS
+  helpers (`xit`, `fit`, `fdescribe`, `xtest`, `xdescribe`, `.only`, `.skip`) count only in
+  .ts/.tsx/.js/.jsx/.mjs/.cjs test files → sent back with the reason (twice → blocked). Every
   violation goes to `.state/violations.jsonl`, "Needs your attention" and the daily report.
 - Owner-approved test rewrites (`gates.test_rewrite_allowed`, per task; owner 2026-10-24 for
   DS1: tests that pin the old look move to the v8 values): in the listed test files, fewer
@@ -234,7 +261,8 @@ then unattended (`run --continuous` overnight).
   comments or whitespace.
 - Screenshots: a web task whose criteria mention the viewer or screenshots lists `routes`; any
   task whose criteria name an app page path (`/viewer/<run>`, `/inspections`; never an API route
-  like `/api/...` or a file like `/openapi.json`) lists it too. A backend task may say "the
+  like `/api/...`, nor a word inside one such as `/coverage` in
+  `GET /api/inspections/{id}/coverage`, or a file like `/openapi.json`) lists it too. A backend task may say "the
   viewer must not break" without routes (B1, S1 and DEF1-api lost their first plan to that
   check, 2026-10-23). The tester
   screenshots them (pipeline tasks: the viewer on the quick benchmark output) at every
@@ -244,7 +272,9 @@ then unattended (`run --continuous` overnight).
   first theme in kk and en; `dev-*` in ru only), as
   `<route>-<viewport>[-<theme>][-<locale>].png` in `.state/packets/<task>/`, emptied at the
   start of each round. Screenshots over the API request limit (90 images, 24 MB; `dev-*` go
-  first) are named to the tester as not attached, never silently cut. A missing screenshot fails
+  first) are named to the tester as not attached, never silently cut; an image over 2000 px a
+  side (the API's limit with over 20 images) is sent scaled down to fit (Pillow, MIT-CMU),
+  aspect kept, with its label. A missing screenshot fails
   the task even if the judge passed. `dev-*.png` are the "before": pipeline
   tasks, the same routes on dev's cached gate benchmark; web tasks, the same routes built from a
   fresh checkout of dev. The tester signs in first (`devteam/shoot.mjs`, A1b login) with
@@ -311,7 +341,9 @@ then unattended (`run --continuous` overnight).
 - A task is `done` only when this run's commits went through a PR that passed CI and was
   merged. A branch already merged with nothing new is blocked as "nothing to merge, already
   done", never marked done.
-- Daily report: merged / blocked tasks, API cost, **subscription load per task** (rounds,
+- Daily report: metrics over the last 7 days (tasks done, parts accepted on the first round,
+  rounds and API $ per done task, blocked, tester errors, flaky tests with counts; also on the
+  dashboard), merged / blocked tasks, API cost, **subscription load per task** (rounds,
   minutes, tokens, ≈ API $), latest benchmark, last release.
 - Models, budget, gates, developer folders and checks: `config.yaml`.
 - Keys: `.env` (gitignored), template `.env.example`.

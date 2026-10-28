@@ -1,6 +1,7 @@
 """Real agents. Every pay-per-use model call goes through llm_call (budget + cost log)."""
 
 import base64
+import io
 import json
 import os
 import shutil
@@ -10,6 +11,7 @@ from pathlib import Path
 import anthropic
 import httpx
 import yaml
+from PIL import Image
 
 from devteam import costs, procs
 from devteam import gates as G
@@ -25,6 +27,14 @@ CACHE = {"type": "ephemeral", "ttl": "1h"}
 CACHE_WRITE_X = 2.0
 # Messages API limits per request: 100 images, 32 MB; kept under both with room for the text.
 MAX_IMAGES, MAX_IMAGE_BYTES = 90, 24e6
+# ... and with over 20 images, at most 2000 px a side (cont-20261027-232407: a v8 reference,
+# light and dark stacked, was rejected with HTTP 400): a longer image is scaled down to fit.
+MAX_SIDE = 2000
+# The judged diff: a part larger than this cannot be reviewed whole, so it cannot pass (a cut diff
+# could hide what the tester never saw). Lockfiles and generated files are in --stat only.
+MAX_DIFF = 120_000
+NOT_JUDGED = ("uv.lock", "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "*.min.js", "*.map")
+JUDGED = (".", *(f":(exclude,glob)**/{p}" for p in NOT_JUDGED))
 
 
 def transient(e: Exception) -> bool:
@@ -45,6 +55,28 @@ def transient(e: Exception) -> bool:
             "rate_limit_error",
         )
     )  # a mid-stream error event arrives with HTTP 200, the kind is in the body
+
+
+def invalid_request(e: Exception) -> bool:
+    """The API refused the request itself (HTTP 400 invalid_request_error)."""
+    if not isinstance(e, anthropic.APIStatusError):
+        return False
+    err = e.body.get("error") if isinstance(e.body, dict) else None
+    return e.status_code == 400 or (
+        isinstance(err, dict) and err.get("type") == "invalid_request_error"
+    )
+
+
+def png_data(path: str, scale: float = 1.0) -> bytes:
+    """The PNG as sent: scaled to fit MAX_SIDE (aspect kept), then by `scale`."""
+    with Image.open(path) as im:
+        f = min(1.0, MAX_SIDE / max(im.size)) * scale
+        if f >= 1:
+            return Path(path).read_bytes()
+        size = (max(1, round(im.width * f)), max(1, round(im.height * f)))
+        buf = io.BytesIO()
+        im.resize(size, Image.Resampling.LANCZOS).save(buf, "PNG")
+        return buf.getvalue()
 
 
 def image_label(path: str) -> str:
@@ -68,6 +100,7 @@ def llm_call(
     client=None,
     images: list[str] = (),
     context: str = "",
+    image_scale: float = 1.0,
 ) -> dict:
     """One structured-output call for `role` (a key of config.models). Reserves the
     worst-case cost first, settles to the real usage after. No SDK retries: transient failures
@@ -76,7 +109,8 @@ def llm_call(
     Prompt caching: `system` and `context` (the stable part of the user turn: repository
     rules, the task and its criteria) are cached; images and `prompt` come after them.
     Each image follows its own text label (file name and role), so a judge with dozens of
-    images never maps them to names by position (DS1: "after" shots read as dev-* "before")."""
+    images never maps them to names by position (DS1: "after" shots read as dev-* "before").
+    Every image is sent through png_data (at most MAX_SIDE a side, times `image_scale`)."""
     system, context, prompt = map(procs.clean_text, (system, context, prompt))
     labels = [image_label(i) for i in images]
     m = team.cfg["models"][role]
@@ -102,7 +136,7 @@ def llm_call(
                 "source": {
                     "type": "base64",
                     "media_type": "image/png",
-                    "data": base64.b64encode(Path(i).read_bytes()).decode(),
+                    "data": base64.b64encode(png_data(i, image_scale)).decode(),
                 },
             },
         ]
@@ -158,6 +192,11 @@ For each task you pick, write:
   the diff and check output (no "works well"). Include the tests that must exist. A goal with
   an "Owner additions (<date>):" list: each of its lines (without the leading "- ") is also its
   own criterion, copied word for word, on top of the 3-7; a plan that drops one is rejected.
+  Size (owner, 2026-10-27: 16 criteria for a backlog entry that listed 5): a goal with a "Done
+  when:" paragraph lists its criteria there (one per ";"-clause, plus its Owner additions); the
+  whole plan stays close to that number N: at most 3 criteria more than N, and every one over N
+  goes in `added_criteria` with why it is needed (else []). Never more than 8 criteria in one
+  part (the task's top-level criteria count in its last part); part 1 of several at most 5.
   Tests check fixed expected values (literals or fixtures), never values computed by the code
   under test.
 - licence_notes: every model or library the plan may use and its licence; it must allow
@@ -194,6 +233,12 @@ part it is on and which parts are done. The top-level `plan` is then the overvie
 task and the top-level `acceptance_criteria` (and `routes`) are the whole task's final state,
 checked in the last part together with that part's own: put the Owner additions and "ruff,
 mypy, pytest pass" there. A task with up to ~4 build items: `parts: []`, plan it as one piece.
+A task that would need more than 3 parts is not one task: list it in `needs_split` with the
+proposed tasks.
+A task with `accepted_parts`: the tester accepted those parts in an earlier run, their code is on
+the branch and they are kept as they are. Plan only the remaining parts (`parts` lists only
+them, never an accepted part again; `parts: []` when one piece is left); the top-level plan and
+criteria stay the whole task's.
 A task with `previous_work` already has commits on its devteam/<id> branch: the developer
 continues on that branch (dev merged in), so plan only what is still missing; say in the plan
 that the earlier work is there. Tasks whose `depends_on` are not all done never reach you.
@@ -251,7 +296,10 @@ or replaces a fixed expected value with one computed by the code under test; tha
 task whatever else passes. Updating an expected value to a new fixed literal that the
 criteria require is not weakening.
 A <plan> that says "part k of n": the brain planned this task in parts; the earlier parts were
-accepted already and the diff still shows the whole branch. Judge only this part's
+accepted already. From part 2 on, <diff> shows only this part's changes (since the previous part
+was accepted, without what came in from dev); <diffstat> is the whole branch, and the earlier
+parts' code is on it: never fail a criterion only because that code is not in <diff>.
+Judge only this part's
 <acceptance_criteria>; never fail it for later parts not being there yet.
 Design (owner, 2026-10-24): design system v8 (docs/design/DESIGN.md and its reference screens)
 is the source of truth for the UI. Images listed as "reference" are those screens, light theme
@@ -360,6 +408,18 @@ class RealAgents:
                             "plan": {"type": "string"},
                             "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
                             "licence_notes": {"type": "string"},
+                            "added_criteria": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "criterion": {"type": "string"},
+                                        "why": {"type": "string"},
+                                    },
+                                    "required": ["criterion", "why"],
+                                    "additionalProperties": False,
+                                },
+                            },
                             "routes": {"type": "array", "items": {"type": "string"}},
                             "parts": {
                                 "type": "array",
@@ -385,6 +445,7 @@ class RealAgents:
                             "plan",
                             "acceptance_criteria",
                             "licence_notes",
+                            "added_criteria",
                             "routes",
                             "parts",
                         ],
@@ -426,8 +487,9 @@ class RealAgents:
             {
                 "task_id": a["task_id"],
                 "assignee": a["assignee"],
-                "plan": a["plan"] + "\n\nLicences: " + a["licence_notes"],
+                "plan": a["plan"] + added_note(a) + "\n\nLicences: " + a["licence_notes"],
                 "criteria": a["acceptance_criteria"],
+                "added_criteria": a.get("added_criteria") or [],
                 "routes": a["routes"],
                 "parts": [
                     {
@@ -671,12 +733,24 @@ Rules:
     # --- tester --------------------------------------------------------------------------
     def judge(self, team, s, checks):
         base = f"{team.remote_name}/{team.cfg['base_branch']}"
-        diff = team.git("diff", f"{base}...HEAD", cwd=s["worktree"])
-        limit = 120_000
-        note = ""
-        if len(diff) > limit:  # said out loud, never silent
-            note = f"\n[diff truncated: showing {limit} of {len(diff)} characters]"
-            diff = diff[:limit]
+        diff = team.git(  # Team.git takes pathspecs literally; these need :(exclude,glob)
+            "diff", part_base(team, s, base), "HEAD", "--", *JUDGED, cwd=s["worktree"],
+            env={"GIT_LITERAL_PATHSPECS": "0"},
+        )  # fmt: skip
+        if len(diff) > MAX_DIFF:  # no tester call: it could only judge a cut diff
+            return {
+                "passed": False,
+                "criteria": [],
+                "tests_weakened": False,
+                "summary": "",
+                "how_to_try": "",
+                "feedback": (
+                    f"This part's diff is too large to review: {len(diff):,} characters without "
+                    f"lockfiles and generated files, over the limit of {MAX_DIFF:,}. Keep the "
+                    "change within the plan of this part: drop unrelated edits, reformatting "
+                    "and generated or copied files."
+                ),
+            }
         stat = team.git("diff", "--stat", f"{base}...HEAD", cwd=s["worktree"])
         check_text = (
             "\n\n".join(
@@ -720,7 +794,7 @@ Rules:
                 else ""
             )
             + f"<diffstat>\n{stat}</diffstat>\n\n"
-            f"<diff>\n{diff}{note}\n</diff>"
+            f"<diff>\n{diff}\n</diff>"
         )
         schema = {
             "type": "object",
@@ -770,17 +844,51 @@ Rules:
                 + "\n</owner_approved_test_rewrites>\n\n"
                 + prompt
             )
-        v = llm_call(
-            team,
-            "tester",
-            s["task"]["id"],
-            TESTER_SYSTEM,
-            team.redact(prompt),
-            schema,
-            images=shots,
-            context=team.redact(context),
-        )
-        v["passed"] = v["passed"] and all(c["met"] for c in v["criteria"])
+        n, tid, scale = len(s["criteria"]), s["task"]["id"], 1.0
+
+        def ask(extra=""):
+            # the API refusing the request is the tester's error, never the developer's: logged,
+            # tried once more with every image at half size, then the task is blocked
+            nonlocal scale
+            try:
+                return llm_call(
+                    team,
+                    "tester",
+                    tid,
+                    TESTER_SYSTEM,
+                    team.redact(prompt + extra),
+                    schema,
+                    images=shots,
+                    context=team.redact(context),
+                    image_scale=scale,
+                )
+            except anthropic.APIStatusError as e:
+                if not invalid_request(e):
+                    raise
+                again = scale == 1.0
+                team.tester_error(
+                    tid,
+                    f"API error: {e}" + ("; retrying with images at half size" if again else ""),
+                )
+                if not again:
+                    raise TaskHalted(f"tester error: {e}") from e
+                scale = 0.5
+                return ask(extra)
+
+        v = ask()
+        if gaps := verdict_gaps(v, n):  # asked once more, with what was wrong
+            v = ask(
+                f"\n\n<incomplete_verdict>\nYour verdict's `criteria` {gaps}. Answer again: "
+                f"one entry for each number 1..{n} of <acceptance_criteria>, each exactly once."
+                "\n</incomplete_verdict>"
+            )
+        if gaps := verdict_gaps(v, n):  # never a pass; not the developer's fault either
+            v["tester_error"] = f"the tester's verdict {gaps} (asked twice)"
+            v["feedback"] = (
+                f"Kerege: {v['tester_error']}; this round is not counted against you. "
+                "Unmet criteria the tester did name are below.\n\n" + v.get("feedback", "")
+            )
+        v["passed"] = v["passed"] and not gaps and all(c["met"] for c in v["criteria"])
         if v.get("tests_weakened") and s.get("test_changes"):
             v["passed"] = False
             v["feedback"] = (
@@ -789,6 +897,44 @@ Rules:
                 "of a fixture). Restore them and fix the code.\n\n" + v.get("feedback", "")
             )
         return v
+
+
+def part_base(team, s: dict, base: str) -> str:
+    """What the judged diff starts from. Part 1 (and a task in one piece): the merge base with
+    dev, the whole branch. Later parts: the commit at which the previous part was accepted,
+    with the dev the branch has merged since then merged into it (a tree, never committed), so
+    dev's changes are not this part's (owner, 2026-10-27: whole-branch diffs of RPT1, U2,
+    REV1-api and DS1 were 154-359 k characters, over MAX_DIFF in their last part)."""
+    wt, accepted = s["worktree"], s.get("part_base")
+    if not accepted:
+        return team.git("merge-base", base, "HEAD", cwd=wt).strip()
+    dev_in_branch = team.git("merge-base", base, "HEAD", cwd=wt).strip()
+    try:
+        return team.git("merge-tree", "--write-tree", accepted, dev_in_branch, cwd=wt).split()[0]
+    except RuntimeError:  # ponytail: dev conflicted with the accepted part; the plain base
+        return accepted  # then shows dev's changes too: larger, never missing anything
+
+
+def added_note(a: dict) -> str:
+    """The brain's criteria over the backlog entry's own, with why: said in the plan."""
+    added = a.get("added_criteria") or []
+    return "".join(
+        ["\n\nCriteria added to the backlog entry's:"] * bool(added)
+        + [f"\n- {x['criterion']}: {x['why']}" for x in added]
+    )
+
+
+def verdict_gaps(v: dict, n: int) -> str:
+    """ "" when the verdict's `criteria` gives each number 1..n exactly once, else what is wrong
+    (2026-10-27: a verdict that left a criterion out passed, all() of the rest being met)."""
+    nums = [c.get("number") for c in v.get("criteria") or []]
+    ok = [x for x in nums if type(x) is int and 1 <= x <= n]
+    gaps = [
+        ("misses numbers", [i for i in range(1, n + 1) if i not in ok]),
+        ("repeats numbers", sorted({x for x in ok if ok.count(x) > 1})),
+        (f"has numbers outside 1..{n}", [x for x in nums if x not in ok]),
+    ]
+    return "; ".join(f"{what} {xs}" for what, xs in gaps if xs)
 
 
 def _json(line: str) -> dict:

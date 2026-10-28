@@ -33,16 +33,30 @@ MAX_DOC_CODE_LINES = 60  # one fenced block in a doc longer than this is code pa
 TEST_FILE = re.compile(
     r"(^|/)(tests?|e2e|__tests__)/|(^|/)test_[^/]*\.py$|_test\.py$|\.(test|spec)\.[cm]?[jt]sx?$"
 )
-SKIP = re.compile(
+JS_EXT = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
+# Jasmine / Jest / Vitest / Playwright helpers: JS/TS test files only (a Python `fit(...)` call is
+# a model fit, not a focused test: RPT1, 2026-10-27)
+SKIP_JS = re.compile(
     r"\b(it|test|describe|suite)\.(skip|only|todo)\b|(?<![.\w])(xit|xdescribe|xtest|fit|fdescribe)"
-    r"\s*\(|pytest\.mark\.(skip|skipif|xfail)\b|\bpytest\.(skip|xfail)\s*\(|@unittest\.skip"
-    r"|test\.fixme\b"
+    r"\s*\(|test\.fixme\b"
 )
-# Retries set by the code itself: Kerege retries a failing e2e test once (--retries=1) and lists
-# it as flaky; more retries would turn a test that keeps failing into a pass (owner, 2026-10-27)
+SKIP = re.compile(
+    r"pytest\.mark\.(skip|skipif|xfail)\b|\bpytest\.(skip|xfail)\s*\(|@unittest\.skip"
+)
+# Test-runner retries set by the code itself: Kerege retries a failing e2e test once (--retries=1)
+# and lists it as flaky; more retries would turn a test that keeps failing into a pass (owner,
+# 2026-10-27). Matched on a hunk's added lines joined, so an options object may span lines.
+# Library options are not runner retries: React Query's `retry: false` in a test QueryClient makes
+# a test stricter (UI-evidence, 2026-10-27: dev_app removed it twice).
 RETRY = re.compile(
-    r"(?<![.\w])(retries|retry)\s*:|--retries\b|\breruns\s*=|--reruns\b|pytest\.mark\.flaky\b"
+    r"--retries\b|--reruns\b|\breruns\s*=|pytest\.mark\.flaky\b|\bjest\.retryTimes\s*\("
+    r"|\bdescribe\.configure\s*\(\s*\{[^{}]*\bretries\b"  # Playwright, per file / describe
+    # Vitest test options: test("name", { retry: 2 }, fn), describe(name, { retry }, fn)
+    r"|(?<![.\w])(?:it|test|describe)(?:\.\w+)*\s*\(\s*(?:(?:(['\"`]).*?\1|[\w.]+)\s*,\s*)?"
+    r"\{[^{}]*\bretry\b"
 )
+# Playwright `retries:` / Vitest `retry:` anywhere in the runner's own config
+RETRY_CONFIG = re.compile(r"(?<![.\w])(retries|retry)\s*:")
 TEST_CONFIG = re.compile(r"(^|/)(playwright|vitest|vite)\.config\.[cm]?[jt]s$|(^|/)conftest\.py$")
 # a skip only while local test data is missing (CI has no data/): e2e on real bundles (A5)
 DATA_SKIP = re.compile(r"\b(skip|skipif)\s*\(.*\b(existsSync|exists|is_file|isfile)\s*\(")
@@ -156,13 +170,19 @@ def bypass(diff: str, paths: list[str], rewrite_ok: list[str] | tuple = ()) -> l
     removed_asserts = added_asserts = removed_tests = added_tests = 0
     for path, minus, plus in _hunks(diff):
         is_test = bool(TEST_FILE.search(path))
-        if is_test or TEST_CONFIG.search(path):
-            for line in plus:
-                if RETRY.search(line):
-                    found.append(f"sets test retries in {path}: {line.strip()[:120]}")
+        retry = [RETRY] + ([RETRY_CONFIG] if TEST_CONFIG.search(path) else [])
+        if is_test or len(retry) > 1:
+            added = "\n".join(plus)
+            at = sorted(
+                {added.rfind("\n", 0, m.start()) + 1 for x in retry for m in x.finditer(added)}
+            )
+            for i in at:  # one finding per line where a match starts
+                line = added[i:].split("\n", 1)[0]
+                found.append(f"sets test retries in {path}: {line.strip()[:120]}")
         if is_test:
+            skip = (SKIP_JS, SKIP) if path.endswith(JS_EXT) else (SKIP,)
             for line in plus:
-                if SKIP.search(line) and not DATA_SKIP.search(line):
+                if any(p.search(line) for p in skip) and not DATA_SKIP.search(line):
                     found.append(f"skips or focuses a test in {path}: {line.strip()[:120]}")
             if path in rewrite_ok:
                 continue

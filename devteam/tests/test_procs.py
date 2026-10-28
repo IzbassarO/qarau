@@ -144,3 +144,42 @@ def test_screenshots_start_a_fresh_server_and_stop_it(team, scripts):
     assert problems == [] and len(paths) == 2
     assert (scripts / "served").exists()
     assert not is_open(port)  # stopped when the shots were taken
+
+
+def slept(monkeypatch, secs: float):
+    """time.time runs `secs` ahead of the monotonic clock from its second call on: the machine
+    slept that long during the first step."""
+    real, calls = time.time, []
+
+    def wall():
+        calls.append(1)
+        return real() + (secs if len(calls) % 2 == 0 else 0)  # (start, end) of each step
+
+    monkeypatch.setattr(time, "time", wall)
+
+
+def test_a_check_that_failed_while_the_machine_slept_runs_once_more(team, tmp_path, monkeypatch):
+    """2026-10-27: a check that ran while the Mac slept came back failed and cost a round."""
+    flaky = f"test -f {tmp_path / 'ran'} || {{ touch {tmp_path / 'ran'}; exit 1; }}"
+    slept(monkeypatch, 3600)
+    assert team.run_proc(flaky, cwd=str(tmp_path), timeout=10)["ok"]  # the second run passes
+    log = yaml.safe_load((team.home / "events.log").read_text())
+    assert [e["msg"][:40] for e in log] == ["the machine slept 60 min during `test -f"]
+    # failing again after the re-run: failed (once more only)
+    r = team.run_proc("exit 3", cwd=str(tmp_path), timeout=10)
+    assert not r["ok"] and r["code"] == 3
+    assert len(yaml.safe_load((team.home / "events.log").read_text())) == 2
+
+
+@pytest.mark.parametrize("secs", [0, 59])
+def test_a_failed_check_without_sleep_is_not_run_again(team, tmp_path, monkeypatch, secs):
+    slept(monkeypatch, secs)
+    flaky = f"test -f {tmp_path / 'ran'} || {{ touch {tmp_path / 'ran'}; exit 1; }}"
+    assert not team.run_proc(flaky, cwd=str(tmp_path), timeout=10)["ok"]
+    assert not (team.home / "events.log").exists()
+
+
+def test_a_watched_developer_run_is_never_run_again(team, tmp_path, monkeypatch):
+    slept(monkeypatch, 3600)
+    r = team.run_proc("exit 1", cwd=str(tmp_path), timeout=10, watch=lambda *a: "")
+    assert not r["ok"] and not (team.home / "events.log").exists()
