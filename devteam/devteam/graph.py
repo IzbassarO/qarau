@@ -80,6 +80,11 @@ FORBIDDEN_BRANCH = {"-D", "-d", "--delete", "-M", "-m", "--move", "-f", "--force
 POLL_S = 5  # a running step is checked this often (limits, `devteam stop <task>`)
 CPU_EVERY_S = 60  # supervisor: how often a round's CPU use is sampled
 SLEPT_S = 60  # wall clock ahead of the monotonic one by more: the machine slept
+# Task size (owner, 2026-10-27: DS1 got 16 criteria in 2 parts for a backlog entry with 5)
+MAX_PARTS = 3  # more: the task goes to needs_split
+MAX_PART_CRITERIA = 8
+FIRST_PART_CRITERIA = 5  # part 1 of several stays small
+MAX_ADDED_CRITERIA = 3  # over the backlog entry's own, each explained in the plan
 OWNER_STOP = "stopped by the owner"
 DEPS_WAIT = "waits for"  # blocked_reason of a task parked on its depends_on, e.g. "waits for A7a"
 CONFLICT = re.compile(rb"^(<{7}|>{7})( |$)", re.M)  # markers git leaves (not "=======": markdown)
@@ -310,11 +315,18 @@ def resume_note(task: dict) -> str:
 
 
 class PlanError(ValueError):
-    """`outside`: task id -> folders its criteria need that the assignee may not edit."""
+    """`outside`: task id -> folders its criteria need that the assignee may not edit.
+    `too_big`: task id -> why it does not fit in MAX_PARTS parts. `only_split`: every error is
+    one of those, so a second bad plan sends those tasks to needs_split."""
 
-    def __init__(self, errors: list[str], outside: dict[str, list[str]]):
+    def __init__(self, errors: list[str], outside: dict[str, list[str]], too_big=None, sizes=0):
         super().__init__("invalid plan: " + "; ".join(errors))
         self.outside, self.only_outside = outside, len(errors) == len(outside)
+        self.too_big: dict[str, str] = too_big or {}
+        self.only_split = len(errors) == len(outside) + sizes
+
+
+SIZE_ERROR = "too big"
 
 
 def outside_paths(criteria: list, dev: str, cfg: dict, task: dict) -> list[str]:
@@ -391,6 +403,17 @@ def owner_additions(goal: str) -> list[str]:
     return out
 
 
+DONE_WHEN = re.compile(r"^Done when:(.*?)(?=\n\n|\Z)", re.M | re.S)
+
+
+def listed_criteria(goal: str) -> int:
+    """Checkable statements a backlog entry lists: the clauses of its "Done when:" paragraph
+    (split at ";") plus its Owner additions. 0 without "Done when:": nothing to stay close to."""
+    if not (m := DONE_WHEN.search(goal or "")):
+        return 0
+    return len([c for c in m.group(1).split(";") if c.strip()]) + len(owner_additions(goal))
+
+
 def _norm(text: str) -> str:
     return " ".join(str(text).lower().split())
 
@@ -401,7 +424,7 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
     devs = cfg["developers"]
     ids = [p.get("task_id") for p in plans]
     who = [p.get("assignee") for p in plans]
-    errors, outside = [], {}
+    errors, outside, too_big, sizes = [], {}, {}, 0
     if len(set(ids)) != len(ids):
         errors.append(f"task ids repeat: {ids}")
     if len(set(who)) != len(who):
@@ -424,14 +447,27 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
                 "list it in needs_split with the parts per developer. If they are only read, "
                 "do not name them in the criteria"
             )
+        accepted = (by_id.get(tid) or {}).get("accepted_parts") or []
         stages = stages_of(p)
         if not str(p.get("plan", "")).strip() or not all(st["criteria"] for st in stages):
             errors.append(
                 f"{tid}: plan and acceptance criteria must not be empty"
                 + (" (in every part)" if len(stages) > 1 else "")
             )
-        if len(stages) > 3:
-            errors.append(f"{tid}: {len(stages)} parts; plan at most 3 inside one task")
+        if len(accepted) + len(stages) > MAX_PARTS:
+            errors.append(
+                f"{tid}: {len(accepted) + len(stages)} parts; plan at most {MAX_PARTS} inside one "
+                "task, or list it in needs_split"
+            )
+        if again := sorted({x["title"] for x in accepted} & {st["title"] for st in stages}):
+            errors.append(
+                f"{tid}: parts {again} were accepted already and are kept: plan only the "
+                "remaining parts"
+            )
+        size = size_errors(p, stages, accepted, by_id[tid]) if tid in by_id else []
+        errors += [f"{tid}{e}" for e in size]
+        if big := [e for e in size if SIZE_ERROR in e]:
+            too_big[tid], sizes = f"{tid}{big[0]}", sizes + len(big)
         all_crit = [c for st in stages for c in st["criteria"]]
         crit = [_norm(c) for c in all_crit]
         if tid in by_id and (
@@ -458,10 +494,14 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
         elif tid in by_id and dev in devs:
             errors += route_errors({**p, "routes": routes}, by_id[tid], cfg)
     if errors:
-        raise PlanError(errors, outside)
+        raise PlanError(errors, outside, too_big, sizes)
     out = []
     for p in plans:
-        task, stages = by_id[p["task_id"]], stages_of(p)
+        task = by_id[p["task_id"]]
+        accepted = task.get("accepted_parts") or []
+        stages = [*accepted, *stages_of(p)]
+        if accepted and not stages[-1]["title"]:
+            stages[-1]["title"] = "the rest of the task"
         overview = resume_note(task) + p["plan"]
         out.append(
             {
@@ -469,8 +509,40 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
                 "assignee": p["assignee"],
                 "overview": overview,
                 "stages": stages,
-                **stage_state(overview, stages, 0),
+                **stage_state(overview, stages, len(accepted)),
             }
+        )
+    return out
+
+
+def size_errors(p: dict, stages: list[dict], accepted: list[dict], task: dict) -> list[str]:
+    """At most MAX_PART_CRITERIA per part, FIRST_PART_CRITERIA in part 1 of several, and close
+    to what the backlog entry lists: at most MAX_ADDED_CRITERIA more, each in `added_criteria`
+    with why. Errors that mean "needs a split" say SIZE_ERROR; the caller adds the task id."""
+    out = []
+    for k, st in enumerate(stages, len(accepted) + 1):
+        if len(st["criteria"]) > MAX_PART_CRITERIA:
+            out.append(
+                f" (part {k}): {len(st['criteria'])} criteria, {SIZE_ERROR} "
+                f"(at most {MAX_PART_CRITERIA} per part)"
+            )
+    if not accepted and len(stages) > 1 and len(stages[0]["criteria"]) > FIRST_PART_CRITERIA:
+        out.append(
+            f" (part 1): {len(stages[0]['criteria'])} criteria, {SIZE_ERROR} (part 1 of several "
+            f"stays small: at most {FIRST_PART_CRITERIA})"
+        )
+    listed = listed_criteria(task.get("goal", ""))
+    total = len({c for st in stages for c in st["criteria"]})
+    why = [a for a in p.get("added_criteria") or [] if str(a.get("why", "")).strip()]
+    if listed and total > listed + MAX_ADDED_CRITERIA:
+        out.append(
+            f": {total} criteria for a backlog entry that lists {listed}, {SIZE_ERROR} "
+            f"(at most {MAX_ADDED_CRITERIA} added)"
+        )
+    elif listed and total - listed > len(why):
+        out.append(
+            f": {total} criteria for a backlog entry that lists {listed}: explain each added "
+            f"one in added_criteria (criterion, why); {len(why)} explained"
         )
     return out
 
@@ -819,6 +891,34 @@ class Team:
         with self._lock, open(self.home / "flaky.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
         self.emit("tester", f"FLAKY e2e (passed on retry, not blocking): {tests[:5]}", task=task_id)
+
+    # --- parts the tester accepted: kept when the task is planned again (resume) ------------
+    def accept_parts(self, task: dict, parts: list[dict]):
+        """After the tester accepts a part that is not the last (DS1, 2026-10-26: a resume
+        re-planned part 1, accepted the day before, and spent a round on it)."""
+        f = self.home / "parts" / f"{task['id']}.json"
+        f.parent.mkdir(exist_ok=True)
+        f.write_text(json.dumps({"goal": task.get("goal", ""), "parts": parts}, indent=1))
+
+    def accepted_parts(self, task: dict) -> list[dict]:
+        """The accepted parts of an earlier run, or [] (none, or the goal changed since: then
+        the whole task is planned again, and the events log says why)."""
+        f = self.home / "parts" / f"{task['id']}.json"
+        try:
+            kept = json.loads(f.read_text())
+        except FileNotFoundError:
+            return []
+        if kept["goal"] != task.get("goal", ""):
+            f.unlink()
+            titles = [x["title"] for x in kept["parts"]]
+            self.emit(
+                "brain",
+                f"the goal changed since parts {titles} were accepted: planning the whole task "
+                "again",
+                task=task["id"],
+            )
+            return []
+        return kept["parts"]
 
     def tester_error(self, task_id: str, detail: str):
         """The tester's verdict stayed incomplete after one re-ask: the round does not pass, and
@@ -1717,6 +1817,7 @@ def build_graph(team: Team, checkpointer):
             return {**out, "verdict": verdict, "fixes": fixes, "snap": snap, "last_sendback": key}
         stages, nxt = s.get("stages") or [], s.get("stage", 0) + 1
         if verdict["passed"] and nxt < len(stages):
+            team.accept_parts(s["task"], stages[:nxt])
             # a part accepted: the next one starts in a fresh round (no feedback, so a new
             # session with the full brief); send-backs and loop detection start again with it
             team.emit(
@@ -1987,8 +2088,9 @@ def build_graph(team: Team, checkpointer):
         team.update_task(tid, **fields)
         team.push_status(tid, f"backlog: {tid} {status}" + (f" (#{g['number']})" if merged else ""))
         team.control_file("stop", tid).unlink(missing_ok=True)  # applied: a resume starts clean
-        if merged:  # blocked keeps it: a resumed task's baseline is still before its first round
-            (team.home / "data-snap" / f"{tid}.json").unlink(missing_ok=True)
+        if merged:  # blocked keeps them: a resumed task's baseline is still before its first
+            (team.home / "data-snap" / f"{tid}.json").unlink(missing_ok=True)  # round, and its
+            (team.home / "parts" / f"{tid}.json").unlink(missing_ok=True)  # accepted parts
         if merged:
             team.unblock_ready()  # e.g. A4 done -> P3b back to todo
         if merged:  # finished: the worktree is no longer needed (branch and packet stay)
@@ -2087,9 +2189,12 @@ def build_graph(team: Team, checkpointer):
         if waiting := sorted(t["id"] for t in todo if not set(t.get("depends_on") or []) <= done):
             team.emit("brain", f"skipping tasks whose depends_on are not all done: {waiting}")
             todo = [t for t in todo if t["id"] not in waiting]
+        accepted = {}
         for t in todo:  # merged_tasks() fetched the task branches
             if work := team.prior_work(t["id"]):
                 t["previous_work"] = work
+            if parts := team.accepted_parts(t):  # kept on resume: only the rest is planned
+                t["accepted_parts"] = accepted[t["id"]] = parts
             if team.writes_runs(t):  # routes must name runs it makes, never these
                 t["runs_before_task"] = team.runs_before_task(t)
         if team.only:  # `devteam run --only P1`
@@ -2105,16 +2210,28 @@ def build_graph(team: Team, checkpointer):
             plans = team.agents.plan(team, todo, feedback=feedback, devs=list(devs)) if todo else []
             splits = [p for p in plans if p.get("split") and p.get("task_id") in open_ids]
             plans = [p for p in plans if not p.get("split")]
+            for p in plans:  # more parts than one task holds: the owner splits it
+                n = len(p.get("parts") or []) + len(accepted.get(p.get("task_id"), []))
+                if n > MAX_PARTS:
+                    splits.append(
+                        {"task_id": p["task_id"], "split": f"it needs {n} parts (max {MAX_PARTS})"}
+                    )
+            plans = [p for p in plans if p["task_id"] not in {x["task_id"] for x in splits}]
             try:
                 assignments = validate_plan(plans, todo, {**cfg, "developers": devs})
                 break
             except PlanError as e:
-                if attempt and e.only_outside:  # never planned across folders: split first
+                if attempt and e.only_split:  # never planned across folders or oversized
                     splits += [
-                        {"task_id": t, "split": f"its criteria need {paths}"}
+                        {"task_id": t, "split": f"its criteria need other folders: {paths}"}
                         for t, paths in e.outside.items()
+                    ] + [
+                        {"task_id": t, "split": f"it does not fit in {MAX_PARTS} parts: {why}"}
+                        for t, why in e.too_big.items()
+                        if t not in e.outside
                     ]
-                    plans = [p for p in plans if p["task_id"] not in e.outside]
+                    drop = set(e.outside) | set(e.too_big)
+                    plans = [p for p in plans if p["task_id"] not in drop]
                     assignments = validate_plan(plans, todo, {**cfg, "developers": devs})
                     break
                 if attempt:
@@ -2128,10 +2245,10 @@ def build_graph(team: Team, checkpointer):
         """Writes the checkpointed assignments to the backlog. Idempotent."""
         run = config["configurable"]["thread_id"]
         for sp in s.get("splits") or []:  # the owner splits them in the backlog
-            reason = (
-                "needs a split before it can be planned: the work spans folders of more than one "
-                f"developer ({sp['split']}). Split it in backlog.yaml (one task per developer, "
-                "depends_on between them)"
+            reason = (  # the work spans more than one developer's folders, or is too big
+                f"needs a split before it can be planned: {sp['split']}. Split it in "
+                "backlog.yaml (one task per developer, at most 3 parts each, depends_on between "
+                "them)"
             )
             team.update_task(sp["task_id"], status="blocked", blocked_reason=reason[:500])
             team.push_status(sp["task_id"], f"backlog: {sp['task_id']} blocked (needs a split)")

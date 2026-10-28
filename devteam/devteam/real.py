@@ -163,6 +163,11 @@ For each task you pick, write:
   the diff and check output (no "works well"). Include the tests that must exist. A goal with
   an "Owner additions (<date>):" list: each of its lines (without the leading "- ") is also its
   own criterion, copied word for word, on top of the 3-7; a plan that drops one is rejected.
+  Size (owner, 2026-10-27: 16 criteria for a backlog entry that listed 5): a goal with a "Done
+  when:" paragraph lists its criteria there (one per ";"-clause, plus its Owner additions); the
+  whole plan stays close to that number N: at most 3 criteria more than N, and every one over N
+  goes in `added_criteria` with why it is needed (else []). Never more than 8 criteria in one
+  part (the task's top-level criteria count in its last part); part 1 of several at most 5.
   Tests check fixed expected values (literals or fixtures), never values computed by the code
   under test.
 - licence_notes: every model or library the plan may use and its licence; it must allow
@@ -199,6 +204,12 @@ part it is on and which parts are done. The top-level `plan` is then the overvie
 task and the top-level `acceptance_criteria` (and `routes`) are the whole task's final state,
 checked in the last part together with that part's own: put the Owner additions and "ruff,
 mypy, pytest pass" there. A task with up to ~4 build items: `parts: []`, plan it as one piece.
+A task that would need more than 3 parts is not one task: list it in `needs_split` with the
+proposed tasks.
+A task with `accepted_parts`: the tester accepted those parts in an earlier run, their code is on
+the branch and they are kept as they are. Plan only the remaining parts (`parts` lists only
+them, never an accepted part again; `parts: []` when one piece is left); the top-level plan and
+criteria stay the whole task's.
 A task with `previous_work` already has commits on its devteam/<id> branch: the developer
 continues on that branch (dev merged in), so plan only what is still missing; say in the plan
 that the earlier work is there. Tasks whose `depends_on` are not all done never reach you.
@@ -365,6 +376,18 @@ class RealAgents:
                             "plan": {"type": "string"},
                             "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
                             "licence_notes": {"type": "string"},
+                            "added_criteria": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "criterion": {"type": "string"},
+                                        "why": {"type": "string"},
+                                    },
+                                    "required": ["criterion", "why"],
+                                    "additionalProperties": False,
+                                },
+                            },
                             "routes": {"type": "array", "items": {"type": "string"}},
                             "parts": {
                                 "type": "array",
@@ -390,6 +413,7 @@ class RealAgents:
                             "plan",
                             "acceptance_criteria",
                             "licence_notes",
+                            "added_criteria",
                             "routes",
                             "parts",
                         ],
@@ -431,8 +455,9 @@ class RealAgents:
             {
                 "task_id": a["task_id"],
                 "assignee": a["assignee"],
-                "plan": a["plan"] + "\n\nLicences: " + a["licence_notes"],
+                "plan": a["plan"] + added_note(a) + "\n\nLicences: " + a["licence_notes"],
                 "criteria": a["acceptance_criteria"],
+                "added_criteria": a.get("added_criteria") or [],
                 "routes": a["routes"],
                 "parts": [
                     {
@@ -820,6 +845,15 @@ Rules:
                 "of a fixture). Restore them and fix the code.\n\n" + v.get("feedback", "")
             )
         return v
+
+
+def added_note(a: dict) -> str:
+    """The brain's criteria over the backlog entry's own, with why: said in the plan."""
+    added = a.get("added_criteria") or []
+    return "".join(
+        ["\n\nCriteria added to the backlog entry's:"] * bool(added)
+        + [f"\n- {x['criterion']}: {x['why']}" for x in added]
+    )
 
 
 def verdict_gaps(v: dict, n: int) -> str:
