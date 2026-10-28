@@ -1375,11 +1375,20 @@ tasks:
     Owner 2026-10-27: part 2 of the UI-evidence split; starts from UI-evidence''s merged panel.
 
     '
-  status: in_progress
+  status: blocked
   depends_on:
   - UI-evidence
   owner: dev_app
   run: cont-20261027-232407-dev_app-1
+  branch: devteam/UI-evidence-b
+  blocked_reason: 'the tester sent it back twice in a row for the same reason, so no new round was started:
+    Criterion 6 fails. In every AFTER screenshot the panel shows the role error text under the frames
+    and no Confirm/Reject/Reclass buttons or comment field.
+
+
+    Cause: web/src/auth/auth.ts fetchSessionRole resolves the role by calling GET /api/users and matching
+    the exact 403 detail strings (''role ''engineer'' may not use a ''admin'' route''). In the real environment
+    the tester''s session did not resolve. The'
 - id: UI-evidence-c
   area: app
   title: 'Evidence panel: phone layout, ru/kk/en, full e2e'
