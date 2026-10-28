@@ -14,6 +14,7 @@ import './index.css';
 import { followSystemTheme } from './design/theme';
 import { AppShell } from './shell/AppShell';
 import { ViewerPage } from './pages/ViewerPage';
+import { ReportPage } from './pages/ReportPage';
 import { AuthProvider } from './auth/AuthProvider';
 import { RequireAuth } from './auth/RequireAuth';
 
@@ -32,6 +33,14 @@ createRoot(document.getElementById('root')!).render(
               <Route path="/" element={<AppShell />} />
               <Route path="/inspections/demo" element={<AppShell demo />} />
               <Route path="/inspections/:id" element={<AppShell />} />
+              <Route
+                path="/inspections/:id/report"
+                element={
+                  <AppShell>
+                    <ReportPage />
+                  </AppShell>
+                }
+              />
               <Route path="/runs" element={<Navigate to="/" replace />} />
             </Route>
             <Route element={<RequireAuth allowInDev />}>

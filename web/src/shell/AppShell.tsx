@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useI18n } from '../i18n';
@@ -12,7 +12,12 @@ import { NewInspectionDialog } from './NewInspectionDialog';
 import { Wordmark } from './ShellIdentity';
 import './shell.css';
 
-export function AppShell({ demo = false }: { demo?: boolean }) {
+export function AppShell({ demo = false, children }: { demo?: boolean; children?: ReactNode }) {
+  // Reports use v8's full-width screen scaffold rather than the inspection sidebar.
+  return children ? <div className="qv">{children}</div> : <InspectionShell demo={demo} />;
+}
+
+function InspectionShell({ demo }: { demo: boolean }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
