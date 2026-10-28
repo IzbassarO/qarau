@@ -1323,7 +1323,7 @@ tasks:
     real API with the demo seed; the remount race flipped the panel to Loading.
 
     '
-  status: in_progress
+  status: done
   depends_on:
   - DS1
   - DEF1-api
@@ -1331,6 +1331,8 @@ tasks:
   owner: dev_app
   run: run-20261027-183321
   branch: devteam/UI-evidence
+  pr: https://github.com/IzbassarO/qarau/pull/85
+  done_at: '2026-10-27'
 - id: UI-evidence-b
   area: app
   title: Decision log and actions in the evidence panel
