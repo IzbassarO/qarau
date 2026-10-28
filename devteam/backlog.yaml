@@ -1678,9 +1678,11 @@ tasks:
     frustum check, the thresholds and the API; ruff, mypy, pytest pass.
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - RPT1
+  owner: dev_pipeline
+  run: cont-20261027-232407-dev_pipeline-1
 - id: P5a-1
   area: core
   title: Metric scale from a measured distance, and gravity
