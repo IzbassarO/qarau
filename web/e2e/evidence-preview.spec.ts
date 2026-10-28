@@ -80,6 +80,11 @@ test('production evidence preview opens the first API finding with three outline
   for (const name of ['Confirm', 'Reject', 'Reclass'])
     await expect(panel.getByRole('button', { name, exact: true })).toBeVisible();
   await expect(panel.getByRole('textbox', { name: 'Comment' })).toBeVisible();
+  // Visibility alone also passes for controls below a scroll container's bottom edge.
+  await expect(panel.getByRole('textbox', { name: 'Comment' })).toBeInViewport({ ratio: 1 });
+  for (const name of ['Confirm', 'Reject', 'Reclass'])
+    await expect(panel.getByRole('button', { name, exact: true })).toBeInViewport({ ratio: 1 });
+  await expect(panel.getByText('No decisions yet')).toBeInViewport({ ratio: 1 });
   await expect(page.getByRole('alert')).toHaveCount(0);
   await panel.getByRole('button', { name: 'Close finding' }).click();
   await expect(panel).toHaveCount(0);

@@ -26,3 +26,17 @@ including noLiterals, noFixtureFindings and i18n keys. The production build emit
 size advisory. The existing evidence preview e2e mock now supplies the role and empty decision
 log and asserts the actions/comment field. E2e and screenshot verification remain with Kerege;
 no server was started and no real decision was submitted.
+
+Screenshot feedback follow-up: actions now precede the log, directly after the frames, as
+requested to match the finding reference. Evidence heights and form spacing use existing
+spacing tokens; the image and SVG share a fixed-ratio inner stage so the height cap does not
+misalign the outline. Smaller phone frame heights leave room for the same controls. No
+colors, fonts or tokens changed.
+
+Added session integration coverage in en/ru/kk: the real AuthProvider consumes a mocked
+GET /api/users engineer denial, sends the session header, displays all three actions and
+the comment before the log, and shows no alert. Existing assertions are unchanged. The
+existing preview e2e now additionally requires the comment, actions and empty log to be
+fully inside the viewport without scrolling. Kerege runs that browser check and captures
+screenshots; no local screenshots or server were started. Rechecked pnpm lint, typecheck,
+test (47 files, 842 tests) and build successfully.

@@ -21,6 +21,10 @@ function Decisions({ findingId }: { findingId: number }) {
   const query = useQuery(decisionsOptions(findingId));
   return (
     <>
+      {roleError && <p role="alert">{t('decisions.roleError')}</p>}
+      {(role === 'engineer' || role === 'admin') && (
+        <DecisionForm key={findingId} findingId={findingId} />
+      )}
       {query.isError ? (
         <p role="alert">{t(decisionErrorKey(query.error))}</p>
       ) : query.isPending ? (
@@ -29,10 +33,6 @@ function Decisions({ findingId }: { findingId: number }) {
         </p>
       ) : (
         <DecisionLog decisions={query.data} />
-      )}
-      {roleError && <p role="alert">{t('decisions.roleError')}</p>}
-      {(role === 'engineer' || role === 'admin') && (
-        <DecisionForm key={findingId} findingId={findingId} />
       )}
     </>
   );
@@ -57,21 +57,23 @@ function EvidenceImage({
   return (
     <figure className="qv-thumb evidence-frame" data-testid="evidence-frame">
       <div className="qv-thumb__img evidence-image">
-        <SessionImage
-          src={evidence.image_url}
-          alt={`${t('pointInfo.frame')} ${evidence.frame_id}`}
-          className="evidence-photo"
-          onLoad={(event) => {
-            const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
-            if (width > 0 && height > 0) setNatural({ width, height });
-          }}
-        />
-        <svg viewBox="0 0 400 250" aria-hidden="true">
-          <polygon
-            className={`qv-mask${severity === 'watch' ? ' qv-mask--watch' : ''}`}
-            points={polygonPoints(evidence.outline, fit)}
+        <div className="evidence-image-content">
+          <SessionImage
+            src={evidence.image_url}
+            alt={`${t('pointInfo.frame')} ${evidence.frame_id}`}
+            className="evidence-photo"
+            onLoad={(event) => {
+              const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
+              if (width > 0 && height > 0) setNatural({ width, height });
+            }}
           />
-        </svg>
+          <svg viewBox="0 0 400 250" aria-hidden="true">
+            <polygon
+              className={`qv-mask${severity === 'watch' ? ' qv-mask--watch' : ''}`}
+              points={polygonPoints(evidence.outline, fit)}
+            />
+          </svg>
+        </div>
       </div>
       <figcaption className="qv-thumb__cap">
         {t('pointInfo.frame')} {evidence.frame_id}
