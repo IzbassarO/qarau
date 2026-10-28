@@ -1403,18 +1403,13 @@ tasks:
     at 390x844; same functions, layout may differ).
 
     '
-  status: blocked
+  status: todo
   depends_on:
   - RPT1
   - DS1
   owner: dev_app
   run: run-20261028-134116
   branch: devteam/UI-report
-  blocked_reason: 'the tester sent it back twice in a row for the same reason, so no new round was started:
-    Criterion 4 fails on the screenshots. (1) inspections-demo-report-1440x900-light-ru.png captured the
-    page while the PDF was still generating: the status text reads ''Отчёт формируется…'', the Download
-    PDF button is disabled, there is no hash and no iframe. The demo route must reach ready state reliably,
-    so check why the PDF request on the demo route can stay pending or slow; in ReportPage.tsx the pd'
 - id: UI-evidence-b
   area: app
   title: Decision log and actions in the evidence panel
