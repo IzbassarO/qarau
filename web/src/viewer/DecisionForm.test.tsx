@@ -21,7 +21,7 @@ vi.mock('../lib/findings', async (original) => ({
 
 const clients: QueryClient[] = [];
 function mount(children: ReactNode) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const client = new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } });
   clients.push(client);
   return render(<QueryClientProvider client={client}>{children}</QueryClientProvider>);
 }

@@ -17,7 +17,7 @@ vi.mock('../lib/findings', async (original) => ({
 }));
 
 function render(element: ReactElement) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const client = new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } });
   return testingRender(element, {
     wrapper: ({ children }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
