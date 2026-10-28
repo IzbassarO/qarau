@@ -7,6 +7,20 @@ workflow:
   # started from the workflow (ADR 0019: `dense-remote --provider modal --allow-paid-gpu`).
   dense: false
 
+coverage:
+  # Coverage states per map region (COV1, docs/notes/cov1-plan.md): the sparse map is cut into
+  # voxels of voxel_size (bundle units, COLMAP's arbitrary scale: tuned on notre-dame). A region
+  # is inspected_ok only when at least min_frames usable frames see it (centroid in the frustum,
+  # one of its points in the frame's tracks) and it holds at least min_points_per_region points;
+  # a finding's point makes it `finding`; anything else is not_seen, never OK.
+  voxel_size: 1.0 # notre-dame/room maps span ~20-30 units; 0.5 left most cells with < 20 points
+  min_frames: 3
+  min_points_per_region: 20
+  max_view_distance: null # bundle units from the camera; null = no limit
+  # The frame quality check: a frame in a frames/quality_report.json issue of these kinds is not
+  # usable (pure_rotation frames are sharp: they only give no depth, so they still count)
+  unusable_issues: [blur, too_fast, low_texture]
+
 dense:
   # Frame links kept per dense point, best first (ADR 0017). Bounds the bundle: links cost
   # 4 bytes each, so 8 per point add at most 32 bytes per dense point (+ 4 for the offset).

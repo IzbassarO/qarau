@@ -166,11 +166,16 @@ def test_layout_helpers_resolve_a_legacy_run(tmp_path: Path) -> None:
 
 
 def test_step_list_from_config(tmp_path: Path) -> None:
-    assert [s.name for s in workflow.product_steps({})] == NAMES
-    assert [s.name for s in workflow.product_steps({"workflow": {"dense": False}})] == NAMES
+    # coverage is last: it marks the bundle that dense re-exports (COV1)
+    assert [s.name for s in workflow.product_steps({})] == [*NAMES, "coverage"]
+    assert [s.name for s in workflow.product_steps({"workflow": {"dense": False}})] == [
+        *NAMES,
+        "coverage",
+    ]
     assert [s.name for s in workflow.product_steps({"workflow": {"dense": True}})] == [
         *NAMES,
         "dense",
+        "coverage",
     ]
     # The checked-in config.yaml keeps dense off: the shipped workflow never densifies.
     assert workflow.dense_enabled(workflow.load_config()) is False

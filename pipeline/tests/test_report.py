@@ -3,10 +3,12 @@ determinism, translations, the database reader and the CLI. Expected strings are
 never read from the code under test."""
 
 import io
+import json
 import re
 import sqlite3
 import string
 import tomllib
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -22,7 +24,9 @@ from qarau_pipeline.report.inputs import (
     Evidence,
     FindingInput,
     InspectionInput,
+    RegionInput,
     VersionEntry,
+    coverage_input,
 )
 
 REPORT_DIR = Path(__file__).resolve().parents[1] / "qarau_pipeline" / "report"
@@ -71,6 +75,21 @@ INPUT = ReportInput(
     verification_id="7F3A-09C2-B4E1-5D68",
 )  # fmt: skip
 
+# A coverage/regions.json as the coverage step writes it (COV1): 1 inspected, 1 finding, 2 not
+# seen. The report lists the not-seen ones, most map points first.
+REGIONS_JSON: dict[str, Any] = {
+    "schema_version": 1, "units": "bundle", "voxel_size": 0.5,
+    "regions": [
+        {"id": "0_0_0", "bounds": [[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]], "state": "inspected_ok",
+         "frame_count": 5, "point_count": 40, "nearest_frames": ["000001.jpg"]},
+        {"id": "1_0_0", "bounds": [[0.5, 0.0, 0.0], [1.0, 0.5, 0.5]], "state": "finding",
+         "frame_count": 4, "point_count": 25, "nearest_frames": ["000002.jpg"]},
+        {"id": "-2_1_0", "bounds": [[-1.0, 0.5, 0.0], [-0.5, 1.0, 0.5]], "state": "not_seen",
+         "frame_count": 1, "point_count": 12, "nearest_frames": ["000004.jpg", "000007.jpg"]},
+        {"id": "3_0_1", "bounds": [[1.5, 0.0, 0.5], [2.0, 0.5, 1.0]], "state": "not_seen",
+         "frame_count": 0, "point_count": 31, "nearest_frames": ["000010.jpg"]},
+    ],
+}  # fmt: skip
 # Literal expectations per language: the headings in the order they must appear in the PDF.
 HEADINGS = {
     "en": ["Inspection report", "Executive summary", "Map", "Findings by severity",
@@ -240,17 +259,21 @@ def test_translation_tables_have_the_same_keys() -> None:
     assert all(len(table[lang]["months"]) == 12 for lang in table)
 
 
-def test_template_has_no_visible_text_of_its_own() -> None:
+@pytest.mark.parametrize("with_coverage", [False, True])
+def test_template_has_no_visible_text_of_its_own(with_coverage: bool) -> None:
     """Every translation replaced by a marker: what is left on the pages is markers and the
     fixture's own data (names, numbers, identifiers), nothing written in the template."""
+    inp = replace(INPUT, coverage=coverage_input(REGIONS_JSON["regions"])) if with_coverage \
+        else INPUT  # fmt: skip
     table = tomllib.loads((REPORT_DIR / "translations.toml").read_text())["en"]
     marked: dict[str, Any] = {}
     for i, (key, value) in enumerate(table.items()):
         marked[key] = [f"@k{i}x{j}@" for j in range(len(value))] if isinstance(value, list) else (
             f"@k{i}@")  # fmt: skip
     marked["decimal"] = "."
-    text = text_of(render_pdf(INPUT, marked, "en"))
+    text = text_of(render_pdf(inp, marked, "en"))
     assert marked["section_cards"] in text and marked["col_engineer"] in text
+    assert (marked["col_nearest"] in text) is with_coverage
     rest = re.sub(r"@k\d+(x\d+)?@", " ", text)
     for data in ("Caspian Inspection Services", "Tank T-104", "Vertical storage tank T-104",
                  "Dana Serik", "Aslan Bekov", "manual: Letter sheet", "Shadow, not corrosion",
@@ -277,6 +300,10 @@ def make_db(path: Path) -> str:
         CREATE TABLE decision (id INTEGER PRIMARY KEY, finding_id INTEGER, user_id INTEGER,
                                verdict TEXT, comment TEXT, new_class TEXT, new_severity TEXT,
                                created_at DATETIME);
+        CREATE TABLE coverage_region (id INTEGER PRIMARY KEY, run_id TEXT, region_key TEXT,
+                                      state TEXT, bounds JSON, frame_count INTEGER,
+                                      point_count INTEGER, nearest_frames JSON,
+                                      created_at DATETIME);
         INSERT INTO organization VALUES (1, 'Caspian Inspection Services');
         INSERT INTO "user" VALUES (1, 'Aslan Bekov'), (2, 'Dana Serik');
         INSERT INTO site VALUES (1, 1, 'Tank T-104');
@@ -354,3 +381,74 @@ def test_cli_unknown_inspection_fails(tmp_path: Path) -> None:
               "--out", str(tmp_path / "x.pdf")])  # fmt: skip
     assert err.value.code == 1
     assert not (tmp_path / "x.pdf").exists()
+
+
+# The not-seen section (COV1) per language: the summary line, then the two rows in order (most
+# map points first): No., bounds, map points, nearest frames.
+NOT_SEEN = {
+    "en": ["Not inspected areas 2",
+           "Map regions: 1 inspected with nothing found, 1 with a finding, 2 not inspected.",
+           "1 1.50 to 2.00; 0.00 to 0.50; 0.50 to 1.00 31 Frame 10",
+           "2 -1.00 to -0.50; 0.50 to 1.00; 0.00 to 0.50 12 Frame 4, Frame 7"],
+    "ru": ["Неосмотренные участки 2",
+           "Участки карты: 1 осмотрено, дефектов нет; 1 с дефектом; 2 не осмотрено.",
+           "1 от 1,50 до 2,00; от 0,00 до 0,50; от 0,50 до 1,00 31 Кадр 10",
+           "2 от -1,00 до -0,50; от 0,50 до 1,00; от 0,00 до 0,50 12 Кадр 4, Кадр 7"],
+    "kk": ["Тексерілмеген аймақтар 2",
+           "Карта аймақтары: 1 тексерілді, ақау жоқ; 1 ақауы бар; 2 тексерілмеген.",
+           "1 1,50 – 2,00; 0,00 – 0,50; 0,50 – 1,00 31 Кадр 10",
+           "2 -1,00 – -0,50; 0,50 – 1,00; 0,00 – 0,50 12 Кадр 4, Кадр 7"],
+}  # fmt: skip
+NOT_COMPUTED = {"en": "Coverage not computed.", "ru": "Покрытие не рассчитано.",
+                "kk": "Қамту есептелмеген."}  # fmt: skip
+
+
+def insert_regions(db: Path, run_id: str, doc: dict[str, Any]) -> None:
+    con = sqlite3.connect(db)
+    con.executemany(
+        "INSERT INTO coverage_region (run_id, region_key, state, bounds, frame_count, "
+        "point_count, nearest_frames) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [(run_id, r["id"], r["state"], json.dumps(r["bounds"]), r["frame_count"],
+          r["point_count"], json.dumps(r["nearest_frames"])) for r in doc["regions"]],
+    )  # fmt: skip
+    con.commit()
+    con.close()
+
+
+@pytest.mark.parametrize("lang", ["ru", "kk", "en"])
+def test_not_seen_section_lists_the_regions_of_regions_json(tmp_path: Path, lang: str) -> None:
+    (tmp_path / "regions.json").write_text(json.dumps(REGIONS_JSON))
+    url = make_db(tmp_path / "api.db")
+    insert_regions(tmp_path / "api.db", "r1", json.loads((tmp_path / "regions.json").read_text()))
+    inp = load_report_input(sa.create_engine(url), 7, REPORT_TIME)
+    assert inp.coverage is not None
+    assert (inp.coverage.inspected_ok, inp.coverage.finding) == (1, 1)
+    assert inp.coverage.not_seen == (
+        RegionInput("3_0_1", ((1.5, 0.0, 0.5), (2.0, 0.5, 1.0)), 31, ("000010.jpg",)),
+        RegionInput("-2_1_0", ((-1.0, 0.5, 0.0), (-0.5, 1.0, 0.5)), 12,
+                    ("000004.jpg", "000007.jpg")),
+    )  # fmt: skip
+    text = text_of(render_report(inp, lang))
+    section = text[text.find(HEADINGS[lang][11], text.find(HEADINGS[lang][10])) :]
+    for s in NOT_SEEN[lang][1:]:
+        assert s in section, f"{lang}: {s!r} missing"
+    assert NOT_SEEN[lang][0] in text
+    assert NOT_COMPUTED[lang] not in text
+
+
+def test_coverage_of_the_latest_run_only(tmp_path: Path) -> None:
+    """Two runs with coverage: the report uses the later one (the map's run)."""
+    db = tmp_path / "api.db"
+    url = make_db(db)
+    con = sqlite3.connect(db)
+    con.execute("INSERT INTO run VALUES ('r2', 7, 'notre-dame-p3e')")
+    con.commit()
+    con.close()
+    insert_regions(db, "r1", REGIONS_JSON)
+    insert_regions(db, "r2", {"regions": REGIONS_JSON["regions"][:2]})
+    cov = load_report_input(sa.create_engine(url), 7, REPORT_TIME).coverage
+    assert cov is not None and (cov.inspected_ok, cov.finding, cov.not_seen) == (1, 1, ())
+    text = text_of(render_report(replace(INPUT, coverage=cov), "en"))
+    assert "Not inspected areas 0" in text
+    assert ("Every region of the map was inspected. Surfaces that are not on the map were not "
+            "filmed and are not assessed.") in text  # fmt: skip

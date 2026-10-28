@@ -190,6 +190,32 @@ class Report(Base):
     created_by: Mapped[int | None] = mapped_column(sa.ForeignKey("user.id"), nullable=True)
 
 
+class CoverageRegion(Base):
+    """One map region of a run's coverage (COV1, migration 0006), imported from the pipeline's
+    <run>/coverage/regions.json: `region_key` is the voxel key "ix_iy_iz", `bounds` the cell
+    [[min x, y, z], [max x, y, z]] in bundle units, `frame_count` the usable frames that see it,
+    `nearest_frames` up to 3 frame image names."""
+
+    __tablename__ = "coverage_region"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "state IN ('inspected_ok', 'finding', 'not_seen')", name="ck_coverage_region_state"
+        ),
+        sa.UniqueConstraint("run_id", "region_key", name="uq_coverage_region_run_key"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[str] = mapped_column(sa.ForeignKey("run.id"), index=True)
+    region_key: Mapped[str] = mapped_column(sa.String(64))
+    state: Mapped[str] = mapped_column(sa.String(16))
+    bounds: Mapped[Any] = mapped_column(sa.JSON)
+    frame_count: Mapped[int] = mapped_column(sa.Integer)
+    point_count: Mapped[int] = mapped_column(sa.Integer)
+    nearest_frames: Mapped[Any] = mapped_column(sa.JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), default=now, server_default=sa.text("CURRENT_TIMESTAMP")
+    )
+
+
 class AuditLog(Base):
     """Append-only (trigger in migration 0001). One row per write request."""
 

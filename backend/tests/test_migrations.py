@@ -23,6 +23,7 @@ from app.models import (
 EXPECTED_TABLES = [
     "alembic_version",
     "audit_log",
+    "coverage_region",
     "decision",
     "finding",
     "inspection",
@@ -195,11 +196,58 @@ def test_v0005_creates_the_report_table_and_downgrades(db_url: str) -> None:
 
     command.downgrade(alembic_config(db_url), "0004")
     tables = sorted(inspect(engine).get_table_names())
-    assert tables == [t for t in EXPECTED_TABLES if t != "report"]
+    assert tables == [t for t in EXPECTED_TABLES if t not in ("report", "coverage_region")]
     command.upgrade(alembic_config(db_url), "head")
     assert sorted(inspect(engine).get_table_names()) == EXPECTED_TABLES
     with engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM report")).scalar() == 0
+
+
+COVERAGE_COLUMNS = ["bounds", "created_at", "frame_count", "id", "nearest_frames", "point_count",
+                    "region_key", "run_id", "state"]  # fmt: skip
+COVERAGE_ROW = ("INSERT INTO coverage_region (run_id, region_key, state, bounds, frame_count, "
+                "point_count, nearest_frames) VALUES (:run, :key, :state, "
+                "'[[0, 0, 0], [1, 1, 1]]', 3, 20, '[\"000001.jpg\"]')")  # fmt: skip
+
+
+def test_v0006_creates_coverage_regions_with_a_state_check_and_downgrades(db_url: str) -> None:
+    """0006 adds `coverage_region` (COV1): a run's regions, state limited to inspected_ok |
+    finding | not_seen, one row per (run, region key), created_at from the server; downgrade to
+    0005 drops it and leaves the other tables."""
+    from conftest import alembic_config
+
+    from alembic import command
+
+    engine = engine_for(db_url)
+    insp = inspect(engine)
+    cols = {c["name"]: c for c in insp.get_columns("coverage_region")}
+    assert sorted(cols) == COVERAGE_COLUMNS
+    assert not any(cols[c]["nullable"] for c in COVERAGE_COLUMNS)
+    fks = [(fk["constrained_columns"], fk["referred_table"])
+           for fk in insp.get_foreign_keys("coverage_region")]  # fmt: skip
+    assert fks == [(["run_id"], "run")]
+    seed_one_decision_and_audit_row(db_url)  # run "rrr…r"
+    run = "r" * 32
+    with engine.begin() as conn:
+        for key, state in (("0_0_0", "inspected_ok"), ("1_0_0", "finding"), ("2_0_0", "not_seen")):
+            conn.execute(text(COVERAGE_ROW), {"run": run, "key": key, "state": state})
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT created_at FROM coverage_region LIMIT 1")).one()
+        assert row[0] is not None
+    for bad in ({"run": run, "key": "3_0_0", "state": "ok"},  # not a coverage state
+                {"run": run, "key": "0_0_0", "state": "not_seen"},  # same run and key again
+                {"run": "nope", "key": "0_0_0", "state": "not_seen"}):  # no such run  # fmt: skip
+        with pytest.raises(DBAPIError), engine.begin() as conn:
+            conn.execute(text(COVERAGE_ROW), bad)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM coverage_region")).scalar() == 3
+
+    command.downgrade(alembic_config(db_url), "0005")
+    assert sorted(inspect(engine).get_table_names()) == [
+        t for t in EXPECTED_TABLES if t != "coverage_region"
+    ]
+    command.upgrade(alembic_config(db_url), "head")
+    assert sorted(inspect(engine).get_table_names()) == EXPECTED_TABLES
 
 
 @pytest.mark.parametrize("sql", FORBIDDEN_SQL)

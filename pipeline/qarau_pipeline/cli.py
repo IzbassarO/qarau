@@ -1,4 +1,4 @@
-"""CLI: python -m qarau_pipeline {run,step,quality,export,segment,project,dense-remote,
+"""CLI: python -m qarau_pipeline {run,step,quality,export,segment,project,coverage,dense-remote,
 finding-evidence,report,benchmark,refresh} ..."""
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from .interfaces import StageError
 from .keyframes import MODES
 from .segmentation import GroundedSam2, ManualMasks, SamApiSegmenter, parse_prompt, segment_stage
 from .workflow import (
+    Step,
     export_run,
     make_context,
     product_steps,
@@ -121,6 +122,17 @@ def cmd_project(a: argparse.Namespace) -> None:
     from .projection import project_stage
 
     print("project:", project_stage(Path(a.run).resolve(), a.scale))
+
+
+def cmd_coverage(a: argparse.Namespace) -> None:
+    """The coverage step of a run, always redone (after `project`, so new findings count)."""
+    from .workflow import coverage
+
+    run = Path(a.run).resolve()
+    res = run_step(Step("coverage", coverage), make_context(run, run_config(run), force=True))
+    if res.status == "failed":
+        raise StageError(f"coverage: {res.error}")
+    print(f"coverage: {run / 'coverage' / 'regions.json'}")
 
 
 def cmd_dense_remote(a: argparse.Namespace) -> None:
@@ -271,7 +283,7 @@ def main(argv: list[str] | None = None) -> None:
                    help="extract features in the sky too (pre-P3b, ADR 0013)")  # fmt: skip
     r.set_defaults(fn=cmd_run)
     st = sub.add_parser("step", help="run exactly one workflow step of a run dir (ADR 0022)")
-    st.add_argument("name", nargs="?", help="probe | frames | sparse | export [| dense]")
+    st.add_argument("name", nargs="?", help="probe | frames | sparse | export [| dense] | coverage")
     st.add_argument("--run", help="run dir: <run>/video.<ext> or <run>/workflow.json names the "
                     "input")  # fmt: skip
     st.add_argument("--force", action="store_true", help="redo the step even if step.json is done")
@@ -305,6 +317,13 @@ def main(argv: list[str] | None = None) -> None:
     pj.add_argument("--run", required=True)
     pj.add_argument("--scale", type=float, help="metres per world unit (area in m2 only with it)")
     pj.set_defaults(fn=cmd_project)
+    cv = sub.add_parser(
+        "coverage",
+        help="coverage state per map region -> <run>/coverage/"
+        "regions.json + the bundle's points.coverage.u8 (always redone)",
+    )
+    cv.add_argument("--run", required=True, help="run dir with an exported bundle")
+    cv.set_defaults(fn=cmd_coverage)
     dr = sub.add_parser("dense-remote", help="COLMAP dense on a remote GPU worker (ADR 0016)")
     dr.add_argument("--provider", choices=["fake", "modal"], default="fake",
                     help="fake (default, free) or modal (paid, needs --allow-paid-gpu); "

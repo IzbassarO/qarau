@@ -16,6 +16,7 @@ NEW_PATHS = [
     "/api/findings/{finding_id}",
     "/api/findings/{finding_id}/decisions",
     "/api/inspections/{inspection_id}/report.pdf",
+    "/api/inspections/{inspection_id}/coverage",
     "/api/users",
     "/api/audit-log",
     "/api/audit-log/{entry_id}",
@@ -36,6 +37,7 @@ EXPECTED_OPERATIONS = {
     "/api/findings/{finding_id}": {"get"},
     "/api/findings/{finding_id}/decisions": {"get", "post"},
     "/api/inspections/{inspection_id}/report.pdf": {"get"},
+    "/api/inspections/{inspection_id}/coverage": {"get"},
     "/api/users": {"get", "post"},
     "/api/audit-log": {"get"},
     "/api/audit-log/{entry_id}": {"put", "patch", "delete"},
@@ -70,6 +72,17 @@ def test_openapi_report_route_is_a_viewer_pdf_with_a_language() -> None:
     lang = next(p for p in op["parameters"] if p["name"] == "lang")
     assert lang["in"] == "query" and lang["required"] is True
     assert lang["schema"]["enum"] == ["ru", "kk", "en"]
+
+
+def test_openapi_coverage_route_is_a_viewer_route_with_the_three_states() -> None:
+    spec = TestClient(app).get("/openapi.json").json()
+    op = spec["paths"]["/api/inspections/{inspection_id}/coverage"]["get"]
+    assert op["description"].startswith("Role: viewer.")
+    out = spec["components"]["schemas"]["CoverageOut"]["properties"]
+    assert set(out) == {"inspection_id", "status", "message", "run_id", "totals", "regions"}
+    region = spec["components"]["schemas"]["RegionOut"]["properties"]
+    assert set(region) == {"id", "state", "bounds", "frame_count", "point_count", "nearest_frames"}
+    assert region["state"]["enum"] == ["inspected_ok", "finding", "not_seen"]
 
 
 def test_openapi_decision_operations_declare_their_roles() -> None:

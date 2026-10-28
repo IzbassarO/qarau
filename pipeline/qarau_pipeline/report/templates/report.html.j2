@@ -162,8 +162,28 @@
 
 <section class="page">
   <h2><span>5</span><span>{{ t('section_not_seen') }}</span></h2>
-  {# ponytail: COV1 replaces this line with the list of not-seen areas #}
+  {% if inp.coverage is none %}
   <p>{{ t('coverage_not_computed') }}</p>
+  {% else %}
+  <p>{{ t('coverage_summary', ok=inp.coverage.inspected_ok, finding=inp.coverage.finding, not_seen=inp.coverage.not_seen|length) }}</p>
+  {% if inp.coverage.not_seen %}
+  <p>{{ t('not_seen_intro') }}</p>
+  <table class="data">
+    <thead><tr>
+      <th>{{ t('col_no') }}</th><th>{{ t('col_bounds') }}</th>
+      <th>{{ t('col_points') }}</th><th>{{ t('col_nearest') }}</th>
+    </tr></thead>
+    <tbody>
+    {% for r in not_seen_rows %}
+    <tr><td>{{ loop.index }}</td><td>{{ bounds(r) }}</td><td>{{ r.point_count }}</td><td>{{ nearest(r) }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if not_seen_more %}<p>{{ t('not_seen_more', count=not_seen_more) }}</p>{% endif %}
+  {% else %}
+  <p>{{ t('not_seen_none') }}</p>
+  {% endif %}
+  {% endif %}
 
   <h2><span>6</span><span>{{ t('section_method') }}</span></h2>
   <h3>{{ t('method_heading') }}</h3>
