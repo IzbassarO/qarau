@@ -1702,11 +1702,14 @@ tasks:
     '
   supervisor:
     max_tokens_per_round: 24000000
-  status: in_progress
+  status: done
   depends_on:
   - COV1
   owner: dev_pipeline
   run: cont-20261028-185246-dev_pipeline-3
+  branch: devteam/COV1-b
+  pr: https://github.com/IzbassarO/qarau/pull/95
+  done_at: '2026-10-28'
 - id: UI-mark
   area: app
   title: Mark a region on the 3D map as a finding
