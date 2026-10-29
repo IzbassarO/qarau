@@ -36,16 +36,26 @@
 
 ## Real data (notre-dame-p3e, 2026-10-29)
 
-Scratch SQLite dev DB (`alembic upgrade head`), `QARAU_RUNS_DIR=data/runs`, `python -m app.seed`:
+Re-run on the final code (round 2): a fresh scratch SQLite dev DB (`alembic upgrade head`),
+`QARAU_ENV=dev`, `QARAU_RUNS_DIR=data/runs`, `python -m app.seed` twice. Printed output:
 
 ```
 seeded organization 'dev' with users admin, engineer, viewer
 seeded 'Demo site': run notre-dame-p3e, finding 1
 coverage of 'Demo site': 485 regions: inspected_ok 192 (39.6%), finding 4 (0.8%), not_seen 289 (59.6%)
+seeded organization 'dev' with users admin, engineer, viewer
+'Demo site' not added: it exists, or notre-dame-p3e is not under QARAU_RUNS_DIR
+coverage of 'Demo site': 485 regions: inspected_ok 192 (39.6%), finding 4 (0.8%), not_seen 289 (59.6%)
 ```
 
-Second run: same totals, still 485 rows. `GET /api/inspections/1/coverage`: computed=true,
-totals {inspected_ok: 39.6, finding: 0.8, not_seen: 59.6}, 485 regions in all three states.
-The demo report (`load_report_input` + `with_coverage` + `render_html`) lists **289 not-seen
-regions** and has no "Coverage not computed." The only file added under the run is
-`data/runs/notre-dame-p3e/coverage/regions.json`; nothing existing changed.
+The run already had `coverage/regions.json` (added by round 1, the only file the task added
+under the run), so the seed read it. To show it is what the final code computes, the same step
+(`run_coverage` with the DB finding's points) was run again into a scratch dir:
+`{'regions': 485, 'inspected_ok': 192, 'finding': 4, 'not_seen': 289}`, regions identical to
+the run's file (`==` True).
+
+- `GET /api/inspections/1/coverage`: computed=true, totals `{inspected_ok: 39.6, finding: 0.8,
+  not_seen: 59.6}`, regions by state: inspected_ok 192, finding 4, not_seen 289.
+- Demo report (`load_report_input` + `with_coverage` + `render_html`, en): **289 not-seen
+  regions** (`Not inspected areas: 289.`), no "Coverage not computed.".
+- `data/runs/notre-dame-p3e`: nothing existing changed.
