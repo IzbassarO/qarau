@@ -383,9 +383,50 @@ def export_bundle(
     manifest["stats"]["processing_s"]["export"] = round(time.perf_counter() - t0, 2)
     (web / "manifest.json").write_text(json.dumps(manifest))
     write_dev_manifest_copy(out, web)
+    write_coverage_layer(out)
 
     check = check_projection(rec, out, manifest, reg, pids)
     return {**manifest["stats"], **extra, "reproj_check_px": check}
+
+
+COVERAGE_CODES = {"not_seen": 0, "inspected_ok": 1, "finding": 2}
+NO_REGION = 255
+
+
+def coverage_codes(xyz: np.ndarray, regions: list[dict[str, Any]]) -> np.ndarray:
+    """Coverage state code per point: that of the region whose bounds hold it (the first region
+    by id when several do: a point on a shared face), NO_REGION when none does."""
+    codes = np.full(len(xyz), NO_REGION, np.uint8)
+    # ponytail: one pass over the points per region; look up voxel keys if this ever gets slow
+    for r in sorted(regions, key=lambda r: str(r["id"]), reverse=True):  # first id written last
+        lo, hi = r["bounds"]["min"], r["bounds"]["max"]
+        codes[np.all((xyz >= lo) & (xyz <= hi), axis=1)] = COVERAGE_CODES[r["state"]]
+    return codes
+
+
+def write_coverage_layer(run: Path) -> dict[str, Any]:
+    """Adds `points.coverage.u8` (one code per bundle point, COVERAGE_CODES / NO_REGION) from
+    <run>/coverage/regions.json (COV1) to the run's bundle, and the manifest key `coverage`
+    (ADR 0003); without regions.json the key says {computed: false} and there is no array.
+    Called by export_bundle and by the coverage step (which runs after export). Returns the key."""
+    mpath = layout.manifest_path(run)
+    man = json.loads(mpath.read_text())
+    regions = run / "coverage" / "regions.json"
+    arr = mpath.parent / "points.coverage.u8"
+    entry: dict[str, Any] = {"computed": False}
+    if regions.is_file():
+        xyz = np.fromfile(run / man["points"]["position"], "<f4").reshape(-1, 3)
+        codes = coverage_codes(xyz, json.loads(regions.read_text())["regions"])
+        codes.tofile(arr)
+        entry = {"computed": True, "path": arr.relative_to(run).as_posix(), "dtype": "u1",
+                 "count": len(codes), "codes": {**COVERAGE_CODES, "no_region": NO_REGION},
+                 "regions": "coverage/regions.json"}  # fmt: skip
+    else:
+        arr.unlink(missing_ok=True)
+    man["coverage"] = entry
+    mpath.write_text(json.dumps(man))
+    write_dev_manifest_copy(run, mpath.parent)
+    return entry
 
 
 def write_dev_manifest_copy(out: Path, web: Path) -> None:

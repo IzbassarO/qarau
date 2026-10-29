@@ -41,10 +41,12 @@ WORKFLOW_JSON = "workflow.json"  # `run` records its input and parameters here f
 READS = {"probe": ("video",), "frames": ("video",), "sparse": ("frames",),
          "export": ("frames", "sparse"), "dense": ("frames", "sparse"),
          "coverage": ("frames", "bundle")}  # fmt: skip
-# ponytail: coverage/ is not a storage kind yet (like findings/): a wiped cache recomputes it;
-# add a kind when COV1-b stores the regions.
+# ponytail: coverage/ is not a storage kind (like findings/): a wiped cache recomputes it; the
+# database keeps its regions (COV1-b) and the bundle its per-point array, so add a kind only
+# when something needs regions.json itself from storage.
 WRITES = {"probe": ("video",), "frames": ("frames",), "sparse": ("sparse",),
-          "export": ("bundle",), "dense": ("dense", "bundle")}  # fmt: skip
+          "export": ("bundle",), "dense": ("dense", "bundle"),
+          "coverage": ("bundle",)}  # fmt: skip
 
 Log = Callable[[str], None]
 OnEvent = Callable[[str, str, "StepResult | None"], None]
@@ -477,9 +479,12 @@ def dense(ctx: StepContext) -> StepResult:
 
 def coverage(ctx: StepContext) -> StepResult:
     """Coverage state per map region (coverage.py, COV1) -> coverage/regions.json; voxel size
-    and thresholds from config.yaml `coverage:`."""
+    and thresholds from config.yaml `coverage:`. Then the bundle gets its per-point coverage
+    array (export.write_coverage_layer, COV1-b), so the step also writes the `bundle` kind."""
     from .coverage import run_coverage
+    from .export import write_coverage_layer
 
     metrics = run_coverage(ctx.run_dir, ctx.config)
+    entry = write_coverage_layer(ctx.run_dir)
     ctx.log(f"coverage: {metrics}")
-    return StepResult("ok", ["coverage/regions.json"], metrics)
+    return StepResult("ok", ["coverage/regions.json", entry["path"]], metrics)

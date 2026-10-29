@@ -136,6 +136,34 @@ class Finding(Base):
     points: Mapped[Any] = mapped_column(sa.JSON, default=list)  # bundle point indices
 
 
+class CoverageState(enum.StrEnum):
+    inspected_ok = "inspected_ok"
+    finding = "finding"
+    not_seen = "not_seen"
+
+
+class CoverageRegion(Base):
+    """One map region of a run's coverage (COV1-b, migration 0006): a row per region of
+    <run>/coverage/regions.json, replaced as a whole when the coverage step runs again
+    (app/workflow.py). Bounds are [x, y, z] in bundle units."""
+
+    __tablename__ = "coverage_region"
+    __table_args__ = (
+        sa.UniqueConstraint("run_id", "region_key"),
+        sa.CheckConstraint(
+            "state IN ('inspected_ok', 'finding', 'not_seen')", name="ck_coverage_region_state"
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[str] = mapped_column(sa.ForeignKey("run.id"), index=True)
+    region_key: Mapped[str] = mapped_column(sa.String(64))  # regions.json id, "i_j_k"
+    state: Mapped[CoverageState] = mapped_column(enum_type(CoverageState))
+    frame_count: Mapped[int] = mapped_column(sa.Integer)
+    bounds_min: Mapped[Any] = mapped_column(sa.JSON)
+    bounds_max: Mapped[Any] = mapped_column(sa.JSON)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=now)
+
+
 class Observation(Base):
     """A Finding seen in one frame: a raster mask (model output) or an outline polygon in
     pixels (manual region projected into the frame)."""
