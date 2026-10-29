@@ -5,15 +5,19 @@
 
 Idempotent: re-running rotates the three users' secrets to the given tokens. The demo site
 (owner, 2026-10-27: tester screenshots showed no finding because there was no site) is added
-once, and only when the notre-dame-p3e run is under QARAU_RUNS_DIR.
+once, and only when the notre-dame-p3e run is under QARAU_RUNS_DIR. Its coverage (DEMO-cov) is
+computed once by the pipeline's coverage step and stored as the S1 workflow stores it; an
+existing demo site without coverage rows gets it on the next run.
 """
 
 import sys
 from pathlib import Path
 
 import numpy as np
+from qarau_pipeline.coverage import run_coverage
 from qarau_pipeline.findings import load_bundle
-from sqlalchemy import select
+from qarau_pipeline.workflow import load_config
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .auth import hash_token, new_salt
@@ -21,6 +25,8 @@ from .db import engine_for
 from .findings import FindingIn, mark_finding
 from .models import (
     AuditLog,
+    CoverageRegion,
+    CoverageState,
     Finding,
     FindingClass,
     Inspection,
@@ -34,6 +40,7 @@ from .models import (
 )
 from .runs import manifest_file
 from .settings import Settings, get_settings
+from .workflow import fill_coverage
 
 DEV_ORG = "dev"
 DEMO_SITE = "Demo site"
@@ -108,6 +115,53 @@ def seed_demo(db: Session, org: Organization, settings: Settings) -> Finding | N
     return finding
 
 
+def coverage_counts(db: Session, run_id: str) -> dict[CoverageState, int]:
+    rows = db.execute(
+        select(CoverageRegion.state, func.count())
+        .where(CoverageRegion.run_id == run_id)
+        .group_by(CoverageRegion.state)
+    ).all()
+    found = {CoverageState(st): int(n) for st, n in rows}
+    return {st: found.get(st, 0) for st in CoverageState}
+
+
+def ensure_demo_coverage(
+    db: Session, settings: Settings, insp: Inspection
+) -> dict[CoverageState, int] | None:
+    """Region count per state of the demo run's coverage. Without stored regions: run the
+    pipeline's coverage step on the run's frames and poses with the demo findings' points as the
+    `finding` regions, and store them with `fill_coverage`, as S1 does. An existing
+    <run>/coverage/regions.json is read, never rewritten: the run dir is shared data. No
+    per-point coverage array in the bundle: S1's write_coverage_layer rewrites manifest.json.
+    None, with one plain line printed, when the step fails."""
+    run = db.scalar(select(Run).where(Run.inspection_id == insp.id).order_by(Run.id))
+    if run is None:
+        print(f"Coverage for '{DEMO_SITE}' was not computed: the inspection has no run")
+        return None
+    counts = coverage_counts(db, run.id)
+    if sum(counts.values()):
+        return counts
+    run_dir = Path(settings.qarau_runs_dir) / run.run_dir
+    # ponytail: a regions.json already in the run is trusted as is; delete it to recompute
+    if not (run_dir / "coverage" / "regions.json").is_file():
+        findings = db.scalars(
+            select(Finding).where(Finding.run_id == run.id, Finding.guest_id.is_(None))
+        )
+        try:
+            run_coverage(run_dir, load_config(), finding_points={f.id: f.points for f in findings})
+        except Exception as e:  # noqa: BLE001 - any step failure is printed; the seed finishes
+            print(
+                f"Coverage for '{DEMO_SITE}' was not computed: the coverage step failed on run "
+                f"{run.run_dir} ({type(e).__name__}: {e})"
+            )
+            return None
+    if not fill_coverage(run.id, run_dir):
+        print(f"Coverage for '{DEMO_SITE}' was not computed: {run.run_dir} has no readable "
+              "coverage/regions.json")  # fmt: skip
+        return None
+    return coverage_counts(db, run.id)
+
+
 def main() -> None:
     s = get_settings()
     if s.qarau_env != "dev":
@@ -124,11 +178,21 @@ def main() -> None:
         org = seed_dev_users(db, tokens)
         demo = seed_demo(db, org, s)
         demo_id = None if demo is None else demo.id
+        site = db.scalar(select(Site).where(Site.org_id == org.id, Site.name == DEMO_SITE))
+        insp = None if site is None else db.scalar(
+            select(Inspection).where(Inspection.site_id == site.id).order_by(Inspection.id)
+        )  # fmt: skip
+        counts = None if insp is None else ensure_demo_coverage(db, s, insp)
     print(f"seeded organization '{DEV_ORG}' with users admin, engineer, viewer")
     if demo_id is not None:
         print(f"seeded '{DEMO_SITE}': run {DEMO_RUN}, finding {demo_id}")
     else:
         print(f"'{DEMO_SITE}' not added: it exists, or {DEMO_RUN} is not under QARAU_RUNS_DIR")
+    if counts is not None:
+        total = sum(counts.values())
+        parts = ", ".join(f"{st.value} {n} ({round(100 * n / total, 1)}%)"
+                          for st, n in counts.items())  # fmt: skip
+        print(f"coverage of '{DEMO_SITE}': {total} regions: {parts}")
 
 
 if __name__ == "__main__":

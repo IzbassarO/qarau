@@ -248,6 +248,13 @@ directly after `export`, on the sparse bundle. Every threshold is in `pipeline/c
   run's rows after every done `coverage` step: delete + insert in one transaction, so a rerun
   never duplicates rows. A missing or unreadable regions.json leaves no rows and a log warning;
   the run does not fail.
+- **Dev seed (DEMO-cov).** `python -m app.seed` gives the "Demo site" inspection the same
+  coverage once: when its run has no rows it runs `run_coverage` in process with the demo
+  findings' points as `finding_points` (manual findings have no findings/points.finding.u16),
+  then `fill_coverage`, and prints the region count per state. An existing
+  `coverage/regions.json` in the run is read, never rewritten, and the bundle gets no per-point
+  coverage array (that would rewrite the shared run's manifest). A failing step is one printed
+  line; the seed still finishes.
 - **API.** `GET /api/inspections/{id}/coverage` (viewer): `{regions: [{id, state, frame_count,
   bounds: {min, max}}], totals: {inspected_ok, finding, not_seen}, computed}` for the
   inspection's newest run (by `created_at`) that has rows, regions ordered by id. **Totals are
