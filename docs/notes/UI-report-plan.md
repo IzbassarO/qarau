@@ -55,3 +55,27 @@ exactly en/kk, both while loading and after painting. Normal checks now pass wit
 the real installed dependency: lint, typecheck, all 970 Vitest tests and build.
 Playwright discovers all 32 report scenarios; its assertions are unchanged.
 Browser execution remains Kerege's check. No servers were started.
+
+## Readiness return: pending requests at the deadline
+
+The screenshot gate waits for both aria-busy and network idle. The current timeout
+only disables the PDF query; disabling a TanStack query does not cancel a fetch already
+in progress. Reproduce that with an abort-aware mock before changing the deadline.
+Cancel this report's summary/PDF queries at the deadline, prevent focus/reconnect from
+starting background report requests, and retain one absolute deadline per attempt.
+Add StrictMode tests through the real devReport middleware and a default-API browser
+matrix covering all three locales, both themes and the existing two viewports. Keep
+all existing assertions. Browser execution/screenshots remain Kerege's responsibility.
+
+Confirmed regression: both hung summary and hung PDF tests failed before the fix
+because the active fetch signal was not aborted at the deadline. They now pass,
+including a zero pending-request/query count. A fake-clock test keeps the original
+28-second deadline through five summary updates while rendering is stalled. The
+worker/document is destroyed exactly once after page one finishes and before ready
+is announced; Blob download and hash remain available.
+
+Verified: pnpm lint, pnpm typecheck, all 977 Vitest tests and pnpm build pass.
+Playwright discovers 44 report tests, including the 12 new default-dev readiness
+cases after sign-in (ru/kk/en x light/dark x desktop/phone). Existing e2e assertions
+are unchanged. Real browser execution and all screenshots still require Kerege;
+no server or screenshot was started here.

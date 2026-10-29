@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useI18n, type Lang } from '../i18n';
 import { fetchReportPdf, type ReportPdf } from '../lib/api';
 import { fetchReportSummary, type ReportSummary } from '../lib/report';
@@ -15,11 +15,14 @@ GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 export function ReportPage() {
   const { id = '' } = useParams();
   const { lang } = useI18n();
+  const queryClient = useQueryClient();
   const [chosenLanguage, setChosenLanguage] = useState<Lang | null>(null);
   const summary = useQuery({
     queryKey: ['report-summary', id],
     queryFn: ({ signal }) => fetchReportSummary(id, signal),
     retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   const pdfLanguage = chosenLanguage ?? lang;
   // Keep the request observer mounted when a language change replaces the preview.
@@ -27,7 +30,18 @@ export function ReportPage() {
   const requestKey = `${id}:${pdfLanguage}`;
   const [timedOutRequest, setTimedOutRequest] = useState<string | null>(null);
   const timedOut = timedOutRequest === requestKey;
-  const onTimeout = useCallback(() => setTimedOutRequest(requestKey), [requestKey]);
+  const onTimeout = useCallback(() => {
+    setTimedOutRequest(requestKey);
+    // Disabling a query stops polling but does not abort an existing fetch.
+    // Cancel both stages so readiness includes network idle, even on a stalled API.
+    void queryClient.cancelQueries({ queryKey: ['report-summary', id], exact: true });
+    const data = queryClient.getQueryData<ReportSummary>(['report-summary', id]);
+    if (data)
+      void queryClient.cancelQueries({
+        queryKey: ['report-pdf', data.inspectionId, pdfLanguage],
+        exact: true,
+      });
+  }, [id, pdfLanguage, queryClient, requestKey]);
   const onRetry = useCallback(() => setTimedOutRequest(null), []);
   const inspectionId = summary.data?.inspectionId;
   const pdf = useQuery({
@@ -37,6 +51,7 @@ export function ReportPage() {
     retry: false,
     gcTime: 0,
     refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     refetchOnMount: false,
     refetchInterval: (query) =>
       !timedOut && query.state.data?.state === 'generating' ? 2000 : false,
@@ -104,11 +119,16 @@ function ReportContent({
   const painted = preview?.blob === blob && preview?.pages !== undefined;
   const previewFailed = preview?.blob === blob && preview?.failed;
   const failed = timedOut || state.state === 'failed' || previewFailed;
-  const busy = !failed && (state.state === 'generating' || !painted || !readyUrl);
+  const busy =
+    !failed &&
+    (summary.isFetching || pdf.isFetching || state.state === 'generating' || !painted || !readyUrl);
+  const deadline = useRef<number | null>(null);
   useEffect(() => {
     if (!busy) return;
     // Include summary fetch, generation polling, worker startup and painting in one deadline.
-    const timeout = window.setTimeout(onTimeout, 28_000);
+    const now = Date.now();
+    deadline.current ??= now + 28_000;
+    const timeout = window.setTimeout(onTimeout, Math.max(0, deadline.current - now));
     return () => window.clearTimeout(timeout);
   }, [busy, attempt, onTimeout]);
   useEffect(() => {
@@ -116,6 +136,11 @@ function ReportContent({
     let active = true;
     let loading: ReturnType<typeof getDocument> | undefined;
     let rendering: RenderTask | undefined;
+    let destroyed: Promise<void> | undefined;
+    function destroyDocument() {
+      if (!loading) return Promise.resolve();
+      return (destroyed ??= loading.destroy().catch(() => {}));
+    }
     async function paint() {
       try {
         const bytes = await blob!.arrayBuffer();
@@ -131,8 +156,14 @@ function ReportContent({
         target.height = Math.ceil(viewport.height);
         rendering = page.render({ canvas: target, viewport });
         await rendering.promise;
-        if (active) setPreview({ blob: blob!, pages: document.numPages });
+        rendering = undefined;
+        const pages = document.numPages;
+        // Only page one is previewed. Close the document/worker before announcing
+        // readiness so no PDF resources remain loading behind a painted canvas.
+        await destroyDocument();
+        if (active) setPreview({ blob: blob!, pages });
       } catch {
+        await destroyDocument();
         if (active) setPreview({ blob: blob!, failed: true });
       }
     }
@@ -140,11 +171,12 @@ function ReportContent({
     return () => {
       active = false;
       rendering?.cancel();
-      void loading?.destroy().catch(() => {});
+      void destroyDocument();
     };
   }, [blob, attempt, timedOut]);
 
   function retry() {
+    deadline.current = null;
     onRetry();
     setPreview(null);
     setAttempt((value) => value + 1);

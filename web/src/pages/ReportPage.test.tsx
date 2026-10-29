@@ -1,5 +1,5 @@
 import { StrictMode } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -11,6 +11,7 @@ import { AppShell } from '../shell/AppShell';
 import fixture from '../test/fixtures/report-summary.json';
 import coverageFixture from '../test/fixtures/report-coverage.json';
 import { fixturePdf, mockReportApi } from '../test/reportApi';
+import { mockDevReportApi } from '../test/devReportApi';
 import { ReportPage } from './ReportPage';
 
 const pdfJs = vi.hoisted(() => ({
@@ -766,4 +767,120 @@ it('fetches a language PDF only once under the app StrictMode lifecycle', async 
     '/api/inspections/37/report.pdf?lang=en',
     '/api/inspections/37/report.pdf?lang=kk',
   ]);
+});
+
+it.each(['/api/inspections/demo', '/api/inspections/0/report.pdf?lang=en'])(
+  'aborts a stalled dev API request at the report deadline: %s',
+  async (path) => {
+    const api = mockDevReportApi(path);
+    const timer = vi.spyOn(window, 'setTimeout');
+    renderReport('demo', true, '/inspections/demo/report', true);
+    await waitFor(() => expect(api.pending.size).toBe(1));
+    const expire = timer.mock.calls.find(([, duration]) => duration === 28_000)?.[0];
+    expect(expire).toBeTypeOf('function');
+    await act(async () => (expire as () => void)());
+    expect((await findAlert()).textContent).toContain('The report is taking too long. Try again.');
+    expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
+    expect(api.signals.at(-1)?.aborted).toBe(true);
+    expect(api.pending.size).toBe(0);
+    expect(clients.at(-1)!.isFetching()).toBe(0);
+  },
+);
+
+it.each([
+  ['en', 'Report is ready.', '1 of 3 pages'],
+  ['ru', 'Отчёт готов.', 'Страница 1 из 3'],
+  ['kk', 'Есеп дайын.', '3 беттің 1-беті'],
+] as const)(
+  'settles the real dev API and canvas under StrictMode in %s',
+  async (lang, ready, count) => {
+    setLang(lang);
+    const api = mockDevReportApi();
+    const painting = deferred<void>();
+    pdfJs.render.mockReturnValueOnce({ promise: painting.promise, cancel: pdfJs.cancel });
+    const view = renderReport('demo', true, '/inspections/demo/report', true);
+    await waitFor(() => expect(pdfJs.render).toHaveBeenCalledTimes(1));
+    expect(clients.at(-1)!.isFetching()).toBe(0);
+    expect(view.container.querySelector('.report-state')?.getAttribute('aria-busy')).toBe('true');
+    await act(async () => painting.resolve());
+    expect(await screen.findByText(ready)).toBeTruthy();
+    expect(screen.getByText(count)).toBeTruthy();
+    expect(view.container.querySelector('[aria-busy="true"], [data-loading]')).toBeNull();
+    expect(clients.at(-1)!.isFetching()).toBe(0);
+    expect(api.pending.size).toBe(0);
+    expect(
+      api.fetch.mock.calls
+        .filter(([url]) => String(url).includes('/report.pdf'))
+        .map(([url]) => url),
+    ).toEqual([`/api/inspections/0/report.pdf?lang=${lang}`]);
+    expect(
+      screen.getByTitle('a278f21895176e40699b4de5dda3b7aa385e82e13995d4bab0beff341aa5d558'),
+    ).toBeTruthy();
+    api.fetch.mockClear();
+    try {
+      await act(async () => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      expect(api.fetch).not.toHaveBeenCalled();
+      expect(view.container.querySelector('[aria-busy="true"], [data-loading]')).toBeNull();
+    } finally {
+      focusManager.setFocused(undefined);
+    }
+  },
+);
+
+it('keeps one 28-second deadline across summary updates while painting is stalled', async () => {
+  vi.useFakeTimers();
+  mockDevReportApi();
+  pdfJs.render.mockReturnValueOnce({ promise: new Promise(() => {}), cancel: pdfJs.cancel });
+  pdfJs.cancel.mockClear();
+  const view = renderReport('demo', true, '/inspections/demo/report', true);
+  try {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(pdfJs.render).toHaveBeenCalledTimes(1);
+    for (let update = 0; update < 5; update++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+        await clients
+          .at(-1)!
+          .invalidateQueries({ queryKey: ['report-summary', 'demo'], exact: true });
+      });
+      expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
+    expect(screen.getByRole('alert').textContent).toContain(
+      'The report is taking too long. Try again.',
+    );
+    expect(clients.at(-1)!.isFetching()).toBe(0);
+    expect(pdfJs.cancel).toHaveBeenCalledTimes(1);
+    expect(pdfJs.destroy).toHaveBeenCalledTimes(1);
+    expect(downloadLink().getAttribute('href')).toBe('blob:report-en');
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
+});
+
+it('finishes worker cleanup before announcing that the painted demo is ready', async () => {
+  const shutdown = deferred<void>();
+  pdfJs.destroy.mockReturnValueOnce(shutdown.promise);
+  mockDevReportApi();
+  const view = renderReport('demo', true, '/inspections/demo/report', true);
+  await waitFor(() => expect(pdfJs.destroy).toHaveBeenCalledTimes(1));
+  expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
+  expect(screen.queryByText('Report is ready.')).toBeNull();
+  expect(clients.at(-1)!.isFetching()).toBe(0);
+  await act(async () => shutdown.resolve());
+  expect(await screen.findByText('Report is ready.')).toBeTruthy();
+  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
+  expect(screen.getByText('1 of 3 pages')).toBeTruthy();
+  expect(downloadLink().getAttribute('href')).toBe('blob:report-en');
+  view.unmount();
+  expect(pdfJs.destroy).toHaveBeenCalledTimes(1);
 });

@@ -372,3 +372,41 @@ test('the default dev API renders the viewer demo report without fixture finding
   );
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
+
+for (const locale of locales) {
+  for (const theme of ['light', 'dark'] as const) {
+    test(`default dev demo becomes network idle after sign-in: ${locale.lang}, ${theme}`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      await page.addInitScript((lang) => localStorage.setItem('qarau.lang', lang), locale.lang);
+      // Match the tester: sign in on / first, then navigate in the same tab.
+      await page.goto('/');
+      await page.getByLabel(locale.username).fill('report-engineer');
+      await page.getByLabel(locale.password).fill('report-test-session');
+      await page.getByRole('button', { name: locale.signIn, exact: true }).click();
+      await expect(page.getByLabel(locale.password)).toHaveCount(0);
+      const pending = new Set<import('@playwright/test').Request>();
+      page.on('request', (request) => pending.add(request));
+      page.on('requestfinished', (request) => pending.delete(request));
+      page.on('requestfailed', (request) => pending.delete(request));
+      await page.goto('/inspections/demo/report');
+      await expectPainted(page, locale.lang);
+      await expect(page.getByRole('status')).toHaveText(locale.ready);
+      await expect(page.locator('[aria-busy="true"], [data-loading]')).toHaveCount(0);
+      await expect(page.locator('html')).toHaveAttribute('lang', locale.lang);
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      await expect(page.getByTitle(hash, { exact: true })).toHaveText('a278f2189517…1aa5d558');
+      await page.waitForLoadState('networkidle');
+      await expect.poll(() => [...pending].map((request) => request.url())).toEqual([]);
+      const downloadEvent = page.waitForEvent('download');
+      await page.getByRole('link', { name: locale.download, exact: true }).click();
+      const download = await downloadEvent;
+      expect(download.suggestedFilename()).toBe(`report-demo-${locale.lang}.pdf`);
+      expect(await download.failure()).toBeNull();
+      expect((await stat((await download.path())!)).size).toBe(619);
+      expect(await readFile((await download.path())!)).toEqual(pdf);
+      await expect(page.getByRole('alert')).toHaveCount(0);
+    });
+  }
+}
