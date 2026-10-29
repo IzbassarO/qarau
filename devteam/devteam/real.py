@@ -33,14 +33,14 @@ MAX_SIDE = 2000
 # The judged diff: a part larger than this cannot be reviewed whole, so it cannot pass (a cut diff
 # could hide what the tester never saw). Lockfiles and generated files are in --stat only.
 MAX_DIFF = 120_000
+NOT_JUDGED = ("uv.lock", "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "*.min.js", "*.map")
+JUDGED = (".", *(f":(exclude,glob)**/{p}" for p in NOT_JUDGED))
 
 
 def max_diff(task: dict) -> int:
     """MAX_DIFF, or the task's own `tester: {max_diff: N}` in backlog.yaml (owner-set, like its
     `supervisor:` limits; UI-report 2026-10-29: a pdf.js preview on a branch at 119.9 k)."""
     return int((task.get("tester") or {}).get("max_diff") or MAX_DIFF)
-NOT_JUDGED = ("uv.lock", "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "*.min.js", "*.map")
-JUDGED = (".", *(f":(exclude,glob)**/{p}" for p in NOT_JUDGED))
 
 
 def transient(e: Exception) -> bool:
