@@ -1409,18 +1409,13 @@ tasks:
     at 390x844; same functions, layout may differ).
 
     '
-  status: blocked
+  status: todo
   depends_on:
   - RPT1
   - DS1
   owner: dev_app
   run: cont-20261028-185246-dev_app-1
   branch: devteam/UI-report
-  blocked_reason: 'the tester sent it back twice in a row for the same reason, so no new round was started:
-    Criterion 4 is unmet because there are no screenshots of the report page (/inspections/<id>/report).
-    Every attached screenshot shows /inspections or /viewer/notre-dame. The report page was not captured,
-    so I could not compare it to docs/design/screens/report-light.png. In the inspections screenshots,
-    the Report link in the row (inspections-1440x900-light-ru.png) is also stacked above ''Открыть карт'
 - id: UI-evidence-b
   area: app
   title: Decision log and actions in the evidence panel
