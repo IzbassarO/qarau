@@ -1433,16 +1433,98 @@ tasks:
     the browser bundle.
   tester:
     max_diff: 180000
-  status: blocked
+  status: split
   depends_on:
   - RPT1
   - DS1
   owner: dev_app
   run: cont-20261029-152145-dev_app-1
   branch: devteam/UI-report
-  blocked_reason: 'supervisor: the task used 36.2 M subscription tokens (limit 36 M per task). Raise the
-    `supervisor` limits in devteam/config.yaml (or the task''s own `supervisor:` in backlog.yaml) or split
-    the task, then `devteam resume UI-report`'
+  split_into:
+  - UI-report-s1
+  - UI-report-s2
+  - UI-report-s3
+- id: UI-report-s1
+  area: app
+  title: 'Report page: summary, states, pdf.js canvas, i18n'
+  goal: 'Today the report page code is on the branch. Build (web/ only): keep the report page with the
+    summary, language choice, pdf.js canvas preview of the first page, page count, Download PDF with hash,
+    and no <iframe>. Confirm the Vitest tests for the summary and the three states with mocked API and
+    mocked pdf.js, and the ru/kk/en keys, pass. Do not rework the e2e or screenshots here.
+
+
+    Split from UI-report by the Analyst (2026-10-29), piece 1 of 3: UI-report''s goal stays the spec.
+
+
+    Not in this task: what UI-report-s2, UI-report-s3 build.
+
+
+    Done when: Vitest for the summary and the three states with a mocked API and a mocked pdf.js (the
+    page count shown, a render error shows the failed state); no <iframe> in the page; i18n ru/kk/en.
+
+    '
+  status: todo
+  added_by: analyst
+  split_from: UI-report
+  depends_on:
+  - RPT1
+  - DS1
+  continues: UI-report
+- id: UI-report-s2
+  area: app
+  title: 'Report page: settle reliably and pass e2e, lint, tsc'
+  goal: 'Build (web/ only): make the report page reliably settle so the Playwright e2e passes without
+    retries. Today a font request (node_modules/.pnpm/@fontsource+ibm-plex-sans) can still be in flight
+    after the page is ready, and the ''default dev demo becomes network idle after sign-in'' scenarios
+    in web/e2e/report.spec.ts:378 fail on the first attempt. Find the cause, for example fonts loaded
+    lazily or late. Then fix it, for example by waiting for document.fonts.ready before clearing aria-busy,
+    or by importing the font CSS at app start. Then check that lint, tsc, Vitest and the e2e (opens the
+    page on a mocked API with a fixture PDF, waits for aria-busy to clear, asserts non-blank canvas pixels
+    and the page count, downloads the fixture PDF) pass with --retries=0.
+
+
+    Split from UI-report by the Analyst (2026-10-29), piece 2 of 3: UI-report''s goal stays the spec.
+
+
+    Not in this task: what UI-report-s1, UI-report-s3 build.
+
+
+    Done when: a Playwright e2e opens the page on a mocked API with a fixture PDF, waits for aria-busy
+    to clear, asserts the canvas has non-blank pixels and the page count, and downloads the fixture PDF;
+    lint, tsc, Vitest and the e2e pass.
+
+    '
+  status: todo
+  added_by: analyst
+  split_from: UI-report
+  depends_on:
+  - UI-report-s1
+- id: UI-report-s3
+  area: app
+  title: 'Report page: screenshots and design match'
+  goal: 'Build (web/ only): make the tester screenshots of /inspections/demo/report show the rendered
+    first page with no NOT-READY label, in light and dark, ru/kk/en, at 1440x900 and 390x844. Match docs/design/screens/report-light.png
+    (design system v8), adjusting only alignment and size. Phone layout follows DESIGN.md Responsive (reference
+    evidence-phone-light.png at 390x844), with the same functions and layout allowed to differ.
+
+
+    Split from UI-report by the Analyst (2026-10-29), piece 3 of 3: UI-report''s goal stays the spec.
+
+
+    Not in this task: what UI-report-s1, UI-report-s2 build.
+
+
+    Done when: tester screenshots of the page "/inspections/demo/report" show the rendered first page,
+    in light and dark, ru/kk/en, at 1440x900 and 390x844. Reference: docs/design/screens/report-light.png
+    (design system v8); match it, adjust only alignment and size; phone layout per DESIGN.md Responsive
+    (reference docs/design/screens/evidence-phone-light.png at 390x844; same functions, layout may differ).
+
+    '
+  status: todo
+  added_by: analyst
+  split_from: UI-report
+  depends_on:
+  - UI-report-s2
 - id: UI-evidence-b
   area: app
   title: Decision log and actions in the evidence panel
