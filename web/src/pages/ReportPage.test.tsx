@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
@@ -50,11 +51,16 @@ function pdfCalls(fetch: ReturnType<typeof mockReportApi>, path = '/report.pdf')
 }
 
 const clients: QueryClient[] = [];
-function renderReport(id = '37', signedIn = true, entry = `/inspections/${id}/report`) {
+function renderReport(
+  id = '37',
+  signedIn = true,
+  entry = `/inspections/${id}/report`,
+  strict = false,
+) {
   if (signedIn) sessionStorage.setItem('qarau.auth.session', 'Bearer test-report-session');
   const client = new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } });
   clients.push(client);
-  return render(
+  const page = (
     <QueryClientProvider client={client}>
       <AuthProvider>
         <MemoryRouter initialEntries={[entry]}>
@@ -73,8 +79,9 @@ function renderReport(id = '37', signedIn = true, entry = `/inspections/${id}/re
           </Routes>
         </MemoryRouter>
       </AuthProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  return render(strict ? <StrictMode>{page}</StrictMode> : page);
 }
 
 beforeEach(() => {
@@ -731,4 +738,32 @@ it('cancels rendering and destroys the worker when leaving the page', async () =
   view.unmount();
   expect(pdfJs.cancel).toHaveBeenCalledTimes(1);
   expect(pdfJs.destroy).toHaveBeenCalledTimes(1);
+});
+
+it('fetches a language PDF only once under the app StrictMode lifecycle', async () => {
+  const kazakh = deferred<Response>();
+  const fetch = mockReportApi();
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (input) =>
+    String(input) === '/api/inspections/37/report.pdf?lang=kk' ? kazakh.promise : original(input),
+  );
+  renderReport('notre-dame', true, '/inspections/notre-dame/report', true);
+  await screen.findByText('Report is ready.');
+  fireEvent.click(screen.getByRole('button', { name: 'Қазақша' }));
+  await waitFor(() =>
+    expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=kk', expect.anything()),
+  );
+  expect(pdfCalls(fetch).map(([url]) => url)).toEqual([
+    '/api/inspections/37/report.pdf?lang=en',
+    '/api/inspections/37/report.pdf?lang=kk',
+  ]);
+  expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
+  await act(async () => kazakh.resolve(fixturePdf()));
+  await screen.findByText('Report is ready.');
+  expect(screen.getByText('1 of 3 pages')).toBeTruthy();
+  expect(downloadLink().getAttribute('download')).toBe('report-notre-dame-kk.pdf');
+  expect(pdfCalls(fetch).map(([url]) => url)).toEqual([
+    '/api/inspections/37/report.pdf?lang=en',
+    '/api/inspections/37/report.pdf?lang=kk',
+  ]);
 });

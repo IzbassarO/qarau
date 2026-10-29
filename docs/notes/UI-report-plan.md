@@ -39,3 +39,19 @@ scratch-only Vitest config resolves just the already-mocked pdf.js imports to di
 placeholders, allowing state/summary tests to execute; this does NOT verify the real
 library, worker or production bundle and is not shipped or used by CI. Kerege must run
 real browser e2e and screenshots; no server or screenshot was started here.
+
+## E2e return: duplicate language request
+
+Reproduce the extra Kazakh PDF fetch in Vitest with the application's StrictMode
+wrapper and a pending PDF response. Keep the existing e2e request-array assertion.
+Move the PDF query observer outside the language-keyed preview lifecycle so StrictMode
+replaying a new preview's effects cannot cancel and restart its network request.
+Retain request cancellation, generation polling, retries and the 28-second deadline.
+Run the normal lint/typecheck/Vitest/build checks with the now-installed pdfjs-dist;
+Kerege runs browser e2e. No servers or screenshots locally.
+
+The new regression failed before the fix with en/kk/kk and passes after it with
+exactly en/kk, both while loading and after painting. Normal checks now pass with
+the real installed dependency: lint, typecheck, all 970 Vitest tests and build.
+Playwright discovers all 32 report scenarios; its assertions are unchanged.
+Browser execution remains Kerege's check. No servers were started.

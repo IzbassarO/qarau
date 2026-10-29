@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useI18n, type Lang } from '../i18n';
@@ -22,31 +22,13 @@ export function ReportPage() {
     retry: false,
   });
   const pdfLanguage = chosenLanguage ?? lang;
-  return (
-    <ReportContent
-      key={`${id}:${pdfLanguage}`}
-      id={id}
-      pdfLanguage={pdfLanguage}
-      summary={summary}
-      onLanguage={setChosenLanguage}
-    />
-  );
-}
-
-function ReportContent({
-  id,
-  pdfLanguage,
-  summary,
-  onLanguage,
-}: {
-  id: string;
-  pdfLanguage: Lang;
-  summary: UseQueryResult<ReportSummary, Error>;
-  onLanguage: (lang: Lang) => void;
-}) {
-  const { t } = useI18n();
-  const [timedOut, setTimedOut] = useState(false);
-  const [attempt, setAttempt] = useState(0);
+  // Keep the request observer mounted when a language change replaces the preview.
+  // Otherwise StrictMode's effect replay aborts and restarts the same PDF fetch.
+  const requestKey = `${id}:${pdfLanguage}`;
+  const [timedOutRequest, setTimedOutRequest] = useState<string | null>(null);
+  const timedOut = timedOutRequest === requestKey;
+  const onTimeout = useCallback(() => setTimedOutRequest(requestKey), [requestKey]);
+  const onRetry = useCallback(() => setTimedOutRequest(null), []);
   const inspectionId = summary.data?.inspectionId;
   const pdf = useQuery({
     queryKey: ['report-pdf', inspectionId, pdfLanguage],
@@ -59,6 +41,43 @@ function ReportContent({
     refetchInterval: (query) =>
       !timedOut && query.state.data?.state === 'generating' ? 2000 : false,
   });
+
+  return (
+    <ReportContent
+      key={requestKey}
+      id={id}
+      pdfLanguage={pdfLanguage}
+      summary={summary}
+      pdf={pdf}
+      timedOut={timedOut}
+      onTimeout={onTimeout}
+      onRetry={onRetry}
+      onLanguage={setChosenLanguage}
+    />
+  );
+}
+
+function ReportContent({
+  id,
+  pdfLanguage,
+  summary,
+  pdf,
+  timedOut,
+  onTimeout,
+  onRetry,
+  onLanguage,
+}: {
+  id: string;
+  pdfLanguage: Lang;
+  summary: UseQueryResult<ReportSummary, Error>;
+  pdf: UseQueryResult<ReportPdf, Error>;
+  timedOut: boolean;
+  onTimeout: () => void;
+  onRetry: () => void;
+  onLanguage: (lang: Lang) => void;
+}) {
+  const { t } = useI18n();
+  const [attempt, setAttempt] = useState(0);
   const state: ReportPdf = summary.isError
     ? { state: 'failed', message: summary.error.message }
     : pdf.isError
@@ -89,9 +108,9 @@ function ReportContent({
   useEffect(() => {
     if (!busy) return;
     // Include summary fetch, generation polling, worker startup and painting in one deadline.
-    const timeout = window.setTimeout(() => setTimedOut(true), 28_000);
+    const timeout = window.setTimeout(onTimeout, 28_000);
     return () => window.clearTimeout(timeout);
-  }, [busy, attempt]);
+  }, [busy, attempt, onTimeout]);
   useEffect(() => {
     if (!blob || timedOut) return;
     let active = true;
@@ -126,7 +145,7 @@ function ReportContent({
   }, [blob, attempt, timedOut]);
 
   function retry() {
-    setTimedOut(false);
+    onRetry();
     setPreview(null);
     setAttempt((value) => value + 1);
     if (summary.isError || !summary.data) void summary.refetch();
