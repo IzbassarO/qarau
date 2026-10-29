@@ -397,6 +397,12 @@ for (const locale of locales) {
       await expect(page.locator('html')).toHaveAttribute('lang', locale.lang);
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       await expect(page.getByTitle(hash, { exact: true })).toHaveText('a278f2189517…1aa5d558');
+      expect(await page.evaluate(() => document.fonts.status)).toBe('loaded');
+      expect(
+        await page.evaluate(() =>
+          document.fonts.check('600 1em "IBM Plex Sans"', 'Qarau Отчёт Қазақша'),
+        ),
+      ).toBe(true);
       await page.waitForLoadState('networkidle');
       await expect.poll(() => [...pending].map((request) => request.url())).toEqual([]);
       const downloadEvent = page.waitForEvent('download');

@@ -92,6 +92,7 @@ function ReportContent({
   onLanguage: (lang: Lang) => void;
 }) {
   const { t } = useI18n();
+  const screen = useRef<HTMLDivElement>(null);
   const [attempt, setAttempt] = useState(0);
   const state: ReportPdf = summary.isError
     ? { state: 'failed', message: summary.error.message }
@@ -161,6 +162,8 @@ function ReportContent({
         // Only page one is previewed. Close the document/worker before announcing
         // readiness so no PDF resources remain loading behind a painted canvas.
         await destroyDocument();
+        if (!active || !screen.current) return;
+        await prepareReportFonts(screen.current);
         if (active) setPreview({ blob: blob!, pages });
       } catch {
         await destroyDocument();
@@ -185,7 +188,7 @@ function ReportContent({
   }
 
   return (
-    <div className="qv-screen report-screen">
+    <div ref={screen} className="qv-screen report-screen">
       <header className="qv-topbar report-topbar">
         <Link className="qv-btn qv-btn--quiet" to="/inspections">
           {t('shell.emptyTitle')}
@@ -269,6 +272,31 @@ function ReportContent({
       </main>
     </div>
   );
+}
+
+/** Font files can start loading only when a new weight or script first appears. */
+async function prepareReportFonts(screen: HTMLElement) {
+  const fonts = screen.ownerDocument.fonts;
+  if (!fonts) return;
+  const style = getComputedStyle(screen);
+  // The language controls include Latin, Cyrillic and Kazakh text in every locale.
+  // Include all summary text so fonts for API object/decider names are loaded too.
+  const text = screen.textContent ?? '';
+  await Promise.all(
+    [
+      ['--font-sans', '--t-body-weight'],
+      ['--font-sans', '--t-label-weight'],
+      ['--font-sans', '--t-body-strong-weight'],
+      ['--font-display', '--t-heading-weight'],
+      ['--font-mono', '--t-mono-weight'],
+    ].map(([familyToken, weightToken]) => {
+      const family = style.getPropertyValue(familyToken).trim();
+      const weight = style.getPropertyValue(weightToken).trim();
+      return family && weight ? fonts.load(`${weight} 1em ${family}`, text) : Promise.resolve([]);
+    }),
+  );
+  // Read ready after the explicit loads, including their final layout/font fallback work.
+  await fonts.ready;
 }
 
 function Summary({ data }: { data: ReportSummary }) {

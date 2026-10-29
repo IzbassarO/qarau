@@ -79,3 +79,13 @@ Playwright discovers 44 report tests, including the 12 new default-dev readiness
 cases after sign-in (ru/kk/en x light/dark x desktop/phone). Existing e2e assertions
 are unchanged. Real browser execution and all screenshots still require Kerege;
 no server or screenshot was started here.
+
+## Font readiness return
+
+The remaining in-flight resource is IBM Plex Sans 600, not an API request. Preserve
+all existing e2e assertions. Request the report's v8 font families/weights explicitly
+using the design tokens and the rendered text (Latin/Cyrillic/Kazakh), then await
+FontFaceSet.ready before announcing the painted preview as ready. Keep the existing
+absolute deadline and Blob download behavior. Add a delayed-font/load/layout regression
+and strengthen the 12 default-dev cases with font readiness assertions. Run the normal
+local checks; Kerege owns first-attempt browser e2e and screenshots. No servers locally.

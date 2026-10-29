@@ -51,6 +51,18 @@ function pdfCalls(fetch: ReturnType<typeof mockReportApi>, path = '/report.pdf')
   return fetch.mock.calls.filter(([url]) => String(url).includes(path));
 }
 
+const originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+const reportFontTokens = {
+  '--font-sans': "'IBM Plex Sans', system-ui, sans-serif",
+  '--font-display': "'Geologica', 'IBM Plex Sans', system-ui, sans-serif",
+  '--font-mono': "'JetBrains Mono', ui-monospace, Menlo, monospace",
+  '--t-body-weight': '400',
+  '--t-label-weight': '500',
+  '--t-body-strong-weight': '600',
+  '--t-heading-weight': '600',
+  '--t-mono-weight': '400',
+};
+
 const clients: QueryClient[] = [];
 function renderReport(
   id = '37',
@@ -107,6 +119,8 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  if (originalFonts) Object.defineProperty(document, 'fonts', originalFonts);
+  else Reflect.deleteProperty(document, 'fonts');
   clients.splice(0).forEach((client) => client.clear());
   sessionStorage.clear();
   vi.unstubAllGlobals();
@@ -883,4 +897,81 @@ it('finishes worker cleanup before announcing that the painted demo is ready', a
   expect(downloadLink().getAttribute('href')).toBe('blob:report-en');
   view.unmount();
   expect(pdfJs.destroy).toHaveBeenCalledTimes(1);
+});
+
+it('keeps the painted demo busy until report fonts and their layout are ready', async () => {
+  const loaded = deferred<FontFace[]>();
+  const laidOut = deferred<FontFaceSet>();
+  const readReady = vi.fn();
+  const fonts = {
+    load: vi.fn(() => loaded.promise),
+    get ready() {
+      readReady();
+      return laidOut.promise;
+    },
+  };
+  Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
+  mockDevReportApi();
+  const view = renderReport('demo', true, '/inspections/demo/report', true);
+  const report = view.container.querySelector<HTMLElement>('.report-screen')!;
+  for (const [name, value] of Object.entries(reportFontTokens))
+    report.style.setProperty(name, value);
+  await waitFor(() => expect(pdfJs.destroy).toHaveBeenCalledTimes(1));
+  expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
+  expect(screen.queryByText('Report is ready.')).toBeNull();
+  expect(fonts.load).toHaveBeenCalledTimes(5);
+  expect(fonts.load).toHaveBeenCalledWith(
+    "600 1em 'IBM Plex Sans', system-ui, sans-serif",
+    expect.stringContaining('Қазақша'),
+  );
+  expect(fonts.load).toHaveBeenCalledWith(
+    "400 1em 'IBM Plex Sans', system-ui, sans-serif",
+    expect.stringContaining('Русский'),
+  );
+  expect(fonts.load).toHaveBeenCalledWith(
+    "500 1em 'IBM Plex Sans', system-ui, sans-serif",
+    expect.stringContaining('English'),
+  );
+  expect(fonts.load).toHaveBeenCalledWith(
+    "600 1em 'Geologica', 'IBM Plex Sans', system-ui, sans-serif",
+    expect.stringContaining('Tank farm №3'),
+  );
+  expect(fonts.load).toHaveBeenCalledWith(
+    "400 1em 'JetBrains Mono', ui-monospace, Menlo, monospace",
+    expect.stringContaining('Tank farm №3'),
+  );
+  expect(readReady).not.toHaveBeenCalled();
+  await act(async () => loaded.resolve([]));
+  expect(readReady).toHaveBeenCalledTimes(1);
+  expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
+  expect(screen.queryByText('Report is ready.')).toBeNull();
+  await act(async () => laidOut.resolve(fonts as unknown as FontFaceSet));
+  expect(await screen.findByText('Report is ready.')).toBeTruthy();
+  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
+  expect(screen.getByText('1 of 3 pages')).toBeTruthy();
+  expect(downloadLink().getAttribute('download')).toBe('report-demo-en.pdf');
+  expect(clients.at(-1)!.isFetching()).toBe(0);
+});
+
+it('keeps the deadline while fonts load and ignores their completion after timeout', async () => {
+  const loaded = deferred<FontFace[]>();
+  const fonts = { load: vi.fn(() => loaded.promise), ready: Promise.resolve() };
+  Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
+  const timer = vi.spyOn(window, 'setTimeout');
+  mockDevReportApi();
+  const view = renderReport('demo', true, '/inspections/demo/report', true);
+  const report = view.container.querySelector<HTMLElement>('.report-screen')!;
+  for (const [name, value] of Object.entries(reportFontTokens))
+    report.style.setProperty(name, value);
+  await waitFor(() => expect(fonts.load).toHaveBeenCalledTimes(5));
+  const expire = timer.mock.calls.find(([, duration]) => duration === 28_000)?.[0];
+  expect(expire).toBeTypeOf('function');
+  await act(async () => (expire as () => void)());
+  expect((await findAlert()).textContent).toContain('The report is taking too long. Try again.');
+  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
+  expect(downloadLink().getAttribute('download')).toBe('report-demo-en.pdf');
+  await act(async () => loaded.resolve([]));
+  expect(screen.queryByText('Report is ready.')).toBeNull();
+  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
+  expect(clients.at(-1)!.isFetching()).toBe(0);
 });
