@@ -26,6 +26,7 @@ uv run devteam report          # writes devteam/reports/YYYY-MM-DD.md
 uv run devteam release         # dev -> main now (also runs automatically every 7 days)
 uv run devteam costs           # API spend per day / agent / model
 uv run devteam cleanup         # remove leftover worktrees of done/dropped tasks
+uv run devteam undo <commit>   # revert one Analyst / Architect plan change (a new commit)
 uv run devteam run --fake      # whole flow with fake agents and a local fake GitHub, no cost
 uv run devteam rehearse        # fake run of the first todo task per developer: PASS / FAIL
 uv run pytest                  # tests, incl. gates, crash + resume, forbidden actions
@@ -117,6 +118,39 @@ then unattended (`run --continuous` overnight).
   going (`devteam/supervise.py`). Limits since 2026-10-23 (owner): 16 M per round, 36 M per
   task, 90 min per round; the backlog of #66 has fewer, 2-3x bigger tasks (S1 and DEF1-api hit
   the old 8 M per round, U2 the old 12 M per task while otherwise green).
+- Roles, Architect, Analyst (Kerege v3 K2, owner 2026-10-28; `config.yaml` → `roles`,
+  `models.architect`, `models.analyst`, both Claude Sonnet on the API, `enabled: false` = v2).
+  Night 2026-10-27: all three tasks were blocked by 00:46 and Kerege idled 10 h (UI-evidence-b
+  needed GET /api/me the backend lacked, COV1 was too big, UI-report hit a tester API error);
+  nobody diagnosed or re-planned. `roles` names who does what (CTO = brain, Core and Backend
+  developer = dev_pipeline, Design developer = dev_app, QA / code reviewer / red team / design QA
+  = tester, ...); one executor may serve several roles.
+  **Architect** (`devteam/architect.py`, read-only): before the brain plans, for the next task of
+  each developer, a context brief from dev's code (the files its goal names, backend routes,
+  `web/src/lib` API clients, the task graph): files, interfaces, contracts, what is missing. It
+  reaches the brain and the developer; cached per task, goal and dev commit
+  (`.state/architect/`). A missing piece in another developer's area becomes a prerequisite task
+  (`added_by: architect`) the task waits on.
+  **Analyst** (`devteam/analyst.py`) on every blocked task (not the owner's own stop, not one
+  waiting for its dependencies): a diagnosis (missing_dependency, too_big, developer_failure,
+  environment, tester_or_kerege_error, unclear) and at most one change, at most 3 a day
+  (Architect's included): (a) a prerequisite task (`added_by: analyst`) in depends_on, the task
+  "waits for" it; (b) a split into 2-3 entries `<id>-s1..3` in order, every criterion of the
+  original ("Done when" clauses and Owner additions) in exactly one (`backlog_problems`, run with
+  the backlog tests on every push), the original keeps its goal, gets status `split` and is done
+  when its pieces are; piece 1 continues the original's branch and accepted parts; (c) resume once
+  with a hint (`analyst_hint`, shown to the brain and the developer); (d) resume once after an
+  environment issue. Never a goal or criteria changed, a done or LATER task, a branch. Each
+  change is its own backlog commit `backlog: analyst: <action> <task>: <why>`, checked by the
+  backlog tests first, logged in `.state/analyst/actions.jsonl`; `devteam undo <commit>` makes a
+  new commit that removes what it added (unless started) and gives back what it changed (unless
+  changed again since). Kerege errors, unclear cases, refused changes or the cap: the owner gets
+  `.state/analyst/<task>.md` (diagnosis and a ready Claude Code prompt with the Rules block) and
+  a notification; the others keep going. A developer pauses only after 2 blocked tasks in a row
+  the Analyst could not act on. Every 6 h and at the end of a continuous run the Analyst writes
+  plan proposals (nothing changed); the daily report's "Plan adjustments" lists the changes
+  (with their undo) and the proposals. The dashboard's **Now** panel: each agent's roles, task,
+  part, round, minutes, last event and last verdict, and why the run stopped.
 - Parts (owner, 2026-10-23): a task whose goal has more than ~4 build items is planned by the
   brain as 2-3 parts inside the same task (`parts` in the plan, never new backlog tasks), each
   with its own plan, acceptance criteria and routes; the task's top-level criteria (Owner
