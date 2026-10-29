@@ -3,6 +3,8 @@ export interface Credentials {
   password: string;
 }
 
+export type { Role } from '../lib/me';
+
 export class AuthError extends Error {
   constructor(public code: 'required' | 'invalidCredentials' | 'connection' | 'storage') {
     super(code);
