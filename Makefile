@@ -1,7 +1,7 @@
 API_PORT ?= 8000
 COMPOSE = docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: up down api web test lint sample
+.PHONY: up down api web test lint sample local local-stop
 
 up:
 	$(COMPOSE) up -d --build --wait
@@ -14,6 +14,13 @@ api:
 
 web:
 	cd web && pnpm dev
+
+# Everything for a real run on this Mac (docs/DEMO.md); LAN=1 also serves the phone.
+local:
+	infra/local.sh start
+
+local-stop:
+	infra/local.sh stop
 
 test:
 	cd backend && uv run pytest
