@@ -4,10 +4,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../auth/AuthProvider';
+import { login, sessionHeader } from '../auth/auth';
 import { createDemo } from '../fixtures/demo';
 import { setLang } from '../i18n';
 import { loadBundle, loadManifest, type Manifest } from '../lib/bundle';
 import fixture from '../test/fixtures/finding.json';
+import meResponses from '../test/fixtures/me-recorded.json';
 import { ViewerPage } from './ViewerPage';
 
 const viewer = vi.hoisted(() => ({ mounts: 0 }));
@@ -26,11 +28,13 @@ vi.mock('../viewer/ViewerScreen', () => ({
 }));
 
 beforeEach(() => {
+  sessionStorage.clear();
   setLang('en');
   viewer.mounts = 0;
   vi.mocked(loadBundle).mockResolvedValue(createDemo('en').bundle);
 });
 afterEach(() => {
+  sessionStorage.clear();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -63,8 +67,20 @@ function openViewer(path = '/viewer/notre-dame-p3e?finding=first') {
   return client;
 }
 
-function mockFindings(result: 'loaded' | 'error' | 'empty') {
+function mockFindings(result: 'loaded' | 'error' | 'empty', identity?: keyof typeof meResponses) {
   const fetch = vi.fn(async (url: string) => {
+    if (identity) {
+      if (url === '/api/runs') return Response.json([]);
+      if (url === '/api/me') {
+        const response = meResponses[identity];
+        return new Response(JSON.stringify(response.body), {
+          status: response.status,
+          headers: response.headers,
+        });
+      }
+      if (fixture.finding.evidence.some((evidence) => evidence.image_url === url))
+        return new Response('fixture image', { headers: { 'Content-Type': 'image/jpeg' } });
+    }
     if (url === '/api/findings/701/decisions') return Response.json([]);
     if (url === '/api/inspections') return Response.json([{ id: 41 }]);
     if (url === '/api/inspections/41/runs')
@@ -128,3 +144,47 @@ it('selects an API finding via the viewer callback, keeps other URL params and d
   expect(viewer.mounts).toBe(1);
   client.clear();
 });
+
+it.each(['tester', 'engineer'] as const)(
+  'forwards the signed-in session on the viewer route and handles the recorded %s /api/me response',
+  async (identity) => {
+    vi.mocked(loadManifest).mockResolvedValue(createDemo('en').bundle.manifest);
+    vi.stubGlobal(
+      'URL',
+      Object.assign(class extends URL {}, {
+        createObjectURL: vi.fn(() => 'blob:fixture-evidence'),
+        revokeObjectURL: vi.fn(),
+      }),
+    );
+    const fetch = mockFindings('loaded', identity);
+    // A successful public /api/runs read does not establish a ME1 user identity.
+    await login({ username: 'fixture-operator', password: 'fixture-session-value' });
+    expect(sessionHeader()).toBe('Bearer fixture-session-value');
+    const client = openViewer('/viewer/notre-dame-p3e?finding=first');
+    try {
+      await screen.findByText('No decisions yet');
+      const log = screen.getByRole('region', { name: 'Decision log' });
+      await waitFor(() => expect(log.getAttribute('aria-busy')).toBe('false'));
+      expect(fetch).toHaveBeenCalledWith('/api/me', {
+        signal: expect.any(AbortSignal),
+        headers: { Authorization: 'Bearer fixture-session-value' },
+      });
+      expect(screen.getByTestId('location').textContent).toBe('?finding=first');
+      if (identity === 'tester') {
+        expect(screen.getByRole('alert').textContent).toBe(
+          'Could not check your role. Reload the page to try again.',
+        );
+        for (const name of ['Confirm', 'Reject', 'Reclass'])
+          expect(screen.queryByRole('button', { name })).toBeNull();
+        expect(screen.queryByRole('textbox', { name: 'Comment' })).toBeNull();
+      } else {
+        for (const name of ['Confirm', 'Reject', 'Reclass'])
+          expect(screen.getByRole('button', { name })).toBeTruthy();
+        expect(screen.getByRole('textbox', { name: 'Comment' })).toBeTruthy();
+        expect(screen.queryByRole('alert')).toBeNull();
+      }
+    } finally {
+      client.clear();
+    }
+  },
+);

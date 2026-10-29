@@ -54,3 +54,31 @@ test (47 files, 853 tests) and build pass; the existing bundle-size advisory rem
 Installed React, TanStack Query, Testing Library and Vitest licence files were checked:
 MIT permits commercial use. No new dependency, server, screenshot or real API write.
 Kerege still owns browser e2e and screenshot verification.
+
+Screenshot return investigation (2026-10-28): the recorded /api/me response is not a new
+schema. Using the real CRUD/runs routers through FastAPI TestClient against the last
+screenshot database opened read-only, the tester's configured password sends a Bearer
+header, gets 200 from /api/runs, but gets 401 application/json from /api/me with
+{"detail":"invalid or missing token"}. The seeded engineer gets 200 application/json with
+id 2, name engineer, role engineer, organization {id: 1, name: dev}. No server was started,
+no secret printed or saved, and no API write was made. FastAPI/SQLAlchemy are MIT and
+httpx/python-dotenv BSD-3-Clause; installed licence metadata was checked for this probe.
+
+Root cause: devteam/config.yaml screenshots.api seeds fixed per-user credentials, while
+devteam/shoot.mjs signs in with the unrelated QARAU_TEST_PASSWORD from devteam/.env.
+Open dev mode lets the existing /api/runs login check pass for that unknown credential;
+ME1 correctly refuses it because there is no authenticated user. The parser and session
+header are correct. Changing header syntax, accepting the 401 body as a role, or embedding
+a seed credential in the web client cannot fix this correctly.
+
+Added a recorded-response fixture (no credentials) and viewer-route regression coverage
+through the real login/session/auth provider: the 401 remains read-only with an alert;
+the actual seeded engineer response shows all three actions and the comment without an
+alert at /viewer/notre-dame-p3e?finding=first. Previous assertions remain unchanged.
+The outstanding fix is to align the screenshot tester credential with a seeded engineer
+or admin in the runner configuration. devteam/config.yaml and devteam/.env are outside
+this task's permitted edits; the former is explicitly protected. No protected files changed.
+Verification after adding the recorded fixture and route regressions: pnpm lint (ESLint and
+Prettier), pnpm typecheck, pnpm test (47 files, 855 tests), and pnpm build pass. The existing
+bundle-size advisory remains. Screenshot acceptance is still blocked on the runner credential
+alignment; this round does not claim a frontend parser change fixes the real 401 response.
