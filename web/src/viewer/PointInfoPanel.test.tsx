@@ -33,7 +33,8 @@ it('renders three-decimal model coordinates, views and unavailable measurements'
   for (const text of ['1.235 model units', '-2.000 model units', '3.400 model units', 'Views', '2'])
     expect(screen.getByText(text)).toBeTruthy();
   expect(screen.getAllByText('Not available: needs metric scale (P5a)')).toHaveLength(2);
-  expect(screen.getByText('Not available: needs point confidence (P6)')).toBeTruthy();
+  expect(screen.queryByText('Not available: needs point confidence (P6)')).toBeNull();
+  expect(screen.queryByText('Point confidence')).toBeNull();
   expect(screen.queryByText('estimated')).toBeNull();
 });
 
@@ -66,7 +67,7 @@ it('closes the panel and explicitly shows empty estimated visibility', () => {
   expect(onClose).toHaveBeenCalledOnce();
 });
 
-it('shows metric values and supplied confidence when available', () => {
+it('shows metric height and distance without supplied confidence', () => {
   render(
     <PointInfoPanel
       info={{
@@ -82,7 +83,9 @@ it('shows metric values and supplied confidence when available', () => {
   );
   expect(screen.getAllByText('3.400 m')).toHaveLength(2);
   expect(screen.getByText('4.200 m')).toBeTruthy();
-  expect(screen.getByText('0.800')).toBeTruthy();
+  expect(screen.queryByText('0.800')).toBeNull();
+  expect(screen.queryByText('Not available: needs point confidence (P6)')).toBeNull();
+  expect(screen.queryByText('Point confidence')).toBeNull();
 });
 
 it.each<Lang>(['en', 'ru', 'kk'])('names COLMAP fusion evidence in %s', (lang) => {
@@ -138,5 +141,6 @@ it.each<Lang>(['en', 'ru', 'kk'])('localizes panel labels and unavailability in 
   expect(screen.getByRole('button', { name: locale['pointInfo.close'] })).toBeTruthy();
   expect(screen.getByText(locale['pointInfo.views'])).toBeTruthy();
   expect(screen.getAllByText(locale['pointInfo.needsScale'])).toHaveLength(2);
-  expect(screen.getByText(locale['pointInfo.needsConfidence'])).toBeTruthy();
+  expect(screen.queryByText(locale['pointInfo.needsConfidence'])).toBeNull();
+  expect(screen.queryByText(locale['pointInfo.confidence'])).toBeNull();
 });

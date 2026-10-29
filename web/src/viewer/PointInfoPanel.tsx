@@ -104,7 +104,7 @@ export function PointInfoPanel({
         )}
       </div>
       <dl className="point-info-measurements">
-        {(['height', 'distance', 'confidence'] as const).map((measurement) => {
+        {(['height', 'distance'] as const).map((measurement) => {
           const value = info[measurement];
           return (
             <div key={measurement}>
@@ -112,15 +112,10 @@ export function PointInfoPanel({
               <dd className="m-0">
                 {value.available ? (
                   <span className="viewer-mono">
-                    {value.value.toFixed(3)}{' '}
-                    {measurement === 'confidence' ? '' : t('pointInfo.metres')}
+                    {value.value.toFixed(3)} {t('pointInfo.metres')}
                   </span>
                 ) : (
-                  t(
-                    measurement === 'confidence'
-                      ? 'pointInfo.needsConfidence'
-                      : 'pointInfo.needsScale',
-                  )
+                  t('pointInfo.needsScale')
                 )}
               </dd>
             </div>
