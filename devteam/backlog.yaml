@@ -1463,13 +1463,18 @@ tasks:
     Owner 2026-10-27: part 2 of the UI-evidence split; starts from UI-evidence''s merged panel.
 
     '
-  status: in_progress
+  status: blocked
   depends_on:
   - UI-evidence
   - ME1
   owner: dev_app
   run: cont-20261028-185246-dev_app-2
   branch: devteam/UI-evidence-b
+  blocked_reason: 'the tester sent it back twice in a row for the same reason, so no new round was started:
+    Criterion 5 fails on the real screenshots. In all of them (viewer-notre-dame-p3e-finding-first-*),
+    the panel shows the error text from i18n key decisions.roleError and no buttons or comment field.
+    The cause is that GET /api/me returns 401 for the screenshot user, and the developer says the screenshot
+    runner''s QARAU_TEST_PASSWORD does not match any seeded engineer token. The developer says the cred'
 - id: CONF-fix
   area: app
   title: No confidence number in the point info panel
