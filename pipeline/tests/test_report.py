@@ -3,10 +3,12 @@ determinism, translations, the database reader and the CLI. Expected strings are
 never read from the code under test."""
 
 import io
+import json
 import re
 import sqlite3
 import string
 import tomllib
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -16,14 +18,22 @@ import sqlalchemy as sa
 from pypdf import PdfReader
 
 from qarau_pipeline.cli import main
-from qarau_pipeline.report import ReportInput, load_report_input, render_pdf, render_report
+from qarau_pipeline.report import (
+    ReportInput,
+    load_report_input,
+    load_strings,
+    render_pdf,
+    render_report,
+)
 from qarau_pipeline.report.inputs import (
     DecisionEntry,
     Evidence,
     FindingInput,
     InspectionInput,
     VersionEntry,
+    with_coverage,
 )
+from qarau_pipeline.report.render import render_html
 
 REPORT_DIR = Path(__file__).resolve().parents[1] / "qarau_pipeline" / "report"
 ALMATY = timezone(timedelta(hours=5))
@@ -345,6 +355,73 @@ def test_cli_writes_the_same_file_twice(tmp_path: Path, capsys: pytest.CaptureFi
     assert "Ақау 1" in text and "Ақау 2" in text and "Қамту есептелмеген." in text
     assert "масштаб орнатылмаған" in text and "Есеп QV-2026-0007, 1-нұсқа" in text
     assert "sha256" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- not-seen areas (COV1-b)
+
+# A run with coverage: 2 not-seen regions and 1 inspected one (regions.json, COV1 format), and
+# 5 registered cameras with R = I (qvec 1 0 0 0), so each centre is -tvec, plus 1 unregistered
+# frame. The nearest frames to the region centres (1.75, -2, 0.25) and (-3.75, 1.25, 2.25) are
+# worked out by hand from these literals.
+COV_REGIONS = [
+    {"id": "3_-9_0", "bounds": {"min": [1.5, -2.25, 0.0], "max": [2.0, -1.75, 0.5]},
+     "state": "not_seen", "frame_count": 0, "point_count": 4, "finding_ids": []},
+    {"id": "0_0_0", "bounds": {"min": [0.0, 0.0, 0.0], "max": [0.5, 0.5, 0.5]},
+     "state": "inspected_ok", "frame_count": 6, "point_count": 30, "finding_ids": []},
+    {"id": "-8_4_8", "bounds": {"min": [-4.0, 1.0, 2.0], "max": [-3.5, 1.5, 2.5]},
+     "state": "not_seen", "frame_count": 1, "point_count": 2, "finding_ids": []},
+]  # fmt: skip
+COV_CAMERAS = {3: [2, -2, 0], 7: [0, 0, 0], 12: [5, -2, 0], 20: [-4, 1, 2], 25: [-3, 2, 3]}
+# per language: section heading, count sentence, the bounds as printed, "coverage not computed"
+NOT_SEEN = {
+    "en": ("Not inspected areas", "Not inspected areas: 2.",
+           ["1.50; -2.25; 0.00", "2.00; -1.75; 0.50", "-4.00; 1.00; 2.00", "-3.50; 1.50; 2.50"],
+           "Coverage not computed."),
+    "ru": ("Неосмотренные участки", "Неосмотренных участков: 2.",
+           ["1,50; -2,25; 0,00", "2,00; -1,75; 0,50", "-4,00; 1,00; 2,00", "-3,50; 1,50; 2,50"],
+           "Покрытие не рассчитано."),
+    "kk": ("Тексерілмеген аймақтар", "Тексерілмеген аймақтар саны: 2.",
+           ["1,50; -2,25; 0,00", "2,00; -1,75; 0,50", "-4,00; 1,00; 2,00", "-3,50; 1,50; 2,50"],
+           "Қамту есептелмеген."),
+}  # fmt: skip
+NEAREST = ["000003.jpg, 000007.jpg, 000012.jpg", "000020.jpg, 000025.jpg, 000007.jpg"]
+
+
+def coverage_runs(root: Path, with_regions: bool = True) -> Path:
+    run = root / "notre-dame-p3e"
+    (run / "export/web").mkdir(parents=True)
+    frames: list[dict[str, Any]] = [
+        {"i": i, "image": f"frames/{i:06d}.jpg", "registered": i in COV_CAMERAS}
+        for i in (3, 7, 12, 20, 25, 30)
+    ]
+    for f in frames:
+        if f["registered"]:
+            f["pose"] = {"qvec": [1, 0, 0, 0], "tvec": [-x for x in COV_CAMERAS[f["i"]]]}
+    (run / "export/web/manifest.json").write_text(json.dumps({"frames": frames}))
+    if with_regions:
+        (run / "coverage").mkdir()
+        (run / "coverage/regions.json").write_text(json.dumps({"regions": COV_REGIONS}))
+    return root
+
+
+@pytest.mark.parametrize("lang", ["ru", "kk", "en"])
+def test_not_seen_areas_list_bounds_and_nearest_frames(tmp_path: Path, lang: str) -> None:
+    inp = with_coverage(replace(INPUT, run_dirs=("notre-dame-p3e",)), coverage_runs(tmp_path))
+    html = flat(render_html(inp, load_strings(lang), lang))
+    heading, count, bounds, not_computed = NOT_SEEN[lang]
+    section = html[html.index(f"<span>5</span><span>{heading}</span>") :]
+    assert count in section
+    for text in [*bounds, *NEAREST]:
+        assert text in section, text
+    assert not_computed not in html
+    assert "000030.jpg" not in html  # not registered: never a nearest frame
+
+
+def test_without_regions_the_report_says_coverage_not_computed(tmp_path: Path) -> None:
+    runs = coverage_runs(tmp_path, with_regions=False)
+    inp = with_coverage(replace(INPUT, run_dirs=("notre-dame-p3e",)), runs)
+    assert inp.coverage is None
+    assert "Coverage not computed." in render_html(inp, load_strings("en"), "en")
 
 
 def test_cli_unknown_inspection_fails(tmp_path: Path) -> None:

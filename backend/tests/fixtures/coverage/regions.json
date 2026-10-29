@@ -1,0 +1,18 @@
+{
+ "version": 1,
+ "units": "bundle",
+ "voxel_size": 1.0,
+ "thresholds": {"min_frames": 3, "min_frame_quality": 100.0, "min_points": 20, "near": 0.01,
+                "far": null, "unusable_issues": ["blur"]},
+ "summary": {"inspected_ok": 2, "finding": 1, "not_seen": 1},
+ "regions": [
+  {"id": "-1_0_0", "bounds": {"min": [-1.0, 0.0, 0.0], "max": [0.0, 1.0, 1.0]},
+   "state": "inspected_ok", "frame_count": 7, "point_count": 40, "finding_ids": []},
+  {"id": "0_0_0", "bounds": {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0]},
+   "state": "inspected_ok", "frame_count": 5, "point_count": 31, "finding_ids": []},
+  {"id": "0_0_1", "bounds": {"min": [0.0, 0.0, 1.0], "max": [1.0, 1.0, 2.0]},
+   "state": "finding", "frame_count": 4, "point_count": 25, "finding_ids": [3]},
+  {"id": "2_-1_0", "bounds": {"min": [2.0, -1.0, 0.0], "max": [3.0, 0.0, 1.0]},
+   "state": "not_seen", "frame_count": 1, "point_count": 6, "finding_ids": []}
+ ]
+}

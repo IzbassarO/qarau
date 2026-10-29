@@ -62,3 +62,16 @@ Optional manifest key `dense`, present when export ran with `--dense`:
 frame_links_source, max_frames_per_point, frame_offsets: {path, dtype: "<u4", length},
 frame_ids: {path, dtype: "<u4", length}, linked_points, dropped}`. Layout, cap and the two
 link sources: ADR 0017. Every v1 key is unchanged; viewers that do not know `dense` ignore it.
+
+## Addendum 2026-10-28 (COV1-b): `coverage` layer
+
+Array `points.coverage.u8` (unsigned 8-bit, one byte per `points` entry, in point order) and
+manifest key `coverage`:
+`{computed: true, path: "export/web/points.coverage.u8", dtype: "u1", count, codes: {not_seen: 0,
+inspected_ok: 1, finding: 2, no_region: 255}, regions: "coverage/regions.json"}`. A point gets
+the state of the coverage region (COV1, `coverage/regions.json`) whose bounds contain it; on a
+face shared by regions, the first region by id. Without coverage the key is
+`{computed: false}` and there is no array, so a viewer never shows "not computed" as OK. Written
+by `export.write_coverage_layer` at the end of export and again by the `coverage` step, which
+runs after export. Additive key, `version` unchanged; viewers that do not know `coverage` ignore
+it (the current viewer does; a later UI task colours the cloud by it).

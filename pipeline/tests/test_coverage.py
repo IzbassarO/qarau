@@ -257,13 +257,18 @@ def test_workflow_step_and_its_plain_failure(tmp_path: Path) -> None:
                          "has not run)")  # fmt: skip
     write_run(tmp_path)
     res = run_step(step, StepContext(tmp_path, config, force=True, log=lambda _: None))
-    assert res.status == "ok" and res.outputs == ["coverage/regions.json"]
+    assert res.status == "ok"
+    assert res.outputs == ["coverage/regions.json", "export/web/points.coverage.u8"]
     assert (res.metrics["inspected_ok"], res.metrics["finding"], res.metrics["not_seen"]) == (
         1,
         1,
         3,
     )
     assert json.loads((tmp_path / "coverage" / "step.json").read_text())["status"] == "done"
+    # COV1-b: the step adds the per-point coverage array to the bundle it read
+    man = json.loads((tmp_path / "export" / "web" / "manifest.json").read_text())
+    assert man["coverage"]["computed"] is True and man["coverage"]["count"] == 85
+    assert (tmp_path / "export/web/points.coverage.u8").stat().st_size == 85
 
 
 def test_stale_findings_fail_in_plain_words(tmp_path: Path) -> None:
