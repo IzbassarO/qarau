@@ -37,6 +37,14 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
 }
+.report-preview-box {
+  display: grid;
+  gap: var(--space-2);
+}
+.report-preview-box > a {
+  padding-block: var(--space-3);
+  text-decoration: underline;
+}
 .report-topbar .qv-topbar__title {
   min-width: 0;
 }
@@ -49,7 +57,6 @@
 .report-document {
   width: min(100%, var(--layout-report-document));
   padding: var(--space-12) var(--space-12) var(--space-10);
-  color-scheme: light;
   overflow-wrap: anywhere;
 }
 .report-document .qv-doc__title {
@@ -128,10 +135,16 @@
     grid-row: 1;
   }
   .report-preview {
-    height: calc(100dvh - var(--layout-topbar) - var(--space-8) * 3);
+    height: calc(100dvh - var(--layout-topbar) - var(--space-8) * 4);
   }
 }
 @media (max-width: 767px) {
+  .report-preview {
+    height: min(24dvh, calc(var(--space-12) * 4));
+  }
+  .report-hash {
+    flex-shrink: 0;
+  }
   .report-main {
     padding: var(--space-4);
   }
@@ -156,11 +169,7 @@
   .report-controls {
     width: 100%;
   }
-  .report-controls .qv-segment {
-    display: flex;
-    width: 100%;
-  }
-  .report-controls .qv-segment button {
+  .report-controls button {
     flex: 1;
     height: auto;
     min-height: calc(var(--space-8) + var(--space-3));

@@ -4,6 +4,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { readDenseFixture } from '../src/fixtures/dense-bundle/readFixture';
 import fixture from '../src/test/fixtures/report-summary.json' with { type: 'json' };
 import coverageFixture from '../src/test/fixtures/report-coverage.json' with { type: 'json' };
+import { reportJson } from '../src/test/reportRoutes';
 
 // Original, hand-authored one-page PDF. No third-party document content.
 const pdf = readFileSync(new URL('../src/test/fixtures/report.pdf', import.meta.url));
@@ -32,18 +33,8 @@ async function mockApi(page: Page) {
         body: bundleFile,
         contentType: url.pathname.endsWith('.svg') ? 'image/svg+xml' : 'application/octet-stream',
       });
-    if (url.pathname === '/api/inspections/demo-id' || url.pathname === '/api/inspections/37')
+    if (url.pathname === '/api/inspections/demo-id')
       return route.fulfill({ json: fixture.inspection });
-    if (url.pathname === '/api/inspections/notre-dame' || url.pathname === '/api/inspections/demo')
-      return route.fulfill({ status: 422, json: fixture.validation });
-    if (url.pathname === '/api/inspections') return route.fulfill({ json: [fixture.inspection] });
-    if (url.pathname === '/api/inspections/37/runs') return route.fulfill({ json: fixture.runs });
-    if (url.pathname === '/api/sites') return route.fulfill({ json: fixture.sites });
-    if (url.pathname === '/api/inspections/37/findings')
-      return route.fulfill({ json: fixture.findings });
-    const decisions: Record<string, unknown> = fixture.decisions;
-    const match = /^\/api\/findings\/(\d+)\/decisions$/.exec(url.pathname);
-    if (match && match[1] in decisions) return route.fulfill({ json: decisions[match[1]] });
     if (url.pathname === '/api/inspections/37/report.pdf') {
       pdfLanguages.push(url.searchParams.get('lang')!);
       return route.fulfill({
@@ -52,7 +43,7 @@ async function mockApi(page: Page) {
         headers: { 'X-Report-SHA256': hash },
       });
     }
-    return route.fulfill({ status: 404, json: fixture.notFound });
+    return route.fulfill(reportJson(url.pathname));
   });
   return pdfLanguages;
 }
@@ -163,6 +154,12 @@ for (const locale of locales) {
       await expect(critical.getByText(locale.decider, { exact: true })).toBeVisible();
       await expect(page.getByText('reference: Letter sheet, frame 18')).toBeVisible();
       await expect(page.getByText(locale.coverage, { exact: true })).toBeVisible();
+      await expect(page.locator('.report-document')).toHaveCSS(
+        'background-color',
+        theme === 'light' ? 'rgb(255, 255, 255)' : 'rgb(38, 38, 38)',
+      );
+      await expect(page.locator('.report-preview-box > a')).toBeVisible();
+      await expect(page.locator('.report-preview-box > a')).toHaveAttribute('href', /^blob:/);
       const languages = page.getByRole('group', { name: locale.language });
       await expect(languages.getByRole('button')).toHaveCount(3);
       await expect(
@@ -180,6 +177,13 @@ for (const locale of locales) {
       await expect(hashLabel).toHaveAttribute('title', hash);
       await expect(hashLabel).toHaveText('5e317abc851b…fef9fb6c');
       await expect(hashLabel).toBeInViewport();
+      expect(
+        await page.locator('.report-hash').evaluate((el) => el.scrollWidth <= el.clientWidth),
+      ).toBe(true);
+      if (page.viewportSize()!.width === 390) {
+        expect(previewBox.height).toBeLessThanOrEqual(192);
+        await expect(page.getByRole('heading', { level: 1 })).toBeInViewport();
+      }
       const downloadButton = page.getByRole('link', { name: locale.download, exact: true });
       await expect(downloadButton).toHaveAttribute('download', `report-37-${locale.lang}.pdf`);
       const downloadBox = (await downloadButton.boundingBox())!;

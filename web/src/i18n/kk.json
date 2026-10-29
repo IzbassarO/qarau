@@ -348,6 +348,7 @@
   "report.language.kk": "Қазақша",
   "report.language.en": "English",
   "report.pdf": "PDF алдын ала қарау",
+  "report.previewHelp": "Алдын ала қарау бос па? Есепті жүктеңіз.",
   "report.generating": "Есеп жасалуда…",
   "report.ready": "Есеп дайын.",
   "report.failed": "Есепті жасау мүмкін болмады",
@@ -355,6 +356,5 @@
   "report.datePattern": "{year} жылғы {day} {month}, {time}",
   "report.months": "қаңтар|ақпан|наурыз|сәуір|мамыр|маусым|шілде|тамыз|қыркүйек|қазан|қараша|желтоқсан",
   "report.download": "PDF жүктеп алу",
-  "report.hash": "SHA-256",
   "report.link": "Есеп"
 }

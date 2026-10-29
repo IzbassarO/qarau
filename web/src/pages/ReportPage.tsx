@@ -59,19 +59,17 @@ export function ReportPage() {
           {t('shell.emptyTitle')}
         </Link>
         <span className="qv-topbar__title">{t('report.title')}</span>
-        <div className="report-controls">
-          <div className="qv-segment" role="group" aria-label={t('report.language')}>
-            {(['ru', 'kk', 'en'] as const).map((locale) => (
-              <button
-                type="button"
-                key={locale}
-                aria-pressed={locale === pdfLanguage}
-                onClick={() => setChosenLanguage(locale)}
-              >
-                {t(`report.language.${locale}`)}
-              </button>
-            ))}
-          </div>
+        <div className="qv-segment report-controls" role="group" aria-label={t('report.language')}>
+          {(['ru', 'kk', 'en'] as const).map((locale) => (
+            <button
+              type="button"
+              key={locale}
+              aria-pressed={locale === pdfLanguage}
+              onClick={() => setChosenLanguage(locale)}
+            >
+              {t(`report.language.${locale}`)}
+            </button>
+          ))}
         </div>
         <div className="report-download">
           {readyUrl ? (
@@ -85,7 +83,6 @@ export function ReportPage() {
           )}
           {state.state === 'ready' && (
             <span className="qv-caption qv-muted report-hash">
-              {t('report.hash')}{' '}
               <code className="qv-mono" title={state.hash}>
                 {state.hash.slice(0, 12)}…{state.hash.slice(-8)}
               </code>
@@ -115,14 +112,15 @@ export function ReportPage() {
             </div>
           )}
           {state.state === 'ready' && readyUrl && (
-            <iframe className="report-preview" title={t('report.pdf')} src={readyUrl} />
+            <div className="report-preview-box">
+              <a href={readyUrl} download={`report-${id}-${pdfLanguage}.pdf`}>
+                {t('report.previewHelp')}
+              </a>
+              <iframe className="report-preview" title={t('report.pdf')} src={readyUrl} />
+            </div>
           )}
         </section>
-        <article
-          className="qv-doc report-document"
-          data-theme="light"
-          aria-label={t('report.summary')}
-        >
+        <article className="qv-doc report-document" aria-label={t('report.summary')}>
           <div className="qv-doc__band">
             <Wordmark />
           </div>

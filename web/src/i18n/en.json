@@ -348,6 +348,7 @@
   "report.language.kk": "Қазақша",
   "report.language.en": "English",
   "report.pdf": "PDF preview",
+  "report.previewHelp": "Blank preview? Download the report.",
   "report.generating": "Generating report…",
   "report.ready": "Report is ready.",
   "report.failed": "Could not generate report",
@@ -355,6 +356,5 @@
   "report.datePattern": "{day} {month} {year} at {time}",
   "report.months": "January|February|March|April|May|June|July|August|September|October|November|December",
   "report.download": "Download PDF",
-  "report.hash": "SHA-256",
   "report.link": "Report"
 }

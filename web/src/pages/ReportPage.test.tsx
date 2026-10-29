@@ -234,6 +234,11 @@ it('shares the PDF Blob and hash', async () => {
   const frame = previewFrame();
   expect(frame.tagName).toBe('IFRAME');
   expect(frame.getAttribute('src')).toBe('blob:report-en');
+  const help = screen.getByRole('link', { name: 'Blank preview? Download the report.' });
+  expect(help.getAttribute('href')).toBe('blob:report-en');
+  expect(help.getAttribute('download')).toBe('report-37-en.pdf');
+  expect(frame.closest('.report-preview-box')?.contains(help)).toBe(true);
+  expect(screen.getByRole('article').hasAttribute('data-theme')).toBe(false);
   const hash = screen.getByTitle(fixture.hash);
   expect(hash.textContent).toBe('bf98d56a3f72…7263bc26');
   expect(hash.getAttribute('title')).toBe(fixture.hash);

@@ -348,6 +348,7 @@
   "report.language.kk": "Қазақша",
   "report.language.en": "English",
   "report.pdf": "Предпросмотр PDF",
+  "report.previewHelp": "Предпросмотр пуст? Скачайте отчёт.",
   "report.generating": "Отчёт формируется…",
   "report.ready": "Отчёт готов.",
   "report.failed": "Не удалось сформировать отчёт",
@@ -355,6 +356,5 @@
   "report.datePattern": "{day} {month} {year} г. в {time}",
   "report.months": "января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря",
   "report.download": "Скачать PDF",
-  "report.hash": "SHA-256",
   "report.link": "Отчёт"
 }
