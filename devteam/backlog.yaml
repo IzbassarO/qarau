@@ -1433,13 +1433,16 @@ tasks:
     the browser bundle.
   tester:
     max_diff: 180000
-  status: in_progress
+  status: blocked
   depends_on:
   - RPT1
   - DS1
   owner: dev_app
   run: cont-20261029-152145-dev_app-1
   branch: devteam/UI-report
+  blocked_reason: 'supervisor: the task used 36.2 M subscription tokens (limit 36 M per task). Raise the
+    `supervisor` limits in devteam/config.yaml (or the task''s own `supervisor:` in backlog.yaml) or split
+    the task, then `devteam resume UI-report`'
 - id: UI-evidence-b
   area: app
   title: Decision log and actions in the evidence panel
