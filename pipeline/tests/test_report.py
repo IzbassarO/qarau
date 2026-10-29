@@ -271,7 +271,8 @@ def test_template_has_no_visible_text_of_its_own() -> None:
 
 def make_db(path: Path) -> str:
     """The columns the report reads, as the API's migrations create them, with 2 manual
-    findings: #1 confirmed then reclassified to watch (scale set), #2 rejected (no scale)."""
+    findings: #1 confirmed then reclassified to watch (scale set), #2 rejected (no scale); and #3
+    in the sandbox of event guest 5 (DEMO1), with that guest's decision."""
     con = sqlite3.connect(path)
     con.executescript("""
         CREATE TABLE organization (id INTEGER PRIMARY KEY, name TEXT);
@@ -281,27 +282,31 @@ def make_db(path: Path) -> str:
                                  created_at DATETIME);
         CREATE TABLE run (id TEXT PRIMARY KEY, inspection_id INTEGER, run_dir TEXT);
         CREATE TABLE finding (id INTEGER PRIMARY KEY, run_id TEXT, class TEXT, severity TEXT,
-                              status TEXT, area_m2 FLOAT, scale_source TEXT, points JSON);
+                              status TEXT, area_m2 FLOAT, scale_source TEXT, points JSON,
+                              guest_id INTEGER);
         CREATE TABLE observation (id INTEGER PRIMARY KEY, finding_id INTEGER, frame_id INTEGER,
                                   outline JSON);
         CREATE TABLE decision (id INTEGER PRIMARY KEY, finding_id INTEGER, user_id INTEGER,
                                verdict TEXT, comment TEXT, new_class TEXT, new_severity TEXT,
                                created_at DATETIME);
         INSERT INTO organization VALUES (1, 'Caspian Inspection Services');
-        INSERT INTO "user" VALUES (1, 'Aslan Bekov'), (2, 'Dana Serik');
+        INSERT INTO "user" VALUES (1, 'Aslan Bekov'), (2, 'Dana Serik'), (3, 'guest');
         INSERT INTO site VALUES (1, 1, 'Tank T-104');
         INSERT INTO inspection VALUES (7, 1, 'quick_scan', '2026-10-21 04:41:00.000000');
         INSERT INTO run VALUES ('r1', 7, 'notre-dame-p3e');
         INSERT INTO finding VALUES (1, 'r1', 'corrosion', 'critical', 'proposed', 0.42,
-                                    'manual: Letter sheet', '[4, 9, 11]');
-        INSERT INTO finding VALUES (2, 'r1', 'coating', 'critical', 'proposed', NULL, NULL, NULL);
+                                    'manual: Letter sheet', '[4, 9, 11]', NULL);
+        INSERT INTO finding VALUES (2, 'r1', 'coating', 'critical', 'proposed', NULL, NULL, NULL,
+                                    NULL);
+        INSERT INTO finding VALUES (3, 'r1', 'crack', 'watch', 'proposed', NULL, NULL, '[1]', 5);
         INSERT INTO observation VALUES (1, 1, 412, '[[10, 20], [60, 20], [35, 70]]'),
                                        (2, 1, 415, '[[1, 2], [3, 4], [5, 6]]'),
                                        (3, 2, 12, NULL);
         INSERT INTO decision VALUES
             (1, 1, 1, 'confirm', NULL, NULL, NULL, '2026-10-21 05:02:00.000000'),
             (2, 2, 2, 'reject', 'Shadow, not corrosion', NULL, NULL, '2026-10-21 05:20:00.000000'),
-            (3, 1, 1, 'reclass', 'Grew since May', NULL, 'watch', '2026-10-21 05:10:00.000000');
+            (3, 1, 1, 'reclass', 'Grew since May', NULL, 'watch', '2026-10-21 05:10:00.000000'),
+            (4, 3, 3, 'confirm', NULL, NULL, NULL, '2026-10-21 06:00:00.000000');
     """)  # fmt: skip
     con.commit()
     con.close()
@@ -340,6 +345,17 @@ def test_load_report_input(tmp_path: Path) -> None:
     )  # fmt: skip
     assert two.evidence[0].outline == ()
     assert [(d.user, d.comment) for d in two.decisions] == [("Dana Serik", "Shadow, not corrosion")]
+
+
+def test_report_input_of_an_event_guest_has_only_its_sandbox(tmp_path: Path) -> None:
+    """DEMO1: guest 5's report shows its finding #3 and decision only; other guests see none,
+    and the report without a guest (above) never shows #3."""
+    engine = sa.create_engine(make_db(tmp_path / "api.db"))
+    inp = load_report_input(engine, 7, REPORT_TIME, guest_id=5)
+    assert [(f.id, f.status, f.class_) for f in inp.findings] == [(3, "confirmed", "crack")]
+    assert [(d.user, d.verdict) for d in inp.findings[0].decisions] == [("guest", "confirm")]
+    assert inp.engineer == "guest"
+    assert load_report_input(engine, 7, REPORT_TIME, guest_id=6).findings == ()
 
 
 def test_cli_writes_the_same_file_twice(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

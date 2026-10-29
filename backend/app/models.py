@@ -23,6 +23,7 @@ class Role(enum.StrEnum):
     admin = "admin"
     engineer = "engineer"
     viewer = "viewer"
+    guest = "guest"  # an event organization's guest user (ADR 0034); never has a user token
 
 
 class Mode(enum.StrEnum):
@@ -263,19 +264,24 @@ class Guest(Base):
     organization_id: Mapped[int] = mapped_column(sa.ForeignKey("organization.id"))
     event_code_id: Mapped[int] = mapped_column(sa.Integer)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=now)
+    # The guest's session (migration 0008): SHA-256 of its bearer token, valid until the code
+    # expires. Purge deletes the row and with it the session.
+    token_sha256: Mapped[str | None] = mapped_column(sa.CHAR(64), unique=True, nullable=True)
 
 
 class AuditLog(Base):
-    """Append-only (trigger in migration 0001). One row per write request."""
+    """Append-only (trigger in migration 0001). One row per write request. `user_id` is null for
+    an anonymous request (a guest code use, migration 0008); `detail` holds its result and IP."""
 
     __tablename__ = "audit_log"
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(sa.ForeignKey("user.id"))
+    user_id: Mapped[int | None] = mapped_column(sa.ForeignKey("user.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=now)
     route: Mapped[str] = mapped_column(sa.String(200))  # "POST /api/sites"
     object_type: Mapped[str] = mapped_column(sa.String(50))
     object_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     action: Mapped[str] = mapped_column(sa.String(50))
+    detail: Mapped[Any | None] = mapped_column(sa.JSON, nullable=True)
 
 
 class VideoUpload(Base):

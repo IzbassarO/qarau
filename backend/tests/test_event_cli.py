@@ -102,7 +102,7 @@ def test_two_creates_give_different_codes(runs: str, capsys: pytest.CaptureFixtu
          "300", "--runs", "run-done"],  # in the past
         ["create", "--name", "launchpad", "--expires", "2026-11-06T23:59-05:00", "--max-guests",
          "0", "--runs", "run-done"],
-        ["purge", "--name", "launchpad"],  # part 2
+        ["purge", "--name", "launchpad"],  # no such event yet
     ],
 )  # fmt: skip
 def test_bad_input_exits_2_and_writes_nothing(

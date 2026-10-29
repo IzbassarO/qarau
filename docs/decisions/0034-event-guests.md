@@ -1,6 +1,6 @@
 # 0034 — Event organizations and guest access (LaunchPad demo)
 
-- Status: accepted for part 1 (schema and `create` CLI); part 2 (sign-in, sandbox, purge) adds to it
+- Status: accepted (part 1: schema and `create` CLI; part 2: sign-in, sandbox, purge)
 - Date: 2026-10-28
 - Task: DEMO1 (owner 2026-10-28: risk high, guest access to a real system)
 
@@ -38,12 +38,47 @@ UPDATE is always refused; DELETE passes only when the row's `guest_id` names a g
 organization **and** the row's `user_id` is a user of that same organization. `guest_id` alone is
 not enough, so a customer user's decision stays undeletable even if tagged with a guest id.
 `audit_log` keeps the 0001 trigger unchanged in every organization: purge never deletes an audit
-row, so a code use is logged against a user of the event organization that purge keeps (part 2).
-Downgrade restores the 0001 trigger bodies.
+row. Downgrade restores the 0001 trigger bodies.
 
-**Rate limiting (part 2).** An in-process limiter (per IP and per code, our own code, no new
-dependency). It holds only for a single API process; several workers or hosts would each count
-separately. Acceptable for one demo server; move the counters to Valkey when the API scales out.
+**Guest user (part 2).** `create` also inserts one user with role `guest` in the event
+organization. It never gets a token (its secret is random hex no scrypt output matches, and
+`find_user` skips the guest role). It is the `user_id` of every guest decision (which is what lets
+the delete trigger accept them at purge) and `created_by` of guest reports, and the user of the
+audit rows of guest writes. Purge keeps it, so no audit row ever points at a deleted user.
+
+**Guest session (part 2, migration 0008).** `POST /api/auth/guest {code}` inserts a `guest` row
+holding the SHA-256 of a new `secrets.token_urlsafe(32)` bearer token; the row is the session,
+checked before the (slow, scrypt) user lookup and valid until the code's `expires_at`. Purge
+deletes the row and with it the session. `max_guests` is counted under a process lock.
+
+**Code-use audit (part 2, migration 0008).** Every attempt writes one `audit_log` row (action
+`event_code.use`, `object_id` = event name or null, `detail` JSON `{result, ip}`). An unknown or
+rate-limited code belongs to no event and no user, so `audit_log.user_id` becomes nullable (an
+anonymous request) instead of inventing a system user. On SQLite this rebuilds the table, so the
+migration creates the 0001 append-only triggers again (tested); on Postgres `ALTER` keeps them.
+Downgrade fails while an anonymous row exists: the log is never edited to make it pass. A flood of
+refused attempts adds rows that can never be deleted; the per-IP limit bounds the rate.
+
+**Guest role and sandbox (part 2).** `guest` ranks below viewer and is deny-by-default:
+`require_role` answers 403 to a guest unless the route is declared with `guests=True`. Only the
+routes a guest needs are (view shared runs and their inspections' coverage, mark a finding,
+decide, get the PDF), and each scopes the guest: runs by `event_code_run` (else 404), inspections
+only when **every** run of the inspection is shared (so its findings, coverage and PDF show
+nothing of an unshared run), findings and decisions by `guest_id` (another guest's → 404). Users
+read only rows with `guest_id` null; the PDF loader takes the caller's guest id and shows only
+that sandbox. New routes stay closed to guests unless someone opts in, which is the safe failure.
+
+**Rate limiting (part 2).** An in-process sliding window (`app/ratelimit.py`, our own code, no
+new dependency), per client IP and per submitted code, run before the code lookup; limits in
+settings (`QARAU_GUEST_RATE_PER_IP` 10/min, `QARAU_GUEST_RATE_PER_CODE` 30/min). It holds only
+for a single API process; several workers or hosts would each count separately. Acceptable for
+one demo server; move the counters to Valkey when the API scales out. Two deploy notes for D2:
+the client IP is the proxy's unless uvicorn trusts `X-Forwarded-For` (`--proxy-headers
+--forwarded-allow-ips`), and at a venue many visitors share one Wi-Fi IP, so 10/min per IP and
+30/min per code throttle a crowd (300 guests need ≥ 10 minutes); raise both for the event.
+
+**Open dev mode.** With `QARAU_API_TOKEN` empty every read route is public, guest or not; a demo
+server must set it.
 
 ## Consequences
 
@@ -51,4 +86,5 @@ separately. Acceptable for one demo server; move the counters to Valkey when the
   part 2 must scope every guest-reachable query (runs via `event_code_run`, findings, decisions,
   reports via `guest_id`) and must test cross-guest reads (404).
 - The event organization's users and audit rows survive purge by design.
+- `audit_log.user_id` may be null; readers (`GET /api/audit-log`) show such rows as anonymous.
 - Codes cannot be recovered; a lost code means a new event.

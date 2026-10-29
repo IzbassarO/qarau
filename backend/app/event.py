@@ -3,10 +3,18 @@
     uv run python -m app.event create --name launchpad --expires 2026-11-06T23:59-05:00 \
         --max-guests 300 --runs <run id>,<run id>
 
+    uv run python -m app.event purge --name launchpad
+
 `create` is the only way to make an event organization (`organization.is_event`, immutable after
-INSERT). It checks that every run exists and is done, then writes the organization, the code's
-SHA-256 and the shared runs in one transaction, and prints the code once. Any error exits 2 and
-writes nothing. `purge` arrives in DEMO1 part 2.
+INSERT). It checks that every run exists and is done, then writes the organization, its guest
+user (the `user_id` of every guest decision and report; it has no token), the code's SHA-256
+and the shared runs in one transaction, and prints the code once. Any error exits 2 and writes
+nothing.
+
+`purge` deletes, in one transaction and only in an organization with `is_event`, the event's
+guests (and with them their sessions) and their decisions, findings (with observations) and
+reports. It keeps the event code, the shared runs, the guest user and every audit row, and
+prints the counts.
 """
 
 import argparse
@@ -16,16 +24,30 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from .db import engine_for
-from .models import EventCode, EventCodeRun, Organization, Run, now
+from .models import (
+    Decision,
+    EventCode,
+    EventCodeRun,
+    Finding,
+    Guest,
+    Observation,
+    Organization,
+    Report,
+    Role,
+    Run,
+    User,
+    now,
+)
 from .settings import get_settings
 
 ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I/L: read aloud and typed on a phone
-CODE_LENGTH = 8  # 31^8 ≈ 8.5e11; guessing is also rate-limited per IP and per code (part 2)
+CODE_LENGTH = 8  # 31^8 ≈ 8.5e11; guessing is also rate-limited per IP and per code
 DEFAULT_ORG = "LaunchPad demo"
+GUEST_USER = "guest"
 
 
 def new_code() -> str:
@@ -77,6 +99,17 @@ def create(
     org = Organization(name=org_name, is_event=True)  # the only place is_event is set
     db.add(org)
     db.flush()
+    # No token is ever issued for it: its secret is random hex that no scrypt output matches,
+    # and auth never accepts a user token of the guest role.
+    db.add(
+        User(
+            org_id=org.id,
+            name=GUEST_USER,
+            role=Role.guest,
+            salt=secrets.token_hex(16),
+            secret_hash=secrets.token_hex(32),
+        )
+    )
     event = EventCode(
         organization_id=org.id,
         name=name,
@@ -91,6 +124,40 @@ def create(
     return code
 
 
+def purge(db: Session, name: str) -> dict[str, int]:
+    """Delete the guest data of event `name` and return the counts; ValueError (nothing
+    deleted) for an unknown event or one whose organization is not an event organization."""
+    event = db.scalar(select(EventCode).where(EventCode.name == name))
+    if event is None:
+        raise ValueError(f"unknown event '{name}'")
+    org = db.get(Organization, event.organization_id)
+    if org is None or not org.is_event:
+        raise ValueError(f"organization of event '{name}' is not an event organization; refused")
+    guests = select(Guest.id).where(
+        Guest.event_code_id == event.id, Guest.organization_id == org.id
+    )
+    findings = select(Finding.id).where(Finding.guest_id.in_(guests))
+    sessions = (
+        select(func.count())
+        .select_from(Guest)
+        .where(Guest.id.in_(guests), Guest.token_sha256.is_not(None))
+    )
+    counts = {"sessions": db.scalar(sessions) or 0}
+    # Children first. The decision trigger (0007) lets these deletes through only for a guest's
+    # decision made by this event organization's user; anything else aborts the transaction.
+    for label, stmt in (
+        ("decisions", delete(Decision).where(Decision.guest_id.in_(guests))),
+        ("observations", delete(Observation).where(Observation.finding_id.in_(findings))),
+        ("findings", delete(Finding).where(Finding.guest_id.in_(guests))),
+        ("reports", delete(Report).where(Report.guest_id.in_(guests))),
+        ("guests", delete(Guest).where(Guest.id.in_(guests))),
+    ):
+        result = db.execute(stmt, execution_options={"synchronize_session": False})
+        counts[label] = result.rowcount  # type: ignore[attr-defined]
+    db.commit()
+    return counts
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m app.event", description="Event guest access.")
     sub = p.add_subparsers(dest="command", required=True)
@@ -100,8 +167,8 @@ def parser() -> argparse.ArgumentParser:
     c.add_argument("--expires", required=True, type=expires, help="ISO 8601 with UTC offset")
     c.add_argument("--max-guests", required=True, type=positive)
     c.add_argument("--runs", required=True, type=run_ids, help="comma-separated run ids")
-    pg = sub.add_parser("purge", help="delete all guest data of an event (DEMO1 part 2)")
-    pg.add_argument("--name", required=True)
+    pg = sub.add_parser("purge", help="delete all guest data of an event")
+    pg.add_argument("--name", required=True, help="event name, e.g. launchpad")
     return p
 
 
@@ -109,7 +176,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     p = parser()
     args = p.parse_args(argv)
     if args.command == "purge":
-        p.error("purge is not built yet (DEMO1 part 2)")
+        with Session(engine_for(get_settings().database_url)) as db:
+            try:
+                counts = purge(db, args.name)
+            except ValueError as e:
+                p.error(str(e))  # exit 2, nothing deleted
+        print(f"event '{args.name}' purged: " + ", ".join(f"{n} {k}" for k, n in counts.items()))
+        print("kept: the event code, the shared runs, the guest user and every audit row")
+        return
     with Session(engine_for(get_settings().database_url)) as db:
         try:
             code = create(db, args.name, args.org, args.expires, args.max_guests, args.runs)
