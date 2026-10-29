@@ -1,0 +1,17 @@
+{
+  "tester": {
+    "status": 401,
+    "headers": { "content-type": "application/json" },
+    "body": { "detail": "invalid or missing token" }
+  },
+  "engineer": {
+    "status": 200,
+    "headers": { "content-type": "application/json" },
+    "body": {
+      "id": 2,
+      "name": "engineer",
+      "role": "engineer",
+      "organization": { "id": 1, "name": "dev" }
+    }
+  }
+}

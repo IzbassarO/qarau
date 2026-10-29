@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PerspectiveCamera, Vector3 } from 'three';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createDemo } from '../fixtures/demo';
+import { AuthProvider } from '../auth/AuthProvider';
 import { login, logout } from '../auth/auth';
 import { LANGS, setLang, type Lang } from '../i18n';
 import * as bundleApi from '../lib/bundle';
@@ -86,11 +87,13 @@ function renderViewer(runId: string, query = '') {
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}
     >
-      <MemoryRouter initialEntries={[`/viewer/${runId}${query}`]}>
-        <Routes>
-          <Route path="/viewer/:runId" element={<ViewerPage />} />
-        </Routes>
-      </MemoryRouter>
+      <AuthProvider>
+        <MemoryRouter initialEntries={[`/viewer/${runId}${query}`]}>
+          <Routes>
+            <Route path="/viewer/:runId" element={<ViewerPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>
     </QueryClientProvider>,
   );
 }
@@ -263,7 +266,8 @@ it('opens ?point=0 with the info tool, evidence panel and selected-point marker,
   const panel = screen.getByRole('region', { name: LANGS.en['pointInfo.title'] });
   expect(within(panel).getByText(`${bundle.position[0].toFixed(3)} model units`)).toBeTruthy();
   expect(within(panel).getAllByText(LANGS.en['pointInfo.needsScale'])).toHaveLength(2);
-  expect(within(panel).getByText(LANGS.en['pointInfo.needsConfidence'])).toBeTruthy();
+  expect(within(panel).queryByText(LANGS.en['pointInfo.needsConfidence'])).toBeNull();
+  expect(within(panel).queryByText(LANGS.en['pointInfo.confidence'])).toBeNull();
   expect(setPicked).toHaveBeenLastCalledWith(0);
   const engine = setPicked.mock.contexts.at(-1) as ViewerEngine;
   expect(engine.scene.getObjectByName('selected-point')!.visible).toBe(true);

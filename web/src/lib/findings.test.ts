@@ -1,8 +1,17 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { LANGS } from '../i18n';
 import fixture from '../test/fixtures/finding.json';
+import decisions from '../test/fixtures/decisions.json';
 import { ApiError } from './api';
-import { findingKeys, formatArea, getFinding, listFindings } from './findings';
+import {
+  listDecisions,
+  postDecision,
+  decisionErrorKey,
+  findingKeys,
+  formatArea,
+  getFinding,
+  listFindings,
+} from './findings';
 
 afterEach(() => {
   sessionStorage.clear();
@@ -181,3 +190,67 @@ it.each([null, 1.234])('makes the missing scale explicit in EN (metric area %s)'
     '3.5 units · scale not set',
   );
 });
+
+it('fetches decisions from the exact API path with the session header and abort signal', async () => {
+  sessionStorage.setItem('qarau.auth.session', 'Bearer test-session');
+  const fetch = vi.fn().mockResolvedValue(Response.json(decisions));
+  vi.stubGlobal('fetch', fetch);
+  const signal = new AbortController().signal;
+  await expect(listDecisions(701, signal)).resolves.toEqual(decisions);
+  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/findings/701/decisions', {
+    signal,
+    headers: { Authorization: 'Bearer test-session' },
+  });
+});
+
+it.each([
+  [
+    { verdict: 'reject' as const, comment: 'Rust is paint' },
+    { verdict: 'reject', comment: 'Rust is paint' },
+  ],
+  [
+    {
+      verdict: 'reclass' as const,
+      comment: 'Coating has peeled away.',
+      new_class: 'coating' as const,
+    },
+    { verdict: 'reclass', comment: 'Coating has peeled away.', new_class: 'coating' },
+  ],
+  [
+    { verdict: 'confirm' as const, comment: '' },
+    { verdict: 'confirm', comment: '' },
+  ],
+])('posts the API body without changing the comment: %j', async (input, expected) => {
+  sessionStorage.setItem('qarau.auth.session', 'Bearer test-session');
+  const fetch = vi.fn().mockResolvedValue(Response.json(decisions[2], { status: 201 }));
+  vi.stubGlobal('fetch', fetch);
+  await expect(postDecision(701, input)).resolves.toEqual(decisions[2]);
+  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/findings/701/decisions', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer test-session', 'Content-Type': 'application/json' },
+    body: JSON.stringify(expected),
+  });
+});
+
+it.each([401, 403, 404, 422, 503])(
+  'surfaces decision GET and POST failures for HTTP %i in plain words',
+  async (status) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ detail: 'Could not record this decision.' }, { status })),
+    );
+    for (const request of [
+      listDecisions(701),
+      postDecision(701, { verdict: 'reject', comment: 'Rust is paint' }),
+    ]) {
+      try {
+        await request;
+        expect.fail('Expected the API error');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ApiError);
+        expect(LANGS.en[decisionErrorKey(error)]).toMatch(/[a-z]+ [a-z]+/i);
+        expect(LANGS.en[decisionErrorKey(error)]).not.toBe(String(status));
+      }
+    }
+  },
+);

@@ -873,8 +873,11 @@
   padding: var(--space-3) var(--space-4) 0;
 }
 .evidence-body {
-  gap: var(--space-5);
+  gap: var(--space-2);
   padding: var(--space-3) var(--space-4) var(--space-4);
+}
+.evidence-body > * {
+  flex-shrink: 0;
 }
 .evidence-facts {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -902,7 +905,7 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-content: start;
-  gap: var(--space-3) var(--space-2);
+  gap: var(--space-2);
 }
 .evidence-frame {
   width: 100%;
@@ -912,6 +915,32 @@
 }
 .evidence-frame:first-child {
   grid-column: 1 / -1;
+}
+.evidence-image {
+  display: grid;
+  place-items: center;
+  aspect-ratio: auto;
+  height: calc(var(--space-8) * 2);
+}
+.evidence-frame:first-child .evidence-image {
+  height: calc(var(--space-10) * 4);
+}
+/* Keep image and outline in the same 400:250 coordinate space when capping height. */
+.evidence-image-content {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  height: 100%;
+  max-width: 100%;
+}
+.evidence-image-content > img,
+.evidence-image-content > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.evidence-image-content > svg {
+  pointer-events: none;
 }
 .evidence-photo {
   object-fit: contain;
@@ -927,4 +956,53 @@
     width: calc(var(--space-8) + var(--space-3));
     height: calc(var(--space-8) + var(--space-3));
   }
+  .evidence-image {
+    height: var(--space-12);
+  }
+  .evidence-frame:first-child .evidence-image {
+    height: calc(var(--space-12) * 2);
+  }
+}
+
+.decision-log,
+.decision-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.decision-form {
+  gap: var(--space-2);
+}
+.decision-form .qv-field {
+  gap: var(--space-1);
+}
+.decision-form .qv-textarea {
+  height: var(--space-12);
+  min-height: var(--space-12);
+}
+.decision-entries {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.decision-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.decision-actions .qv-btn {
+  padding-inline: var(--space-2);
+  height: auto;
+  min-height: calc(var(--space-10) + var(--space-1));
+  white-space: normal;
+}
+.decision-time {
+  color: var(--ink-muted);
+  font-size: var(--t-caption-size);
+}
+.decision-entries .qv-logentry__verdict {
+  font-size: var(--t-caption-size);
+}
+.decision-comment {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

@@ -1249,6 +1249,15 @@ def test_lockfiles_are_not_judged_and_an_oversized_diff_cannot_pass(repo, monkey
     v, calls = judge_seq(monkeypatch, [verdict(1)], n=1, team=team, worktree=str(repo))
     assert calls == [] and v["passed"] is False
     assert "diff is too large to review" in v["feedback"] and "within the plan" in v["feedback"]
+    assert f"limit of {R.MAX_DIFF:,}" in v["feedback"]
+    # the owner's per-task `tester: {max_diff: N}` (UI-report, 2026-10-29) lets it be judged;
+    # a smaller one still refuses, and other tasks keep MAX_DIFF
+    task = {"id": "T-1", "title": "t", "tester": {"max_diff": 180_000}}
+    v, calls = judge_seq(monkeypatch, [verdict(1)], n=1, team=team, worktree=str(repo), task=task)
+    assert v["passed"] is True and len(calls) == 1
+    task["tester"]["max_diff"] = 100_000
+    v, calls = judge_seq(monkeypatch, [verdict(1)], n=1, team=team, worktree=str(repo), task=task)
+    assert calls == [] and "limit of 100,000" in v["feedback"]
 
 
 class TesterErrs(Fast):

@@ -1,0 +1,35 @@
+[
+  {
+    "id": 903,
+    "finding_id": 701,
+    "user_id": 13,
+    "user": "Mira Chen",
+    "verdict": "reclass",
+    "comment": "Coating has peeled away.",
+    "new_class": "coating",
+    "new_severity": "watch",
+    "created_at": "2026-10-27T12:30:00Z"
+  },
+  {
+    "id": 901,
+    "finding_id": 701,
+    "user_id": 11,
+    "user": "Dana Serik",
+    "verdict": "confirm",
+    "comment": "Pitting visible in both frames.",
+    "new_class": null,
+    "new_severity": null,
+    "created_at": "2026-10-25T09:00:00Z"
+  },
+  {
+    "id": 902,
+    "finding_id": 701,
+    "user_id": 12,
+    "user": "Alex Kim",
+    "verdict": "reject",
+    "comment": "Rust is paint",
+    "new_class": null,
+    "new_severity": null,
+    "created_at": "2026-10-26T10:15:00Z"
+  }
+]

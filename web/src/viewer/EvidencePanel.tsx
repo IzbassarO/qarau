@@ -1,9 +1,39 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '../auth/AuthProvider';
 import { SessionImage } from '../auth/SessionImage';
 import { useI18n, type Key } from '../i18n';
 import type { Manifest } from '../lib/bundle';
-import { formatArea, type EvidenceFrame, type Finding } from '../lib/findings';
+import {
+  decisionErrorKey,
+  decisionsOptions,
+  formatArea,
+  type EvidenceFrame,
+  type Finding,
+} from '../lib/findings';
 import { containFit, polygonPoints } from '../lib/outline';
+import { DecisionLog } from './DecisionLog';
+import { DecisionForm } from './DecisionForm';
+
+function Decisions({ findingId }: { findingId: number }) {
+  const { t } = useI18n();
+  const { role, roleLoading, roleError } = useAuth();
+  const query = useQuery(decisionsOptions(findingId));
+  return (
+    <>
+      {roleError && <p role="alert">{t('decisions.roleError')}</p>}
+      {(role === 'engineer' || role === 'admin') && (
+        <DecisionForm key={findingId} findingId={findingId} />
+      )}
+      <DecisionLog
+        decisions={query.data ?? []}
+        busy={query.isFetching || roleLoading || (role === null && !roleError)}
+        loading={query.isPending}
+        error={query.isError ? t(decisionErrorKey(query.error)) : undefined}
+      />
+    </>
+  );
+}
 
 function EvidenceImage({
   evidence,
@@ -24,21 +54,23 @@ function EvidenceImage({
   return (
     <figure className="qv-thumb evidence-frame" data-testid="evidence-frame">
       <div className="qv-thumb__img evidence-image">
-        <SessionImage
-          src={evidence.image_url}
-          alt={`${t('pointInfo.frame')} ${evidence.frame_id}`}
-          className="evidence-photo"
-          onLoad={(event) => {
-            const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
-            if (width > 0 && height > 0) setNatural({ width, height });
-          }}
-        />
-        <svg viewBox="0 0 400 250" aria-hidden="true">
-          <polygon
-            className={`qv-mask${severity === 'watch' ? ' qv-mask--watch' : ''}`}
-            points={polygonPoints(evidence.outline, fit)}
+        <div className="evidence-image-content">
+          <SessionImage
+            src={evidence.image_url}
+            alt={`${t('pointInfo.frame')} ${evidence.frame_id}`}
+            className="evidence-photo"
+            onLoad={(event) => {
+              const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
+              if (width > 0 && height > 0) setNatural({ width, height });
+            }}
           />
-        </svg>
+          <svg viewBox="0 0 400 250" aria-hidden="true">
+            <polygon
+              className={`qv-mask${severity === 'watch' ? ' qv-mask--watch' : ''}`}
+              points={polygonPoints(evidence.outline, fit)}
+            />
+          </svg>
+        </div>
       </div>
       <figcaption className="qv-thumb__cap">
         {t('pointInfo.frame')} {evidence.frame_id}
@@ -67,14 +99,18 @@ export function EvidencePanel({
   // Keep terminal states terminal even if a caller starts a background request.
   const [settled, setSettled] = useState(!loading);
   if (!settled && (!loading || error || findings !== undefined)) setSettled(true);
-  if (selection === null) return null;
   const finding =
     selection === 'first'
       ? findings?.[0]
       : findings?.find((finding) => String(finding.id) === selection);
+  const { role, roleLoading, roleError } = useAuth({ resolveRole: !!finding && !error });
+  if (selection === null) return null;
+  const busy =
+    (!settled && loading && !error && findings === undefined) ||
+    (!!finding && !error && (roleLoading || (role === null && !roleError)));
   const statusKey = finding ? (`evidence.status.${finding.status}` as Key) : null;
   return (
-    <aside className="qv-detail evidence-panel" aria-label={t('evidence.title')}>
+    <aside className="qv-detail evidence-panel" aria-label={t('evidence.title')} aria-busy={busy}>
       <div className="qv-detail__head evidence-head">
         <span className="qv-caption qv-muted">
           {t('evidence.title')}
@@ -130,6 +166,7 @@ export function EvidencePanel({
                 />
               ))}
             </div>
+            <Decisions key={finding.id} findingId={finding.id} />
           </>
         )}
       </div>

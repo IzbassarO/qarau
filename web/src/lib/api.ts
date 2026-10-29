@@ -5,6 +5,7 @@ export class ApiError extends Error {
   constructor(
     public readonly path: string,
     public readonly status?: number,
+    public readonly detail?: string,
   ) {
     // Keep the status message used by existing authentication/error views.
     super(status === undefined ? path : String(status));
@@ -42,15 +43,29 @@ export async function apiErrorMessage(response: Response): Promise<string> {
   return '';
 }
 
-export async function readApi(path: string, signal?: AbortSignal): Promise<unknown> {
-  const response = await fetchApi(path, signal);
+export async function requestApi(path: string, options: RequestInit = {}): Promise<unknown> {
+  const response = await fetch(path, {
+    ...options,
+    headers: { ...authHeader(), ...options.headers },
+  });
   if ([404, 405, 501].includes(response.status))
     throw new ApiUnavailableError(path, response.status);
-  if (!response.ok) throw new ApiError(path, response.status);
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new ApiError(
+      path,
+      response.status,
+      typeof body?.detail === 'string' ? body.detail : undefined,
+    );
+  }
   // Vite's SPA fallback answers unknown API paths with index.html and HTTP 200.
   if (response.headers.get('Content-Type')?.includes('text/html'))
     throw new ApiUnavailableError(path);
   return response.json();
+}
+
+export async function readApi(path: string, signal?: AbortSignal): Promise<unknown> {
+  return requestApi(path, { signal });
 }
 
 /** S1 reruns the named step and its successors; the API supplies all identifiers. */

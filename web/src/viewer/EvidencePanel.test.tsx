@@ -1,9 +1,29 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import type { ReactElement } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { fireEvent, render as testingRender, screen, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { setLang } from '../i18n';
 import type { Finding } from '../lib/findings';
 import fixture from '../test/fixtures/finding.json';
+import type { Role } from '../auth/auth';
 import { EvidencePanel } from './EvidencePanel';
+
+let role: Role = 'viewer';
+vi.mock('../auth/AuthProvider', () => ({ useAuth: () => ({ role, roleError: false }) }));
+vi.mock('../lib/findings', async (original) => ({
+  ...(await original<typeof import('../lib/findings')>()),
+  listDecisions: vi.fn().mockResolvedValue([]),
+  decisionsOptions: (id: number) => ({ queryKey: ['decisions', id], queryFn: async () => [] }),
+}));
+
+function render(element: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } });
+  return testingRender(element, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
 
 const finding = fixture.finding as Finding;
 const base = {
@@ -13,7 +33,10 @@ const base = {
   onClose: vi.fn(),
 };
 
-beforeEach(() => setLang('en'));
+beforeEach(() => {
+  setLang('en');
+  role = 'viewer';
+});
 
 it('shows Loading during the initial request', () => {
   render(<EvidencePanel {...base} findings={undefined} loading />);
@@ -100,5 +123,21 @@ it.each(['error', 'empty'] as const)(
     // Even a subsequent pending background request must not restore the initial state.
     view.rerender(<EvidencePanel {...base} findings={undefined} loading />);
     expect(screen.queryByText('Loading')).toBeNull();
+  },
+);
+
+it.each(['viewer', 'engineer', 'admin'] as const)(
+  'shows decision actions only for engineer/admin, role %s',
+  async (userRole) => {
+    role = userRole;
+    render(<EvidencePanel {...base} findings={[finding]} />);
+    expect(await screen.findByText('No decisions yet')).toBeTruthy();
+    for (const name of ['Confirm', 'Reject', 'Reclass']) {
+      if (userRole === 'viewer') expect(screen.queryByRole('button', { name })).toBeNull();
+      else expect(screen.getByRole('button', { name })).toBeTruthy();
+    }
+    if (userRole === 'viewer')
+      expect(screen.queryByRole('textbox', { name: 'Comment' })).toBeNull();
+    else expect(screen.getByRole('textbox', { name: 'Comment' })).toBeTruthy();
   },
 );

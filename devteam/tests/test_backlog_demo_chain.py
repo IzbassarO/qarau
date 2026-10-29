@@ -17,7 +17,9 @@ CHAIN = [
     "B1", "U2", "S1", "DS1", "D1", "DEF1-api", "UI-inspections", "REV1-api", "UI-evidence",
     # owner, 2026-10-28 (LaunchPad demo, 2026-11-06): one queue per developer, in this order
     "ME1", "UI-report", "UI-evidence-b", "CONF-fix", "UI-evidence-c", "RPT1", "COV1", "COV1-b",
-    "UI-mark", "DEMO1", "D2", "DEMO1-ui",
+    "UI-mark", "DEMO1", "TEST-v0008", "DEMO-cov", "D2", "DEMO1-ui",
+    # owner, 2026-10-29: the demo needs the report, marking and event-code sign-in first
+    "COV-ui",
 ]  # fmt: skip
 DEPS = {
     "B1": [],
@@ -42,6 +44,10 @@ DEPS = {
     "COV1-b": ["COV1"],  # owner, 2026-10-28: COV1 split in two
     "DEMO1": [],
     "DEMO1-ui": ["DEMO1"],
+    # owner, 2026-10-29: gaps from the `make local` walk (PR #97)
+    "COV-ui": ["CONF-fix"],
+    "TEST-v0008": [],
+    "DEMO-cov": ["COV1-b"],
 }
 LATER = [
     "P5a-1", "P5a-2", "P7", "P4a-2b", "P4c", "A7a", "A7", "O1a", "O1", "P5b", "P6", "UX-kk",

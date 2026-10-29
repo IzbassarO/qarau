@@ -37,6 +37,12 @@ NOT_JUDGED = ("uv.lock", "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "*.
 JUDGED = (".", *(f":(exclude,glob)**/{p}" for p in NOT_JUDGED))
 
 
+def max_diff(task: dict) -> int:
+    """MAX_DIFF, or the task's own `tester: {max_diff: N}` in backlog.yaml (owner-set, like its
+    `supervisor:` limits; UI-report 2026-10-29: a pdf.js preview on a branch at 119.9 k)."""
+    return int((task.get("tester") or {}).get("max_diff") or MAX_DIFF)
+
+
 def transient(e: Exception) -> bool:
     """Worth retrying: network drops, timeouts, rate limits, server errors, overload."""
     if isinstance(e, (anthropic.APIConnectionError, httpx.TransportError)):
@@ -791,7 +797,8 @@ Rules:
             "diff", part_base(team, s, base), "HEAD", "--", *JUDGED, cwd=s["worktree"],
             env={"GIT_LITERAL_PATHSPECS": "0"},
         )  # fmt: skip
-        if len(diff) > MAX_DIFF:  # no tester call: it could only judge a cut diff
+        limit = max_diff(s["task"])
+        if len(diff) > limit:  # no tester call: it could only judge a cut diff
             return {
                 "passed": False,
                 "criteria": [],
@@ -800,7 +807,7 @@ Rules:
                 "how_to_try": "",
                 "feedback": (
                     f"This part's diff is too large to review: {len(diff):,} characters without "
-                    f"lockfiles and generated files, over the limit of {MAX_DIFF:,}. Keep the "
+                    f"lockfiles and generated files, over the limit of {limit:,}. Keep the "
                     "change within the plan of this part: drop unrelated edits, reformatting "
                     "and generated or copied files."
                 ),

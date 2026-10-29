@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve, basename, extname } from 'node:path';
 import { expect, test } from '@playwright/test';
 import fixture from '../src/test/fixtures/finding.json' with { type: 'json' };
+import me from '../src/test/fixtures/me.json' with { type: 'json' };
 import type { Manifest } from '../src/lib/bundle';
 
 // Playwright collects each file once in its coordinator, then imports it in workers
@@ -32,6 +33,8 @@ test('production evidence preview opens the first API finding with three outline
       image_url: `/api/runs/notre-dame-p3e/files/${manifest.frames[evidence.frame_id].image}`,
     })),
   };
+  await page.route('**/api/me', (route) => route.fulfill({ json: me }));
+  await page.route('**/api/findings/701/decisions', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/inspections', (route) => route.fulfill({ json: [{ id: 41 }] }));
   await page.route('**/api/inspections/41/runs', (route) =>
     route.fulfill({
@@ -72,6 +75,15 @@ test('production evidence preview opens the first API finding with three outline
       .toBeGreaterThan(0);
   }
   await expect(panel).not.toContainText(/confidence|%|0\.987654|98\.7/i);
+  await expect(panel.getByText('No decisions yet')).toBeVisible();
+  for (const name of ['Confirm', 'Reject', 'Reclass'])
+    await expect(panel.getByRole('button', { name, exact: true })).toBeVisible();
+  await expect(panel.getByRole('textbox', { name: 'Comment' })).toBeVisible();
+  // Visibility alone also passes for controls below a scroll container's bottom edge.
+  await expect(panel.getByRole('textbox', { name: 'Comment' })).toBeInViewport({ ratio: 1 });
+  for (const name of ['Confirm', 'Reject', 'Reclass'])
+    await expect(panel.getByRole('button', { name, exact: true })).toBeInViewport({ ratio: 1 });
+  await expect(panel.getByText('No decisions yet')).toBeInViewport({ ratio: 1 });
   await expect(page.getByRole('alert')).toHaveCount(0);
   await panel.getByRole('button', { name: 'Close finding' }).click();
   await expect(panel).toHaveCount(0);

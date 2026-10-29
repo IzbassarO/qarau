@@ -16,7 +16,8 @@ notes: 'Demo chain (owner, 2026-10-22). Product first, then metres: website + de
 
   UI-evidence, ME1, UI-report, UI-evidence-b, CONF-fix, UI-evidence-c, RPT1, COV1, COV1-b, UI-mark,
 
-  DEMO1, D2, DEMO1-ui (owner 2026-10-28, LaunchPad demo 2026-11-06; D2 held until the owner''s local
+  DEMO1, TEST-v0008, DEMO-cov, D2, DEMO1-ui, COV-ui (owner 2026-10-28; COV-ui last, TEST-v0008, DEMO-cov
+  2026-10-29, LaunchPad demo 2026-11-06; D2 held until the owner''s local
 
   review). Then LATER: status `later`, off the demo chain; the
 
@@ -1376,45 +1377,68 @@ tasks:
   area: app
   title: Report preview page and PDF download
   goal: 'Today there is no report in the web app. RPT1 gives GET /api/inspections/{id}/report.pdf?lang=
-    (its hash in
 
-    the headers); DS1 gives the v8 look.
+    (its hash in the headers); DS1 gives the v8 look. An <iframe> preview shows an empty box in
+
+    headless Chromium (Kerege''s screenshots have no PDF viewer).
 
 
     Build (web/ only): a report page per inspection (/inspections/:id/report): a summary of what the PDF
 
     contains (object, date, findings by severity with status and who decided, scale source, the coverage
-    line
 
-    or "coverage not computed"), a language choice (ru/kk/en -> the PDF''s lang), an inline preview (the
+    line or "coverage not computed"), a language choice (ru/kk/en -> the PDF''s lang), a preview that
 
-    browser''s PDF viewer in an iframe) and "Download PDF" with the hash shown next to it. States: generating,
+    renders the first page of the fetched PDF itself with pdf.js (pdfjs-dist) into a <canvas>, the
 
-    ready, failed with the API''s message. Linked from the inspections list ("Report" when done) and the
-    viewer.
+    page count ("1 of N pages") and "Download PDF" with the hash shown next to it; no <iframe>, no
 
-    Not in this task: editing the report, XLSX, e-mail.
+    browser PDF viewer. The pdf.js worker is bundled by Vite (no CDN). The preview is aria-busy="true"
 
-    Done when: Vitest for the summary and the three states with a mocked API; a Playwright e2e opens the
-    page on
+    until the first page is painted. States: generating, ready, failed with the API''s message (a PDF
 
-    a mocked API and downloads a fixture PDF; i18n ru/kk/en; tester screenshots of the page
+    pdf.js cannot open is "failed" in plain words, the download still works). Linked from the
 
-    "/inspections/demo/report" in light and dark, ru/kk/en, at 1440x900
+    inspections list ("Report" when done) and the viewer.
 
-    and 390x844.
+
+    Not in this task: editing the report, XLSX, e-mail, pages other than the first in the preview.
+
+
+    Done when: Vitest for the summary and the three states with a mocked API and a mocked pdf.js
+
+    (the page count shown, a render error shows the failed state); no <iframe> in the page; a
+
+    Playwright e2e opens the page on a mocked API with a fixture PDF, waits for aria-busy to clear,
+
+    asserts the canvas has non-blank pixels and the page count, and downloads the fixture PDF;
+
+    i18n ru/kk/en; lint, tsc, Vitest and the e2e pass; tester screenshots of the page
+
+    "/inspections/demo/report" show the rendered first page, in light and dark, ru/kk/en, at
+
+    1440x900 and 390x844.
 
     Reference: docs/design/screens/report-light.png (design system v8); match it, adjust only alignment
+
     and size; phone layout per DESIGN.md Responsive (reference docs/design/screens/evidence-phone-light.png
+
     at 390x844; same functions, layout may differ).
 
+
+    Owner 2026-10-29: pdf.js canvas preview instead of the iframe (headless Chromium has no PDF viewer).
+
     '
+  licence: pdfjs-dist (Apache-2.0); its optional dependency @napi-rs/canvas (MIT) is Node-only, not in
+    the browser bundle.
+  tester:
+    max_diff: 180000
   status: in_progress
   depends_on:
   - RPT1
   - DS1
   owner: dev_app
-  run: cont-20261029-094213-dev_app-1
+  run: cont-20261029-152145-dev_app-1
   branch: devteam/UI-report
 - id: UI-evidence-b
   area: app
@@ -1459,13 +1483,15 @@ tasks:
     Owner 2026-10-27: part 2 of the UI-evidence split; starts from UI-evidence''s merged panel.
 
     '
-  status: todo
+  status: done
   depends_on:
   - UI-evidence
   - ME1
   owner: dev_app
-  run: cont-20261028-185246-dev_app-2
+  run: cont-20261029-094213-dev_app-2
   branch: devteam/UI-evidence-b
+  pr: https://github.com/IzbassarO/qarau/pull/98
+  done_at: '2026-10-29'
 - id: CONF-fix
   area: app
   title: No confidence number in the point info panel
@@ -1492,7 +1518,12 @@ tasks:
     Owner 2026-10-28: LaunchPad demo; a number the user cannot act on.
 
     '
-  status: todo
+  status: done
+  owner: dev_app
+  run: cont-20261029-094213-dev_app-3
+  branch: devteam/CONF-fix
+  pr: https://github.com/IzbassarO/qarau/pull/99
+  done_at: '2026-10-29'
 - id: UI-evidence-c
   area: app
   title: 'Evidence panel: phone layout, ru/kk/en, full e2e'
@@ -1532,9 +1563,11 @@ tasks:
     Owner 2026-10-27: part 3 of the UI-evidence split; the whole-task criteria of the old plan land here.
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - UI-evidence-b
+  owner: dev_app
+  run: cont-20261029-094213-dev_app-4
 - id: RPT1
   area: core
   title: PDF inspection report
@@ -1808,6 +1841,90 @@ tasks:
   branch: devteam/DEMO1
   pr: https://github.com/IzbassarO/qarau/pull/96
   done_at: '2026-10-29'
+- id: TEST-v0008
+  area: core
+  title: Migration 0008 test passes on Postgres
+  goal: 'Today backend/tests/test_migrations.py::test_v0008_adds_guest_sessions_and_anonymous_audit_rows_and_downgrades
+
+    passes on SQLite and fails on Postgres (QARAU_TEST_DATABASE_URL): AUDIT_ROW inserts id=1
+
+    explicitly, the audit_log id sequence does not move, and ANONYMOUS_AUDIT_ROW then gets id 1
+
+    too: UniqueViolation on audit_log_pkey.
+
+
+    Build (backend/tests/ only): fix only that test: drop the explicit id from AUDIT_ROW, or move
+
+    the sequence with setval on Postgres after it. Every assertion of the test stays.
+
+
+    Not in this task: any migration, app code, other tests, running Postgres in CI.
+
+
+    Done when: the test passes on SQLite (`cd backend && uv run pytest -q`) and on the dev
+
+    Postgres (`QARAU_TEST_DATABASE_URL=<a separate test database> uv run pytest -q
+
+    tests/test_migrations.py`, output in the PR); `git diff` touches only that test file;
+
+    ruff, mypy, pytest pass.
+
+
+    Owner 2026-10-29: found in the owner''s `make local` walk (PR #97).
+
+    '
+  status: in_progress
+  owner: dev_pipeline
+  run: cont-20261029-152145-dev_pipeline-1
+- id: DEMO-cov
+  area: core
+  title: Real coverage for the dev seed's demo inspection
+  goal: 'Today the dev seed (backend/app/seed.py) adds the "Demo site" inspection on run
+
+    notre-dame-p3e with one manual finding but never runs the coverage step, so GET
+
+    /api/inspections/{id}/coverage says computed=false, the bundle has no per-point coverage
+
+    array and the PDF says "coverage not computed".
+
+
+    Build (backend/, pipeline/ if needed): after the demo finding exists, the seed runs the real
+
+    `coverage` step on notre-dame-p3e (the same step the S1 workflow runs, so the finding''s
+
+    region is `finding`) and stores its regions as the workflow does (fill_coverage). Also when
+
+    the demo site already exists without coverage rows (an existing dev database). No invented
+
+    regions: everything comes from the step on the run''s frames and poses; a step failure is
+
+    printed in plain words and the seed still finishes.
+
+
+    Not in this task: the viewer layer (COV-ui), the coverage computation itself (COV1), the
+
+    report section (COV1-b).
+
+
+    Done when: a test seeds a fixture run and asserts CoverageRegion rows exist for it and GET
+
+    /api/inspections/{id}/coverage returns computed=true with totals; a second seed run adds no
+
+    duplicate rows; on notre-dame-p3e the seed prints the coverage totals, the API shows all
+
+    three states and the report for the demo inspection lists its not-seen regions (page image
+
+    in the PR); ruff, mypy, pytest pass.
+
+
+    Owner 2026-10-29: LaunchPad demo; the owner''s `make local` walk (PR #97) showed no coverage.
+
+    '
+  writable:
+  - data/runs
+  status: todo
+  depends_on:
+  - COV1-b
 - id: D2
   area: core
   title: 'Deploy staging: one VM, compose, HTTPS, backups'
@@ -1905,6 +2022,61 @@ tasks:
   status: todo
   depends_on:
   - DEMO1
+- id: COV-ui
+  area: app
+  title: Coverage layer in the viewer
+  goal: 'Today the viewer has no coverage layer and the status screen shows the `coverage` step as
+
+    "Unknown stage" (processing.unknownStage; web/src/lib/processing.ts has no `coverage` entry).
+
+    The API gives GET /api/inspections/{id}/coverage (viewer): regions, totals in % per state,
+
+    `computed`; the bundle manifest key `coverage` names the per-point array points.coverage.u8
+
+    (codes per state and `no_region`; {computed: false} and no array when not computed).
+
+
+    Build (web/ only): a "Coverage" toggle in the viewer that colours the points by the bundle''s
+
+    per-point array with the v8 tokens (`ok` inspected_ok, `critical`/`watch` finding, `unseen`
+
+    not_seen; not_seen must never look like OK), a legend with the three states and the API''s
+
+    totals in %, and "coverage not computed" in plain words when `computed` is false (no layer,
+
+    nothing guessed). The status screen names the `coverage` step in ru/kk/en. Data only from
+
+    the API and the bundle, no coverage in the client code or fixtures shipped to users.
+
+
+    Not in this task: computing coverage (COV1, DEMO-cov), the report''s section (COV1-b), comparing
+
+    inspections (M4), dense-based coverage.
+
+
+    Done when: Vitest tests assert a fixture bundle''s codes map to the three token colours and
+
+    not_seen never gets the `ok` colour; the legend shows fixture totals; computed=false shows the
+
+    plain message and no toggle state; the status screen renders the `coverage` step label (not
+
+    processing.unknownStage) in ru/kk/en; en.json, ru.json and kk.json have every new key with
+
+    non-identical ru/kk values; lint, tsc, Vitest and the Playwright e2e pass; tester screenshots
+
+    of /viewer/notre-dame-p3e with the layer on, light and dark, ru/kk/en, 1440x900 and 390x844.
+
+    Reference: docs/design/screens/viewer-light.png and docs/design/screens/states-light.png
+
+    (design system v8); match it, adjust only alignment and size.
+
+
+    Owner 2026-10-29: LaunchPad demo; the owner''s `make local` walk (PR #97) found no layer.
+
+    '
+  status: todo
+  depends_on:
+  - CONF-fix
 - id: P5a-1
   area: core
   title: Metric scale from a measured distance, and gravity

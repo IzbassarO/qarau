@@ -13,12 +13,14 @@ test('Notre-Dame deep link opens point evidence and thumbnails seek the source f
   await page.waitForFunction(() => window.__qarau?.pointsLoaded, null, { timeout: 120_000 });
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(page.getByText(en['error.webgl'])).toHaveCount(0);
+  await expect(page.getByLabel(en['canvas.label'])).toBeVisible();
   const panel = page.getByRole('region', { name: en['pointInfo.title'] });
   await expect(panel).toBeVisible();
   await expect(panel.getByText(en['pointInfo.coordinates'], { exact: false })).toBeVisible();
   await expect(panel.getByText(en['pointInfo.views'], { exact: true })).toBeVisible();
   await expect(panel.getByText(en['pointInfo.needsScale'])).toHaveCount(2);
-  await expect(panel.getByText(en['pointInfo.needsConfidence'])).toBeVisible();
+  await expect(panel.getByText(en['pointInfo.needsConfidence'])).toHaveCount(0);
+  await expect(panel.getByText(en['pointInfo.confidence'])).toHaveCount(0);
   const evidence = panel.getByRole('img');
   if (await evidence.count()) {
     await expect(evidence.first()).toBeVisible();

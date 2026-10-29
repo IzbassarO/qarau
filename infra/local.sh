@@ -8,7 +8,8 @@
 #
 # Settings come from .env.example, then .env (QARAU_LOCAL_ENV_FILE to use another file).
 # Ports: API 8010 and web 4173 by default; clear of Kerege (Vite 5197-5199, its API and e2e on
-# OS-picked free ports) and its dashboard (8765). LAN=1 serves the web app on 0.0.0.0 too.
+# OS-picked free ports) and its dashboard (8765). LAN=1 serves the web app on 0.0.0.0 too, and
+# never in open dev mode: an empty QARAU_API_TOKEN gets a generated one (lan_token).
 # The three dev logins are generated once into data/local/dev-logins.env (data/ is gitignored).
 set -euo pipefail
 
@@ -81,6 +82,20 @@ dev_logins() {
   set +a
 }
 
+# LAN=1 with an empty QARAU_API_TOKEN: open dev mode (reads with any password) would reach the
+# whole Wi-Fi, so the API gets a random shared token instead, kept as QARAU_LAN_API_TOKEN in
+# dev-logins.env (not QARAU_API_TOKEN: without LAN=1 that file must not change the mode). Only
+# the dev logins and event codes get in then; nobody is given the shared token.
+lan_token() {
+  [ "${LAN:-0}" = 1 ] && [ -z "${QARAU_API_TOKEN:-}" ] || return 0
+  local f=$STATE/dev-logins.env
+  if [ -z "${QARAU_LAN_API_TOKEN:-}" ]; then
+    QARAU_LAN_API_TOKEN=$(openssl rand -hex 24)
+    echo "QARAU_LAN_API_TOKEN=$QARAU_LAN_API_TOKEN" >>"$f"
+  fi
+  export QARAU_API_TOKEN=$QARAU_LAN_API_TOKEN
+}
+
 modal_state() {
   if [ -n "${MODAL_TOKEN_ID:-}" ] && [ -n "${MODAL_TOKEN_SECRET:-}" ]; then echo "set"; else echo "NOT set"; fi
 }
@@ -109,6 +124,7 @@ start() {
   say "== database: alembic upgrade head, dev seed"
   (cd "$ROOT/backend" && uv run --no-sync alembic upgrade head)
   dev_logins
+  lan_token
   (cd "$ROOT/backend" && QARAU_ENV=dev uv run --no-sync python -m app.seed)
 
   say "== web: production build"
@@ -138,6 +154,8 @@ start() {
     local ip
     ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)
     say "  Phone:       http://${ip:-<LAN address of this Mac>}:$WEB_PORT  (same Wi-Fi)"
+    say "  Access:      closed: QARAU_API_TOKEN is set (data/local/dev-logins.env when .env has none);"
+    say "               only the dev logins below and event codes get in, no open dev mode on the Wi-Fi"
   else
     say "  Phone:       off; run 'make local LAN=1' to serve on the Wi-Fi network"
   fi
