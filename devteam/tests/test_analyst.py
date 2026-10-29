@@ -213,7 +213,7 @@ def test_at_most_three_plan_changes_a_day_and_one_resume_per_task(repo, night):
 
 
 def test_a_change_the_backlog_tests_refuse_is_not_made_anywhere(repo, night, monkeypatch):
-    monkeypatch.setattr(night, "backlog_check", lambda text: "FAILED test_backlog_x")
+    monkeypatch.setattr(night, "backlog_check", lambda text, ref: "FAILED test_backlog_x")
     assert AN.on_blocked(night, "UI-evidence-b") == ""
     assert "UI-evidence-b-pre" not in on_dev(repo)
     assert "UI-evidence-b-pre" not in {t["id"] for t in night.load_backlog()}
