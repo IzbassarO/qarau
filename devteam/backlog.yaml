@@ -1409,13 +1409,25 @@ tasks:
     at 390x844; same functions, layout may differ).
 
     '
-  status: in_progress
+  status: blocked
   depends_on:
   - RPT1
   - DS1
   owner: dev_app
   run: cont-20261029-094213-dev_app-1
   branch: devteam/UI-report
+  blocked_reason: 'tester: Kerege ran the e2e tests (Playwright) right after your round and they fail,
+    so the tester did not review this round. Fix them first.
+
+
+    Failing checks:
+
+    $ cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_E2E_PORT=59211 QARAU_RUNS_DIR=/Users/izbassar/Documents/Startup/qarau/data/runs
+    pnpm exec playwright test --reporter=list --workers=3 --retries=1
+
+    e2e FAILED: 4 failed, 295 passed.
+
+    1) [desktop] › e2e/report.spec.ts:215:5 › report reached from inspections: en, lig'
 - id: UI-evidence-b
   area: app
   title: Decision log and actions in the evidence panel
