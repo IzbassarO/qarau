@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
 import { byteResponses } from './dev-response-bytes.ts';
+import { devReport } from './dev-report.ts';
 
 const TYPES: Record<string, string> = {
   '.json': 'application/json',
@@ -74,6 +75,7 @@ export function devRuns(): Plugin {
           TYPES[path.extname(file)] ?? 'application/octet-stream',
         );
       });
+      server.middlewares.use(devReport);
     },
   };
 }

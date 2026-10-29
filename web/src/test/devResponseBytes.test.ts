@@ -84,7 +84,7 @@ it('preserves PDF bytes', () => {
   const pdf = readFileSync(resolve(process.cwd(), 'src/test/fixtures/report.pdf'));
   expect(reply.end(pdf)).toBe(reply);
   expect(nativeEnd.mock.calls[0][0]).toBe(pdf);
-  expect(pdf.length).toBe(606);
+  expect(pdf.length).toBe(619);
 });
 
 it('preserves end encodings, overloads and return value', () => {

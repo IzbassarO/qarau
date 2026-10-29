@@ -1,13 +1,7 @@
-import { apiErrorMessage, fetchApi } from './api';
-import type { Lang } from '../i18n';
+import { ApiError, ReportApiError, apiErrorMessage, fetchApi } from './api';
 import type { Finding } from './findings';
 import { listInspectionFindings } from './findings';
-import { getInspectionCoverage, type InspectionCoverage } from './inspections';
-
-export type ReportPdf =
-  | { state: 'generating' }
-  | { state: 'ready'; blob: Blob; hash: string }
-  | { state: 'failed'; message: string };
+import { getInspection, getInspectionCoverage, type InspectionCoverage } from './inspections';
 
 export interface ReportDecision {
   id: number;
@@ -32,15 +26,6 @@ interface Inspection {
   id: number;
   site_id: number;
   created_at: string;
-}
-
-class ReportApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-  }
 }
 
 async function json<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -78,7 +63,13 @@ export async function reportInspectionForRun(runId: string, signal?: AbortSignal
 
 async function inspectionForReport(id: string, signal?: AbortSignal): Promise<Inspection> {
   try {
-    return await json<Inspection>(`/api/inspections/${encodeURIComponent(id)}`, signal);
+    try {
+      return await getInspection(id, signal);
+    } catch (error) {
+      if (error instanceof ApiError)
+        throw new ReportApiError(error.detail ?? error.message, error.status ?? 0);
+      throw error;
+    }
   } catch (error) {
     if (
       !(error instanceof ReportApiError) ||
@@ -92,7 +83,7 @@ async function inspectionForReport(id: string, signal?: AbortSignal): Promise<In
       signal,
     );
     if (inspectionId === null) throw error;
-    return json<Inspection>(`/api/inspections/${inspectionId}`, signal);
+    return getInspection(String(inspectionId), signal);
   }
 }
 
@@ -115,26 +106,4 @@ export async function fetchReportSummary(id: string, signal?: AbortSignal): Prom
     ),
     coverage,
   };
-}
-
-export async function fetchReportPdf(
-  id: string | number,
-  lang: Lang,
-  signal?: AbortSignal,
-): Promise<ReportPdf> {
-  try {
-    const response = await fetchApi(
-      `/api/inspections/${encodeURIComponent(id)}/report.pdf?lang=${lang}`,
-      signal,
-    );
-    if (response.status === 202) return { state: 'generating' };
-    if (!response.ok) throw new ReportApiError(await apiErrorMessage(response), response.status);
-    const hash = response.headers.get('X-Report-SHA256');
-    if (!hash || !response.headers.get('Content-Type')?.includes('application/pdf'))
-      return { state: 'failed', message: '' };
-    return { state: 'ready', blob: await response.blob(), hash };
-  } catch (error) {
-    if (signal?.aborted || error instanceof ReportApiError) throw error;
-    return { state: 'failed', message: '' };
-  }
 }

@@ -1,37 +1,63 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useI18n, type Lang } from '../i18n';
-import {
-  fetchReportPdf,
-  fetchReportSummary,
-  type ReportPdf,
-  type ReportSummary,
-} from '../lib/report';
+import { fetchReportPdf, type ReportPdf } from '../lib/api';
+import { fetchReportSummary, type ReportSummary } from '../lib/report';
+import { getDocument, GlobalWorkerOptions, type RenderTask } from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { formatReportDate } from '../lib/reportDate';
 import { Wordmark } from '../shell/ShellIdentity';
 import './report.css';
 
+GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
 export function ReportPage() {
   const { id = '' } = useParams();
-  const { t, lang } = useI18n();
+  const { lang } = useI18n();
   const [chosenLanguage, setChosenLanguage] = useState<Lang | null>(null);
-  const pdfLanguage = chosenLanguage ?? lang;
   const summary = useQuery({
     queryKey: ['report-summary', id],
     queryFn: ({ signal }) => fetchReportSummary(id, signal),
     retry: false,
   });
+  const pdfLanguage = chosenLanguage ?? lang;
+  return (
+    <ReportContent
+      key={`${id}:${pdfLanguage}`}
+      id={id}
+      pdfLanguage={pdfLanguage}
+      summary={summary}
+      onLanguage={setChosenLanguage}
+    />
+  );
+}
+
+function ReportContent({
+  id,
+  pdfLanguage,
+  summary,
+  onLanguage,
+}: {
+  id: string;
+  pdfLanguage: Lang;
+  summary: UseQueryResult<ReportSummary, Error>;
+  onLanguage: (lang: Lang) => void;
+}) {
+  const { t } = useI18n();
+  const [timedOut, setTimedOut] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const inspectionId = summary.data?.inspectionId;
   const pdf = useQuery({
     queryKey: ['report-pdf', inspectionId, pdfLanguage],
     queryFn: ({ signal }) => fetchReportPdf(inspectionId!, pdfLanguage, signal),
-    enabled: inspectionId !== undefined,
+    enabled: inspectionId !== undefined && !timedOut,
     retry: false,
     gcTime: 0,
     refetchOnWindowFocus: false,
     refetchOnMount: false,
-    refetchInterval: (query) => (query.state.data?.state === 'generating' ? 2000 : false),
+    refetchInterval: (query) =>
+      !timedOut && query.state.data?.state === 'generating' ? 2000 : false,
   });
   const state: ReportPdf = summary.isError
     ? { state: 'failed', message: summary.error.message }
@@ -52,6 +78,61 @@ export function ReportPage() {
   }, [blob, id, pdfLanguage]);
   const readyUrl = pdfUrl?.blob === blob ? pdfUrl?.url : undefined;
 
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const [preview, setPreview] = useState<{ blob: Blob; pages?: number; failed?: boolean } | null>(
+    null,
+  );
+  const painted = preview?.blob === blob && preview?.pages !== undefined;
+  const previewFailed = preview?.blob === blob && preview?.failed;
+  const failed = timedOut || state.state === 'failed' || previewFailed;
+  const busy = !failed && (state.state === 'generating' || !painted || !readyUrl);
+  useEffect(() => {
+    if (!busy) return;
+    // Include summary fetch, generation polling, worker startup and painting in one deadline.
+    const timeout = window.setTimeout(() => setTimedOut(true), 28_000);
+    return () => window.clearTimeout(timeout);
+  }, [busy, attempt]);
+  useEffect(() => {
+    if (!blob || timedOut) return;
+    let active = true;
+    let loading: ReturnType<typeof getDocument> | undefined;
+    let rendering: RenderTask | undefined;
+    async function paint() {
+      try {
+        const bytes = await blob!.arrayBuffer();
+        if (!active) return;
+        loading = getDocument({ data: new Uint8Array(bytes) });
+        const document = await loading.promise;
+        if (!active) return;
+        const page = await document.getPage(1);
+        if (!active || !canvas.current) return;
+        const target = canvas.current;
+        const viewport = page.getViewport({ scale: 1.5 });
+        target.width = Math.ceil(viewport.width);
+        target.height = Math.ceil(viewport.height);
+        rendering = page.render({ canvas: target, viewport });
+        await rendering.promise;
+        if (active) setPreview({ blob: blob!, pages: document.numPages });
+      } catch {
+        if (active) setPreview({ blob: blob!, failed: true });
+      }
+    }
+    void paint();
+    return () => {
+      active = false;
+      rendering?.cancel();
+      void loading?.destroy().catch(() => {});
+    };
+  }, [blob, attempt, timedOut]);
+
+  function retry() {
+    setTimedOut(false);
+    setPreview(null);
+    setAttempt((value) => value + 1);
+    if (summary.isError || !summary.data) void summary.refetch();
+    else if (state.state !== 'ready') void pdf.refetch();
+  }
+
   return (
     <div className="qv-screen report-screen">
       <header className="qv-topbar report-topbar">
@@ -65,7 +146,7 @@ export function ReportPage() {
               type="button"
               key={locale}
               aria-pressed={locale === pdfLanguage}
-              onClick={() => setChosenLanguage(locale)}
+              onClick={() => onLanguage(locale)}
             >
               {t(`report.language.${locale}`)}
             </button>
@@ -91,32 +172,39 @@ export function ReportPage() {
         </div>
       </header>
       <main className="report-main" id="report-main">
-        <section
-          className="report-state"
-          aria-label={t('report.pdf')}
-          aria-busy={state.state === 'generating' || (state.state === 'ready' && !readyUrl)}
-        >
-          {state.state === 'generating' && <p role="status">{t('report.generating')}</p>}
-          {state.state === 'ready' && <p role="status">{t('report.ready')}</p>}
-          {state.state === 'failed' && (
+        <section className="report-state" aria-label={t('report.pdf')} aria-busy={busy}>
+          {busy && <p role="status">{t('report.generating')}</p>}
+          {!busy && !failed && <p role="status">{t('report.ready')}</p>}
+          {failed && (
             <div role="alert">
-              <h2>{t('report.failed')}</h2>
-              <p>{state.message || t('report.failureFallback')}</p>
-              <button
-                type="button"
-                className="qv-btn qv-btn--secondary"
-                onClick={() => void (summary.isError ? summary.refetch() : pdf.refetch())}
-              >
+              <h2>{t(previewFailed ? 'report.previewFailureTitle' : 'report.failed')}</h2>
+              <p>
+                {timedOut
+                  ? t('report.timeout')
+                  : previewFailed
+                    ? t('report.previewFailure')
+                    : state.state === 'failed'
+                      ? state.message || t('report.failureFallback')
+                      : ''}
+              </p>
+              <button type="button" className="qv-btn qv-btn--secondary" onClick={retry}>
                 {t('report.retry')}
               </button>
             </div>
           )}
-          {state.state === 'ready' && readyUrl && (
-            <div className="report-preview-box">
-              <a href={readyUrl} download={`report-${id}-${pdfLanguage}.pdf`}>
-                {t('report.previewHelp')}
-              </a>
-              <iframe className="report-preview" title={t('report.pdf')} src={readyUrl} />
+          {blob && (
+            <div className="report-preview-box" hidden={Boolean(failed)}>
+              <canvas
+                ref={canvas}
+                className="report-preview"
+                role="img"
+                aria-label={t('report.pdf')}
+              />
+              {painted && (
+                <p className="qv-caption report-page-count">
+                  {t('report.pageCount').replace('{count}', String(preview.pages))}
+                </p>
+              )}
             </div>
           )}
         </section>

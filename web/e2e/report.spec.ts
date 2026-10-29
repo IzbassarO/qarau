@@ -8,7 +8,7 @@ import { reportJson } from '../src/test/reportRoutes';
 
 // Original, hand-authored one-page PDF. No third-party document content.
 const pdf = readFileSync(new URL('../src/test/fixtures/report.pdf', import.meta.url));
-const hash = '5e317abc851bdb197835b4a473d2fed04bb0051eed5c8956234256cbfef9fb6c';
+const hash = 'a278f21895176e40699b4de5dda3b7aa385e82e13995d4bab0beff341aa5d558';
 
 async function authenticate(page: Page, lang = 'en') {
   await page.addInitScript((locale) => {
@@ -46,6 +46,28 @@ async function mockApi(page: Page) {
     return route.fulfill(reportJson(url.pathname));
   });
   return pdfLanguages;
+}
+
+async function expectPainted(page: Page, lang = 'en') {
+  await expect(page.locator('.report-state')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('iframe, embed, object')).toHaveCount(0);
+  const canvas = page.locator('canvas.report-preview');
+  await expect(canvas).toBeVisible();
+  await expect(page.locator('.report-page-count')).toHaveText(
+    { en: '1 of 1 pages', ru: 'Страница 1 из 1', kk: '1 беттің 1-беті' }[lang]!,
+  );
+  expect(
+    await canvas.evaluate((element: HTMLCanvasElement) => {
+      const context = element.getContext('2d')!;
+      const pixels = context.getImageData(0, 0, element.width, element.height).data;
+      // The PDF page is opaque white. Its text must paint darker pixels.
+      for (let i = 0; i < pixels.length; i += 4)
+        if (pixels[i + 3] > 0 && pixels[i] < 200 && pixels[i + 1] < 200 && pixels[i + 2] < 200)
+          return true;
+      return false;
+    }),
+  ).toBe(true);
+  return canvas;
 }
 
 const locales = [
@@ -114,8 +136,8 @@ test('demo report shows API coverage and downloads the fixture PDF', async ({ pa
     page.getByText('Inspected and clear: 61.5 %. Findings: 23.1 %. Not seen: 15.4 %.'),
   ).toBeVisible();
   await expect(page.getByText('Areas not seen: north-wall-upper')).toBeVisible();
-  await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
-  await expect(page.getByTitle(hash, { exact: true })).toHaveText('5e317abc851b…fef9fb6c');
+  await expectPainted(page);
+  await expect(page.getByTitle(hash, { exact: true })).toHaveText('a278f2189517…1aa5d558');
   const link = page.getByRole('link', { name: 'Download PDF', exact: true });
   await expect(link).toHaveAttribute('download', 'report-demo-en.pdf');
   const downloadEvent = page.waitForEvent('download');
@@ -123,7 +145,7 @@ test('demo report shows API coverage and downloads the fixture PDF', async ({ pa
   const download = await downloadEvent;
   expect(download.suggestedFilename()).toBe('report-demo-en.pdf');
   expect(await download.failure()).toBeNull();
-  expect((await stat((await download.path())!)).size).toBe(606);
+  expect((await stat((await download.path())!)).size).toBe(619);
   expect(await readFile((await download.path())!)).toEqual(pdf);
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
@@ -158,24 +180,22 @@ for (const locale of locales) {
         'background-color',
         theme === 'light' ? 'rgb(255, 255, 255)' : 'rgb(38, 38, 38)',
       );
-      await expect(page.locator('.report-preview-box > a')).toBeVisible();
-      await expect(page.locator('.report-preview-box > a')).toHaveAttribute('href', /^blob:/);
+
       const languages = page.getByRole('group', { name: locale.language });
       await expect(languages.getByRole('button')).toHaveCount(3);
       await expect(
         page.getByRole('banner').getByRole('group', { name: locale.language }),
       ).toBeVisible();
       await expect(languages).toBeInViewport();
-      const preview = page.locator('iframe');
-      await expect(preview).toHaveAttribute('title', locale.preview);
-      await expect(preview).toHaveAttribute('src', /^blob:/);
+      const preview = await expectPainted(page, locale.lang);
+      await expect(preview).toHaveAttribute('aria-label', locale.preview);
       await expect(preview).toBeInViewport();
       const previewBox = (await preview.boundingBox())!;
       expect(previewBox.y).toBeGreaterThanOrEqual(0);
       expect(previewBox.y + previewBox.height).toBeLessThanOrEqual(page.viewportSize()!.height);
       const hashLabel = page.getByTitle(hash, { exact: true });
       await expect(hashLabel).toHaveAttribute('title', hash);
-      await expect(hashLabel).toHaveText('5e317abc851b…fef9fb6c');
+      await expect(hashLabel).toHaveText('a278f2189517…1aa5d558');
       await expect(hashLabel).toBeInViewport();
       expect(
         await page.locator('.report-hash').evaluate((el) => el.scrollWidth <= el.clientWidth),
@@ -206,7 +226,7 @@ for (const locale of locales) {
       const download = await downloadEvent;
       expect(download.suggestedFilename()).toBe(`report-37-${locale.lang}.pdf`);
       expect(await download.failure()).toBeNull();
-      expect((await stat((await download.path())!)).size).toBe(606);
+      expect((await stat((await download.path())!)).size).toBe(619);
       expect(await readFile((await download.path())!)).toEqual(pdf);
       expect(requests).toEqual([locale.lang]);
       await expect(page.getByRole('alert')).toHaveCount(0);
@@ -239,9 +259,12 @@ for (const locale of locales) {
         'false',
       );
       await expect(page.getByRole('status')).toHaveText(locale.ready);
-      await expect(page.locator('iframe')).toHaveAttribute('title', locale.preview);
-      await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
-      await expect(page.locator('iframe')).toBeInViewport();
+      await expectPainted(page, locale.lang);
+      await expect(page.locator('canvas.report-preview')).toHaveAttribute(
+        'aria-label',
+        locale.preview,
+      );
+      await expect(page.locator('canvas.report-preview')).toBeInViewport();
       const languageButtons = page
         .getByRole('group', { name: locale.language })
         .getByRole('button');
@@ -250,7 +273,7 @@ for (const locale of locales) {
       await expect(downloadLink).toHaveAttribute('download', `report-37-${locale.lang}.pdf`);
       await expect(downloadLink).toHaveAttribute('href', /^blob:/);
       await expect(downloadLink).toBeInViewport();
-      await expect(page.getByTitle(hash, { exact: true })).toHaveText('5e317abc851b…fef9fb6c');
+      await expect(page.getByTitle(hash, { exact: true })).toHaveText('a278f2189517…1aa5d558');
       await expect(page.getByTitle(hash, { exact: true })).toBeInViewport();
       await expect(page.getByRole('alert')).toHaveCount(0);
       await expect(page.locator('body')).not.toContainText(/\b(?:report|evidence)\.[a-zA-Z]/);
@@ -277,12 +300,12 @@ test('named demo report resolves its API id, switches PDF language and shows unk
     expect((await reportLink.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await reportLink.click();
   await expect(page).toHaveURL('/inspections/demo/report');
-  await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
+  await expectPainted(page);
   await expect(page.getByRole('alert')).toHaveCount(0);
   await page.goto('/inspections/notre-dame/report');
-  await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
+  await expectPainted(page);
   await page.getByRole('button', { name: 'Қазақша', exact: true }).click();
-  await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
+  await expectPainted(page);
   await expect.poll(() => requests).toEqual(['en', 'en', 'kk']);
   // Wait for the Kazakh Blob, not the previous language's preview.
   const downloadLink = page.getByRole('link', { name: 'Download PDF', exact: true });
@@ -293,10 +316,11 @@ test('named demo report resolves its API id, switches PDF language and shows unk
   const download = await downloadEvent;
   expect(download.suggestedFilename()).toBe('report-notre-dame-kk.pdf');
   expect(await download.failure()).toBeNull();
-  expect((await stat((await download.path())!)).size).toBe(606);
+  expect((await stat((await download.path())!)).size).toBe(619);
   expect(await readFile((await download.path())!)).toEqual(pdf);
   await page.goto('/inspections/unknown/report');
   await expect(page.getByRole('alert')).toContainText('inspection not found');
+  await expect(page.locator('canvas.report-preview')).toHaveCount(0);
   await expect(page.locator('iframe')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Download PDF', exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Download PDF', exact: true })).toBeDisabled();
@@ -313,7 +337,7 @@ test('inspection list and /viewer/notre-dame links open the same API inspection 
   await expect(listLink).toHaveAttribute('href', '/inspections/37/report');
   await listLink.click();
   await expect(page).toHaveURL('/inspections/37/report');
-  await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
+  await expectPainted(page);
   await expect(page.getByText('Tank T-104, north wall', { exact: true })).toHaveCount(2);
   await expect(page.getByRole('alert')).toHaveCount(0);
 
@@ -323,7 +347,7 @@ test('inspection list and /viewer/notre-dame links open the same API inspection 
   await expect(viewerLink).toBeInViewport();
   await viewerLink.click();
   await expect(page).toHaveURL('/inspections/37/report');
-  await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
+  await expectPainted(page);
   await expect(page.getByTitle(hash, { exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Download PDF', exact: true })).toHaveAttribute(
     'download',
@@ -331,4 +355,20 @@ test('inspection list and /viewer/notre-dame links open the same API inspection 
   );
   await expect(page.getByRole('alert')).toHaveCount(0);
   expect(requests).toEqual(['en', 'en']);
+});
+
+test('the default dev API renders the viewer demo report without fixture findings', async ({
+  page,
+}) => {
+  await authenticate(page);
+  await page.goto('/inspections/demo/report');
+  await expectPainted(page);
+  await expect(page.getByText('Tank farm №3', { exact: true })).toHaveCount(2);
+  await expect(page.getByText('Coverage not computed', { exact: true })).toBeVisible();
+  await expect(page.getByText('No findings', { exact: true })).toHaveCount(2);
+  await expect(page.getByRole('link', { name: 'Download PDF', exact: true })).toHaveAttribute(
+    'href',
+    /^blob:/,
+  );
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });

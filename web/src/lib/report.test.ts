@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { fetchReportPdf, fetchReportSummary, reportInspectionForRun } from './report';
+import { fetchReportPdf } from './api';
+import { fetchReportSummary, reportInspectionForRun } from './report';
 import fixture from '../test/fixtures/report-summary.json';
 import coverageFixture from '../test/fixtures/report-coverage.json';
 import { mockReportApi } from '../test/reportApi';
@@ -84,6 +85,7 @@ it('assembles summary from API routes', async () => {
   expect(summary.findings[2].decisions).toEqual([]);
   expect(fetch.mock.calls.map(([path]) => path)).toEqual([
     '/api/inspections/37',
+    '/api/inspections/37/runs',
     '/api/sites',
     '/api/inspections/37/findings',
     '/api/inspections/37/coverage',
@@ -151,4 +153,13 @@ it('preserves authorization/server errors', async () => {
   vi.stubGlobal('fetch', fetch);
   await expect(fetchReportSummary('notre-dame')).rejects.toThrow(fixture.failure.detail);
   expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+// Empty bodies and empty JSON are not computed coverage.
+it.each([null, {}, { computed: false }, ''])('handles empty coverage %j', async (coverage) => {
+  mockReportApi(undefined, {
+    '/api/inspections/37/coverage': () =>
+      coverage === '' ? new Response(null, { status: 204 }) : Response.json(coverage),
+  });
+  expect((await fetchReportSummary('37')).coverage).toBeNull();
 });

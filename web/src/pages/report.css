@@ -33,7 +33,9 @@
 .report-preview {
   display: block;
   width: 100%;
-  height: min(var(--layout-side-panel), 65dvh);
+  height: auto;
+  max-height: min(var(--layout-side-panel), 65dvh);
+  object-fit: contain;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
 }
@@ -41,9 +43,8 @@
   display: grid;
   gap: var(--space-2);
 }
-.report-preview-box > a {
-  padding-block: var(--space-3);
-  text-decoration: underline;
+.report-preview-box[hidden] {
+  display: none;
 }
 .report-topbar .qv-topbar__title {
   min-width: 0;
@@ -135,12 +136,12 @@
     grid-row: 1;
   }
   .report-preview {
-    height: calc(100dvh - var(--layout-topbar) - var(--space-8) * 4);
+    max-height: calc(100dvh - var(--layout-topbar) - var(--space-8) * 4);
   }
 }
 @media (max-width: 767px) {
   .report-preview {
-    height: min(24dvh, calc(var(--space-12) * 4));
+    max-height: min(24dvh, calc(var(--space-12) * 4));
   }
   .report-hash {
     flex-shrink: 0;

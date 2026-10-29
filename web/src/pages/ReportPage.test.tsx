@@ -12,10 +12,22 @@ import coverageFixture from '../test/fixtures/report-coverage.json';
 import { fixturePdf, mockReportApi } from '../test/reportApi';
 import { ReportPage } from './ReportPage';
 
+const pdfJs = vi.hoisted(() => ({
+  render: vi.fn(),
+  getPage: vi.fn(),
+  getDocument: vi.fn(),
+  cancel: vi.fn(),
+  destroy: vi.fn(),
+}));
+vi.mock('pdfjs-dist', () => ({
+  GlobalWorkerOptions: {},
+  getDocument: pdfJs.getDocument,
+}));
+
 // Fixed English queries shared by the state and Blob-lifecycle scenarios.
 const pdfRegion = () => screen.getByRole('region', { name: 'PDF preview' });
-const previewFrame = () => screen.getByTitle('PDF preview');
-const missingPreview = () => screen.queryByTitle('PDF preview');
+const previewCanvas = () => screen.getByRole('img', { name: 'PDF preview' });
+const missingPreview = () => screen.queryByRole('img', { name: 'PDF preview' });
 const downloadButton = () => screen.getByRole('button', { name: 'Download PDF' });
 const downloadLink = () => screen.getByRole('link', { name: 'Download PDF' });
 const findDownload = () => screen.findByRole('link', { name: 'Download PDF' });
@@ -67,6 +79,16 @@ function renderReport(id = '37', signedIn = true, entry = `/inspections/${id}/re
 
 beforeEach(() => {
   sessionStorage.clear();
+  pdfJs.render.mockReset().mockReturnValue({ promise: Promise.resolve(), cancel: pdfJs.cancel });
+  pdfJs.destroy.mockReset().mockResolvedValue(undefined);
+  pdfJs.getPage.mockReset().mockResolvedValue({
+    getViewport: () => ({ width: 450, height: 240 }),
+    render: pdfJs.render,
+  });
+  pdfJs.getDocument.mockReset().mockImplementation(() => ({
+    promise: Promise.resolve({ numPages: 3, getPage: pdfJs.getPage }),
+    destroy: pdfJs.destroy,
+  }));
   setLang('en');
   vi.stubGlobal(
     'URL',
@@ -112,7 +134,7 @@ it('renders the API summary', async () => {
   expect(screen.queryByText(/confidence/i)).toBeNull();
 });
 
-it('stays busy until Blob links attach', async () => {
+it('stays busy until the first page is painted', async () => {
   mockReportApi();
   vi.mocked(URL.createObjectURL).mockImplementationOnce(() => {
     expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
@@ -122,9 +144,10 @@ it('stays busy until Blob links attach', async () => {
   });
   renderReport();
   const download = await findDownload();
+  await screen.findByText('1 of 3 pages');
   expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
   expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-  expect(previewFrame().getAttribute('src')).toBe('blob:report-en');
+  expect(previewCanvas().tagName).toBe('CANVAS');
   expect(download.getAttribute('href')).toBe('blob:report-en');
   expect(download.getAttribute('download')).toBe('report-37-en.pdf');
   expect(missingAlert()).toBeNull();
@@ -151,8 +174,9 @@ it('opens Report from the loaded list', async () => {
   fireEvent.click(report);
   const download = await findDownload();
   expect(download.getAttribute('download')).toBe('report-37-en.pdf');
+  await screen.findByText('1 of 3 pages');
   expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-  expect(previewFrame().getAttribute('src')).toBe('blob:report-en');
+  expect(previewCanvas().tagName).toBe('CANVAS');
   expect(screen.getByTitle(fixture.hash).textContent).toBe('bf98d56a3f72…7263bc26');
   expect(languageChoice()).toBeTruthy();
   expect(screen.getAllByText('Tank T-104, north wall')).toHaveLength(2);
@@ -231,13 +255,12 @@ it('shares the PDF Blob and hash', async () => {
   const fetch = mockReportApi();
   const view = renderReport();
   const download = await findDownload();
-  const frame = previewFrame();
-  expect(frame.tagName).toBe('IFRAME');
-  expect(frame.getAttribute('src')).toBe('blob:report-en');
-  const help = screen.getByRole('link', { name: 'Blank preview? Download the report.' });
-  expect(help.getAttribute('href')).toBe('blob:report-en');
-  expect(help.getAttribute('download')).toBe('report-37-en.pdf');
-  expect(frame.closest('.report-preview-box')?.contains(help)).toBe(true);
+  const frame = previewCanvas();
+  expect(frame.tagName).toBe('CANVAS');
+  expect(view.container.querySelector('iframe, embed, object')).toBeNull();
+  expect(await screen.findByText('1 of 3 pages')).toBeTruthy();
+  expect(pdfJs.getPage).toHaveBeenCalledWith(1);
+  expect(pdfJs.render).toHaveBeenCalledWith(expect.objectContaining({ canvas: frame }));
   expect(screen.getByRole('article').hasAttribute('data-theme')).toBe(false);
   const hash = screen.getByTitle(fixture.hash);
   expect(hash.textContent).toBe('bf98d56a3f72…7263bc26');
@@ -262,7 +285,7 @@ it('replaces and revokes the Blob on language change', async () => {
     .mockReturnValueOnce('blob:report-kk');
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   const view = renderReport();
-  await waitFor(() => expect(previewFrame().getAttribute('src')).toBe('blob:report-en'));
+  await waitFor(() => expect(pdfRegion().getAttribute('aria-busy')).toBe('false'));
   const { promise: pending, resolve: finish } = deferred<Response>();
   fetch.mockImplementationOnce(() => pending);
   fireEvent.click(screen.getByRole('button', { name: 'Қазақша' }));
@@ -278,7 +301,8 @@ it('replaces and revokes the Blob on language change', async () => {
   expect(screen.queryByTitle(fixture.hash)).toBeNull();
   expect(statusText()).toBe('Generating report…');
   await act(async () => finish(fixturePdf()));
-  await waitFor(() => expect(previewFrame().getAttribute('src')).toBe('blob:report-kk'));
+  await waitFor(() => expect(pdfRegion().getAttribute('aria-busy')).toBe('false'));
+  expect(previewCanvas().tagName).toBe('CANVAS');
   const link = downloadLink() as HTMLAnchorElement;
   expect(link.getAttribute('href')).toBe('blob:report-kk');
   expect(link.download).toBe('report-37-kk.pdf');
@@ -426,7 +450,7 @@ it('switches PDF to kk independently of UI', async () => {
     ),
   );
   expect(
-    within(languages).getByRole('button', { name: 'Қазақша' }).getAttribute('aria-pressed'),
+    within(languageChoice()).getByRole('button', { name: 'Қазақша' }).getAttribute('aria-pressed'),
   ).toBe('true');
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Inspection report');
 });
@@ -629,9 +653,82 @@ it('places preview before summary', async () => {
   renderReport();
   const download = await findDownload();
   expect(download.getAttribute('download')).toBe('report-37-en.pdf');
-  const preview = previewFrame();
+  const preview = previewCanvas();
   const summary = screen.getByRole('article', { name: 'Summary' });
   expect(preview.compareDocumentPosition(summary)).toBe(4);
   expect(pdfRegion().contains(preview)).toBe(true);
   expect(screen.getByRole('main').contains(preview)).toBe(true);
+});
+
+it('keeps busy while pdf.js is painting and shows the document page count afterwards', async () => {
+  const painting = deferred<void>();
+  pdfJs.render.mockReturnValueOnce({ promise: painting.promise, cancel: pdfJs.cancel });
+  mockReportApi();
+  const view = renderReport();
+  await waitFor(() => expect(pdfJs.render).toHaveBeenCalledTimes(1));
+  expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
+  expect(screen.queryByText('Report is ready.')).toBeNull();
+  expect(screen.queryByText('1 of 3 pages')).toBeNull();
+  expect(view.container.querySelector('iframe')).toBeNull();
+  await act(async () => painting.resolve());
+  expect(await screen.findByText('1 of 3 pages')).toBeTruthy();
+  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
+  expect(new TextDecoder().decode(pdfJs.getDocument.mock.calls[0][0].data)).toBe(fixture.pdf);
+});
+
+it.each(['open', 'render'])(
+  'shows a plain preview failure when pdf.js cannot %s, keeping the PDF downloadable',
+  async (step) => {
+    if (step === 'open')
+      pdfJs.getDocument.mockImplementationOnce(() => ({
+        promise: Promise.reject(new Error('pdf.js internal diagnostic')),
+        destroy: pdfJs.destroy,
+      }));
+    else
+      pdfJs.render.mockImplementationOnce(() => ({
+        promise: Promise.reject(new Error('pdf.js internal diagnostic')),
+        cancel: pdfJs.cancel,
+      }));
+    mockReportApi();
+    const view = renderReport();
+    const alert = await findAlert();
+    expect(alert.textContent).toContain('Could not preview report');
+    expect(alert.textContent).toContain(
+      'The PDF preview could not be displayed. You can still download the PDF.',
+    );
+    expect(alert.textContent).not.toContain('pdf.js internal diagnostic');
+    expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
+    expect(screen.queryByText('Report is ready.')).toBeNull();
+    expect(downloadLink().getAttribute('href')).toBe('blob:report-en');
+    expect(screen.getByTitle(fixture.hash)).toBeTruthy();
+    expect(view.container.querySelector('iframe')).toBeNull();
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('1 of 3 pages')).toBeTruthy();
+  },
+);
+
+it.each(['fetch', 'paint'])('clears busy before 30 seconds when %s hangs', async (step) => {
+  if (step === 'paint')
+    pdfJs.render.mockReturnValueOnce({ promise: new Promise(() => {}), cancel: pdfJs.cancel });
+  mockReportApi(step === 'fetch' ? () => new Promise(() => {}) : undefined);
+  const timer = vi.spyOn(window, 'setTimeout');
+  renderReport();
+  if (step === 'paint') await waitFor(() => expect(pdfJs.render).toHaveBeenCalled());
+  const deadline = timer.mock.calls.find(([, duration]) => duration === 28_000)?.[0];
+  expect(deadline).toBeTypeOf('function');
+  await act(async () => (deadline as () => void)());
+  expect((await findAlert()).textContent).toContain('The report is taking too long. Try again.');
+  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
+  if (step === 'paint') expect(downloadLink().getAttribute('href')).toBe('blob:report-en');
+});
+
+it('cancels rendering and destroys the worker when leaving the page', async () => {
+  pdfJs.render.mockReturnValueOnce({ promise: new Promise(() => {}), cancel: pdfJs.cancel });
+  pdfJs.cancel.mockClear();
+  mockReportApi();
+  const view = renderReport();
+  await waitFor(() => expect(pdfJs.render).toHaveBeenCalledTimes(1));
+  view.unmount();
+  expect(pdfJs.cancel).toHaveBeenCalledTimes(1);
+  expect(pdfJs.destroy).toHaveBeenCalledTimes(1);
 });

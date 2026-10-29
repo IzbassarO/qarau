@@ -24,8 +24,10 @@ export async function getInspectionCoverage(
   const response = await fetchApi(`/api/inspections/${id}/coverage`, signal);
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(await apiErrorMessage(response));
-  const coverage = (await response.json()) as InspectionCoverage;
-  return coverage.computed ? coverage : null;
+  const body = await response.text();
+  if (!body.trim()) return null;
+  const coverage = JSON.parse(body) as InspectionCoverage | null;
+  return coverage?.computed && coverage.totals && coverage.regions?.length ? coverage : null;
 }
 
 export type InspectionStatus = 'uploaded' | 'queued' | 'running' | 'done' | 'failed' | 'unknown';

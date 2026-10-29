@@ -1,3 +1,4 @@
+import type { Lang } from '../i18n';
 import { authHeader } from '../auth/auth';
 
 /** HTTP failure from the authenticated API transport. */
@@ -49,7 +50,7 @@ export async function requestApi(path: string, options: RequestInit = {}): Promi
     headers: { ...authHeader(), ...options.headers },
   });
   if ([404, 405, 501].includes(response.status))
-    throw new ApiUnavailableError(path, response.status);
+    throw new ApiUnavailableError(path, response.status, await apiErrorMessage(response));
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new ApiError(
@@ -75,4 +76,41 @@ export async function rerunInspectionStep(inspectionId: string, runId: string, s
     { method: 'POST', headers: authHeader() },
   );
   if (!response.ok) throw new Error(String(response.status));
+}
+
+export type ReportPdf =
+  | { state: 'generating' }
+  | { state: 'ready'; blob: Blob; hash: string }
+  | { state: 'failed'; message: string };
+
+export class ReportApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/** Authenticated binary report transport. The server supplies the body hash. */
+export async function fetchReportPdf(
+  id: string | number,
+  lang: Lang,
+  signal?: AbortSignal,
+): Promise<ReportPdf> {
+  try {
+    const response = await fetchApi(
+      `/api/inspections/${encodeURIComponent(id)}/report.pdf?lang=${lang}`,
+      signal,
+    );
+    if (response.status === 202) return { state: 'generating' };
+    if (!response.ok) throw new ReportApiError(await apiErrorMessage(response), response.status);
+    const hash = response.headers.get('X-Report-SHA256');
+    if (!hash || !response.headers.get('Content-Type')?.includes('application/pdf'))
+      return { state: 'failed', message: '' };
+    return { state: 'ready', blob: await response.blob(), hash };
+  } catch (error) {
+    if (signal?.aborted || error instanceof ReportApiError) throw error;
+    return { state: 'failed', message: '' };
+  }
 }
