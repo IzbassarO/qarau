@@ -115,3 +115,23 @@ theme over light/dark and lang over ru/kk/en at both 1440x900 and 390x844 (12
 captures). Authenticate first, wait for `.report-state[aria-busy="false"]` and a
 Blob iframe/download link, and capture the report route itself. The prior packet
 contains only list/viewer captures and cannot establish the report visual criterion.
+
+## Returned e2e timeout
+
+The latest gate passed 227 tests before viewer/upload scenarios stalled together.
+The saved stderr tail contains a V8 HTTP-server dump; the full crash header was
+not retained. Node 26 is installed. Upstream nodejs/node#66870 describes a matching
+Vite 8.3.4 failure under sustained traffic in `res.end(string)`/Buffer.byteLength,
+and recommends passing bytes to Node. Add a response-local conversion before
+Vite's middleware (in the existing dev-runs plugin, no gate/config changes), and
+verify real Vite send responses, UTF-8, callbacks, binary PDF and empty/HEAD/304
+responses without opening a port. Preserve all existing e2e assertions and runtime
+limits, add no browser scenarios, then rerun the required local checks. Vite and
+Node use MIT-compatible commercial licences; no dependency is added.
+Source: https://github.com/nodejs/node/issues/66870.
+
+Verification passed: lint, typecheck, 48 Vitest files / 905 tests, build and
+diff-check. The nine response tests use Vite's actual send helper and Node's real
+HTTP response without a listening socket. Discovery finds all 124 report/viewer/
+viewer-chrome/upload scenarios; the browser rerun remains with Kerege. No existing
+test, assertion, timeout or retry setting changed, and no server was started.

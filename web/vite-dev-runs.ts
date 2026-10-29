@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
+import { byteResponses } from './dev-response-bytes.ts';
 
 const TYPES: Record<string, string> = {
   '.json': 'application/json',
@@ -15,6 +16,8 @@ export function devRuns(): Plugin {
     name: 'qarau-dev-runs',
     apply: 'serve',
     configureServer(server) {
+      // Install before Vite's module/HTML handlers as well as our API responses.
+      server.middlewares.use(byteResponses);
       const root = path.resolve(process.env.QARAU_RUNS_DIR ?? '../data/runs');
       const send = (
         res: ServerResponse,
