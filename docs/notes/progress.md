@@ -2,6 +2,15 @@
 
 Newest first. Keep it short.
 
+## 2026-10-29 — `make local` for the owner's walk-through (docs/DEMO.md)
+
+- **`make local` / `make local-stop`** (`infra/local.sh`): compose postgres/valkey/s3, migrations,
+  dev seed, API :8010, native S1 worker (rq SimpleWorker, this Mac's CPU), web production build via
+  `vite preview` :4173 with /api proxied; `LAN=1` for a phone. Dev logins in data/local/.
+- **Known:** dense never runs from the app (Modal only by hand, ADR 0019); the web does not know the
+  `coverage` step ("Unknown step"); no coverage UI task in the backlog; on Postgres
+  `test_v0008_…` fails (explicit `id=1` insert does not advance the sequence: a test bug).
+
 ## 2026-10-27 — Kerege e2e stability, demo seed, UI-evidence split
 
 - **e2e:** Kerege runs Playwright with `--workers=3 --retries=1` (timeout 30 min). Fails then
