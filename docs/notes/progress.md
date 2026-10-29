@@ -2,6 +2,16 @@
 
 Newest first. Keep it short.
 
+## 2026-10-29 — LaunchPad gaps from the `make local` walk (PR #97)
+
+- **Backlog:** COV-ui (app, after CONF-fix: coverage layer, legend, % totals, `coverage` step
+  named), TEST-v0008 (core: the 0008 migration test on Postgres), DEMO-cov (core: the dev seed
+  runs the real coverage step on notre-dame-p3e). Queue: dev_pipeline TEST-v0008, DEMO-cov, D2
+  (held); dev_app CONF-fix, COV-ui, UI-evidence-c, UI-mark, DEMO1-ui.
+- **`make local LAN=1`** never runs open dev mode: an empty `QARAU_API_TOKEN` gets a generated
+  one (`QARAU_LAN_API_TOKEN` in data/local/dev-logins.env); only dev logins and event codes get
+  in. Without `LAN=1` nothing changes.
+
 ## 2026-10-29 — `make local` for the owner's walk-through (docs/DEMO.md)
 
 - **`make local` / `make local-stop`** (`infra/local.sh`): compose postgres/valkey/s3, migrations,
