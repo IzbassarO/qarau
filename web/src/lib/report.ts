@@ -1,6 +1,6 @@
 import { apiErrorMessage, fetchApi } from './api';
 import type { Lang } from '../i18n';
-import type { Finding, FindingClass, Severity } from './findings';
+import type { Finding } from './findings';
 import { listInspectionFindings } from './findings';
 import { getInspectionCoverage, type InspectionCoverage } from './inspections';
 
@@ -11,14 +11,8 @@ export type ReportPdf =
 
 export interface ReportDecision {
   id: number;
-  finding_id: number;
-  user_id: number;
   user: string;
   verdict: 'confirm' | 'reject' | 'reclass';
-  comment: string | null;
-  new_class: FindingClass | null;
-  new_severity: Severity | null;
-  created_at: string;
 }
 
 export interface ReportFinding extends Finding {
@@ -30,7 +24,7 @@ export interface ReportSummary {
   object: string | null;
   date: string;
   findings: ReportFinding[];
-  /** Server-supplied prose or COV1-b totals, never client-computed coverage. */
+  /** API coverage prose or COV1-b totals. */
   coverage: string | InspectionCoverage | null;
 }
 
@@ -55,7 +49,7 @@ async function json<T>(path: string, signal?: AbortSignal): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-/** Resolve a viewer's run to an inspection, including inspections without findings. */
+/** Resolve the API inspection associated with a viewer run. */
 export async function reportInspectionForRun(runId: string, signal?: AbortSignal) {
   const inspections = await json<{ id: number; run_id?: string | null }[]>(
     '/api/inspections',
@@ -92,21 +86,13 @@ async function inspectionForReport(id: string, signal?: AbortSignal): Promise<In
       /^\d+$/.test(id)
     )
       throw error;
-    // The tester's named route refers to seed.py's run, not an integer DB key.
-    // Confirm the association returned by the API; never hard-code the inspection ID.
-    const runName = id === 'demo' || id === 'notre-dame' ? 'notre-dame-p3e' : id;
-    const inspections = await json<Inspection[]>('/api/inspections', signal);
-    const runs = await Promise.all(
-      inspections.map((inspection) =>
-        json<{ id: string; run_dir: string; inspection_id: number }[]>(
-          `/api/inspections/${inspection.id}/runs`,
-          signal,
-        ),
-      ),
+    // Named routes resolve through the seeded run's API association.
+    const inspectionId = await reportInspectionForRun(
+      id === 'demo' || id === 'notre-dame' ? 'notre-dame-p3e' : id,
+      signal,
     );
-    const match = runs.flat().find((run) => run.id === runName || run.run_dir === runName);
-    if (!match) throw error;
-    return json<Inspection>(`/api/inspections/${match.inspection_id}`, signal);
+    if (inspectionId === null) throw error;
+    return json<Inspection>(`/api/inspections/${inspectionId}`, signal);
   }
 }
 

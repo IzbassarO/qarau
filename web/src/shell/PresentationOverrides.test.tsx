@@ -45,7 +45,7 @@ it.each([
   ['dark', 'kk', 'Инспекция есебі'],
   ['light', 'en', 'Inspection report'],
   ['dark', 'en', 'Inspection report'],
-])('applies URL theme=%s and lang=%s without changing saved preferences', (theme, lang, title) => {
+])('applies temporary theme=%s, lang=%s', (theme, lang, title) => {
   const { preference } = renderPresentation(`?theme=${theme}&lang=${lang}`);
   expect(document.documentElement.dataset.theme).toBe(theme);
   expect(document.documentElement.lang).toBe(lang);
@@ -59,7 +59,7 @@ it.each([
   expect(document.documentElement.dataset.theme).toBe(theme);
 });
 
-it('updates overrides on navigation and restores saved language and system theme when removed', () => {
+it('restores preferences on navigation', () => {
   const { preference } = renderPresentation('?theme=light&lang=ru');
   fireEvent.click(screen.getByRole('link', { name: 'Change overrides' }));
   expect(document.documentElement.dataset.theme).toBe('dark');

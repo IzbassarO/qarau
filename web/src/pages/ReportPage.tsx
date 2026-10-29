@@ -1,8 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useI18n, type Lang } from '../i18n';
-import { fetchReportPdf, fetchReportSummary, type ReportPdf } from '../lib/report';
+import {
+  fetchReportPdf,
+  fetchReportSummary,
+  type ReportPdf,
+  type ReportSummary,
+} from '../lib/report';
 import { formatReportDate } from '../lib/reportDate';
 import { Wordmark } from '../shell/ShellIdentity';
 import './report.css';
@@ -122,133 +127,140 @@ export function ReportPage() {
             <Wordmark />
           </div>
           <h1 className="qv-doc__title">{t('report.title')}</h1>
-          {data && (
-            <>
-              <p className="qv-doc__subtitle">{data.object ?? t('report.objectUnavailable')}</p>
-              <table className="qv-facts">
-                <tbody>
-                  <tr>
-                    <td>{t('report.object')}</td>
-                    <td>{data.object ?? t('report.objectUnavailable')}</td>
-                  </tr>
-                  <tr>
-                    <td>{t('report.date')}</td>
-                    <td>
-                      <time dateTime={data.date}>
-                        {formatReportDate(new Date(data.date), lang, t)}
-                      </time>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>{t('report.scale')}</td>
-                    <td>
-                      {data.findings.length ? (
-                        <ul className="report-scales">
-                          {[...new Set(data.findings.map((finding) => finding.scale))].map(
-                            (scale) => (
-                              <li key={scale}>
-                                {scale === 'not set' ? t('report.scaleNotSet') : scale}
-                              </li>
-                            ),
-                          )}
-                        </ul>
-                      ) : (
-                        t('report.scaleNotSet')
-                      )}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              <h2>{t('report.summary')}</h2>
-              {(['critical', 'watch'] as const).map((severity) => (
-                <section key={severity} aria-label={t(`evidence.severity.${severity}`)}>
-                  <h3>{t(`evidence.severity.${severity}`)}</h3>
-                  <p className="qv-caption">
-                    {t('report.findingCount').replace(
-                      '{count}',
-                      String(
-                        data.findings.filter((finding) => finding.severity === severity).length,
-                      ),
-                    )}
-                  </p>
-                  {data.findings.some((finding) => finding.severity === severity) ? (
-                    <table className="data report-findings">
-                      <thead>
-                        <tr>
-                          <th scope="col">{t('evidence.title')}</th>
-                          <th scope="col">{t('evidence.status')}</th>
-                          <th scope="col">{t('report.decidedBy')}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.findings
-                          .filter((finding) => finding.severity === severity)
-                          .map((finding) => (
-                            <tr key={finding.id}>
-                              <td>
-                                <span className={`sev ${severity}`}>
-                                  {t(`evidence.class.${finding.class}`)}
-                                </span>
-                                <p>{finding.comment}</p>
-                              </td>
-                              <td>
-                                {finding.status === 'proposed' ||
-                                finding.status === 'confirmed' ||
-                                finding.status === 'rejected' ||
-                                finding.status === 'low_evidence'
-                                  ? t(`evidence.status.${finding.status}`)
-                                  : finding.status}
-                              </td>
-                              <td>
-                                {finding.decisions.length === 0 ? (
-                                  t('report.noDecision')
-                                ) : (
-                                  <ol className="report-decisions">
-                                    {finding.decisions.map((decision) => (
-                                      <li key={decision.id}>
-                                        {decision.user}, {t(`report.verdict.${decision.verdict}`)}
-                                      </li>
-                                    ))}
-                                  </ol>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <p>{t('evidence.empty')}</p>
-                  )}
-                </section>
-              ))}
-              <h2>{t('report.coverage')}</h2>
-              {typeof data.coverage === 'string' ? (
-                <p>{data.coverage}</p>
-              ) : data.coverage?.computed ? (
-                <>
-                  <p>
-                    {t('report.coverageTotals')
-                      .replace('{inspected}', String(data.coverage.totals.inspected_ok))
-                      .replace('{finding}', String(data.coverage.totals.finding))
-                      .replace('{unseen}', String(data.coverage.totals.not_seen))}
-                  </p>
-                  {data.coverage.regions.some((region) => region.state === 'not_seen') && (
-                    <p>
-                      {t('report.notSeenRegions')}{' '}
-                      {data.coverage.regions
-                        .filter((region) => region.state === 'not_seen')
-                        .map((region) => region.id)
-                        .join(', ')}
-                    </p>
-                  )}
-                </>
-              ) : (
-                <p>{t('report.coverageNotComputed')}</p>
-              )}
-            </>
-          )}
+          {data && <Summary data={data} />}
         </article>
       </main>
     </div>
+  );
+}
+
+function Summary({ data }: { data: ReportSummary }) {
+  const { t, lang } = useI18n();
+  return (
+    <>
+      <p className="qv-doc__subtitle">{data.object ?? t('report.objectUnavailable')}</p>
+      <table className="qv-facts">
+        <tbody>
+          <Fact label={t('report.object')}>{data.object ?? t('report.objectUnavailable')}</Fact>
+          <Fact label={t('report.date')}>
+            <time dateTime={data.date}>{formatReportDate(new Date(data.date), lang, t)}</time>
+          </Fact>
+          <Fact label={t('report.scale')}>
+            {data.findings.length ? (
+              <ul className="report-scales">
+                {[...new Set(data.findings.map((finding) => finding.scale))].map((scale) => (
+                  <li key={scale}>{scale === 'not set' ? t('report.scaleNotSet') : scale}</li>
+                ))}
+              </ul>
+            ) : (
+              t('report.scaleNotSet')
+            )}
+          </Fact>
+        </tbody>
+      </table>
+      <h2>{t('report.summary')}</h2>
+      {(['critical', 'watch'] as const).map((severity) => (
+        <FindingGroup
+          key={severity}
+          severity={severity}
+          findings={data.findings.filter((finding) => finding.severity === severity)}
+        />
+      ))}
+      <h2>{t('report.coverage')}</h2>
+      {typeof data.coverage === 'string' ? (
+        <p>{data.coverage}</p>
+      ) : data.coverage?.computed ? (
+        <>
+          <p>
+            {t('report.coverageTotals')
+              .replace('{inspected}', String(data.coverage.totals.inspected_ok))
+              .replace('{finding}', String(data.coverage.totals.finding))
+              .replace('{unseen}', String(data.coverage.totals.not_seen))}
+          </p>
+          {data.coverage.regions.some((region) => region.state === 'not_seen') && (
+            <p>
+              {t('report.notSeenRegions')}{' '}
+              {data.coverage.regions
+                .filter((region) => region.state === 'not_seen')
+                .map((region) => region.id)
+                .join(', ')}
+            </p>
+          )}
+        </>
+      ) : (
+        <p>{t('report.coverageNotComputed')}</p>
+      )}
+    </>
+  );
+}
+
+function FindingGroup({
+  severity,
+  findings,
+}: {
+  severity: 'critical' | 'watch';
+  findings: ReportSummary['findings'];
+}) {
+  const { t } = useI18n();
+  return (
+    <section aria-label={t(`evidence.severity.${severity}`)}>
+      <h3>{t(`evidence.severity.${severity}`)}</h3>
+      <p className="qv-caption">
+        {t('report.findingCount').replace('{count}', String(findings.length))}
+      </p>
+      {findings.length > 0 ? (
+        <table className="data report-findings">
+          <thead>
+            <tr>
+              <th scope="col">{t('evidence.title')}</th>
+              <th scope="col">{t('evidence.status')}</th>
+              <th scope="col">{t('report.decidedBy')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {findings.map((finding) => (
+              <tr key={finding.id}>
+                <td>
+                  <span className={`sev ${severity}`}>{t(`evidence.class.${finding.class}`)}</span>
+                  <p>{finding.comment}</p>
+                </td>
+                <td>
+                  {finding.status === 'proposed' ||
+                  finding.status === 'confirmed' ||
+                  finding.status === 'rejected' ||
+                  finding.status === 'low_evidence'
+                    ? t(`evidence.status.${finding.status}`)
+                    : finding.status}
+                </td>
+                <td>
+                  {finding.decisions.length === 0 ? (
+                    t('report.noDecision')
+                  ) : (
+                    <ol className="report-decisions">
+                      {finding.decisions.map((decision) => (
+                        <li key={decision.id}>
+                          {decision.user}, {t(`report.verdict.${decision.verdict}`)}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p>{t('evidence.empty')}</p>
+      )}
+    </section>
+  );
+}
+
+function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <tr>
+      <td>{label}</td>
+      <td>{children}</td>
+    </tr>
   );
 }

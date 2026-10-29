@@ -9,6 +9,13 @@ import coverageFixture from '../src/test/fixtures/report-coverage.json' with { t
 const pdf = readFileSync(new URL('../src/test/fixtures/report.pdf', import.meta.url));
 const hash = '5e317abc851bdb197835b4a473d2fed04bb0051eed5c8956234256cbfef9fb6c';
 
+async function authenticate(page: Page, lang = 'en') {
+  await page.addInitScript((locale) => {
+    localStorage.setItem('qarau.lang', locale);
+    sessionStorage.setItem('qarau.auth.session', 'Bearer report-test-session');
+  }, lang);
+}
+
 async function mockApi(page: Page) {
   const pdfLanguages: string[] = [];
   const { manifest, files } = readDenseFixture();
@@ -105,10 +112,7 @@ const locales = [
 ] as const;
 
 test('demo report shows API coverage and downloads the fixture PDF', async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem('qarau.lang', 'en');
-    sessionStorage.setItem('qarau.auth.session', 'Bearer report-test-session');
-  });
+  await authenticate(page);
   await mockApi(page);
   await page.route('**/api/inspections/37/coverage', (route) =>
     route.fulfill({ json: coverageFixture }),
@@ -136,11 +140,9 @@ test('demo report shows API coverage and downloads the fixture PDF', async ({ pa
 for (const locale of locales) {
   for (const theme of ['light', 'dark'] as const) {
     test(`report preview and fixture download: ${locale.lang}, ${theme}`, async ({ page }) => {
-      // URL overrides must take precedence over saved language and system theme.
       await page.emulateMedia({ colorScheme: theme === 'light' ? 'dark' : 'light' });
       await page.addInitScript(() => localStorage.setItem('qarau.lang', 'en'));
       const requests = await mockApi(page);
-      // Authenticate through the form and retain the requested report URL.
       await page.goto(`/inspections/37/report?theme=${theme}&lang=${locale.lang}`);
       await page.getByLabel(locale.username).fill('report-engineer');
       await page.getByLabel(locale.password).fill('report-test-session');
@@ -152,7 +154,6 @@ for (const locale of locales) {
       await expect(page.getByRole('heading', { level: 1 })).toHaveText(locale.title);
       await page.evaluate(async () => {
         await document.fonts.ready;
-        // Sign-in may have scrolled its form into view; inspect the report at its top.
         window.scrollTo(0, 0);
       });
       await expect(page.getByText('Tank T-104, north wall', { exact: true })).toHaveCount(2);
@@ -171,7 +172,6 @@ for (const locale of locales) {
       const preview = page.locator('iframe');
       await expect(preview).toHaveAttribute('title', locale.preview);
       await expect(preview).toHaveAttribute('src', /^blob:/);
-      // At the page top, an iframe below the findings fails this viewport check.
       await expect(preview).toBeInViewport();
       const previewBox = (await preview.boundingBox())!;
       expect(previewBox.y).toBeGreaterThanOrEqual(0);
@@ -202,7 +202,6 @@ for (const locale of locales) {
       const download = await downloadEvent;
       expect(download.suggestedFilename()).toBe(`report-37-${locale.lang}.pdf`);
       expect(await download.failure()).toBeNull();
-      // Literal known fixture size: never compute the expectation from the downloaded data.
       expect((await stat((await download.path())!)).size).toBe(606);
       expect(await readFile((await download.path())!)).toEqual(pdf);
       expect(requests).toEqual([locale.lang]);
@@ -211,10 +210,7 @@ for (const locale of locales) {
 
     test(`report reached from inspections: ${locale.lang}, ${theme}`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme });
-      await page.addInitScript((lang) => {
-        localStorage.setItem('qarau.lang', lang);
-        sessionStorage.setItem('qarau.auth.session', 'Bearer report-test-session');
-      }, locale.lang);
+      await authenticate(page, locale.lang);
       const requests = await mockApi(page);
       await page.goto('/inspections');
       await expect(page.locator('.inspections-start')).toHaveAttribute('aria-busy', 'false');
@@ -262,10 +258,7 @@ for (const locale of locales) {
 test('named demo report resolves its API id, switches PDF language and shows unknown-id errors', async ({
   page,
 }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem('qarau.lang', 'en');
-    sessionStorage.setItem('qarau.auth.session', 'Bearer report-test-session');
-  });
+  await authenticate(page);
   const requests = await mockApi(page);
   await page.goto('/inspections');
   await expect(page.getByRole('link', { name: 'Report', exact: true })).toHaveAttribute(
@@ -287,8 +280,7 @@ test('named demo report resolves its API id, switches PDF language and shows unk
   await page.getByRole('button', { name: 'Қазақша', exact: true }).click();
   await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
   await expect.poll(() => requests).toEqual(['en', 'en', 'kk']);
-  // A blob iframe can still belong to the previous language. Wait for the native
-  // download anchor to carry the Kazakh filename before dispatching its click.
+  // Wait for the Kazakh Blob, not the previous language's preview.
   const downloadLink = page.getByRole('link', { name: 'Download PDF', exact: true });
   await expect(downloadLink).toHaveAttribute('download', 'report-notre-dame-kk.pdf');
   await expect(downloadLink).toHaveAttribute('href', /^blob:/);
@@ -310,10 +302,7 @@ test('named demo report resolves its API id, switches PDF language and shows unk
 test('inspection list and /viewer/notre-dame links open the same API inspection report', async ({
   page,
 }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem('qarau.lang', 'en');
-    sessionStorage.setItem('qarau.auth.session', 'Bearer report-test-session');
-  });
+  await authenticate(page);
   const requests = await mockApi(page);
   await page.goto('/inspections');
   const listLink = page.getByRole('link', { name: 'Report', exact: true });

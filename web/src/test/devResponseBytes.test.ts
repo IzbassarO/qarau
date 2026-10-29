@@ -29,7 +29,7 @@ function response(method = 'GET') {
   return { request, reply, nativeEnd };
 }
 
-it('installs byte responses before path-scoped run handlers and Vite module responses', () => {
+it('installs before Vite and API handlers', () => {
   const use = vi.fn();
   const configure = devRuns().configureServer;
   if (typeof configure !== 'function') throw new Error('Expected configureServer hook');
@@ -38,7 +38,7 @@ it('installs byte responses before path-scoped run handlers and Vite module resp
   expect(use.mock.calls[1][0]).toBe('/api/runs');
 });
 
-it('hands Node bytes for Vite JavaScript with an inline source map, preserving headers and UTF-8', () => {
+it('preserves Vite JS, source maps and headers', () => {
   const { request, reply, nativeEnd } = response();
   send(request, reply, 'export const title = "Қарау / Отчёт";\n', 'js', {
     etag: '"report-module"',
@@ -79,7 +79,7 @@ it.each([
   expect(reply.getHeader('Content-Type')).toBe(contentType);
 });
 
-it('preserves the fixture PDF bytes without re-encoding them', () => {
+it('preserves PDF bytes', () => {
   const { reply, nativeEnd } = response();
   const pdf = readFileSync(resolve(process.cwd(), 'src/test/fixtures/report.pdf'));
   expect(reply.end(pdf)).toBe(reply);
@@ -87,7 +87,7 @@ it('preserves the fixture PDF bytes without re-encoding them', () => {
   expect(pdf.length).toBe(606);
 });
 
-it('preserves explicit encodings, callback overloads and the response return value', () => {
+it('preserves end encodings, overloads and return value', () => {
   const encoded = response();
   const done = vi.fn();
   expect(encoded.reply.end('d09ed182d187d191d182', 'hex', done)).toBe(encoded.reply);

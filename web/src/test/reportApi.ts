@@ -2,9 +2,13 @@ import { vi } from 'vitest';
 import fixture from './fixtures/report-summary.json';
 
 /** Mock the backend's individual JSON routes, rather than mocking summary assembly. */
-export function mockReportApi(pdf: () => Response | Promise<Response> = fixturePdf) {
+export function mockReportApi(
+  pdf: () => Response | Promise<Response> = fixturePdf,
+  routes: Record<string, () => Response> = {},
+) {
   const fetch = vi.fn(async (input: string | URL | Request) => {
     const path = String(input);
+    if (path in routes) return routes[path]();
     if (path.startsWith('/api/inspections/37/report.pdf?lang=')) return pdf();
     if (path === '/api/inspections/notre-dame' || path === '/api/inspections/demo')
       return Response.json(fixture.validation, { status: 422 });

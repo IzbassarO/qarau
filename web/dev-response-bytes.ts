@@ -1,8 +1,7 @@
 import type { Connect } from 'vite';
 
-/** Avoid Node 26's Buffer.byteLength fast-call abort when Vite ends a string response.
+/** Send bytes around Node 26's HTTP fast-call abort; preserve binary bodies/overloads.
  * https://github.com/nodejs/node/issues/66870
- * Keep the conversion local to this response; binary bodies and overloads pass through.
  */
 export const byteResponses: Connect.NextHandleFunction = (_request, response, next) => {
   const end = response.end;

@@ -1,137 +1,21 @@
 # UI-report plan
 
-## Scope and implementation
+Continue this branch; preserve tests and fixture assertions.
 
-Build on the existing report work. Changes stay in `web/` and this note; the
-backend is read-only. No report editing, XLSX, email, new dependencies or models.
+- Authenticated PDF, ru/kk/en, X-Report-SHA256, API error detail and 202 polling.
+- API summary: object/date, findings/status/deciders, scale, COV1-b percentages
+  and not-seen regions; 404/computed=false means coverage not computed.
+- Shared iframe/download Blob URL, revoke on change/unmount, aria-busy until ready.
+- Done-list/viewer links, API-resolved demo alias, v8 desktop/phone layout and i18n.
+- Consolidate duplicated rendering, lookups and test setup to reduce review size.
 
-1. Use RPT1's authenticated `GET /api/inspections/{id}/report.pdf?lang=ru|kk|en`.
-   Read the exact `X-Report-SHA256` header, return its `sha256` and the PDF Blob,
-   and throw HTTP errors carrying the API detail/status. Pending requests and
-   HTTP 202 show generating; a failed response shows the API message and retry.
-2. Load the summary from inspection, sites, findings and append-only decisions
-   endpoints. Display object/site name, date, severity groups and counts, returned
-   statuses/deciders and scale sources. Never replay decisions or compute coverage.
-   Read COV1-b's coverage percentages and not-seen regions; show localized
-   coverage-not-computed for 404/computed=false. Render supplied prose verbatim.
-3. Register `/inspections/:id/report` behind `RequireAuth`. Keep language choice
-   independent of UI language. Share one Blob URL between iframe and native download
-   anchor; revoke it on replacement/unmount. Generating sets `aria-busy=true`; ready
-   and failed clear it. A replacement cannot retain a stale preview/download.
-4. Link done inspections and viewers with known inspection/run associations to
-   their reports. Resolve named `demo`/`notre-dame` report aliases through the API's
-   seeded `notre-dame-p3e` run association, never a hard-coded inspection ID. Preserve
-   unknown-ID and authorization errors.
-5. Follow DESIGN.md v8, `report-light.png` and existing tokens/components. Preserve
-   the tester-requested toolbar language controls, shortened hash beside download
-   (complete header value in its title), disabled download while unavailable,
-   desktop summary/preview columns and phone preview before the full summary.
-   Keep phone controls at least 44 px and prevent horizontal overflow. The document
-   stays white across app themes. All UI strings use matching ru/kk/en keys; explicit
-   Kazakh month names avoid browser ICU fallback codes. Read-only `theme`/`lang` URL
-   overrides do not change saved preferences.
+Keep the Node 26 byte-response fix: https://github.com/nodejs/node/issues/66870.
+No new dependencies. MIT: React/router/query/Vite/Vitest/Node; Apache-2.0:
+Playwright; OFL: fonts. All allow commercial use.
 
-## Tests and returned corrections
+Check lint, types, Vitest, build, diff and e2e discovery. Kerege runs browsers and
+captures /inspections/demo/report: light/dark, ru/kk/en, 1440x900 and 390x844,
+waiting for aria-busy=false and Blob links. No local servers.
 
-Keep all existing test assertions and fixture expectations. Vitest covers summary
-literals, severity counts/status/decider, date/scale/coverage, three PDF states,
-authentication, retry, language query parameters, Blob lifecycle and entry links.
-
-Playwright uses mocked API routes and the original 606-byte PDF under
-`web/src/test/fixtures/`. Check the literal header hash, download filename/size and
-fixture bytes at desktop and phone sizes in ru/kk/en and light/dark. After switching
-the named report to Kazakh, wait for requests `['en', 'en', 'kk']` and the anchor's
-literal `download="report-notre-dame-kk.pdf"` plus Blob href before clicking; an
-existing English Blob iframe alone does not establish readiness.
-
-Six additional theme/language scenarios start at `/inspections`, click the localized
-Report link and assert the ready report summary, language choice, iframe, named
-anchor and hash without an error banner or raw translation keys. The named viewer
-link also reaches the same API inspection report.
-
-## Verification, licences and tester handoff
-
-Required local checks: `pnpm lint && pnpm typecheck`, `pnpm test && pnpm build`,
-Playwright discovery and `git diff --check`. The last code round passed all checks:
-47 Vitest files, 887 tests and 28 discovered desktop/phone report e2e cases. Kerege
-runs browser e2e with its own fresh server (`reuseExistingServer: false`). Never
-start a local server or take developer screenshots for this task.
-
-Tester screenshot flow: authenticate against the seeded API, set the desired saved
-UI language and light/dark system theme, open `/inspections`, click a done
-inspection's Report action, then wait for the PDF section to clear `aria-busy` and
-show the preview/download. Capture the report route at 1440x900 and 390x844 for all
-six theme/language combinations. The mocked equivalent is `report reached from
-inspections` in `web/e2e/report.spec.ts`. Browser execution and screenshots remain
-with Kerege/tester; protected pipeline configuration is outside this task.
-
-Installed package metadata: React/React DOM, react-router, TanStack Query, Vite,
-Vitest and Testing Library use MIT; Playwright uses Apache-2.0. Existing self-hosted
-fonts use OFL. All permit commercial use; no dependencies or tools were added.
-
-## Screenshot readiness correction
-
-Mark the inspection list busy during its initial API load. Keep `.report-state`
-busy until its Blob URL is attached to both preview and download, so capture cannot
-observe a ready PDF state before the iframe exists. New Vitest cases cover these
-transitions and clicking the list's Report link. Existing assertions are preserved.
-The six e2e navigation variants additionally check list readiness and viewport
-visibility of the preview, download/hash and all language buttons.
-
-Real backend verification runs in-process through FastAPI TestClient, without a
-listening port: migrate a scratch SQLite, exercise `/api/inspections/37/report.pdf`
-in ru/kk/en and verify PDF bytes, response headers and SHA-256. The original backend
-seed is also exercised on a separate scratch database with the original
-`notre-dame-p3e` bundle read-only. No backend code or data files are changed.
-FastAPI/SQLAlchemy/Alembic are MIT; httpx and WeasyPrint are BSD-3-Clause.
-Both backend checks passed; seeded PDFs returned 200 in 1.17–1.30 seconds across
-ru/kk/en. Lint, typecheck, all 887 Vitest tests, build, e2e discovery and diff-check
-passed after the readiness changes. No listening server was started.
-
-Screenshot evidence still must be supplied by the tester. The developer does not
-capture screenshots or modify protected tester routes/configuration. The prior
-size-gate correction consolidated historical notes; keep this note concise.
-
-## Continuation after merging dev
-
-The last tester packet passed functional checks and returned the task because its
-captures omitted the report route. Tester-owned screenshots remain outstanding.
-COV1-b is now merged: connect its coverage API, display the returned percentages
-and not-seen region identifiers without calculating coverage, and retain the
-not-computed message for 404 or computed=false. Add API-backed fixture tests for
-both paths and the required literal PDF failure. Reuse the findings client, keep
-desktop list actions aligned in one row, then rerun the required local gates and
-Playwright discovery. No new dependencies; installed licence metadata confirms
-React/React Router/Vitest MIT and Playwright Apache-2.0 (commercial use allowed).
-
-Continuation checks passed: lint, typecheck, 47 Vitest files / 896 tests, production
-build, and diff-check. Playwright discovers 30 report scenarios (298 overall);
-browser execution belongs to Kerege. No server or screenshot capture was started.
-ScaleReference source and decision user names are exposed by the existing API;
-there is no missing-field gap to flag for those summary values.
-
-Tester handoff: capture `/inspections/demo/report?theme=light&lang=ru`, varying
-theme over light/dark and lang over ru/kk/en at both 1440x900 and 390x844 (12
-captures). Authenticate first, wait for `.report-state[aria-busy="false"]` and a
-Blob iframe/download link, and capture the report route itself. The prior packet
-contains only list/viewer captures and cannot establish the report visual criterion.
-
-## Returned e2e timeout
-
-The latest gate passed 227 tests before viewer/upload scenarios stalled together.
-The saved stderr tail contains a V8 HTTP-server dump; the full crash header was
-not retained. Node 26 is installed. Upstream nodejs/node#66870 describes a matching
-Vite 8.3.4 failure under sustained traffic in `res.end(string)`/Buffer.byteLength,
-and recommends passing bytes to Node. Add a response-local conversion before
-Vite's middleware (in the existing dev-runs plugin, no gate/config changes), and
-verify real Vite send responses, UTF-8, callbacks, binary PDF and empty/HEAD/304
-responses without opening a port. Preserve all existing e2e assertions and runtime
-limits, add no browser scenarios, then rerun the required local checks. Vite and
-Node use MIT-compatible commercial licences; no dependency is added.
-Source: https://github.com/nodejs/node/issues/66870.
-
-Verification passed: lint, typecheck, 48 Vitest files / 905 tests, build and
-diff-check. The nine response tests use Vite's actual send helper and Node's real
-HTTP response without a listening socket. Discovery finds all 124 report/viewer/
-viewer-chrome/upload scenarios; the browser rerun remains with Kerege. No existing
-test, assertion, timeout or retry setting changed, and no server was started.
+Passed: lint, types, 905 tests, build, diff-check; 30 report e2e cases discovered.
+All 378 matcher calls/expected arguments in edited tests are preserved.
