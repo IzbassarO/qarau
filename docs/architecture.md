@@ -398,6 +398,64 @@ shared read-only token); the row never feeds back into the PDF, so the same data
 report time always give the same hash. 404 for an unknown inspection, 422 for a missing or unknown
 `lang`, 401 without a valid token. Every report is version 1 until reports are issued (signed off).
 
+**Event organizations and guests (`backend/app/event.py`, DEMO1, ADR 0034).** For a public demo
+(LaunchPad, 2026-11-06) guests sign in with a short event code instead of a user account.
+`uv run python -m app.event create --name launchpad --expires 2026-11-06T23:59-05:00 --max-guests
+300 --runs <id>,<id>` is the only way to make an **event organization**: it checks that every run
+exists and is `done`, then in one transaction inserts the organization (default name "LaunchPad
+demo") with `is_event = true`, an `event_code` row (name, SHA-256 of the code, `expires_at` in
+UTC, `max_guests`), the event's **guest user** (role `guest`, no token: the `user_id` of every
+guest decision, report and write audit row) and one `event_code_run` row per shared run, and
+prints the code once (8 characters from `secrets`, alphabet without 0/O/1/I/L). Bad input exits 2
+and writes nothing.
+Migration 0007 holds the rules in the database: `organization.is_event` is set only at INSERT
+(a trigger rejects any UPDATE that changes it; no API body or seed sets it), `event_code` and
+`guest` rows are refused outside an event organization, and `finding`, `decision` and `report` get
+a nullable `guest_id` (the guest's sandbox). The decision trigger is reworked: UPDATE is always
+refused; DELETE only for a decision whose `guest_id` is set and whose user belongs to that
+guest's event organization, so `app.event purge` can remove guest rows and nothing else.
+`audit_log` stays fully append-only everywhere.
+
+*Guest sign-in.* `POST /api/auth/guest {code}` (public, like a login) first counts the attempt
+in an in-process sliding window (`app/ratelimit.py`: per client IP `QARAU_GUEST_RATE_PER_IP`,
+default 10/min, and per code `QARAU_GUEST_RATE_PER_CODE`, default 30/min; over → 429 with
+`Retry-After`), then looks up the SHA-256 of the code (upper-cased, trimmed): unknown or past
+`expires_at` → 401, `max_guests` guests already → 403 "event is full". Otherwise it inserts a
+`guest` row with the SHA-256 of a new `secrets.token_urlsafe(32)` bearer token (migration 0008,
+`guest.token_sha256`: the row is the session) and returns the token once with the event, its
+organization, expiry and shared runs (`run_id`, `run_dir`, `inspection_id`). `GET
+/api/auth/guest` returns the same for a signed-in guest. A guest token is valid until the code
+expires. Every attempt, accepted or not, writes one `audit_log` row: action `event_code.use`,
+`object_id` = event name (null when unknown or rate-limited), `detail` = `{result: ok | unknown |
+expired | full | rate_limited, ip}`, `user_id` null (an anonymous request; migration 0008 makes
+`audit_log.user_id` nullable and adds `detail`). It references no guest row, so purge never needs
+to delete it.
+
+*The `guest` role* ranks below viewer. `require_role(role)` answers 403 to a guest on every
+route; only routes declared with `guests=True` (`ViewerOrGuest` / `EngineerOrGuest` in
+`crud.py`) let it in, and those scope it (`auth.check_run`, `check_inspection`, `own`):
+
+| A guest may | Scope |
+| --- | --- |
+| `GET /api/runs`, `/api/runs/{id}/manifest.json`, `/files/…` | only shared runs; others 404 |
+| `GET /api/inspections/{id}`, `/coverage`, `/findings`, `/report.pdf` | only an inspection whose runs are all shared; others 404 |
+| `POST /api/inspections/{id}/findings` | same inspections; the finding carries its `guest_id` |
+| `GET /api/findings/{id}`, `GET`/`POST …/decisions` | its own findings only; another guest's 404 |
+
+Everything else (upload, processing and rerun, organizations, sites, users, inspection lists,
+audit log, `/api/me`) is 403. Users read only rows with `guest_id` null: a guest's finding is 404
+to an engineer, and the PDF (`qarau_pipeline.report.load_report_input(…, guest_id)`) holds only
+the caller's sandbox: the guest's own findings and decisions, or for a user none of any guest's.
+A guest's decision and report use the event's guest user as `user_id` / `created_by` and carry
+the `guest_id`.
+
+*Purge.* `uv run python -m app.event purge --name launchpad` refuses (exit 2) an unknown event or
+one whose organization is not `is_event`; otherwise, in one transaction, it deletes that event's
+guests' decisions, observations, findings and reports and the guests themselves (with them their
+sessions), and prints the counts. It keeps the event code, the shared runs, the guest user and
+every audit row. In open dev mode (`QARAU_API_TOKEN` empty) reads are public for everyone, so a
+public demo server must set `QARAU_API_TOKEN` (D2).
+
 ## Benchmark
 
 `python -m qarau_pipeline benchmark --data D --out O` runs every reference video in

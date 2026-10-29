@@ -25,7 +25,10 @@ EXPECTED_TABLES = [
     "audit_log",
     "coverage_region",
     "decision",
+    "event_code",
+    "event_code_run",
     "finding",
+    "guest",
     "inspection",
     "observation",
     "organization",
@@ -123,6 +126,8 @@ def seed_one_decision_and_audit_row(db_url: str) -> None:
 
 DECISION_COLUMNS_0003 = ["comment", "created_at", "finding_id", "id", "user_id", "verdict"]
 DECISION_COLUMNS_0004 = sorted([*DECISION_COLUMNS_0003, "new_class", "new_severity"])
+DECISION_COLUMNS_HEAD = sorted([*DECISION_COLUMNS_0004, "guest_id"])
+EVENT_TABLES = ("event_code", "event_code_run", "guest")
 
 
 def test_v0004_adds_reclass_columns_and_keeps_the_append_only_trigger(db_url: str) -> None:
@@ -134,7 +139,7 @@ def test_v0004_adds_reclass_columns_and_keeps_the_append_only_trigger(db_url: st
 
     engine = engine_for(db_url)
     cols = {c["name"]: c for c in inspect(engine).get_columns("decision")}
-    assert sorted(cols) == DECISION_COLUMNS_0004
+    assert sorted(cols) == DECISION_COLUMNS_HEAD
     assert cols["new_class"]["nullable"] and cols["new_severity"]["nullable"]
     seed_one_decision_and_audit_row(db_url)
     with pytest.raises(DBAPIError, match="append-only"), engine.begin() as conn:
@@ -149,7 +154,7 @@ def test_v0004_adds_reclass_columns_and_keeps_the_append_only_trigger(db_url: st
 
     command.upgrade(alembic_config(db_url), "head")
     assert (
-        sorted(c["name"] for c in inspect(engine).get_columns("decision")) == DECISION_COLUMNS_0004
+        sorted(c["name"] for c in inspect(engine).get_columns("decision")) == DECISION_COLUMNS_HEAD
     )
     with Session(engine) as db:
         d = db.query(Decision).one()  # the 0003 row survived with null new_* columns
@@ -163,8 +168,8 @@ def test_v0004_adds_reclass_columns_and_keeps_the_append_only_trigger(db_url: st
         conn.execute(text("UPDATE decision SET comment = 'edited'"))
 
 
-REPORT_COLUMNS = ["created_by", "generated_at", "id", "inspection_id", "lang", "report_number",
-                  "sha256", "version"]  # fmt: skip
+REPORT_COLUMNS = ["created_by", "generated_at", "guest_id", "id", "inspection_id", "lang",
+                  "report_number", "sha256", "version"]  # fmt: skip
 
 
 def test_v0005_creates_the_report_table_and_downgrades(db_url: str) -> None:
@@ -178,13 +183,18 @@ def test_v0005_creates_the_report_table_and_downgrades(db_url: str) -> None:
     insp = inspect(engine)
     cols = {c["name"]: c for c in insp.get_columns("report")}
     assert sorted(cols) == REPORT_COLUMNS
-    assert cols["created_by"]["nullable"]
-    assert not any(cols[c]["nullable"] for c in REPORT_COLUMNS if c != "created_by")
+    assert cols["created_by"]["nullable"] and cols["guest_id"]["nullable"]
+    assert not any(
+        cols[c]["nullable"] for c in REPORT_COLUMNS if c not in ("created_by", "guest_id")
+    )
     assert getattr(cols["sha256"]["type"], "length", None) == 64
     fks = {
         fk["constrained_columns"][0]: fk["referred_table"] for fk in insp.get_foreign_keys("report")
     }
-    assert fks == {"inspection_id": "inspection", "created_by": "user"}
+    expected_fks = {"inspection_id": "inspection", "created_by": "user"}
+    if engine.dialect.name == "postgresql":  # SQLite: guest_id has no foreign key (0007)
+        expected_fks["guest_id"] = "guest"
+    assert fks == expected_fks
     seed_one_decision_and_audit_row(db_url)
     row = ("INSERT INTO report (inspection_id, lang, sha256, generated_at, report_number, "
            "version, created_by) VALUES (1, 'en', :sha, CURRENT_TIMESTAMP, 'QV-2026-0001', 1, "
@@ -196,7 +206,9 @@ def test_v0005_creates_the_report_table_and_downgrades(db_url: str) -> None:
 
     command.downgrade(alembic_config(db_url), "0004")
     tables = sorted(inspect(engine).get_table_names())
-    assert tables == [t for t in EXPECTED_TABLES if t not in ("report", "coverage_region")]
+    assert tables == [
+        t for t in EXPECTED_TABLES if t not in ("report", "coverage_region", *EVENT_TABLES)
+    ]
     command.upgrade(alembic_config(db_url), "head")
     assert sorted(inspect(engine).get_table_names()) == EXPECTED_TABLES
     with engine.connect() as conn:
@@ -237,11 +249,87 @@ def test_v0006_creates_the_coverage_region_table_and_downgrades(db_url: str) -> 
 
     command.downgrade(alembic_config(db_url), "0005")
     tables = sorted(inspect(engine).get_table_names())
-    assert tables == [t for t in EXPECTED_TABLES if t != "coverage_region"]
+    assert tables == [t for t in EXPECTED_TABLES if t not in ("coverage_region", *EVENT_TABLES)]
     command.upgrade(alembic_config(db_url), "head")
     assert sorted(inspect(engine).get_table_names()) == EXPECTED_TABLES
     with engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM coverage_region")).scalar() == 0
+
+
+ROWS_0006 = [
+    "INSERT INTO organization (id, name) VALUES (1, 'o')",
+    'INSERT INTO "user" (id, org_id, name, role, secret_hash, salt) '
+    "VALUES (1, 1, 'u', 'engineer', 'h', 's')",
+    "INSERT INTO site (id, org_id, name) VALUES (1, 1, 's')",
+    "INSERT INTO inspection (id, site_id, mode, status, created_at) "
+    "VALUES (1, 1, 'quick_scan', 'created', CURRENT_TIMESTAMP)",
+    "INSERT INTO run (id, inspection_id, run_dir, status, progress, steps) "
+    "VALUES ('r1', 1, 'r1', 'done', 100, '[]')",
+    "INSERT INTO finding (id, run_id, class, severity, status, area_units, points) "
+    "VALUES (1, 'r1', 'corrosion', 'watch', 'proposed', 0, '[]')",
+    "INSERT INTO decision (id, finding_id, user_id, verdict, created_at) "
+    "VALUES (1, 1, 1, 'confirm', CURRENT_TIMESTAMP)",
+]
+EVENT_CODE_COLUMNS = ["code_sha256", "created_at", "expires_at", "id", "max_guests", "name",
+                      "organization_id"]  # fmt: skip
+
+
+def test_v0007_adds_event_tables_and_guest_columns_and_downgrades(db_url: str) -> None:
+    """0007 on a database with data: the existing organization is not an event, existing rows
+    get a null guest_id, the new tables exist; downgrade to 0006 removes all of it and the
+    decision stays append-only before, during and after (the 0001 trigger body is restored)."""
+    from conftest import alembic_config, drop_everything
+
+    from alembic import command
+
+    engine = engine_for(db_url)
+    drop_everything(db_url)
+    command.upgrade(alembic_config(db_url), "0006")
+    with engine.begin() as conn:
+        for sql in ROWS_0006:
+            conn.execute(text(sql))
+    command.upgrade(alembic_config(db_url), "0007")
+
+    insp = inspect(engine)
+    assert sorted(insp.get_table_names()) == EXPECTED_TABLES
+    org_cols = {c["name"]: c for c in insp.get_columns("organization")}
+    assert not org_cols["is_event"]["nullable"]
+    assert sorted(c["name"] for c in insp.get_columns("event_code")) == EVENT_CODE_COLUMNS
+    assert sorted(c["name"] for c in insp.get_columns("event_code_run")) == [
+        "event_code_id",
+        "run_id",
+    ]
+    assert sorted(c["name"] for c in insp.get_columns("guest")) == [
+        "created_at",
+        "event_code_id",
+        "id",
+        "organization_id",
+    ]
+    for table in ("finding", "decision", "report"):
+        cols = {c["name"]: c for c in insp.get_columns(table)}
+        assert cols["guest_id"]["nullable"], table
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT is_event FROM organization")).scalar() in (False, 0)
+        assert conn.execute(text("SELECT guest_id FROM decision")).scalar() is None
+        assert conn.execute(text("SELECT guest_id FROM finding")).scalar() is None
+    with pytest.raises(DBAPIError, match="append-only"), engine.begin() as conn:
+        conn.execute(text("DELETE FROM decision"))
+
+    command.downgrade(alembic_config(db_url), "0006")
+    insp = inspect(engine)
+    assert sorted(insp.get_table_names()) == [t for t in EXPECTED_TABLES if t not in EVENT_TABLES]
+    assert "is_event" not in {c["name"] for c in insp.get_columns("organization")}
+    for table in ("finding", "decision", "report"):
+        assert "guest_id" not in {c["name"] for c in insp.get_columns(table)}, table
+    for sql in ("DELETE FROM decision", "UPDATE decision SET comment = 'edited'"):
+        with pytest.raises(DBAPIError, match="append-only"), engine.begin() as conn:
+            conn.execute(text(sql))
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM decision")).scalar() == 1
+
+    command.upgrade(alembic_config(db_url), "head")
+    with pytest.raises(DBAPIError, match="append-only"), engine.begin() as conn:
+        conn.execute(text("DELETE FROM decision"))
 
 
 @pytest.mark.parametrize("sql", FORBIDDEN_SQL)
@@ -254,3 +342,65 @@ def test_decision_and_audit_log_are_append_only(db_url: str, sql: str) -> None:
     with engine.connect() as conn:
         count = conn.execute(text(f"SELECT count(*) FROM {table}")).scalar()  # noqa: S608
     assert count == 1
+
+
+AUDIT_ROW = ("INSERT INTO audit_log (id, user_id, created_at, route, object_type, action) "
+             "VALUES (1, 1, CURRENT_TIMESTAMP, 'POST /x', 'x', 'create')")  # fmt: skip
+ANONYMOUS_AUDIT_ROW = (
+    "INSERT INTO audit_log (user_id, created_at, route, object_type, action, detail) VALUES "
+    "(NULL, CURRENT_TIMESTAMP, 'POST /api/auth/guest', 'event_code', 'event_code.use', "
+    """'{"result": "unknown", "ip": "203.0.113.7"}')"""
+)
+AUDIT_COLUMNS_0007 = ["action", "created_at", "id", "object_id", "object_type", "route", "user_id"]
+
+
+def test_v0008_adds_guest_sessions_and_anonymous_audit_rows_and_downgrades(db_url: str) -> None:
+    """0008 on a database with an audit row: `guest.token_sha256` (unique), `audit_log.detail`
+    and a nullable `audit_log.user_id`; the row survives and audit_log stays append-only (on
+    SQLite the table is rebuilt and the 0001 triggers are created again). Downgrade restores
+    0007 and is refused while an anonymous audit row exists: the log is never edited to pass."""
+    from conftest import alembic_config, drop_everything
+
+    from alembic import command
+
+    engine = engine_for(db_url)
+    drop_everything(db_url)
+    command.upgrade(alembic_config(db_url), "0007")
+    with engine.begin() as conn:
+        for sql in [*ROWS_0006, AUDIT_ROW]:
+            conn.execute(text(sql))
+    command.upgrade(alembic_config(db_url), "0008")
+
+    insp = inspect(engine)
+    audit = {c["name"]: c for c in insp.get_columns("audit_log")}
+    assert sorted(audit) == sorted([*AUDIT_COLUMNS_0007, "detail"])
+    assert audit["user_id"]["nullable"] and audit["detail"]["nullable"]
+    assert [fk["referred_table"] for fk in insp.get_foreign_keys("audit_log")] == ["user"]
+    guest = {c["name"]: c for c in insp.get_columns("guest")}
+    assert guest["token_sha256"]["nullable"]
+    assert [(i["column_names"], bool(i["unique"])) for i in insp.get_indexes("guest")] == [
+        (["token_sha256"], True)
+    ]
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT user_id, action FROM audit_log")).all() == [(1, "create")]
+    for sql in FORBIDDEN_SQL[2:]:  # the audit_log statements
+        with pytest.raises(DBAPIError, match="append-only"), engine.begin() as conn:
+            conn.execute(text(sql))
+
+    command.downgrade(alembic_config(db_url), "0007")
+    insp = inspect(engine)
+    audit = {c["name"]: c for c in insp.get_columns("audit_log")}
+    assert sorted(audit) == AUDIT_COLUMNS_0007
+    assert not audit["user_id"]["nullable"]
+    assert "token_sha256" not in {c["name"] for c in insp.get_columns("guest")}
+    for sql in FORBIDDEN_SQL[2:]:
+        with pytest.raises(DBAPIError, match="append-only"), engine.begin() as conn:
+            conn.execute(text(sql))
+
+    command.upgrade(alembic_config(db_url), "head")
+    with engine.begin() as conn:
+        conn.execute(text(ANONYMOUS_AUDIT_ROW))
+    with pytest.raises(DBAPIError):
+        command.downgrade(alembic_config(db_url), "0007")
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM audit_log")).scalar() == 2

@@ -177,7 +177,7 @@ run = sa.table("run", sa.column("id"), sa.column("inspection_id"), sa.column("ru
 finding = sa.table(
     "finding", sa.column("id"), sa.column("run_id"), sa.column("class"), sa.column("severity"),
     sa.column("status"), sa.column("area_m2", sa.Float), sa.column("scale_source"),
-    sa.column("points", sa.JSON),
+    sa.column("points", sa.JSON), sa.column("guest_id"),
 )  # fmt: skip
 observation = sa.table(
     "observation", sa.column("id"), sa.column("finding_id"), sa.column("frame_id"),
@@ -196,11 +196,14 @@ def _aware(t: datetime) -> datetime:
     return t if t.tzinfo is not None else t.replace(tzinfo=UTC)
 
 
-def load_report_input(engine: sa.Engine, inspection_id: int, report_time: datetime) -> ReportInput:
+def load_report_input(
+    engine: sa.Engine, inspection_id: int, report_time: datetime, guest_id: int | None = None
+) -> ReportInput:
     """The report of an inspection as of `report_time`: version 1 of `QV-<year>-<inspection id>`,
     the capture date is the inspection's date. The API's `report` table logs every generation
     (hash, time, who) but does not feed back into the PDF, so the same data and report time
-    always give the same bytes.
+    always give the same bytes. Findings (and so their decisions) are those of guest `guest_id`'s
+    sandbox (an event guest, DEMO1), or with no guest id those of no guest.
     ponytail: fixed version 1; number versions from the report table once a report is issued
     (signed off), which needs the sign-off workflow."""
     if report_time.tzinfo is None:
@@ -215,10 +218,14 @@ def load_report_input(engine: sa.Engine, inspection_id: int, report_time: dateti
         ).first()
         if head is None:
             raise StageError(f"inspection {inspection_id} not found")
+        sandbox = finding.c.guest_id
         rows = c.execute(
             sa.select(finding, run.c.run_dir)
             .join(run, run.c.id == finding.c.run_id)
-            .where(run.c.inspection_id == inspection_id)
+            .where(
+                run.c.inspection_id == inspection_id,
+                sandbox.is_(None) if guest_id is None else sandbox == guest_id,
+            )
             .order_by(finding.c.id)
         ).all()
         run_dirs = tuple(c.execute(

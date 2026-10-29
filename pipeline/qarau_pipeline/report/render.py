@@ -208,9 +208,10 @@ class Generated(NamedTuple):
 
 def generate(
     inspection_id: int, lang: str, report_time: datetime, engine: sa.Engine,
-    runs_dir: Path | None,
+    runs_dir: Path | None, guest_id: int | None = None,
 ) -> Generated:  # fmt: skip
-    """An inspection's report as PDF bytes with their SHA-256: the CLI and the API call this."""
-    inp = load_report_input(engine, inspection_id, report_time)
+    """An inspection's report as PDF bytes with their SHA-256: the CLI and the API call this.
+    `guest_id`: the report of that event guest's sandbox (`load_report_input`)."""
+    inp = load_report_input(engine, inspection_id, report_time, guest_id)
     pdf = render_report(inp, lang, runs_dir)
     return Generated(pdf, hashlib.sha256(pdf).hexdigest(), inp)

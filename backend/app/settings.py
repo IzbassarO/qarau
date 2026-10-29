@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # Shared read-only token (M1). Empty = open dev mode: reads need no token, writes always do.
     qarau_api_token: str = ""
     qarau_cors_origins: str = "http://localhost:5173"
+    # Guest sign-in attempts per minute (POST /api/auth/guest, ADR 0034): per client IP and per
+    # submitted code. In-process counters: they hold for one API process only.
+    qarau_guest_rate_per_ip: int = 10
+    qarau_guest_rate_per_code: int = 30
     # `python -m app.seed` runs only with QARAU_ENV=dev and these three tokens set.
     qarau_env: str = ""
     qarau_dev_admin_token: str = ""

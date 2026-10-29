@@ -11,8 +11,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from .crud import Db, Viewer
-from .models import CoverageRegion, CoverageState, Inspection, Run, Site, User
+from .auth import check_inspection
+from .crud import Db, ViewerOrGuest
+from .models import CoverageRegion, CoverageState, Inspection, Role, Run, Site, User
 
 router = APIRouter(prefix="/api")
 
@@ -40,15 +41,18 @@ class CoverageOut(BaseModel):
     description="Role: viewer. Coverage regions of the inspection's newest run that has them: "
     "id, state (inspected_ok | finding | not_seen), frame count, bounds (bundle units), and "
     "totals in % of the region count (1 decimal). computed=false and empty totals when coverage "
-    "was not computed. 404: unknown inspection, or one of another organization.",
+    "was not computed. 404: unknown inspection, or one of another organization (a guest: one "
+    "whose runs are not all shared with its event).",
 )
-def get_coverage(inspection_id: int, db: Db, who: Viewer) -> CoverageOut:
+def get_coverage(inspection_id: int, db: Db, who: ViewerOrGuest) -> CoverageOut:
     insp = db.get(Inspection, inspection_id)
     site = db.get(Site, insp.site_id) if insp is not None else None
     user = db.get(User, who.user_id) if who.user_id is not None else None
     # The shared read-only dev token has no organization and reads everything, as elsewhere.
-    if site is None or (user is not None and user.org_id != site.org_id):
+    # A guest reads the shared runs of another organization: check_inspection scopes it.
+    if site is None or (user is not None and who.role != Role.guest and user.org_id != site.org_id):
         raise HTTPException(404, "inspection not found")
+    check_inspection(db, who, inspection_id)
     run_id = db.scalar(
         select(CoverageRegion.run_id)
         .join(Run, Run.id == CoverageRegion.run_id)

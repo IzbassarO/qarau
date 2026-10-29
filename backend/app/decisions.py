@@ -4,8 +4,10 @@ POST /api/findings/{id}/decisions  (engineer) -> 201 DecisionOut (insert only, o
 GET  /api/findings/{id}/decisions  (viewer)   -> [DecisionOut], oldest first
 
 No PUT, PATCH or DELETE handler exists (FastAPI answers 405) and the database trigger refuses
-UPDATE and DELETE on `decision` (migration 0001). The finding's effective status, class and
-severity are replayed from its decisions (`derive_finding_state`); nothing is written back.
+UPDATE and DELETE on `decision` (migration 0001; since 0007 only `app.event purge` may delete
+a guest's decision in an event organization, ADR 0034). A guest decides only on its own
+findings. The finding's effective status, class and severity are replayed from its decisions
+(`derive_finding_state`); nothing is written back.
 """
 
 from collections.abc import Sequence
@@ -17,7 +19,8 @@ from qarau_pipeline.report.inputs import replay_decisions
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .crud import Db, Engineer, Viewer, audit
+from .auth import Identity
+from .crud import Db, EngineerOrGuest, ViewerOrGuest, audit
 from .models import Decision, Finding, FindingClass, Severity, User, Verdict
 
 router = APIRouter(prefix="/api")
@@ -102,9 +105,11 @@ def to_out(decision: Decision, user: str) -> DecisionOut:
     )
 
 
-def finding_or_404(db: Session, finding_id: int) -> Finding:
+def finding_or_404(db: Session, finding_id: int, who: Identity) -> Finding:
+    """The finding if it is in the caller's sandbox: a guest's own finding for that guest, a
+    finding of no guest for everyone else (ADR 0034); else 404, never 403, so ids leak nothing."""
     finding = db.get(Finding, finding_id)
-    if finding is None:
+    if finding is None or finding.guest_id != who.guest_id:
         raise HTTPException(404, "finding not found")
     return finding
 
@@ -115,12 +120,13 @@ def finding_or_404(db: Session, finding_id: int) -> Finding:
     description="Role: engineer. Record a decision on a finding: verdict confirm | reject | "
     "reclass; comment is required for reject and reclass; reclass carries new_class and/or "
     "new_severity (confirm and reject may not). The user comes from the session and created_at "
-    "from the server. Insert only: the same body twice makes two rows; nothing is ever edited.",
+    "from the server. Insert only: the same body twice makes two rows; nothing is ever edited. "
+    "Also a guest, on its own findings only (another's: 404); the decision carries its guest id.",
 )
 def create_decision(
-    finding_id: int, body: DecisionIn, db: Db, who: Engineer, request: Request
+    finding_id: int, body: DecisionIn, db: Db, who: EngineerOrGuest, request: Request
 ) -> DecisionOut:
-    finding_or_404(db, finding_id)
+    finding_or_404(db, finding_id, who)
     if who.user_id is None:  # the shared token is read-only; never reached for a write
         raise HTTPException(403, "writes need a user token")
     # Insert only, no dedup: the same body twice is two rows (both are evidence of a decision).
@@ -131,6 +137,7 @@ def create_decision(
         comment=body.comment,
         new_class=None if body.new_class is None else body.new_class.value,
         new_severity=body.new_severity,
+        guest_id=who.guest_id,
     )
     db.add(decision)
     db.flush()
@@ -144,8 +151,8 @@ def create_decision(
 @router.get(
     "/findings/{finding_id}/decisions",
     description="Role: viewer. The full decision history of a finding, oldest first "
-    "(user, verdict, comment, new class / severity, created_at).",
+    "(user, verdict, comment, new class / severity, created_at). A guest: its own findings only.",
 )
-def list_decisions(finding_id: int, db: Db, _: Viewer) -> list[DecisionOut]:
-    finding_or_404(db, finding_id)
+def list_decisions(finding_id: int, db: Db, who: ViewerOrGuest) -> list[DecisionOut]:
+    finding_or_404(db, finding_id, who)
     return [to_out(d, user) for d, user in decisions_of(db, finding_id)]

@@ -28,8 +28,9 @@ from qarau_pipeline.findings import (
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .crud import Db, Engineer, Viewer, audit, get_or_404
-from .decisions import state_of
+from .auth import check_inspection, own
+from .crud import Db, EngineerOrGuest, ViewerOrGuest, audit, get_or_404
+from .decisions import finding_or_404, state_of
 from .models import (
     Finding,
     FindingClass,
@@ -161,27 +162,40 @@ def to_out(db: Session, finding: Finding, run: Run, bundle: Bundle) -> FindingOu
 @router.post(
     "/inspections/{inspection_id}/findings",
     status_code=201,
-    description="Role: engineer. Mark a finding by hand: a polygon in map coordinates or a list "
+    description="Role: engineer. Also a guest: into its own sandbox, on an inspection whose runs "
+    "are all shared with its event (else 404). Mark a finding by hand: a polygon in map "
+    "coordinates or a list "
     "of point indices. The server selects the map points inside the region, measures its area "
     "(bundle units²; m² only when the inspection has a ScaleReference, else scale is 'not set') "
     "and stores the 3 best evidence frames with the region outlined in each (confidence 1.0). "
     "422: bad body or a region with no points; 409: the inspection has no exported run.",
 )
 def create_finding(
-    inspection_id: int, body: FindingIn, db: Db, who: Engineer, request: Request, settings: Cfg
+    inspection_id: int,
+    body: FindingIn,
+    db: Db,
+    who: EngineerOrGuest,
+    request: Request,
+    settings: Cfg,
 ) -> FindingOut:
     get_or_404(db, Inspection, inspection_id)
-    finding, run, bundle = mark_finding(db, settings, inspection_id, body)
+    check_inspection(db, who, inspection_id)
+    finding, run, bundle = mark_finding(db, settings, inspection_id, body, who.guest_id)
     audit(db, who, request, "finding", finding.id, "create")
     db.commit()
     return to_out(db, finding, run, bundle)
 
 
 def mark_finding(
-    db: Session, settings: Settings, inspection_id: int, body: FindingIn
+    db: Session,
+    settings: Settings,
+    inspection_id: int,
+    body: FindingIn,
+    guest_id: int | None = None,
 ) -> tuple[Finding, Run, Bundle]:
     """Select, measure and store a manual finding with its evidence frames (not committed).
-    The API route and the dev seed (app/seed.py) both create findings only through this."""
+    The API route and the dev seed (app/seed.py) both create findings only through this.
+    `guest_id`: the finding goes into that guest's sandbox (ADR 0034)."""
     run = exported_run(db, settings, inspection_id)
     bundle = bundle_of(settings, run)
     try:
@@ -205,6 +219,7 @@ def mark_finding(
         area_units=area,
         area_m2=None if m_per_unit is None else area * m_per_unit**2,
         scale_source=None if m_per_unit is None else scale,
+        guest_id=guest_id,
     )
     db.add(finding)
     db.flush()
@@ -219,14 +234,18 @@ def mark_finding(
 
 @router.get(
     "/inspections/{inspection_id}/findings",
-    description="Role: viewer. Findings of an inspection with their points and evidence frames.",
+    description="Role: viewer. Findings of an inspection with their points and evidence frames. "
+    "A guest sees only its own findings, users never see a guest's.",
 )
-def list_findings(inspection_id: int, db: Db, _: Viewer, settings: Cfg) -> list[FindingOut]:
+def list_findings(
+    inspection_id: int, db: Db, who: ViewerOrGuest, settings: Cfg
+) -> list[FindingOut]:
     get_or_404(db, Inspection, inspection_id)
+    check_inspection(db, who, inspection_id)
     rows = db.execute(
         select(Finding, Run)
         .join(Run, Finding.run_id == Run.id)
-        .where(Run.inspection_id == inspection_id)
+        .where(Run.inspection_id == inspection_id, own(Finding.guest_id, who))
         .order_by(Finding.id)
     ).all()
     bundles: dict[str, Bundle] = {}
@@ -241,11 +260,12 @@ def list_findings(inspection_id: int, db: Db, _: Viewer, settings: Cfg) -> list[
 @router.get(
     "/findings/{finding_id}",
     description="Role: viewer. One finding: class, severity, status, area and scale source, "
-    "3D points, evidence frames with outlines and image URLs.",
+    "3D points, evidence frames with outlines and image URLs. 404 for another guest's finding "
+    "(and for a guest's finding to every user).",
 )
-def get_finding(finding_id: int, db: Db, _: Viewer, settings: Cfg) -> FindingOut:
-    finding = db.get(Finding, finding_id)
-    run = db.get(Run, finding.run_id) if finding is not None else None
-    if finding is None or run is None:
+def get_finding(finding_id: int, db: Db, who: ViewerOrGuest, settings: Cfg) -> FindingOut:
+    finding = finding_or_404(db, finding_id, who)
+    run = db.get(Run, finding.run_id)
+    if run is None:
         raise HTTPException(404, "finding not found")
     return to_out(db, finding, run, bundle_of(settings, run))

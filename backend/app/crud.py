@@ -3,7 +3,7 @@ with "Role: <role>"; every write inserts an AuditLog row."""
 
 import secrets
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,6 +19,10 @@ Db = Annotated[Session, Depends(get_db)]
 Viewer = Annotated[Identity, Depends(require_role("viewer"))]
 Engineer = Annotated[Identity, Depends(require_role("engineer"))]
 Admin = Annotated[Identity, Depends(require_role("admin"))]
+# The same, plus event guests (ADR 0034): the route scopes a guest with auth.check_run /
+# check_inspection / own. Every other route answers 403 to a guest.
+ViewerOrGuest = Annotated[Identity, Depends(require_role("viewer", guests=True))]
+EngineerOrGuest = Annotated[Identity, Depends(require_role("engineer", guests=True))]
 
 
 def audit(
@@ -118,12 +122,13 @@ class MeOut(BaseModel):
 
 class AuditOut(Out):
     id: int
-    user_id: int
+    user_id: int | None  # None: an anonymous request (a guest code use)
     created_at: datetime
     route: str
     object_type: str
     object_id: str | None
     action: str
+    detail: dict[str, Any] | None = None
 
 
 # --- organizations ---------------------------------------------------------------------------
