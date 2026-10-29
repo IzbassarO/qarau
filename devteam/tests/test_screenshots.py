@@ -7,18 +7,21 @@ import os
 import socket
 import sqlite3
 import subprocess
+import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 import yaml
 from conftest import CFG, HERE, remote_of, team_for
 from langgraph.checkpoint.sqlite import SqliteSaver
+from test_safety import TODO
 
 from devteam import gates as G
 from devteam import procs
 from devteam import real as R
 from devteam.agents import FakeAgents
-from devteam.graph import Team, build_graph
+from devteam.graph import Team, build_graph, validate_plan
 
 pytestmark = pytest.mark.usefixtures("fast_poll")
 
@@ -393,3 +396,173 @@ def test_shoot_waits_for_the_page_to_clear_aria_busy(tmp_path, script, ready):
         assert out is None, r.stdout
     else:
         assert out and out[1] == "6" and 'aria-busy="true"' in out[2]
+
+
+# --- 8. guest routes: shot as an event guest (DEMO1-ui, 2026-10-29) -------------------------------
+GUEST = {"path": "/viewer/notre-dame-p3e", "session": "guest"}
+
+
+def guest_shots(tmp_path, shoot="touch {png}", create="echo 'code: ABCD2345'"):
+    """dev_app against a stand-in API, with screenshots.guest whose commands log their calls."""
+    log = tmp_path / "calls.txt"
+    devs = web_shots(tmp_path, f"echo shoot {{url}} $QARAU_TEST_EVENT_CODE "
+                     f"user=$QARAU_TEST_USER >> {log}; {shoot}")  # fmt: skip
+    sc = devs["dev_app"]["screenshots"]
+    sc["api"] = "exec python3 -m http.server {api_port} --bind 127.0.0.1"
+    sc["login"] = {"user": "engineer", "token": "seeded-token"}
+    sc["guest"] = {
+        "run": "notre-dame-p3e",
+        "create": f"echo create {{db}} {{name}} {{run}} {{expires}} >> {log}; {create}",
+        "purge": f"echo purge {{db}} {{name}} >> {log}",
+    }
+    return devs, log
+
+
+def test_a_guest_route_is_shot_signed_in_with_a_short_lived_event_code(repo, tmp_path):
+    devs, log = guest_shots(tmp_path)
+    team, _ = make(repo, developers=devs)
+    s = {"task": {"id": "T-002"}, "assignee": "dev_app", "worktree": str(repo)}
+    shots, problems = G.screenshots(team, s, ["/?signed-out", GUEST])
+    assert problems == [] and [Path(p).name for p in shots] == [
+        "signed-out.png",
+        "viewer-notre-dame-p3e.png",
+    ]
+    create, engineer, guest, purge = log.read_text().splitlines()
+    _, db, name, run, expires = create.split()
+    assert db == str(team.home / "api" / "T-002.sqlite")  # the test database the API uses
+    assert (name, run) == ("shoot-notre-dame-p3e", "notre-dame-p3e")
+    left = datetime.fromisoformat(expires) - datetime.now(UTC)
+    assert timedelta(minutes=55) < left <= timedelta(hours=1)
+    assert engineer.endswith("/?signed-out user=engineer")  # plain routes: the seeded engineer
+    assert guest.endswith("/viewer/notre-dame-p3e ABCD2345 user=")  # the code, no user login
+    assert purge == f"purge {db} {name}"
+
+
+def test_the_guest_event_is_purged_also_when_a_shot_fails(repo, tmp_path):
+    devs, log = guest_shots(tmp_path, shoot="exit 1")
+    team, _ = make(repo, developers=devs)
+    s = {"task": {"id": "T-002"}, "assignee": "dev_app", "worktree": str(repo)}
+    shots, problems = G.screenshots(team, s, [GUEST])
+    assert shots == [] and len(problems) == 1
+    assert log.read_text().splitlines()[-1].startswith("purge ")
+
+
+def test_no_event_no_guest_shot_and_nothing_to_purge(repo, tmp_path):
+    devs, log = guest_shots(tmp_path, create="echo 'unknown run id: notre-dame-p3e'; exit 2")
+    team, _ = make(repo, developers=devs)
+    s = {"task": {"id": "T-002"}, "assignee": "dev_app", "worktree": str(repo)}
+    shots, problems = G.screenshots(team, s, ["/", GUEST])
+    assert [Path(p).name for p in shots] == ["root.png"]  # the guest shot is missing: round fails
+    assert len(problems) == 1 and "unknown run id" in problems[0]
+    assert not any(x.startswith("purge") for x in log.read_text().splitlines())
+
+
+def test_dev_before_shots_leave_out_guest_routes(repo, tmp_path):
+    devs, log = guest_shots(tmp_path)
+    team, _ = make(repo, developers=devs)
+    s = {"task": {"id": "T-002"}, "assignee": "dev_app", "worktree": str(repo)}
+    shots, problems = G.screenshots(team, s, ["/", GUEST], prefix="dev-", before=True)
+    assert [Path(p).name for p in shots] == ["dev-root.png"] and problems == []
+    assert "create" not in log.read_text()
+
+
+def test_without_screenshots_guest_a_guest_route_is_shot_as_the_engineer(repo, tmp_path):
+    devs, log = guest_shots(tmp_path)
+    del devs["dev_app"]["screenshots"]["guest"]
+    team, _ = make(repo, developers=devs)
+    s = {"task": {"id": "T-002"}, "assignee": "dev_app", "worktree": str(repo)}
+    shots, problems = G.screenshots(team, s, [GUEST])
+    assert problems == [] and [Path(p).name for p in shots] == ["viewer-notre-dame-p3e.png"]
+    assert log.read_text().split() == ["shoot", f"{devs['dev_app']['screenshots']['url']}"
+                                       "/viewer/notre-dame-p3e", "user=engineer"]  # fmt: skip
+
+
+def guest_plan(*routes):
+    crit = ["a guest's viewer shows the demo banner"]
+    return [{"task_id": "T-002", "assignee": "dev_app", "plan": "p", "criteria": crit,
+             "routes": list(routes)}]  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("routes", "why"),
+    [
+        (["/?signed-out", "/viewer/notre-dame-p3e"], "no route has session: guest"),
+        ([{"path": "/viewer/notre-dame", "session": "guest"}], "only the shared run"),
+        (["/?signed-out", GUEST], None),
+    ],
+    ids=["no-guest-route", "unshared-run", "ok"],
+)
+def test_a_task_tagged_guest_plans_its_guest_screens_as_guest_routes(routes, why):
+    todo = [{**t, "tags": ["guest"]} if t["id"] == "T-002" else t for t in TODO]
+    if why:
+        with pytest.raises(ValueError, match=why):
+            validate_plan(guest_plan(*routes), todo, CFG)
+    else:
+        (a,) = validate_plan(guest_plan(*routes), todo, CFG)
+        assert a["routes"] == routes
+    off = copy.deepcopy(CFG)  # no screenshots.guest: plans are checked as before
+    del off["developers"]["dev_app"]["screenshots"]["guest"]
+    validate_plan(guest_plan("/?signed-out", "/viewer/notre-dame-p3e"), todo, off)
+
+
+# The sign-in page's event-code form as DEMO1-ui builds it: a toggle opens #login-event-code; the
+# form goes on success, an alert says a refused code.
+CODE_PAGE = """<html><body><form id="f">
+<button type="button" aria-expanded="false" onclick="document.getElementById('c').hidden = false">
+I have an event code</button>
+<div id="c" hidden><input id="login-event-code"></div><button type="submit">Sign in</button></form>
+<script>document.getElementById('f').onsubmit = (e) => { e.preventDefault();
+  if (document.getElementById('login-event-code').value === 'ABCD2345') e.target.remove();
+  else document.body.insertAdjacentHTML('beforeend', '<p role="alert">expired</p>'); };</script>
+</body></html>"""
+
+
+@pytest.mark.skipif(
+    not (WEB / "node_modules" / "@playwright" / "test").exists(),
+    reason="needs web/node_modules (pnpm install) and Playwright's Chromium",
+)
+@pytest.mark.parametrize(("code", "ok"), [("ABCD2345", True), ("WRONG000", False)])
+def test_shoot_signs_a_guest_in_with_the_event_code_form(tmp_path, code, ok):
+    (tmp_path / "index.html").write_text(CODE_PAGE)
+    (tmp_path / "page.html").write_text("<html><body>viewer</body></html>")
+    port = procs.free_port()
+    server = subprocess.Popen(
+        ["python3", "-m", "http.server", str(port), "--bind", "127.0.0.1"],
+        cwd=tmp_path, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )  # fmt: skip
+    try:
+        for _ in range(50):  # until the server answers
+            if G._answers(f"http://127.0.0.1:{port}/"):
+                break
+            time.sleep(0.2)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("QARAU_TEST_")}
+        png = tmp_path / "page.png"
+        r = subprocess.run(
+            ["node", str(G.SHOOT), f"http://127.0.0.1:{port}/page.html", str(png), "800,600", "0"],
+            cwd=WEB, env={**env, "QARAU_TEST_EVENT_CODE": code, "QARAU_SHOOT_READY_S": "2"},
+            capture_output=True, text=True, timeout=60,
+        )  # fmt: skip
+    finally:
+        server.kill()
+        server.wait()
+    assert (r.returncode == 0) == ok, r.stderr[-500:]
+    assert png.exists() == ok
+    assert ok or "sign-in failed: the event code was refused" in r.stderr
+    assert code not in r.stdout + r.stderr  # the code is never printed
+
+
+def test_the_brain_may_answer_guest_routes_only_with_screenshots_guest(repo, monkeypatch):
+    seen = []
+    monkeypatch.setattr(R, "llm_call", lambda team, role, task, system, prompt, schema, **kw: (
+        seen.append(schema["properties"]["assignments"]["items"]["properties"]["routes"])
+        or {"assignments": [], "needs_split": []}))  # fmt: skip
+    team = team_for(repo)
+    R.RealAgents().plan(team, [])
+    del team.cfg["developers"]["dev_app"]["screenshots"]["guest"]
+    R.RealAgents().plan(team, [])
+    on, off = seen
+    guest = {"type": "object", "properties": {"path": {"type": "string"},
+             "session": {"type": "string", "enum": ["guest"]}},
+             "required": ["path", "session"], "additionalProperties": False}  # fmt: skip
+    assert on["items"]["anyOf"] == [{"type": "string"}, guest]
+    assert off["items"] == {"type": "string"}  # as before

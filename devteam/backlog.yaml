@@ -1998,6 +1998,8 @@ tasks:
   blocked_reason: 'owner: deploy only after the local review'
 - id: DEMO1-ui
   area: app
+  tags:
+  - guest
   title: Event code sign-in and guest mode in the web app
   goal: 'Today (after DEMO1) the API gives a guest session for an event code.
 
