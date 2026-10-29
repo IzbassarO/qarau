@@ -48,6 +48,14 @@ class FakeAgents:
             "summary": f"{dev['provider']} wrote {stub.name}",
         }
 
+    def ask(self, team, role: str, task: str, system: str, prompt: str, schema: dict) -> dict:
+        """Architect: a brief, nothing missing. Analyst: the owner decides; no proposals."""
+        if role == "architect":
+            return {"brief": f"Fake brief for {task}.", "missing": [], "prerequisite": {}}
+        if "proposals" in schema["properties"]:
+            return {"proposals": []}
+        return {"diagnosis": "unclear", "why": "fake analyst", "action": "report", "prompt": ""}
+
     def judge(self, team, s, checks: list[dict]) -> dict:
         time.sleep(self.delay)
         passed = s.get("rounds", 0) >= 2  # fails round 1, passes round 2

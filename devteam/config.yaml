@@ -122,7 +122,24 @@ supervisor:
   max_round_min: 90               # longest round; a task may set its own (backlog `supervisor:`)
   max_idle_min: 20                # no output from the developer and no CPU work in its processes
 
+# Roles (Kerege v3, owner 2026-10-28): who does what. One executor (a key of `models` or
+# `developers`) may serve several roles for now.
+roles:
+  cto: brain                    # plans: picks tasks, writes plans and criteria
+  architect: architect          # context brief before a task is planned; missing prerequisites
+  analyst: analyst              # diagnoses blocked tasks, small plan changes, plan proposals
+  core_developer: dev_pipeline  # pipeline/
+  backend_developer: dev_pipeline  # backend/
+  design_developer: dev_app     # web/
+  devops_release: dev_pipeline  # infra/; the release itself is Kerege's
+  qa: tester
+  code_reviewer: tester
+  risk_analyst: tester          # red team
+  design_qa: tester
+  artifact_curator: brain
+
 # provider: anthropic for now. Prices are $ per 1M tokens, used for the cost report.
+# architect / analyst: `enabled: false` = Kerege v2 (no brief; a blocked task waits for the owner).
 models:
   brain:
     provider: anthropic
@@ -135,6 +152,22 @@ models:
     provider: anthropic
     model: claude-sonnet-5-5
     effort: medium
+    price_in: 2.0
+    price_out: 10.0
+    price_cache_read: 0.2
+  architect:                # read-only, before the brain plans a task (devteam/architect.py)
+    enabled: true
+    provider: anthropic
+    model: claude-sonnet-5-5
+    effort: medium
+    price_in: 2.0
+    price_out: 10.0
+    price_cache_read: 0.2
+  analyst:                  # every blocked task; at most 3 plan changes a day (devteam/analyst.py)
+    enabled: true
+    provider: anthropic
+    model: claude-sonnet-5-5
+    effort: high
     price_in: 2.0
     price_out: 10.0
     price_cache_read: 0.2

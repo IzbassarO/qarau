@@ -86,6 +86,8 @@ def image_label(path: str) -> str:
         return f"Image {name}: REFERENCE v8 (design system reference screen)"
     if name.startswith("dev-"):
         return f"Image {name}: BEFORE (dev, without this task)"
+    if "-NOT-READY-" in name:
+        return f"Image {name}: AFTER, page NOT READY when shot (developer issue)"
     return f"Image {name}: AFTER (task, the code under review)"
 
 
@@ -271,6 +273,11 @@ a criterion that asks for a screenshot or visual proof is met or failed by what 
 screenshots show, never failed because the developer produced none. A visual criterion in the
 viewer (web or pipeline task) with no screenshot of yours (none attached, or listed in
 <screenshots_failed>) is NOT met: never pass it from the code alone.
+A screenshot whose name has `NOT-READY` was taken while the page still marked itself busy
+(aria-busy) after the wait: that is a developer issue, like a failing check. Judge what it shows,
+fail the criteria it leaves unproven, and in feedback tell the developer which page stayed busy
+and that it must become ready sooner or clear aria-busy; never treat it as a tester or Kerege
+error or a missing screenshot.
 Developers run only a quick benchmark subset; the full benchmark is a merge gate after you:
 never fail a criterion because the developer did not run the full set.
 Screenshots named `dev-*.png` are the "before": pipeline tasks, the same page with the
@@ -361,6 +368,10 @@ class RealAgents:
             f"`{name}` not found on PATH (checked again after {TOOL_RETRY_S} s): reinstall it, "
             "then `devteam resume`"
         )
+
+    def ask(self, team, role: str, task: str, system: str, prompt: str, schema: dict) -> dict:
+        """One structured call for a planning role (architect, analyst): config.models.<role>."""
+        return llm_call(team, role, task, system, prompt, schema, max_tokens=8000)
 
     # --- brain ---------------------------------------------------------------------------
     def plan(self, team, todo, feedback=None, devs=None):
@@ -576,7 +587,7 @@ Goal: {t.get("goal", "").strip()}
 
 Plan from the tech lead:
 {s["plan"]}
-
+{context_notes(t)}
 Acceptance criteria (all must be visibly met in your diff, with tests):
 {crit}
 
@@ -940,6 +951,16 @@ Rules:
                 "of a fixture). Restore them and fix the code.\n\n" + v.get("feedback", "")
             )
         return v
+
+
+def context_notes(t: dict) -> str:
+    """The Architect's brief and the Analyst's hint for a resumed task, when there are."""
+    out = ""
+    if t.get("architect_brief"):
+        out += f"\nContext from the Architect (dev's code, read-only):\n{t['architect_brief']}\n"
+    if t.get("analyst_hint"):
+        out += f"\nHint from the Analyst (this task was blocked before):\n{t['analyst_hint']}\n"
+    return out
 
 
 def part_base(team, s: dict, base: str) -> str:

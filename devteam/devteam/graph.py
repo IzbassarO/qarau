@@ -36,7 +36,7 @@ from devteam import supervise as SV
 from devteam.costs import BudgetExceeded, SubscriptionLimit
 from devteam.supervise import TaskHalted
 
-AGENTS = ["brain", "dev_pipeline", "dev_app", "tester"]
+AGENTS = ["brain", "architect", "analyst", "dev_pipeline", "dev_app", "tester"]
 GIT_NET_COMMANDS = {"fetch", "push", "ls-remote", "pull"}
 GIT_NET_WAITS = (10, 30, 90)  # seconds before each retry of a git network command
 GIT_NET_ERROR = re.compile(
@@ -86,6 +86,7 @@ MAX_PART_CRITERIA = 8
 FIRST_PART_CRITERIA = 5  # part 1 of several stays small
 MAX_ADDED_CRITERIA = 3  # over the backlog entry's own, each explained in the plan
 OWNER_STOP = "stopped by the owner"
+PLAN_CHANGE = ("backlog: analyst:", "backlog: architect:")  # the commits `devteam undo` reverts
 DEPS_WAIT = "waits for"  # blocked_reason of a task parked on its depends_on, e.g. "waits for A7a"
 CONFLICT = re.compile(rb"^(<{7}|>{7})( |$)", re.M)  # markers git leaves (not "=======": markdown)
 
@@ -409,12 +410,20 @@ def owner_additions(goal: str) -> list[str]:
 DONE_WHEN = re.compile(r"^Done when:(.*?)(?=\n\n|\Z)", re.M | re.S)
 
 
+def done_when(goal: str) -> list[str]:
+    """The clauses of a goal's "Done when:" paragraph (split at ";"), one line each, no final
+    full stop."""
+    m = DONE_WHEN.search(goal or "")
+    clauses = (" ".join(c.split()).rstrip(".") for c in (m.group(1).split(";") if m else []))
+    return [c for c in clauses if c]
+
+
 def listed_criteria(goal: str) -> int:
     """Checkable statements a backlog entry lists: the clauses of its "Done when:" paragraph
     (split at ";") plus its Owner additions. 0 without "Done when:": nothing to stay close to."""
-    if not (m := DONE_WHEN.search(goal or "")):
+    if not DONE_WHEN.search(goal or ""):
         return 0
-    return len([c for c in m.group(1).split(";") if c.strip()]) + len(owner_additions(goal))
+    return len(done_when(goal)) + len(owner_additions(goal))
 
 
 def _norm(text: str) -> str:
@@ -702,18 +711,22 @@ class Team:
                             t.pop(k, None)
                         else:
                             t[k] = v
-            # readers don't take the lock: replace the file whole, never truncate it in place
-            tmp = self.home / "backlog.yaml.tmp"  # same filesystem: os.replace is atomic
-            tmp.write_text(
-                yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100),
-                encoding="utf-8",
-                errors="replace",
-            )
-            os.replace(tmp, self.backlog_path)
+            self._write_backlog(data)
         why = str(fields.get("blocked_reason") or "")
         newly = fields.get("status") == "blocked" and was != "blocked"
         if newly and not why.startswith(OWNER_STOP):  # the owner knows about their own stop
             watchdog.notify(self, f"{task_id} blocked: {why[:250]}")
+
+    def _write_backlog(self, data: dict):
+        """Under self._lock. Readers don't take the lock: the file is replaced whole, never
+        truncated in place."""
+        tmp = self.home / "backlog.yaml.tmp"  # same filesystem: os.replace is atomic
+        tmp.write_text(
+            yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100),
+            encoding="utf-8",
+            errors="replace",
+        )
+        os.replace(tmp, self.backlog_path)
 
     # --- processes (all killable by `devteam stop`) --------------------------------------
     def run_proc(
@@ -1141,25 +1154,90 @@ class Team:
     def push_status(self, task_id: str, message: str) -> str | None:
         """Commits this task's status fields onto origin/dev and pushes them straight to dev:
         dev holds the record (a status kept only in the working copy got lost on 2026-10-16).
-        Built on a fresh origin/dev each try, so a race costs a retry; never forced or rebased.
-        The pre-push hook lets through only a fast-forward that changes backlog.yaml alone.
-        The backlog tests run on the new backlog first: if they fail, nothing is pushed (the
-        status stays in the working copy) and the owner is told why. Returns None then."""
+        Returns None when the backlog tests refused it (push_backlog)."""
+
+        def edit(data: dict, _raw: str):
+            mine = next(t for t in self.load_backlog() if t["id"] == task_id)
+            for t in data["tasks"]:
+                if t["id"] == task_id:
+                    for k in (*STATUS_FIELDS, "blocked_reason"):
+                        if k in mine:
+                            t[k] = mine[k]
+                        else:
+                            t.pop(k, None)
+
+        return message if self.push_backlog(edit, message, task_id) is not None else None
+
+    def change_backlog(self, edit, message: str, task_id: str = "") -> str | None:
+        """A plan change (Analyst, Architect, undo): pushed to dev as its own commit (the
+        checkpoint `devteam undo <commit>` reverts), then made in this backlog file too. `edit`
+        must give the same result when run again (the checkout may already have it). Returns the
+        commit, or None when the backlog tests refused it (then nothing changed anywhere)."""
+        sha = self.push_backlog(edit, message, task_id)
+        if sha is None:
+            return None
+        with self._lock:
+            raw = self.backlog_path.read_text()
+            data = yaml.safe_load(raw)
+            text = edit(data, raw)
+            self._write_backlog(data if text is None else yaml.safe_load(text))
+        return sha
+
+    def undo(self, commit: str) -> str:
+        """`devteam undo <commit>`: a new commit that reverts one plan change; never a history
+        rewrite. Entries it added go (unless started since); fields it changed get their old
+        value back unless they changed again since (a later status stays). Returns the commit."""
+        self.fetch(self.cfg["base_branch"])
+        path, sha = "devteam/backlog.yaml", self.git("rev-parse", "--verify", commit).strip()
+        subject = self.git("log", "-1", "--format=%s", sha).strip()
+        if not subject.startswith(PLAN_CHANGE):
+            raise ValueError(f"{sha[:9]} is not a plan change ({PLAN_CHANGE}...): {subject}")
+        if self.git("diff-tree", "--no-commit-id", "--name-only", "-r", sha).split() != [path]:
+            raise ValueError(f"{sha[:9]} changes more than {path}")
+        before, after = (
+            {t["id"]: t for t in yaml.safe_load(self.git("show", f"{sha}{x}:{path}"))["tasks"]}
+            for x in ("^", "")
+        )
+        if gone := before.keys() - after.keys():
+            raise ValueError(f"{sha[:9]} removed {sorted(gone)}: undo it by hand")
+
+        def edit(data: dict, _raw: str):
+            for t in list(data["tasks"]):
+                if t["id"] not in before and t["id"] in after:  # added by the change
+                    if t["status"] not in ("todo", "blocked"):
+                        raise ValueError(f"{t['id']} is {t['status']} now: undo it by hand")
+                    data["tasks"].remove(t)
+                elif t["id"] in before and t["id"] in after:
+                    b, a = before[t["id"]], after[t["id"]]
+                    for k in b.keys() | a.keys():
+                        if b.get(k) != a.get(k) and t.get(k) == a.get(k):  # not changed since
+                            if k in b:
+                                t[k] = b[k]
+                            else:
+                                t.pop(k, None)
+
+        out = self.change_backlog(edit, f"backlog: undo {sha[:9]} ({subject})"[:200])
+        if out is None:
+            raise ValueError("the backlog tests refuse the undo: see the events log")
+        self.emit("brain", f"undid {sha[:9]}: {subject}")
+        return out
+
+    def push_backlog(self, edit, message: str, task_id: str = "") -> str | None:
+        """`edit(data, raw)` on the backlog of a fresh origin/dev (it changes `data`, or returns
+        the new text), committed and pushed straight to dev. Never forced or rebased: a race
+        costs a retry. The pre-push hook lets through only a fast-forward that changes
+        backlog.yaml alone. The backlog tests run on the new backlog first: if they fail,
+        nothing is pushed and the owner is told why; returns None then, else the commit."""
         base, rn, err, refused, pushed = self.cfg["base_branch"], self.remote_name, None, "", ""
         with self._lock:  # no emit() inside: it takes the same lock
-            mine = next(t for t in self.load_backlog() if t["id"] == task_id)
             for attempt in range(3):
                 self.fetch(base)
                 parent = self.git("rev-parse", f"{rn}/{base}").strip()
-                data = yaml.safe_load(self.git("show", f"{parent}:devteam/backlog.yaml"))
-                for t in data["tasks"]:
-                    if t["id"] == task_id:
-                        for k in (*STATUS_FIELDS, "blocked_reason"):
-                            if k in mine:
-                                t[k] = mine[k]
-                            else:
-                                t.pop(k, None)
-                text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100)
+                raw = self.git("show", f"{parent}:devteam/backlog.yaml")
+                data = yaml.safe_load(raw)
+                text = edit(data, raw)
+                if text is None:
+                    text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100)
                 if refused := self.backlog_check(text):
                     break
                 blob = self.git("hash-object", "-w", "--stdin", input=text).strip()
@@ -1205,7 +1283,7 @@ class Team:
             return None
         if err:
             self.emit("brain", f"could not fast-forward the checkout: {err}; pull by hand")
-        return message
+        return pushed
 
     def backlog_check(self, text: str) -> str:
         """gates.backlog_check on the backlog a status commit would push (DEVTEAM_BACKLOG):
@@ -1246,6 +1324,13 @@ class Team:
             for k in STATUS_FIELDS
             if mine.get(tid, {}).get(k) != theirs.get(tid, {}).get(k)
         ]
+
+    def has_ref(self, ref: str) -> bool:
+        try:
+            self.git("rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
+            return True
+        except RuntimeError:
+            return False
 
     def branch_for(self, task_id: str) -> str:
         return f"{self.branch_prefix}/{task_id}"
@@ -1474,6 +1559,9 @@ class Team:
 
 
 def build_graph(team: Team, checkpointer):
+    from devteam import analyst as AN  # they import this module
+    from devteam import architect as AR
+
     cfg = team.cfg
     max_fixes = cfg["max_fix_loops"]
     base = cfg["base_branch"]
@@ -1489,8 +1577,14 @@ def build_graph(team: Team, checkpointer):
                 team.git("worktree", "add", str(path), branch)
             elif team.git("branch", "-r", "--list", theirs).strip():
                 team.git("worktree", "add", "-b", branch, str(path), theirs)
-            else:
-                team.git("worktree", "add", "-b", branch, str(path), base_ref)
+            else:  # piece 1 of an Analyst split continues the original's work, if it has any
+                start = base_ref
+                if orig := s["task"].get("continues"):
+                    b = team.branch_for(orig)
+                    start = next(
+                        (r for r in (b, f"{team.remote_name}/{b}") if team.has_ref(r)), base_ref
+                    )
+                team.git("worktree", "add", "-b", branch, str(path), start)
         out = {"worktree": str(path), "branch": branch, "rounds": 0, "fixes": 0, "tokens": 0}
         out["last_sendback"] = ""
         team.verify_worktree({**s, **out})
@@ -2100,6 +2194,11 @@ def build_graph(team: Team, checkpointer):
         if merged:  # blocked keeps them: a resumed task's baseline is still before its first
             (team.home / "data-snap" / f"{tid}.json").unlink(missing_ok=True)  # round, and its
             (team.home / "parts" / f"{tid}.json").unlink(missing_ok=True)  # accepted parts
+        if merged and (orig := s["task"].get("split_from")):
+            pieces = [t for t in team.load_backlog() if t.get("split_from") == orig]
+            if all(t["status"] == "done" for t in pieces):  # the split task is done too
+                team.update_task(orig, status="done", done_at=time.strftime("%Y-%m-%d"))
+                team.push_status(orig, f"backlog: {orig} done (its pieces are)")
         if merged:
             team.unblock_ready()  # e.g. A4 done -> P3b back to todo
         if merged:  # finished: the worktree is no longer needed (branch and packet stay)
@@ -2108,6 +2207,7 @@ def build_graph(team: Team, checkpointer):
             except RuntimeError:
                 pass
         team.emit("tester", f"{status}: {packet.relative_to(team.root)}", task=tid, to="reviewer")
+        acted = "" if merged else AN.on_blocked(team, tid)  # "" with no switch: Kerege v2
         return {
             "results": [
                 {
@@ -2116,6 +2216,7 @@ def build_graph(team: Team, checkpointer):
                     "packet": str(packet),
                     "pr": g.get("pr", ""),
                     "reason": "" if merged else fields["blocked_reason"],
+                    "analyst": acted,
                 }
             ]
         }
@@ -2215,6 +2316,13 @@ def build_graph(team: Team, checkpointer):
             team.emit("brain", f"skipping tasks without a known area {sorted(known)}: {no_area}")
         areas = {a for d in devs.values() for a in d["areas"]}  # other developers' tasks wait
         todo = [t for t in todo if t.get("area") in areas]
+        if AN.enabled(team, "architect"):  # the next task of each developer (backlog order)
+            for d in devs.values():
+                if t := next((t for t in todo if t.get("area") in d["areas"]), None):
+                    if (text := AR.brief(team, t)) is None:  # it waits on a new prerequisite
+                        todo.remove(t)
+                    elif text:
+                        t["architect_brief"] = text
         assignments, splits, feedback = [], [], None
         open_ids = {t["id"] for t in todo}
         for attempt in range(2):  # one retry with the validation errors
@@ -2264,6 +2372,7 @@ def build_graph(team: Team, checkpointer):
             team.update_task(sp["task_id"], status="blocked", blocked_reason=reason[:500])
             team.push_status(sp["task_id"], f"backlog: {sp['task_id']} blocked (needs a split)")
             team.emit("brain", reason, task=sp["task_id"], to="reviewer")
+            AN.on_blocked(team, sp["task_id"])
         for a in s["assignments"]:
             team.update_task(a["task"]["id"], status="in_progress", owner=a["assignee"], run=run)
             # on dev too: a claim kept only in the main checkout left backlog.yaml modified there

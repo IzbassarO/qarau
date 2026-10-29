@@ -82,6 +82,45 @@ def agent_states(
     return out
 
 
+PART = re.compile(r"\bpart (\d+)/(\d+)")
+VERDICT = re.compile(r"sent back|criteria pass|merged into dev|BLOCKED|^(done|blocked): ")
+
+
+def now_rows(events: list[dict], office: dict, roles: dict, started: float | None) -> list[dict]:
+    """The "Now" panel (owner 2026-10-28): per agent its roles, task, part, round, minutes, last
+    event and the tester's last verdict on that task, from this run's events."""
+    run = [e for e in events if e.get("ts") and (started is None or _epoch(e["ts"]) >= started)]
+    rows = []
+    for a, o in office.items():
+        tid = o["task"]
+        mine = [e for e in run if tid and e.get("task") == tid]
+        msgs = [str(e.get("msg", "")) for e in mine]
+        last = next((e for e in reversed(run) if e.get("agent") == a), None)
+        rows.append(
+            {
+                "agent": a,
+                "roles": [r for r, ex in roles.items() if ex == a],
+                "task": tid,
+                "state": o["state"],
+                "part": next(
+                    (f"{m[1]}/{m[2]}" for x in reversed(msgs) if (m := PART.search(x))), ""
+                ),
+                "round": sum(x.startswith(("building", "fixing")) for x in msgs),
+                "secs": o["secs"],
+                "last": f"{last['ts'][11:16]} {last.get('msg', '')}" if last else "",
+                "verdict": next(
+                    (
+                        str(e["msg"])
+                        for e in reversed(mine)
+                        if e.get("agent") == "tester" and VERDICT.search(str(e.get("msg", "")))
+                    ),
+                    "",
+                ),  # fmt: skip
+            }
+        )
+    return rows
+
+
 class GhCache:
     """gh calls, cached so a page refresh does not hit GitHub every time."""
 
@@ -117,9 +156,18 @@ def packet_line(team: Team, tid: str) -> str:
     return lines[2].replace("**", "").replace("`", "") if len(lines) > 2 else ""
 
 
-ROOMS = {"brain": "Lead", "dev_pipeline": "Core", "dev_app": "App", "tester": "Testing"}
+ROOMS = {
+    "brain": "Lead",
+    "architect": "Lead",
+    "analyst": "Lead",
+    "dev_pipeline": "Core",
+    "dev_app": "App",
+    "tester": "Testing",
+}
 ROLE = {
     "brain": "plans the next task",
+    "architect": "context brief before planning",
+    "analyst": "diagnoses blocked tasks, re-plans",
     "dev_pipeline": "pipeline, backend, infra",
     "dev_app": "web app",
     "tester": "checks, judge, gates",
@@ -341,6 +389,7 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
         run = {"state": "stopped", "reason": last_run["stop_reason"], "secs": secs}
     else:
         run = {"state": "not running", "reason": "no run today", "secs": None}
+    now_panel = now_rows(events, office, team.cfg.get("roles") or {}, started)
     task_tokens: dict[str, int] = {}
     for t, _a, _m, _n, _secs, ti, to, _usd in sub_rows:
         task_tokens[t] = task_tokens.get(t, 0) + (ti or 0) + (to or 0)
@@ -350,6 +399,7 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
         "active": active,
         "run": run,
         "agents": agents,
+        "now_panel": now_panel,
         "office": office,
         "spent": spent,
         "budget": cap,
@@ -713,6 +763,26 @@ def _attention(d: dict) -> str:
     )
 
 
+def _now(d: dict) -> str:
+    r = d["run"]
+    line = f"Run: {r['state']}" + (f" — {r['reason']}" if r["reason"] else "")
+    rows = []
+    for x in d["now_panel"]:
+        mins = f"{x['secs'] / 60:.0f}" if x["secs"] is not None else "—"
+        rows.append(
+            f"<tr class='{x['state']}'><td><b>{_e(x['agent'])}</b>"
+            f"<div class='muted'>{_e(', '.join(x['roles']))}</div></td>"
+            f"<td>{_e(x['task']) or '—'}</td><td>{_e(x['part']) or '—'}</td>"
+            f"<td>{x['round'] or '—'}</td><td>{mins}</td>"
+            f"<td>{_e(x['last'][:160]) or '—'}</td><td>{_e(x['verdict'][:160]) or '—'}</td></tr>"
+        )
+    return (
+        f"<p class='why'>{_e(line[:400])}</p><div class='box'><table><tr><th>Agent</th>"
+        "<th>Task</th><th>Part</th><th>Round</th><th>Minutes</th><th>Last event</th>"
+        f"<th>Last verdict</th></tr>{''.join(rows)}</table></div>"
+    )
+
+
 def _cards(d: dict) -> str:
     out = ["<div class='cards'>"]
     for name, a in d["office"].items():
@@ -1010,6 +1080,8 @@ def render(d: dict) -> str:
             "<button data-go='office' aria-selected='false'>Office</button></nav></header>",
             _summary(d),
             "<div data-tab='overview'>",
+            "<h2>Now</h2>",
+            _now(d),
             "<h2>Needs your attention</h2>",
             _attention(d),
             "<h2>Agents</h2>",

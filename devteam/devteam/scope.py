@@ -152,6 +152,19 @@ def _looser(old: str, new: str) -> str:
     return ""
 
 
+def statement(lines: list[str], i: int) -> str:
+    """lines[i] joined with the lines after it until its brackets close: a skip written over
+    several lines (`NO_RUN = pytest.mark.skipif(\n    not MANIFEST.is_file(), ...)`, COV1
+    2026-10-28) is read whole."""
+    out, depth = [], 0
+    for line in lines[i : i + 12]:
+        out.append(line.strip())
+        depth += line.count("(") - line.count(")")
+        if depth <= 0:
+            break
+    return " ".join(out)
+
+
 def rewrite_allowed(cfg: dict, tid: str) -> list[str]:
     """Test files the owner allowed this task to rewrite (config gates.test_rewrite_allowed)."""
     return list((cfg["gates"].get("test_rewrite_allowed") or {}).get(tid) or [])
@@ -181,8 +194,8 @@ def bypass(diff: str, paths: list[str], rewrite_ok: list[str] | tuple = ()) -> l
                 found.append(f"sets test retries in {path}: {line.strip()[:120]}")
         if is_test:
             skip = (SKIP_JS, SKIP) if path.endswith(JS_EXT) else (SKIP,)
-            for line in plus:
-                if any(p.search(line) for p in skip) and not DATA_SKIP.search(line):
+            for i, line in enumerate(plus):
+                if any(p.search(line) for p in skip) and not DATA_SKIP.search(statement(plus, i)):
                     found.append(f"skips or focuses a test in {path}: {line.strip()[:120]}")
             if path in rewrite_ok:
                 continue

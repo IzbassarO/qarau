@@ -9,6 +9,7 @@ from pathlib import Path
 
 import yaml
 
+from devteam import analyst as AN
 from devteam import costs
 from devteam.continuous import runs_of_day, summary_lines
 from devteam.gates import bench_table
@@ -192,6 +193,7 @@ def write_report(team, day: str | None = None) -> Path:
             + " |"
         )
 
+    lines += AN.report_lines(team, day)
     runs = runs_of_day(team.home, day)
     if runs:
         lines += ["", "## Continuous runs", ""]
