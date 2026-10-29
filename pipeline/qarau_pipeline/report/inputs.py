@@ -1,5 +1,6 @@
 """Everything the PDF report shows, read from the API's database (backend/app/models.py) with
 SQLAlchemy Core. `load_report_input` is the one reader used by the CLI and by the backend route.
+The not-seen areas come from the map run's coverage/regions.json (`with_coverage`, COV1-b).
 
 The finding's status, class and severity are replayed from its append-only decision log
 (`replay_decisions`, also used by backend/app/decisions.py); the stored row keeps the proposal.
@@ -8,14 +9,21 @@ The finding's status, class and severity are replayed from its append-only decis
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Protocol
 
+import numpy as np
 import sqlalchemy as sa
 
+from ..cameras import rot_from_qvec
 from ..interfaces import StageError
+from ..layout import manifest_path
+
+N_NEAREST = 3  # nearest frames listed per not-seen region
 
 
 @dataclass(frozen=True)
@@ -64,6 +72,19 @@ class VersionEntry:
 
 
 @dataclass(frozen=True)
+class NotSeenRegion:
+    id: str  # regions.json id, "i_j_k"
+    min: tuple[float, ...]  # x, y, z in bundle units (the map's own scale)
+    max: tuple[float, ...]
+    frames: tuple[str, ...]  # nearest frames' image names, closest first; () with no camera
+
+
+@dataclass(frozen=True)
+class Coverage:
+    not_seen: tuple[NotSeenRegion, ...]  # in regions.json order
+
+
+@dataclass(frozen=True)
 class ReportInput:
     organization: str
     site: str
@@ -77,8 +98,41 @@ class ReportInput:
     findings: tuple[FindingInput, ...]
     versions: tuple[VersionEntry, ...]  # document control, oldest first
     verification_id: str
-    coverage: None = None  # not-seen areas; COV1 fills it, until then "coverage not computed"
+    coverage: Coverage | None = None  # None: "coverage not computed" (with_coverage fills it)
     run_dirs: tuple[str, ...] = ()  # the inspection's runs by id; the map: the last exported
+
+
+def with_coverage(inp: ReportInput, runs_dir: Path | None) -> ReportInput:
+    """`inp` with the coverage of its map's run (the last exported one, as snapshot.py draws);
+    unchanged without a runs dir, an exported run or coverage/regions.json in it."""
+    if runs_dir is None or inp.coverage is not None:
+        return inp
+    exported = [d for d in inp.run_dirs if manifest_path(runs_dir / d).is_file()]
+    return replace(inp, coverage=load_coverage(runs_dir / exported[-1])) if exported else inp
+
+
+def load_coverage(run_dir: Path) -> Coverage | None:
+    """The not-seen regions of <run>/coverage/regions.json (COV1) with their nearest frames: up
+    to N_NEAREST registered frames whose camera centres (the bundle's poses) are closest to the
+    region's centre. None when the run has no regions.json."""
+    path = run_dir / "coverage" / "regions.json"
+    if not path.is_file():
+        return None
+    regions = [r for r in json.loads(path.read_text())["regions"] if r["state"] == "not_seen"]
+    names, centres = [], []
+    for f in json.loads(manifest_path(run_dir).read_text())["frames"]:
+        if f.get("registered"):
+            R = rot_from_qvec(np.asarray(f["pose"]["qvec"], float))
+            centres.append(-R.T @ np.asarray(f["pose"]["tvec"], float))
+            names.append(Path(f["image"]).name)
+    cams = np.asarray(centres, float).reshape(-1, 3)
+    out = []
+    for r in regions:
+        lo, hi = np.asarray(r["bounds"]["min"], float), np.asarray(r["bounds"]["max"], float)
+        near = np.argsort(np.linalg.norm(cams - (lo + hi) / 2, axis=1), kind="stable")[:N_NEAREST]
+        out.append(NotSeenRegion(str(r["id"]), tuple(lo.tolist()), tuple(hi.tolist()),
+                                 tuple(names[i] for i in near)))  # fmt: skip
+    return Coverage(tuple(out))
 
 
 def verification_id(*parts: object) -> str:
@@ -123,7 +177,7 @@ run = sa.table("run", sa.column("id"), sa.column("inspection_id"), sa.column("ru
 finding = sa.table(
     "finding", sa.column("id"), sa.column("run_id"), sa.column("class"), sa.column("severity"),
     sa.column("status"), sa.column("area_m2", sa.Float), sa.column("scale_source"),
-    sa.column("points", sa.JSON),
+    sa.column("points", sa.JSON), sa.column("guest_id"),
 )  # fmt: skip
 observation = sa.table(
     "observation", sa.column("id"), sa.column("finding_id"), sa.column("frame_id"),
@@ -142,11 +196,14 @@ def _aware(t: datetime) -> datetime:
     return t if t.tzinfo is not None else t.replace(tzinfo=UTC)
 
 
-def load_report_input(engine: sa.Engine, inspection_id: int, report_time: datetime) -> ReportInput:
+def load_report_input(
+    engine: sa.Engine, inspection_id: int, report_time: datetime, guest_id: int | None = None
+) -> ReportInput:
     """The report of an inspection as of `report_time`: version 1 of `QV-<year>-<inspection id>`,
     the capture date is the inspection's date. The API's `report` table logs every generation
     (hash, time, who) but does not feed back into the PDF, so the same data and report time
-    always give the same bytes.
+    always give the same bytes. Findings (and so their decisions) are those of guest `guest_id`'s
+    sandbox (an event guest, DEMO1), or with no guest id those of no guest.
     ponytail: fixed version 1; number versions from the report table once a report is issued
     (signed off), which needs the sign-off workflow."""
     if report_time.tzinfo is None:
@@ -161,10 +218,14 @@ def load_report_input(engine: sa.Engine, inspection_id: int, report_time: dateti
         ).first()
         if head is None:
             raise StageError(f"inspection {inspection_id} not found")
+        sandbox = finding.c.guest_id
         rows = c.execute(
             sa.select(finding, run.c.run_dir)
             .join(run, run.c.id == finding.c.run_id)
-            .where(run.c.inspection_id == inspection_id)
+            .where(
+                run.c.inspection_id == inspection_id,
+                sandbox.is_(None) if guest_id is None else sandbox == guest_id,
+            )
             .order_by(finding.c.id)
         ).all()
         run_dirs = tuple(c.execute(

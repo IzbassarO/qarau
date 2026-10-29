@@ -55,7 +55,7 @@ def developer_of(task: dict) -> str:
 
 @pytest.mark.backlog
 def test_the_file_ends_with_the_demo_chain_then_later_in_the_owners_order():
-    ids = [t["id"] for t in real_backlog()]
+    ids = [t["id"] for t in real_backlog() if not t.get("added_by")]  # the owner's entries
     assert ids[ids.index("B1") :] == CHAIN + LATER
     assert ids.index("P4a-3") == ids.index("P4a-2a-run") + 1  # finished tasks keep their place
 
@@ -63,7 +63,9 @@ def test_the_file_ends_with_the_demo_chain_then_later_in_the_owners_order():
 @pytest.mark.backlog
 def test_demo_chain_dependencies_are_the_owners_and_never_point_off_the_chain():
     by = {t["id"]: t for t in real_backlog()}
-    assert {tid: by[tid].get("depends_on", []) for tid in CHAIN} == DEPS
+    added = {tid for tid, t in by.items() if t.get("added_by")}  # Analyst / Architect, checked
+    owners = {tid: [d for d in by[tid].get("depends_on", []) if d not in added] for tid in CHAIN}
+    assert owners == DEPS  # in test_analyst
     parked = set(LATER) | {"P5a"}  # LATER and dropped
     for tid in CHAIN:
         assert not set(by[tid].get("depends_on") or []) & parked, tid

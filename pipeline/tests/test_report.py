@@ -3,10 +3,12 @@ determinism, translations, the database reader and the CLI. Expected strings are
 never read from the code under test."""
 
 import io
+import json
 import re
 import sqlite3
 import string
 import tomllib
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -16,14 +18,22 @@ import sqlalchemy as sa
 from pypdf import PdfReader
 
 from qarau_pipeline.cli import main
-from qarau_pipeline.report import ReportInput, load_report_input, render_pdf, render_report
+from qarau_pipeline.report import (
+    ReportInput,
+    load_report_input,
+    load_strings,
+    render_pdf,
+    render_report,
+)
 from qarau_pipeline.report.inputs import (
     DecisionEntry,
     Evidence,
     FindingInput,
     InspectionInput,
     VersionEntry,
+    with_coverage,
 )
+from qarau_pipeline.report.render import render_html
 
 REPORT_DIR = Path(__file__).resolve().parents[1] / "qarau_pipeline" / "report"
 ALMATY = timezone(timedelta(hours=5))
@@ -261,7 +271,8 @@ def test_template_has_no_visible_text_of_its_own() -> None:
 
 def make_db(path: Path) -> str:
     """The columns the report reads, as the API's migrations create them, with 2 manual
-    findings: #1 confirmed then reclassified to watch (scale set), #2 rejected (no scale)."""
+    findings: #1 confirmed then reclassified to watch (scale set), #2 rejected (no scale); and #3
+    in the sandbox of event guest 5 (DEMO1), with that guest's decision."""
     con = sqlite3.connect(path)
     con.executescript("""
         CREATE TABLE organization (id INTEGER PRIMARY KEY, name TEXT);
@@ -271,27 +282,31 @@ def make_db(path: Path) -> str:
                                  created_at DATETIME);
         CREATE TABLE run (id TEXT PRIMARY KEY, inspection_id INTEGER, run_dir TEXT);
         CREATE TABLE finding (id INTEGER PRIMARY KEY, run_id TEXT, class TEXT, severity TEXT,
-                              status TEXT, area_m2 FLOAT, scale_source TEXT, points JSON);
+                              status TEXT, area_m2 FLOAT, scale_source TEXT, points JSON,
+                              guest_id INTEGER);
         CREATE TABLE observation (id INTEGER PRIMARY KEY, finding_id INTEGER, frame_id INTEGER,
                                   outline JSON);
         CREATE TABLE decision (id INTEGER PRIMARY KEY, finding_id INTEGER, user_id INTEGER,
                                verdict TEXT, comment TEXT, new_class TEXT, new_severity TEXT,
                                created_at DATETIME);
         INSERT INTO organization VALUES (1, 'Caspian Inspection Services');
-        INSERT INTO "user" VALUES (1, 'Aslan Bekov'), (2, 'Dana Serik');
+        INSERT INTO "user" VALUES (1, 'Aslan Bekov'), (2, 'Dana Serik'), (3, 'guest');
         INSERT INTO site VALUES (1, 1, 'Tank T-104');
         INSERT INTO inspection VALUES (7, 1, 'quick_scan', '2026-10-21 04:41:00.000000');
         INSERT INTO run VALUES ('r1', 7, 'notre-dame-p3e');
         INSERT INTO finding VALUES (1, 'r1', 'corrosion', 'critical', 'proposed', 0.42,
-                                    'manual: Letter sheet', '[4, 9, 11]');
-        INSERT INTO finding VALUES (2, 'r1', 'coating', 'critical', 'proposed', NULL, NULL, NULL);
+                                    'manual: Letter sheet', '[4, 9, 11]', NULL);
+        INSERT INTO finding VALUES (2, 'r1', 'coating', 'critical', 'proposed', NULL, NULL, NULL,
+                                    NULL);
+        INSERT INTO finding VALUES (3, 'r1', 'crack', 'watch', 'proposed', NULL, NULL, '[1]', 5);
         INSERT INTO observation VALUES (1, 1, 412, '[[10, 20], [60, 20], [35, 70]]'),
                                        (2, 1, 415, '[[1, 2], [3, 4], [5, 6]]'),
                                        (3, 2, 12, NULL);
         INSERT INTO decision VALUES
             (1, 1, 1, 'confirm', NULL, NULL, NULL, '2026-10-21 05:02:00.000000'),
             (2, 2, 2, 'reject', 'Shadow, not corrosion', NULL, NULL, '2026-10-21 05:20:00.000000'),
-            (3, 1, 1, 'reclass', 'Grew since May', NULL, 'watch', '2026-10-21 05:10:00.000000');
+            (3, 1, 1, 'reclass', 'Grew since May', NULL, 'watch', '2026-10-21 05:10:00.000000'),
+            (4, 3, 3, 'confirm', NULL, NULL, NULL, '2026-10-21 06:00:00.000000');
     """)  # fmt: skip
     con.commit()
     con.close()
@@ -332,6 +347,17 @@ def test_load_report_input(tmp_path: Path) -> None:
     assert [(d.user, d.comment) for d in two.decisions] == [("Dana Serik", "Shadow, not corrosion")]
 
 
+def test_report_input_of_an_event_guest_has_only_its_sandbox(tmp_path: Path) -> None:
+    """DEMO1: guest 5's report shows its finding #3 and decision only; other guests see none,
+    and the report without a guest (above) never shows #3."""
+    engine = sa.create_engine(make_db(tmp_path / "api.db"))
+    inp = load_report_input(engine, 7, REPORT_TIME, guest_id=5)
+    assert [(f.id, f.status, f.class_) for f in inp.findings] == [(3, "confirmed", "crack")]
+    assert [(d.user, d.verdict) for d in inp.findings[0].decisions] == [("guest", "confirm")]
+    assert inp.engineer == "guest"
+    assert load_report_input(engine, 7, REPORT_TIME, guest_id=6).findings == ()
+
+
 def test_cli_writes_the_same_file_twice(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     url = make_db(tmp_path / "api.db")
     when = "2026-10-26T14:32:00+05:00"
@@ -345,6 +371,73 @@ def test_cli_writes_the_same_file_twice(tmp_path: Path, capsys: pytest.CaptureFi
     assert "Ақау 1" in text and "Ақау 2" in text and "Қамту есептелмеген." in text
     assert "масштаб орнатылмаған" in text and "Есеп QV-2026-0007, 1-нұсқа" in text
     assert "sha256" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- not-seen areas (COV1-b)
+
+# A run with coverage: 2 not-seen regions and 1 inspected one (regions.json, COV1 format), and
+# 5 registered cameras with R = I (qvec 1 0 0 0), so each centre is -tvec, plus 1 unregistered
+# frame. The nearest frames to the region centres (1.75, -2, 0.25) and (-3.75, 1.25, 2.25) are
+# worked out by hand from these literals.
+COV_REGIONS = [
+    {"id": "3_-9_0", "bounds": {"min": [1.5, -2.25, 0.0], "max": [2.0, -1.75, 0.5]},
+     "state": "not_seen", "frame_count": 0, "point_count": 4, "finding_ids": []},
+    {"id": "0_0_0", "bounds": {"min": [0.0, 0.0, 0.0], "max": [0.5, 0.5, 0.5]},
+     "state": "inspected_ok", "frame_count": 6, "point_count": 30, "finding_ids": []},
+    {"id": "-8_4_8", "bounds": {"min": [-4.0, 1.0, 2.0], "max": [-3.5, 1.5, 2.5]},
+     "state": "not_seen", "frame_count": 1, "point_count": 2, "finding_ids": []},
+]  # fmt: skip
+COV_CAMERAS = {3: [2, -2, 0], 7: [0, 0, 0], 12: [5, -2, 0], 20: [-4, 1, 2], 25: [-3, 2, 3]}
+# per language: section heading, count sentence, the bounds as printed, "coverage not computed"
+NOT_SEEN = {
+    "en": ("Not inspected areas", "Not inspected areas: 2.",
+           ["1.50; -2.25; 0.00", "2.00; -1.75; 0.50", "-4.00; 1.00; 2.00", "-3.50; 1.50; 2.50"],
+           "Coverage not computed."),
+    "ru": ("Неосмотренные участки", "Неосмотренных участков: 2.",
+           ["1,50; -2,25; 0,00", "2,00; -1,75; 0,50", "-4,00; 1,00; 2,00", "-3,50; 1,50; 2,50"],
+           "Покрытие не рассчитано."),
+    "kk": ("Тексерілмеген аймақтар", "Тексерілмеген аймақтар саны: 2.",
+           ["1,50; -2,25; 0,00", "2,00; -1,75; 0,50", "-4,00; 1,00; 2,00", "-3,50; 1,50; 2,50"],
+           "Қамту есептелмеген."),
+}  # fmt: skip
+NEAREST = ["000003.jpg, 000007.jpg, 000012.jpg", "000020.jpg, 000025.jpg, 000007.jpg"]
+
+
+def coverage_runs(root: Path, with_regions: bool = True) -> Path:
+    run = root / "notre-dame-p3e"
+    (run / "export/web").mkdir(parents=True)
+    frames: list[dict[str, Any]] = [
+        {"i": i, "image": f"frames/{i:06d}.jpg", "registered": i in COV_CAMERAS}
+        for i in (3, 7, 12, 20, 25, 30)
+    ]
+    for f in frames:
+        if f["registered"]:
+            f["pose"] = {"qvec": [1, 0, 0, 0], "tvec": [-x for x in COV_CAMERAS[f["i"]]]}
+    (run / "export/web/manifest.json").write_text(json.dumps({"frames": frames}))
+    if with_regions:
+        (run / "coverage").mkdir()
+        (run / "coverage/regions.json").write_text(json.dumps({"regions": COV_REGIONS}))
+    return root
+
+
+@pytest.mark.parametrize("lang", ["ru", "kk", "en"])
+def test_not_seen_areas_list_bounds_and_nearest_frames(tmp_path: Path, lang: str) -> None:
+    inp = with_coverage(replace(INPUT, run_dirs=("notre-dame-p3e",)), coverage_runs(tmp_path))
+    html = flat(render_html(inp, load_strings(lang), lang))
+    heading, count, bounds, not_computed = NOT_SEEN[lang]
+    section = html[html.index(f"<span>5</span><span>{heading}</span>") :]
+    assert count in section
+    for text in [*bounds, *NEAREST]:
+        assert text in section, text
+    assert not_computed not in html
+    assert "000030.jpg" not in html  # not registered: never a nearest frame
+
+
+def test_without_regions_the_report_says_coverage_not_computed(tmp_path: Path) -> None:
+    runs = coverage_runs(tmp_path, with_regions=False)
+    inp = with_coverage(replace(INPUT, run_dirs=("notre-dame-p3e",)), runs)
+    assert inp.coverage is None
+    assert "Coverage not computed." in render_html(inp, load_strings("en"), "en")
 
 
 def test_cli_unknown_inspection_fails(tmp_path: Path) -> None:

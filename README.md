@@ -30,6 +30,9 @@ See [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Local development
 
+Whole app for a real run on a Mac: `make local` (stop: `make local-stop`), see
+[`docs/DEMO.md`](docs/DEMO.md).
+
 Requirements: Docker, [uv](https://docs.astral.sh/uv/) (Python 3.12), Node.js 22 + pnpm
 (for `web/`), FFmpeg and COLMAP (for `pipeline/`).
 

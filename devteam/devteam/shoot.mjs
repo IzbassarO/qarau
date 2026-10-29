@@ -3,8 +3,8 @@
 //   node shoot.mjs <url> <png> [width,height] [wait_ms] [light|dark] [ru|kk|en]
 // The theme is emulated as prefers-color-scheme; empty = the browser default. The locale is
 // the app's own choice (localStorage qarau.lang, web/src/i18n), set before any page script.
-// Credentials come only from the environment (QARAU_TEST_USER / QARAU_TEST_PASSWORD, from
-// devteam/.env) and are never printed. Without them, or for a route with `?signed-out` (the
+// Credentials come only from the environment (QARAU_TEST_USER / QARAU_TEST_PASSWORD: the seeded
+// API's user from config screenshots.login, else devteam/.env) and are never printed. Without them, or for a route with `?signed-out` (the
 // login page itself), the page is shot as it is.
 // After the fixed wait it waits until the page is ready, up to QARAU_SHOOT_READY_S (config
 // gates.screenshot_ready_timeout_s, 30 s): no [aria-busy="true"] or [data-loading] element and
@@ -43,7 +43,7 @@ try {
         .waitFor({ timeout: 15000 })
         .then(() => false);
       if (!(await Promise.race([signedIn, refused]).catch(() => false)))
-        throw new Error('sign-in failed: check QARAU_TEST_USER / QARAU_TEST_PASSWORD in devteam/.env');
+        throw new Error('sign-in failed: check screenshots.login (seeded API) or QARAU_TEST_USER / QARAU_TEST_PASSWORD in devteam/.env');
     }
   }
   let inflight = 0;

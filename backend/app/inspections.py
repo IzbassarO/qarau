@@ -19,7 +19,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import workflow
-from .crud import Db, Engineer, InspectionOut, Viewer, audit, get_or_404
+from .auth import check_inspection
+from .crud import Db, Engineer, InspectionOut, ViewerOrGuest, audit, get_or_404
 from .models import Inspection, Run
 
 router = APIRouter(prefix="/api/inspections/{inspection_id}")
@@ -84,10 +85,12 @@ def steps_of(run: Run) -> list[StepOut]:
 @router.get(
     "",
     description="Role: viewer. One inspection with its latest run's status, progress, "
-    "current step and the step list (name, status, started_at, finished_at, duration_s, error).",
+    "current step and the step list (name, status, started_at, finished_at, duration_s, error). "
+    "A guest: 404 unless every run of the inspection is shared with its event.",
 )
-def get_inspection(inspection_id: int, db: Db, _: Viewer) -> InspectionStatus:
+def get_inspection(inspection_id: int, db: Db, who: ViewerOrGuest) -> InspectionStatus:
     insp = get_or_404(db, Inspection, inspection_id)
+    check_inspection(db, who, inspection_id)
     out = InspectionStatus.model_validate(insp)
     run = latest_run(db, inspection_id)
     if run is not None:

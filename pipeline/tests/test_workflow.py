@@ -166,10 +166,12 @@ def test_layout_helpers_resolve_a_legacy_run(tmp_path: Path) -> None:
 
 
 def test_step_list_from_config(tmp_path: Path) -> None:
-    assert [s.name for s in workflow.product_steps({})] == NAMES
-    assert [s.name for s in workflow.product_steps({"workflow": {"dense": False}})] == NAMES
+    # S1 (COV1): coverage comes directly after export, dense (when on) after coverage
+    s1 = ["probe", "frames", "sparse", "export", "coverage"]
+    assert [s.name for s in workflow.product_steps({})] == s1
+    assert [s.name for s in workflow.product_steps({"workflow": {"dense": False}})] == s1
     assert [s.name for s in workflow.product_steps({"workflow": {"dense": True}})] == [
-        *NAMES,
+        *s1,
         "dense",
     ]
     # The checked-in config.yaml keeps dense off: the shipped workflow never densifies.
@@ -189,7 +191,13 @@ def test_dense_step_refuses_a_paid_provider(tmp_path: Path) -> None:
 
 def test_cli_step_list_and_unknown_step(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     main(["step", "--list"])
-    assert json.loads(capsys.readouterr().out) == NAMES
+    assert json.loads(capsys.readouterr().out) == [
+        "probe",
+        "frames",
+        "sparse",
+        "export",
+        "coverage",
+    ]
     with pytest.raises(SystemExit) as e:
         main(["step", "nope", "--run", str(tmp_path)])
     assert e.value.code == 1 and "unknown step 'nope'" in capsys.readouterr().err

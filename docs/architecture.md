@@ -34,7 +34,8 @@ in [Region of interest — version 1](notes/roi-format.md).
 ## Workflow steps
 
 One inspection run is a sequence of **steps** (`pipeline/qarau_pipeline/workflow.py`, ADR
-0022): `probe → frames (+ quality report) → sparse (COLMAP) → export [→ dense]`. `dense` is
+0022): `probe → frames (+ quality report) → sparse (COLMAP) → export → coverage [→ dense]`
+(coverage: "Coverage regions" below). `dense` is
 listed only when `pipeline/config.yaml` → `workflow.dense` is true (default false) and then uses
 the fake provider only; a paid Modal run is never started from the workflow (ADR 0019).
 
@@ -191,9 +192,9 @@ makes every result reproducible and every failure local.
 | measurement | clustered points, scale | area is part of the findings file: m² only with a known scale, else `rel` (ADR 0009) |
 | registration (monitoring) | new frames, baseline model | transform to baseline, aligned cloud |
 | change detection | findings now vs baseline/previous | `changes.json` (new / grew / shrank / stable) |
-| coverage | poses, usable frames, cloud | per-point/voxel state: inspected_ok / finding / not_seen |
+| coverage | bundle points + poses + tracks, frame blur scores, quality report, `findings/points.finding.u16` | `coverage/regions.json`: one voxel region per occupied cell, state inspected_ok / finding / not_seen ("Coverage regions" below); the step then adds `points.coverage.u8` + manifest key `coverage` to the bundle, and the worker stores the regions in `coverage_region`. CLI `python -m qarau_pipeline coverage --run DIR [--out DIR]` |
 | risk ranking | findings, changes, asset data | severity + reason text per finding |
-| report | the API database: inspection, site, organization, findings with observations (evidence frame + outline), decisions, scale source | PDF only so far (RPT1, ADR 0027): `qarau_pipeline.report.generate(inspection_id, lang, report_time, engine, runs_dir)` → `Generated(pdf, sha256, input)`, called by both the CLI and `GET /api/inspections/{id}/report.pdf` ("Inspection report" below); CLI `python -m qarau_pipeline report --inspection N --lang ru\|kk\|en --out F [--report-time ISO] [--db URL] [--runs-dir DIR]` (runs dir default `QARAU_RUNS_DIR`; without one: no map, no frame images, said in the PDF). `report/snapshot.py` (ADR 0032) draws the map of the inspection's last exported run with a NumPy point rasterizer (orthographic, fixed camera 30° above the filmed side, z-buffer, PNG via Pillow, no GL) and reads each finding's first 3 evidence frames; the template puts numbered SVG markers over the map, a crop around the marker in each card and the outline as an SVG `<polygon>` over each frame (viewBox in frame pixels). `report/inputs.py` reads the tables with SQLAlchemy Core into a frozen `ReportInput` (status/class/severity replayed from the decision log by `replay_decisions`, the same function `backend/app/decisions.py` uses; report number, version, version history and verification ID; the report time); `report/render.py` (`render_report(input, lang, runs_dir)`, reads only the run dirs) fills the Jinja2 template `report/templates/report.html.j2` + `report.css` and WeasyPrint writes an A4 PDF/A-3b: cover (company, site, asset, capture date, report number, version), executive summary, map snapshot with numbered findings, findings table by severity, one card per finding (class, severity, status, map location, area in m² with uncertainty or "uncertainty not estimated", or "scale not set"; scale source; the 3 evidence frames with outlines; who decided and when; its decision log), not inspected areas ("coverage not computed" until COV1), method and limitations, sign-off (prepared / checked / approved), document control (version history, verification ID); `@page` header with the report number and footer with the engineer, report time and "page X of Y" on every page. All strings in `report/translations.toml` (ru/kk/en), v8 fonts embedded from `report/fonts/` (OFL). The report time is the only clock in the file (PDF and XMP dates), so the same input gives byte-identical files. XLSX and work orders: later |
+| report | the API database: inspection, site, organization, findings with observations (evidence frame + outline), decisions, scale source | PDF only so far (RPT1, ADR 0027): `qarau_pipeline.report.generate(inspection_id, lang, report_time, engine, runs_dir)` → `Generated(pdf, sha256, input)`, called by both the CLI and `GET /api/inspections/{id}/report.pdf` ("Inspection report" below); CLI `python -m qarau_pipeline report --inspection N --lang ru\|kk\|en --out F [--report-time ISO] [--db URL] [--runs-dir DIR]` (runs dir default `QARAU_RUNS_DIR`; without one: no map, no frame images, said in the PDF). `report/snapshot.py` (ADR 0032) draws the map of the inspection's last exported run with a NumPy point rasterizer (orthographic, fixed camera 30° above the filmed side, z-buffer, PNG via Pillow, no GL) and reads each finding's first 3 evidence frames; the template puts numbered SVG markers over the map, a crop around the marker in each card and the outline as an SVG `<polygon>` over each frame (viewBox in frame pixels). `report/inputs.py` reads the tables with SQLAlchemy Core into a frozen `ReportInput` (status/class/severity replayed from the decision log by `replay_decisions`, the same function `backend/app/decisions.py` uses; report number, version, version history and verification ID; the report time); `report/render.py` (`render_report(input, lang, runs_dir)`, reads only the run dirs) fills the Jinja2 template `report/templates/report.html.j2` + `report.css` and WeasyPrint writes an A4 PDF/A-3b: cover (company, site, asset, capture date, report number, version), executive summary, map snapshot with numbered findings, findings table by severity, one card per finding (class, severity, status, map location, area in m² with uncertainty or "uncertainty not estimated", or "scale not set"; scale source; the 3 evidence frames with outlines; who decided and when; its decision log), not inspected areas (the not_seen regions of the map's run with their nearest frames, "Coverage regions" below; "coverage not computed" without regions.json), method and limitations, sign-off (prepared / checked / approved), document control (version history, verification ID); `@page` header with the report number and footer with the engineer, report time and "page X of Y" on every page. All strings in `report/translations.toml` (ru/kk/en), v8 fonts embedded from `report/fonts/` (OFL). The report time is the only clock in the file (PDF and XMP dates), so the same input gives byte-identical files. XLSX and work orders: later |
 
 ## Key techniques
 
@@ -210,6 +211,63 @@ shown in m² without a scale source; the UI says "relative size" instead.
 **Coverage.** Voxelize the cloud. A voxel is `inspected` if it is seen in at least one
 usable frame within a distance and viewing-angle threshold that makes defects of the
 target size visible. Everything else is `not_seen`.
+
+**Coverage regions (COV1, `pipeline/qarau_pipeline/coverage.py`).** The `coverage` step runs
+directly after `export`, on the sparse bundle. Every threshold is in `pipeline/config.yaml` →
+`coverage:`; none is in code.
+
+- Regions: a voxel grid of `voxel_size` (bundle units: COLMAP's arbitrary scale, after export's
+  gravity alignment) over the bundle's points; only occupied cells are regions, id `"i_j_k"` =
+  `floor(p / voxel_size)`.
+- A frame **sees** a point when the point is in its frustum (bundle pose, pinhole K from the
+  manifest, `near < depth < far`, projection inside the image; radial distortion ignored) and
+  the frame tracked it in COLMAP (matched there, so no wall in between).
+- A frame is **usable** when it is registered, kept, in no quality-report issue of a kind in
+  `unusable_issues` and its blur score is `>= min_frame_quality` (an image set has no score:
+  its frames count).
+- State: `finding` when a point of a finding (`findings/points.finding.u16`, the project stage)
+  is in the region; else `inspected_ok` when `>= min_frames` usable frames see one of its points
+  and it holds `>= min_points` points; else `not_seen`. `not_seen` is never folded into OK.
+- `<run>/coverage/regions.json` (written atomically: temp file + `os.replace`):
+
+  ```json
+  {"version": 1, "units": "bundle", "voxel_size": 1.0,
+   "thresholds": {"min_frames": 3, "min_frame_quality": 100.0, "min_points": 20,
+                  "near": 0.01, "far": null, "unusable_issues": ["blur", "too_fast", "low_texture"]},
+   "summary": {"inspected_ok": 196, "finding": 0, "not_seen": 289},
+   "regions": [{"id": "0_-1_0", "bounds": {"min": [0, -1, 0], "max": [1, 0, 1]},
+                "state": "inspected_ok", "frame_count": 87, "point_count": 1204,
+                "finding_ids": []}]}
+  ```
+
+- **Database (COV1-b).** Table `coverage_region` (migration 0006, model `CoverageRegion`): `id`,
+  `run_id` → `run` (organization through run → inspection → site, as `finding`), `region_key`
+  (the regions.json id), `state` (CHECK inspected_ok | finding | not_seen), `frame_count`,
+  `bounds_min` / `bounds_max` (JSON [x, y, z], bundle units), `created_at`; unique
+  (`run_id`, `region_key`). The worker (`backend/app/workflow.py` `fill_coverage`) replaces a
+  run's rows after every done `coverage` step: delete + insert in one transaction, so a rerun
+  never duplicates rows. A missing or unreadable regions.json leaves no rows and a log warning;
+  the run does not fail.
+- **API.** `GET /api/inspections/{id}/coverage` (viewer): `{regions: [{id, state, frame_count,
+  bounds: {min, max}}], totals: {inspected_ok, finding, not_seen}, computed}` for the
+  inspection's newest run (by `created_at`) that has rows, regions ordered by id. **Totals are
+  percentages of the region count** (each region counts once whatever its size or point count;
+  1 decimal), the simplest share an engineer can check against the list. No rows: `computed:
+  false` and empty `totals`, never zeros that read as OK. 404 for an unknown inspection or, for a
+  user token, one of another organization (the shared read-only dev token sees all, as on every
+  route).
+- **Bundle.** `points.coverage.u8` + manifest key `coverage` (ADR 0003 addendum): one code per
+  bundle point, 0 not_seen, 1 inspected_ok, 2 finding, 255 no region; a point on a face shared by
+  regions takes the first region by id. `export.write_coverage_layer` writes it at the end of
+  `export_bundle` and again in the `coverage` step (which runs after export, so the step also
+  pushes the `bundle` storage kind). No regions.json: `coverage: {computed: false}`, no array.
+- **Report.** "Not inspected areas" lists the not_seen regions of the map's run (the last
+  exported one): their count and a table of id, both corners (2 decimals, map units: the sparse
+  map has no metric scale, so the report never calls them metres) and the 3 frames whose camera
+  centres (bundle poses) are nearest to the region's centre: where to re-shoot from. "Coverage not
+  computed" only when the run has no regions.json.
+- `coverage/` is not a storage kind (a wiped cache recomputes it). With `workflow.dense` on,
+  coverage stays on the sparse map.
 
 **Registration (monitoring).** Localize new frames against the baseline COLMAP model
 (feature matching + PnP), reconstruct the new partial cloud in the baseline frame, then
@@ -339,6 +397,64 @@ lang, sha256, `generated_at` in UTC, report number, version, `created_by` = the 
 shared read-only token); the row never feeds back into the PDF, so the same data, language and
 report time always give the same hash. 404 for an unknown inspection, 422 for a missing or unknown
 `lang`, 401 without a valid token. Every report is version 1 until reports are issued (signed off).
+
+**Event organizations and guests (`backend/app/event.py`, DEMO1, ADR 0034).** For a public demo
+(LaunchPad, 2026-11-06) guests sign in with a short event code instead of a user account.
+`uv run python -m app.event create --name launchpad --expires 2026-11-06T23:59-05:00 --max-guests
+300 --runs <id>,<id>` is the only way to make an **event organization**: it checks that every run
+exists and is `done`, then in one transaction inserts the organization (default name "LaunchPad
+demo") with `is_event = true`, an `event_code` row (name, SHA-256 of the code, `expires_at` in
+UTC, `max_guests`), the event's **guest user** (role `guest`, no token: the `user_id` of every
+guest decision, report and write audit row) and one `event_code_run` row per shared run, and
+prints the code once (8 characters from `secrets`, alphabet without 0/O/1/I/L). Bad input exits 2
+and writes nothing.
+Migration 0007 holds the rules in the database: `organization.is_event` is set only at INSERT
+(a trigger rejects any UPDATE that changes it; no API body or seed sets it), `event_code` and
+`guest` rows are refused outside an event organization, and `finding`, `decision` and `report` get
+a nullable `guest_id` (the guest's sandbox). The decision trigger is reworked: UPDATE is always
+refused; DELETE only for a decision whose `guest_id` is set and whose user belongs to that
+guest's event organization, so `app.event purge` can remove guest rows and nothing else.
+`audit_log` stays fully append-only everywhere.
+
+*Guest sign-in.* `POST /api/auth/guest {code}` (public, like a login) first counts the attempt
+in an in-process sliding window (`app/ratelimit.py`: per client IP `QARAU_GUEST_RATE_PER_IP`,
+default 10/min, and per code `QARAU_GUEST_RATE_PER_CODE`, default 30/min; over → 429 with
+`Retry-After`), then looks up the SHA-256 of the code (upper-cased, trimmed): unknown or past
+`expires_at` → 401, `max_guests` guests already → 403 "event is full". Otherwise it inserts a
+`guest` row with the SHA-256 of a new `secrets.token_urlsafe(32)` bearer token (migration 0008,
+`guest.token_sha256`: the row is the session) and returns the token once with the event, its
+organization, expiry and shared runs (`run_id`, `run_dir`, `inspection_id`). `GET
+/api/auth/guest` returns the same for a signed-in guest. A guest token is valid until the code
+expires. Every attempt, accepted or not, writes one `audit_log` row: action `event_code.use`,
+`object_id` = event name (null when unknown or rate-limited), `detail` = `{result: ok | unknown |
+expired | full | rate_limited, ip}`, `user_id` null (an anonymous request; migration 0008 makes
+`audit_log.user_id` nullable and adds `detail`). It references no guest row, so purge never needs
+to delete it.
+
+*The `guest` role* ranks below viewer. `require_role(role)` answers 403 to a guest on every
+route; only routes declared with `guests=True` (`ViewerOrGuest` / `EngineerOrGuest` in
+`crud.py`) let it in, and those scope it (`auth.check_run`, `check_inspection`, `own`):
+
+| A guest may | Scope |
+| --- | --- |
+| `GET /api/runs`, `/api/runs/{id}/manifest.json`, `/files/…` | only shared runs; others 404 |
+| `GET /api/inspections/{id}`, `/coverage`, `/findings`, `/report.pdf` | only an inspection whose runs are all shared; others 404 |
+| `POST /api/inspections/{id}/findings` | same inspections; the finding carries its `guest_id` |
+| `GET /api/findings/{id}`, `GET`/`POST …/decisions` | its own findings only; another guest's 404 |
+
+Everything else (upload, processing and rerun, organizations, sites, users, inspection lists,
+audit log, `/api/me`) is 403. Users read only rows with `guest_id` null: a guest's finding is 404
+to an engineer, and the PDF (`qarau_pipeline.report.load_report_input(…, guest_id)`) holds only
+the caller's sandbox: the guest's own findings and decisions, or for a user none of any guest's.
+A guest's decision and report use the event's guest user as `user_id` / `created_by` and carry
+the `guest_id`.
+
+*Purge.* `uv run python -m app.event purge --name launchpad` refuses (exit 2) an unknown event or
+one whose organization is not `is_event`; otherwise, in one transaction, it deletes that event's
+guests' decisions, observations, findings and reports and the guests themselves (with them their
+sessions), and prints the counts. It keeps the event code, the shared runs, the guest user and
+every audit row. In open dev mode (`QARAU_API_TOKEN` empty) reads are public for everyone, so a
+public demo server must set `QARAU_API_TOKEN` (D2).
 
 ## Benchmark
 

@@ -1,14 +1,16 @@
 """The RQ job that runs an inspection's workflow steps and mirrors their state to Postgres.
 
-`run_inspection(run_id, from_step)` runs the pipeline steps in order, one subprocess per step
-(`python -m qarau_pipeline step <name> --run <dir> [--force]`, ADR 0022), so the backend
+`run_inspection(run_id, from_step)` runs the pipeline steps in order (S1, the pipeline's
+`product_steps`: probe -> frames -> sparse -> export -> coverage [-> dense]), one subprocess
+per step (`python -m qarau_pipeline step <name> --run <dir> [--force]`, ADR 0022), so the backend
 environment never imports pycolmap. After every transition it writes Run.status
 (queued | running | done | failed), current_step, progress (finished steps / total, 0-100), error
 and the `steps` list (one {name, status, started_at, finished_at, duration_s, error} per step),
 and mirrors the status on the Inspection. The pipeline's own <run>/<step>/step.json markers
 make the job idempotent: re-enqueueing a run after a worker crash redoes only the steps without
 a `done` marker. `from_step` forces that step and the ones after it; earlier steps are not
-touched.
+touched. After the `coverage` step, `fill_coverage` replaces the run's CoverageRegion rows with
+the regions of <run>/coverage/regions.json (COV1-b).
 
 The step runner is a protocol (`StepRunner`) so tests plug in in-process fakes via `make_runner`.
 """
@@ -25,10 +27,11 @@ from typing import Any, Protocol
 
 from redis import Redis
 from rq import Queue
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from .db import engine_for
-from .models import Inspection, Run
+from .models import CoverageRegion, CoverageState, Inspection, Run
 from .settings import get_settings
 from .storage import prefix_of
 
@@ -190,6 +193,37 @@ def run_inspection(run_id: str, from_step: str | None = None) -> str:
         if not ok:
             _set_run(run_id, status="failed", error=f"{name}: {doc.get('error')}")
             return "failed"
+        if name == "coverage":
+            fill_coverage(run_id, run_dir)
         _set_run(run_id, progress=100 * (i + 1) // len(names))
     _set_run(run_id, status="done", current_step=None, progress=100)
     return "done"
+
+
+def fill_coverage(run_id: str, run_dir: Path) -> int:
+    """Replace the run's CoverageRegion rows with <run_dir>/coverage/regions.json in one
+    transaction (a rerun never duplicates rows); returns the row count. `coverage/` is not a
+    storage kind: the step has just written the file into the run's cache dir. A missing or
+    unreadable file leaves no rows and a warning; it never fails the run."""
+    path = run_dir / "coverage" / "regions.json"
+    try:
+        rows = [
+            CoverageRegion(
+                run_id=run_id, region_key=str(r["id"]), state=CoverageState(r["state"]),
+                frame_count=int(r["frame_count"]),
+                bounds_min=[float(x) for x in r["bounds"]["min"]],
+                bounds_max=[float(x) for x in r["bounds"]["max"]],
+            )
+            for r in json.loads(path.read_text())["regions"]
+        ]  # fmt: skip
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        log.warning("run %s: no coverage regions stored, %s is missing or unreadable: %s",
+                    run_id, path, e)  # fmt: skip
+        rows = []
+
+    def go(db: Session) -> None:
+        db.execute(delete(CoverageRegion).where(CoverageRegion.run_id == run_id))
+        db.add_all(rows)
+
+    _write(go)
+    return len(rows)

@@ -10,16 +10,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from qarau_pipeline.storage import key_for
 
-from .auth import require_role
-from .crud import Db
+from .auth import check_run, shared_runs
+from .crud import Db, ViewerOrGuest
+from .models import Role
 from .settings import get_settings
 from .storage import prefix_for_run_id, storage
 
-router = APIRouter(prefix="/api/runs", dependencies=[Depends(require_role("viewer"))])
+# Guests read only the runs shared with their event (check_run: any other run is 404).
+router = APIRouter(prefix="/api/runs")
 RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 CACHE = {"Cache-Control": "public, max-age=3600"}
 MANIFEST = "export/web/manifest.json"
@@ -81,11 +83,19 @@ def from_storage(db: Db, run_id: str, rel: str) -> Response:
     return StreamingResponse(chunks, media_type=media, headers=CACHE)
 
 
-@router.get("", description="Role: viewer. Exported pipeline runs found under QARAU_RUNS_DIR.")
-def list_runs() -> list[dict[str, Any]]:
+@router.get(
+    "",
+    description="Role: viewer. Exported pipeline runs found under QARAU_RUNS_DIR (a guest: only "
+    "the runs shared with its event).",
+)
+def list_runs(db: Db, who: ViewerOrGuest) -> list[dict[str, Any]]:
     root = Path(get_settings().qarau_runs_dir)
+    guest = who.role == Role.guest
+    shared = {n for r in shared_runs(db, who) for n in (r.id, r.run_dir)} if guest else set()
     out = []
     for d in sorted(root.iterdir()) if root.is_dir() else []:
+        if guest and d.name not in shared:
+            continue
         if RUN_ID.fullmatch(d.name) and manifest_file(d) is not None:
             m = read_manifest(d)
             out.append(
@@ -103,9 +113,11 @@ def list_runs() -> list[dict[str, Any]]:
     "/{run_id}/manifest.json",
     response_model=dict[str, Any],
     description="Role: viewer. The run's viewer manifest (from the cache, or from storage: "
-    "streamed, or a 302 to a signed URL with QARAU_FILES_MODE=redirect).",
+    "streamed, or a 302 to a signed URL with QARAU_FILES_MODE=redirect). A guest: 404 unless "
+    "the run is shared with its event.",
 )
-def manifest(run_id: str, db: Db) -> Any:
+def manifest(run_id: str, db: Db, who: ViewerOrGuest) -> Any:
+    check_run(db, who, run_id)
     d = local_dir(run_id)
     if d is not None and manifest_file(d) is not None:
         return read_manifest(d)
@@ -115,9 +127,11 @@ def manifest(run_id: str, db: Db) -> Any:
 @router.get(
     "/{run_id}/files/{path:path}",
     description="Role: viewer. A file of the run (from the cache, or from storage: streamed, "
-    "or a 302 to a signed URL with QARAU_FILES_MODE=redirect).",
+    "or a 302 to a signed URL with QARAU_FILES_MODE=redirect). A guest: 404 unless the run is "
+    "shared with its event.",
 )
-def run_file(run_id: str, path: str, db: Db) -> Response:
+def run_file(run_id: str, path: str, db: Db, who: ViewerOrGuest) -> Response:
+    check_run(db, who, run_id)
     d = local_dir(run_id)
     if d is not None:
         f = (d / path).resolve()
