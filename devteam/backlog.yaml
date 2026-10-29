@@ -1375,40 +1375,37 @@ tasks:
 - id: UI-report
   area: app
   title: Report preview page and PDF download
-  goal: 'Today there is no report in the web app. RPT1 gives GET /api/inspections/{id}/report.pdf?lang=
-    (its hash in
-
-    the headers); DS1 gives the v8 look.
-
+  goal: |
+    Today there is no report in the web app. RPT1 gives GET /api/inspections/{id}/report.pdf?lang=
+    (its hash in the headers); DS1 gives the v8 look. An <iframe> preview shows an empty box in
+    headless Chromium (Kerege's screenshots have no PDF viewer).
 
     Build (web/ only): a report page per inspection (/inspections/:id/report): a summary of what the PDF
-
     contains (object, date, findings by severity with status and who decided, scale source, the coverage
-    line
+    line or "coverage not computed"), a language choice (ru/kk/en -> the PDF's lang), a preview that
+    renders the first page of the fetched PDF itself with pdf.js (pdfjs-dist) into a <canvas>, the
+    page count ("1 of N pages") and "Download PDF" with the hash shown next to it; no <iframe>, no
+    browser PDF viewer. The pdf.js worker is bundled by Vite (no CDN). The preview is aria-busy="true"
+    until the first page is painted. States: generating, ready, failed with the API's message (a PDF
+    pdf.js cannot open is "failed" in plain words, the download still works). Linked from the
+    inspections list ("Report" when done) and the viewer.
 
-    or "coverage not computed"), a language choice (ru/kk/en -> the PDF''s lang), an inline preview (the
+    Not in this task: editing the report, XLSX, e-mail, pages other than the first in the preview.
 
-    browser''s PDF viewer in an iframe) and "Download PDF" with the hash shown next to it. States: generating,
-
-    ready, failed with the API''s message. Linked from the inspections list ("Report" when done) and the
-    viewer.
-
-    Not in this task: editing the report, XLSX, e-mail.
-
-    Done when: Vitest for the summary and the three states with a mocked API; a Playwright e2e opens the
-    page on
-
-    a mocked API and downloads a fixture PDF; i18n ru/kk/en; tester screenshots of the page
-
-    "/inspections/demo/report" in light and dark, ru/kk/en, at 1440x900
-
-    and 390x844.
-
+    Done when: Vitest for the summary and the three states with a mocked API and a mocked pdf.js
+    (the page count shown, a render error shows the failed state); no <iframe> in the page; a
+    Playwright e2e opens the page on a mocked API with a fixture PDF, waits for aria-busy to clear,
+    asserts the canvas has non-blank pixels and the page count, and downloads the fixture PDF;
+    i18n ru/kk/en; lint, tsc, Vitest and the e2e pass; tester screenshots of the page
+    "/inspections/demo/report" show the rendered first page, in light and dark, ru/kk/en, at
+    1440x900 and 390x844.
     Reference: docs/design/screens/report-light.png (design system v8); match it, adjust only alignment
     and size; phone layout per DESIGN.md Responsive (reference docs/design/screens/evidence-phone-light.png
     at 390x844; same functions, layout may differ).
 
-    '
+    Owner 2026-10-29: pdf.js canvas preview instead of the iframe (headless Chromium has no PDF viewer).
+  licence: 'pdfjs-dist (Apache-2.0); its optional dependency @napi-rs/canvas (MIT) is Node-only, not
+    in the browser bundle.'
   status: blocked
   depends_on:
   - RPT1
@@ -1506,9 +1503,12 @@ tasks:
     Owner 2026-10-28: LaunchPad demo; a number the user cannot act on.
 
     '
-  status: in_progress
+  status: done
   owner: dev_app
   run: cont-20261029-094213-dev_app-3
+  branch: devteam/CONF-fix
+  pr: https://github.com/IzbassarO/qarau/pull/99
+  done_at: '2026-10-29'
 - id: COV-ui
   area: app
   title: Coverage layer in the viewer
@@ -1581,9 +1581,11 @@ tasks:
     Owner 2026-10-27: part 3 of the UI-evidence split; the whole-task criteria of the old plan land here.
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - UI-evidence-b
+  owner: dev_app
+  run: cont-20261029-094213-dev_app-4
 - id: RPT1
   area: core
   title: PDF inspection report
