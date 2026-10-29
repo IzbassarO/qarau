@@ -1873,9 +1873,15 @@ tasks:
     Owner 2026-10-29: found in the owner''s `make local` walk (PR #97).
 
     '
-  status: in_progress
+  status: blocked
   owner: dev_pipeline
   run: cont-20261029-152145-dev_pipeline-1
+  branch: devteam/TEST-v0008
+  blocked_reason: 'the tester sent it back twice in a row for the same reason, so no new round was started:
+    Criterion 3 is unmet: there is no Postgres run output. The code fix looks correct (id removed from
+    AUDIT_ROW at backend/tests/test_migrations.py:347). Run `QARAU_TEST_DATABASE_URL=postgresql+psycopg://<user>:<pw>@<host>:<port>/<separate_test_db>
+    uv run pytest -q tests/test_migrations.py` against a throwaway Postgres and include the real output
+    in the report. If Postgres is truly unreachable from t'
 - id: DEMO-cov
   area: core
   title: Real coverage for the dev seed's demo inspection
