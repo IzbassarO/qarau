@@ -1433,12 +1433,12 @@ tasks:
     the browser bundle.
   tester:
     max_diff: 180000
-  status: todo
+  status: in_progress
   depends_on:
   - RPT1
   - DS1
   owner: dev_app
-  run: cont-20261029-094213-dev_app-1
+  run: cont-20261029-152145-dev_app-1
   branch: devteam/UI-report
 - id: UI-evidence-b
   area: app
