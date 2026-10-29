@@ -18,10 +18,12 @@ import time
 import traceback
 from pathlib import Path
 
+from devteam import analyst as AN
 from devteam import costs
 from devteam.costs import BudgetExceeded, SubscriptionLimit
 from devteam.graph import OWNER_STOP, StopRun, Team
 
+REVIEW_EVERY_S = 6 * 3600  # the Analyst's plan proposals for the daily report
 UNKNOWN_RESET_RETRY_S = 1800  # a limit without a reset time: try again every 30 min
 MIN_WAIT_S = 60
 
@@ -108,10 +110,15 @@ class Continuous:
         return ""
 
     def _timer(self):
-        """max_hours: a clean stop even while every developer is busy."""
+        """max_hours: a clean stop even while every developer is busy. Every REVIEW_EVERY_S the
+        Analyst's plan proposals (proposals only)."""
+        reviewed = self.clock()
         while not self.team.stopping.wait(30):
             if self.clock() - self.t0 >= self.max_s:
                 self.halt(f"max_hours reached ({self.max_s / 3600:g} h)")
+            elif self.clock() - reviewed >= REVIEW_EVERY_S:
+                reviewed = self.clock()
+                AN.review(self.team)
 
     # --- one developer ---------------------------------------------------------------------
     def _round(self, thread: str, inp) -> dict:
@@ -203,17 +210,7 @@ class Continuous:
                     self.ended += 1
                     self.results += [{**r, "dev": dev} for r in vals.get("results", [])]
                     self.cond.notify_all()  # an ended task can unblock work for the others
-                    # per developer: one developer's bad streak never stops the others; the
-                    # owner's own `devteam stop <task>` is not a failure of the team
-                    mine = [
-                        r
-                        for r in self.results
-                        if r["dev"] == dev and not str(r.get("reason")).startswith(OWNER_STOP)
-                    ]
-                    streak = mine[-2:]
-                    if len(streak) == 2 and all(r["status"] == "blocked" for r in streak):
-                        reason = f"{dev} paused: 2 of its tasks in a row ended blocked "
-                        reason += f"({streak[0]['id']}, {streak[1]['id']})"
+                    if reason := pause_reason(self.results, dev):
                         self.paused[dev] = reason
                     else:
                         continue
@@ -288,6 +285,7 @@ class Continuous:
                 "no developer can take a task: " if self.paused else ""
             ) + "; ".join(why)
         self.team.stopping.set()  # the timer thread ends
+        AN.review(self.team)
         summary = {
             "run": self.run_id,
             "started": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(self.t0)),
@@ -305,6 +303,24 @@ class Continuous:
         out.parent.mkdir(exist_ok=True)
         out.write_text(json.dumps(summary, indent=1))
         return summary
+
+
+def pause_reason(results: list[dict], dev: str) -> str:
+    """Per developer: one developer's bad streak never stops the others. 2 of its tasks in a row
+    ended blocked: it pauses. The owner's own `devteam stop <task>` is not a failure of the team,
+    nor a block the Analyst acted on (owner 2026-10-28: pause only when it could not)."""
+    mine = [
+        r
+        for r in results
+        if r["dev"] == dev
+        and not str(r.get("reason")).startswith(OWNER_STOP)
+        and not r.get("analyst")
+    ]
+    streak = mine[-2:]
+    if len(streak) == 2 and all(r["status"] == "blocked" for r in streak):
+        ids = ", ".join(r["id"] for r in streak)
+        return f"{dev} paused: 2 of its tasks in a row ended blocked ({ids})"
+    return ""
 
 
 def summary_lines(s: dict) -> list[str]:

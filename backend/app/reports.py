@@ -15,7 +15,8 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Response
 from qarau_pipeline.report import generate
 
-from .crud import Db, Viewer, get_or_404
+from .auth import check_inspection
+from .crud import Db, ViewerOrGuest, get_or_404
 from .db import engine_for
 from .findings import Cfg
 from .models import Inspection, Report
@@ -40,19 +41,25 @@ Clock = Annotated[datetime, Depends(report_clock)]
     "executive summary, map, findings by severity, one card per finding with its evidence "
     "frames and decision log, not inspected areas, method and limitations, sign-off, document "
     "control. Headers X-Report-SHA256 (of the body) and X-Report-Generated-At (the report time "
-    "printed in the PDF); each call is logged in the report table. 404: unknown inspection.",
+    "printed in the PDF); each call is logged in the report table. 404: unknown inspection. "
+    "Findings and decisions: a guest's report has only its own sandbox, every other report "
+    "none of any guest's; a guest gets 404 unless every run of the inspection is shared.",
 )
 def get_report_pdf(
-    inspection_id: int, lang: Literal["ru", "kk", "en"], db: Db, who: Viewer, settings: Cfg,
-    now: Clock,
+    inspection_id: int, lang: Literal["ru", "kk", "en"], db: Db, who: ViewerOrGuest,
+    settings: Cfg, now: Clock,
 ) -> Response:  # fmt: skip
     get_or_404(db, Inspection, inspection_id)
+    check_inspection(db, who, inspection_id)
     engine = engine_for(settings.database_url)
-    pdf, sha, inp = generate(inspection_id, lang, now, engine, Path(settings.qarau_runs_dir))
+    pdf, sha, inp = generate(
+        inspection_id, lang, now, engine, Path(settings.qarau_runs_dir), guest_id=who.guest_id
+    )
     db.add(
         Report(
             inspection_id=inspection_id, lang=lang, sha256=sha, generated_at=now.astimezone(UTC),
             report_number=inp.report_number, version=inp.version, created_by=who.user_id,
+            guest_id=who.guest_id,
         )
     )  # fmt: skip
     db.commit()

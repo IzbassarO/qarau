@@ -32,6 +32,8 @@ from devteam.report import write_report, write_reports
 ROOT = Path(__file__).resolve().parents[2]
 COLORS = {
     "brain": "magenta",
+    "architect": "blue",
+    "analyst": "bright_magenta",
     "dev_pipeline": "cyan",
     "dev_app": "green",
     "tester": "yellow",
@@ -367,9 +369,14 @@ def main():
             "cleanup",
             "dashboard",
             "rehearse",
+            "undo",
         ],
     )
-    p.add_argument("task", nargs="?", help="stop / resume: only this task, e.g. A7")
+    p.add_argument(
+        "task",
+        nargs="?",
+        help="stop / resume: only this task, e.g. A7; undo: a plan change's commit",
+    )
     p.add_argument(
         "--continuous",
         action="store_true",
@@ -387,6 +394,13 @@ def main():
         costs.mark_stale(team.home)
     if args.task and args.command in ("stop", "resume"):
         return control_task(team, args.command, args.task)
+    if args.command == "undo":  # a new commit on dev that reverts one plan change
+        try:
+            sha = team.undo(args.task or "")
+        except (ValueError, RuntimeError) as e:
+            sys.exit(f"undo: {e}")
+        console.print(f"undo: {sha[:9]} pushed to {team.cfg['base_branch']}")
+        return
     if args.task:
         sys.exit(f"`devteam {args.command}` takes no task id")
     if args.command in ("run", "resume"):

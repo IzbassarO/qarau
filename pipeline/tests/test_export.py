@@ -7,12 +7,14 @@ import pycolmap
 import pytest
 
 from qarau_pipeline.export import (
+    coverage_codes,
     export_bundle,
     project,
     qvec_from_matrix,
     rot_from_qvec,
     rotation_between,
     sanitize_points,
+    write_coverage_layer,
     write_laz_ply,
 )
 from qarau_pipeline.interfaces import DensePoints
@@ -344,4 +346,83 @@ def test_dense_filtering_keeps_rows_in_step(tmp_path: Path) -> None:
 
 def test_no_dense_layer_without_dense_input(bundle) -> None:
     _, m, *_ = bundle
-    assert "dense" not in m and m["version"] == 2 and set(m) == V1_KEYS
+    assert "dense" not in m and m["version"] == 2 and set(m) == V1_KEYS | {"coverage"}
+
+
+# ---------------------------------------------------------------- coverage layer (COV1-b)
+
+# 6 points and 3 voxel regions in the COV1 format: points 0-1 in the inspected region, 2-3 in the
+# not-seen one, 4 in the finding region, 5 in none.
+COV_POINTS = [[0.2, 0.3, 0.4], [0.9, 0.1, 0.5], [-0.5, 0.5, 0.5], [-0.1, 0.9, 0.2],
+              [1.5, 0.5, 0.5], [5.0, 5.0, 5.0]]  # fmt: skip
+COV_REGIONS = [
+    {"id": "0_0_0", "bounds": {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0]},
+     "state": "inspected_ok", "frame_count": 4, "point_count": 2, "finding_ids": []},
+    {"id": "-1_0_0", "bounds": {"min": [-1.0, 0.0, 0.0], "max": [0.0, 1.0, 1.0]},
+     "state": "not_seen", "frame_count": 0, "point_count": 2, "finding_ids": []},
+    {"id": "1_0_0", "bounds": {"min": [1.0, 0.0, 0.0], "max": [2.0, 1.0, 1.0]},
+     "state": "finding", "frame_count": 5, "point_count": 1, "finding_ids": [1]},
+]  # fmt: skip
+
+
+def coverage_run(tmp_path: Path, regions: list | None) -> Path:
+    """A bundle with only what the coverage layer reads: the manifest and the positions."""
+    run = tmp_path / "cov"
+    (run / "export/web").mkdir(parents=True)
+    np.array(COV_POINTS, "<f4").tofile(run / "export/web/points.position.f32")
+    man = {"version": 2, "points": {"count": 6, "position": "export/web/points.position.f32"}}
+    (run / "export/web/manifest.json").write_text(json.dumps(man))
+    if regions is not None:
+        (run / "coverage").mkdir()
+        (run / "coverage/regions.json").write_text(json.dumps({"version": 1, "regions": regions}))
+    return run
+
+
+def test_coverage_array_read_through_the_manifest(tmp_path: Path) -> None:
+    run = coverage_run(tmp_path, COV_REGIONS)
+    write_coverage_layer(run)
+    m = json.loads((run / "export/web/manifest.json").read_text())
+    c = m["coverage"]
+    codes = {"not_seen": 0, "inspected_ok": 1, "finding": 2, "no_region": 255}
+    assert c == {"computed": True, "path": "export/web/points.coverage.u8", "dtype": "u1",
+                 "count": 6, "regions": "coverage/regions.json", "codes": codes}  # fmt: skip
+    assert np.fromfile(run / c["path"], c["dtype"]).tolist() == [1, 1, 0, 0, 2, 255]
+    assert m["points"] == {"count": 6, "position": "export/web/points.position.f32"}  # untouched
+    copy = run / "web/manifest.json"  # the dev middleware's copy follows
+    assert copy.read_bytes() == (run / "export/web/manifest.json").read_bytes()
+
+
+def test_point_on_a_shared_face_takes_the_first_region_by_id(tmp_path: Path) -> None:
+    # x = 0 lies in "-1_0_0" (not_seen) and "0_0_0"; x = 1 in "0_0_0" (inspected_ok) and
+    # "1_0_0". Ids sort as strings: "-1_0_0" < "0_0_0" < "1_0_0".
+    pts = np.array([[0.0, 0.5, 0.5], [1.0, 0.5, 0.5]], "<f4")
+    assert coverage_codes(pts, COV_REGIONS).tolist() == [0, 1]
+
+
+def test_no_regions_no_array_and_the_manifest_says_not_computed(tmp_path: Path) -> None:
+    run = coverage_run(tmp_path, COV_REGIONS)
+    write_coverage_layer(run)
+    (run / "coverage/regions.json").unlink()
+    assert write_coverage_layer(run) == {"computed": False}
+    m = json.loads((run / "export/web/manifest.json").read_text())
+    assert m["coverage"] == {"computed": False}
+    assert not (run / "export/web/points.coverage.u8").exists()
+
+
+def test_export_adds_the_coverage_layer_when_regions_exist(tmp_path: Path) -> None:
+    """A re-export of a run with coverage writes the array for the new points; the one region
+    spans the whole cloud, so every point is `finding` (code 2)."""
+    out, m, _, rec, _ = run_export(tmp_path)
+    assert m["coverage"] == {"computed": False}
+    assert not (out / "export/web/points.coverage.u8").exists()
+    everything = [{"id": "0_0_0", "bounds": {"min": [-100.0] * 3, "max": [100.0] * 3},
+                   "state": "finding", "frame_count": 3, "point_count": N,
+                   "finding_ids": [1]}]  # fmt: skip
+    (out / "coverage").mkdir()
+    (out / "coverage/regions.json").write_text(json.dumps({"regions": everything}))
+    frames = [{"i": i, "name": f"f{i}.jpg", "file": f"frames/{i:06d}.jpg", "t": 0.0,
+               "kept": i != 2, "drop_reason": None, "blur": 1.0} for i in range(F)]  # fmt: skip
+    export_bundle(rec, frames, out, m["source"], "run")
+    again = json.loads((out / "export/web/manifest.json").read_text())
+    assert again["coverage"]["count"] == N == again["points"]["count"]
+    assert np.fromfile(out / again["coverage"]["path"], "u1").tolist() == [2] * N

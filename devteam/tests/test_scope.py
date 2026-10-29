@@ -110,6 +110,31 @@ def test_skip_checks_have_no_false_alarms_seen_on_real_prs():
 
 
 @pytest.mark.parametrize(
+    ("plus", "refused"),
+    [  # COV1 test_coverage_real.py, 2026-10-28: the data-presence skip over several lines
+        (
+            ["NO_RUN = pytest.mark.skipif(", "    not MANIFEST.is_file(),", "    reason='no run')"],
+            0,
+        ),
+        (["NO_RUN = pytest.mark.skipif(not MANIFEST.is_file(), reason='no run')"], 0),
+        (["NO_RUN = pytest.mark.skipif(", "    sys.platform == 'darwin',", "    reason='x')"], 1),
+        (
+            [
+                "@pytest.mark.skipif(",
+                "    True, reason='later'",
+                ")",
+                "def test_a(): assert x.exists()",
+            ],
+            1,
+        ),
+    ],
+)
+def test_a_data_presence_skip_is_allowed_on_one_line_or_several(plus, refused):
+    path = "pipeline/tests/test_coverage_real.py"
+    assert len(SC.bypass(diff(path, plus=plus), [path])) == refused
+
+
+@pytest.mark.parametrize(
     ("path", "line"),
     [
         ("web/e2e/viewer.spec.ts", "test.describe.configure({ retries: 3 });"),

@@ -24,7 +24,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from markupsafe import Markup
 
 from ..interfaces import StageError
-from .inputs import DecisionEntry, FindingInput, ReportInput, load_report_input
+from .inputs import DecisionEntry, FindingInput, ReportInput, load_report_input, with_coverage
 from .snapshot import Plate, Visuals, load_visuals
 
 HERE = Path(__file__).resolve().parent
@@ -131,6 +131,9 @@ def _context(inp: ReportInput, s: dict[str, Any], lang: str) -> dict[str, Any]:
         time = f"{p.time_s:.1f}".replace(".", s["decimal"])
         return t("plate_caption", frame=p.frame_id, time=time)
 
+    def xyz(v: tuple[float, ...]) -> str:
+        return "; ".join(f"{x:.2f}".replace(".", s["decimal"]) for x in v)
+
     findings = sorted(inp.findings, key=lambda f: (SEVERITY_ORDER.get(f.severity, 9), f.id))
     confirmed = [f for f in inp.findings if f.status == "confirmed"]
     measured = [f.area_m2 for f in confirmed if f.area_m2 is not None]
@@ -143,12 +146,16 @@ def _context(inp: ReportInput, s: dict[str, Any], lang: str) -> dict[str, Any]:
         (t("summary_proposed"), str(sum(f.status == "proposed" for f in inp.findings))),
         (t("summary_area"), fmt_area(sum(measured), s) if measured else t("scale_not_set")),
         (t("summary_no_scale"), str(len(confirmed) - len(measured))),
-        (t("summary_not_seen"), t("coverage_not_computed")),
+        (
+            t("summary_not_seen"),
+            t("coverage_not_computed") if inp.coverage is None else str(len(inp.coverage.not_seen)),
+        ),
     ]
     engineer = inp.engineer or t("engineer_none")
     return {
         "lang": lang, "s": s, "inp": inp, "t": t, "word": word, "when": when, "area": area,
         "verdict": verdict, "decided": decided, "plate_caption": plate_caption, "colours": COLOURS,
+        "xyz": xyz,
         "findings": findings, "summary": summary,
         "engineer": engineer,
         "header": css_content(str(s["header"]), number=inp.report_number, version=inp.version),
@@ -187,7 +194,9 @@ def render_pdf(
 
 
 def render_report(inp: ReportInput, lang: str, runs_dir: Path | None = None) -> bytes:
-    """The PDF; the map and the evidence frames come from the run dirs under `runs_dir`."""
+    """The PDF; the map, the evidence frames and the not-seen areas come from the run dirs
+    under `runs_dir`."""
+    inp = with_coverage(inp, runs_dir)
     return render_pdf(inp, load_strings(lang), lang, load_visuals(inp, runs_dir))
 
 
@@ -199,9 +208,10 @@ class Generated(NamedTuple):
 
 def generate(
     inspection_id: int, lang: str, report_time: datetime, engine: sa.Engine,
-    runs_dir: Path | None,
+    runs_dir: Path | None, guest_id: int | None = None,
 ) -> Generated:  # fmt: skip
-    """An inspection's report as PDF bytes with their SHA-256: the CLI and the API call this."""
-    inp = load_report_input(engine, inspection_id, report_time)
+    """An inspection's report as PDF bytes with their SHA-256: the CLI and the API call this.
+    `guest_id`: the report of that event guest's sandbox (`load_report_input`)."""
+    inp = load_report_input(engine, inspection_id, report_time, guest_id)
     pdf = render_report(inp, lang, runs_dir)
     return Generated(pdf, hashlib.sha256(pdf).hexdigest(), inp)

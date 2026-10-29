@@ -21,6 +21,7 @@ from app import auth, inspections
 from app.db import engine_for
 from app.main import app
 from app.models import Base, Inspection, Mode, Role, Site
+from app.ratelimit import LIMITER
 from app.seed import seed_dev_users
 from app.settings import get_settings
 from app.storage import storage
@@ -57,6 +58,7 @@ def db_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     storage.cache_clear()
     engine_for.cache_clear()
     auth._verified.clear()
+    LIMITER.clear()
     drop_everything(url)
     command.upgrade(alembic_config(url), "head")
     yield url

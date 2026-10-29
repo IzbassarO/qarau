@@ -1398,10 +1398,11 @@ tasks:
     Done when: Vitest for the summary and the three states with a mocked API; a Playwright e2e opens the
     page on
 
-    a mocked API and downloads a fixture PDF; i18n ru/kk/en; tester screenshots of the page in light and
-    dark,
+    a mocked API and downloads a fixture PDF; i18n ru/kk/en; tester screenshots of the page
 
-    ru/kk/en.
+    "/inspections/demo/report" in light and dark, ru/kk/en, at 1440x900
+
+    and 390x844.
 
     Reference: docs/design/screens/report-light.png (design system v8); match it, adjust only alignment
     and size; phone layout per DESIGN.md Responsive (reference docs/design/screens/evidence-phone-light.png
@@ -1413,7 +1414,7 @@ tasks:
   - RPT1
   - DS1
   owner: dev_app
-  run: cont-20261028-185246-dev_app-1
+  run: cont-20261029-094213-dev_app-1
   branch: devteam/UI-report
 - id: UI-evidence-b
   area: app
@@ -1463,7 +1464,7 @@ tasks:
   - UI-evidence
   - ME1
   owner: dev_app
-  run: cont-20261027-232407-dev_app-1
+  run: cont-20261028-185246-dev_app-2
   branch: devteam/UI-evidence-b
 - id: CONF-fix
   area: app
@@ -1649,12 +1650,14 @@ tasks:
     '
   supervisor:
     max_tokens_per_round: 24000000
-  status: in_progress
+  status: done
   depends_on:
   - RPT1
   owner: dev_pipeline
   run: cont-20261028-185246-dev_pipeline-2
   branch: devteam/COV1
+  pr: https://github.com/IzbassarO/qarau/pull/94
+  done_at: '2026-10-28'
 - id: COV1-b
   area: core
   title: 'Coverage: regions in the database, API, bundle array and report section'
@@ -1690,9 +1693,14 @@ tasks:
     '
   supervisor:
     max_tokens_per_round: 24000000
-  status: todo
+  status: done
   depends_on:
   - COV1
+  owner: dev_pipeline
+  run: cont-20261028-185246-dev_pipeline-3
+  branch: devteam/COV1-b
+  pr: https://github.com/IzbassarO/qarau/pull/95
+  done_at: '2026-10-28'
 - id: UI-mark
   area: app
   title: Mark a region on the 3D map as a finding
@@ -1794,7 +1802,12 @@ tasks:
     an `app.event create` organization with an immutable event flag.
 
     '
-  status: todo
+  status: done
+  owner: dev_pipeline
+  run: cont-20261028-185246-dev_pipeline-4
+  branch: devteam/DEMO1
+  pr: https://github.com/IzbassarO/qarau/pull/96
+  done_at: '2026-10-29'
 - id: D2
   area: core
   title: 'Deploy staging: one VM, compose, HTTPS, backups'

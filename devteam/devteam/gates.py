@@ -326,7 +326,15 @@ def screenshots(
         return f"{what} did not start: {sc[what]}"
 
     paths, problems = [], []
-    login = {k: team.secrets[k] for k in TEST_LOGIN if team.secrets.get(k)}
+    # Against the seeded API: its seeded user (screenshots.login), so role-dependent UI is shot as
+    # that role sees it. The .env test user matches no seeded user: /api/me answered 401, the page
+    # showed the role error and no decision buttons (UI-evidence-b, 2026-10-28).
+    seeded = sc.get("login") if sc.get("api") else None
+    login = (
+        dict(zip(TEST_LOGIN, (seeded["user"], seeded["token"]), strict=True))
+        if seeded
+        else {k: team.secrets[k] for k in TEST_LOGIN if team.secrets.get(k)}
+    )
     if len(login) < len(TEST_LOGIN):  # said, not a failed screenshot: the page is still shot
         team.emit(
             "tester",

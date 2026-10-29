@@ -77,6 +77,37 @@ def test_missing_test_login_is_said_not_silent(repo, tmp_path):
     )
 
 
+def test_against_the_seeded_api_the_tester_signs_in_as_its_engineer(repo, tmp_path):
+    """UI-evidence-b, 2026-10-28: the .env user matched no seeded user, /api/me answered 401 and
+    the shots showed the role error with no decision buttons."""
+    seen = tmp_path / "env.txt"
+    devs = web_shots(tmp_path, f"env | grep ^QARAU_TEST_ > {seen}; touch {{png}}")
+    sc = devs["dev_app"]["screenshots"]
+    env_login = {"QARAU_TEST_USER": "tester", "QARAU_TEST_PASSWORD": "a-long-test-password"}
+    s = {"task": {"id": "T-002"}, "assignee": "dev_app", "worktree": str(repo)}
+    sc["login"] = {"user": "engineer", "token": "seeded-token"}
+    team, _ = make(repo, developers=devs, secrets=env_login)
+    assert G.screenshots(team, s, ["/"])[1] == []
+    assert sorted(seen.read_text().split()) == [
+        "QARAU_TEST_PASSWORD=a-long-test-password",
+        "QARAU_TEST_USER=tester",
+    ]  # no api: .env
+    sc["api"] = "exec python3 -m http.server {api_port} --bind 127.0.0.1"
+    assert G.screenshots(team, s, ["/"])[1] == []
+    assert sorted(seen.read_text().split()) == [
+        "QARAU_TEST_PASSWORD=seeded-token",
+        "QARAU_TEST_USER=engineer",
+    ]
+    log = team.home / "events.log"
+    assert not log.exists() or "WARNING" not in log.read_text()
+
+
+def test_config_signs_dev_app_in_as_the_seeded_engineer():
+    sc = yaml.safe_load((HERE / "config.yaml").read_text())["developers"]["dev_app"]["screenshots"]
+    assert sc["login"]["user"] == "engineer"
+    assert f"QARAU_DEV_ENGINEER_TOKEN={sc['login']['token']} " in sc["api"]
+
+
 def test_config_shoots_through_the_sign_in_script():
     cfg = yaml.safe_load((HERE / "config.yaml").read_text())
     for dev in ("dev_pipeline", "dev_app"):
