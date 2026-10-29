@@ -34,7 +34,8 @@ in [Region of interest — version 1](notes/roi-format.md).
 ## Workflow steps
 
 One inspection run is a sequence of **steps** (`pipeline/qarau_pipeline/workflow.py`, ADR
-0022): `probe → frames (+ quality report) → sparse (COLMAP) → export [→ dense]`. `dense` is
+0022): `probe → frames (+ quality report) → sparse (COLMAP) → export → coverage [→ dense]`
+(coverage: "Coverage regions" below). `dense` is
 listed only when `pipeline/config.yaml` → `workflow.dense` is true (default false) and then uses
 the fake provider only; a paid Modal run is never started from the workflow (ADR 0019).
 
@@ -191,7 +192,7 @@ makes every result reproducible and every failure local.
 | measurement | clustered points, scale | area is part of the findings file: m² only with a known scale, else `rel` (ADR 0009) |
 | registration (monitoring) | new frames, baseline model | transform to baseline, aligned cloud |
 | change detection | findings now vs baseline/previous | `changes.json` (new / grew / shrank / stable) |
-| coverage | poses, usable frames, cloud | per-point/voxel state: inspected_ok / finding / not_seen |
+| coverage | bundle points + poses + tracks, frame blur scores, quality report, `findings/points.finding.u16` | `coverage/regions.json`: one voxel region per occupied cell, state inspected_ok / finding / not_seen ("Coverage regions" below). CLI `python -m qarau_pipeline coverage --run DIR [--out DIR]` |
 | risk ranking | findings, changes, asset data | severity + reason text per finding |
 | report | the API database: inspection, site, organization, findings with observations (evidence frame + outline), decisions, scale source | PDF only so far (RPT1, ADR 0027): `qarau_pipeline.report.generate(inspection_id, lang, report_time, engine, runs_dir)` → `Generated(pdf, sha256, input)`, called by both the CLI and `GET /api/inspections/{id}/report.pdf` ("Inspection report" below); CLI `python -m qarau_pipeline report --inspection N --lang ru\|kk\|en --out F [--report-time ISO] [--db URL] [--runs-dir DIR]` (runs dir default `QARAU_RUNS_DIR`; without one: no map, no frame images, said in the PDF). `report/snapshot.py` (ADR 0032) draws the map of the inspection's last exported run with a NumPy point rasterizer (orthographic, fixed camera 30° above the filmed side, z-buffer, PNG via Pillow, no GL) and reads each finding's first 3 evidence frames; the template puts numbered SVG markers over the map, a crop around the marker in each card and the outline as an SVG `<polygon>` over each frame (viewBox in frame pixels). `report/inputs.py` reads the tables with SQLAlchemy Core into a frozen `ReportInput` (status/class/severity replayed from the decision log by `replay_decisions`, the same function `backend/app/decisions.py` uses; report number, version, version history and verification ID; the report time); `report/render.py` (`render_report(input, lang, runs_dir)`, reads only the run dirs) fills the Jinja2 template `report/templates/report.html.j2` + `report.css` and WeasyPrint writes an A4 PDF/A-3b: cover (company, site, asset, capture date, report number, version), executive summary, map snapshot with numbered findings, findings table by severity, one card per finding (class, severity, status, map location, area in m² with uncertainty or "uncertainty not estimated", or "scale not set"; scale source; the 3 evidence frames with outlines; who decided and when; its decision log), not inspected areas ("coverage not computed" until COV1), method and limitations, sign-off (prepared / checked / approved), document control (version history, verification ID); `@page` header with the report number and footer with the engineer, report time and "page X of Y" on every page. All strings in `report/translations.toml` (ru/kk/en), v8 fonts embedded from `report/fonts/` (OFL). The report time is the only clock in the file (PDF and XMP dates), so the same input gives byte-identical files. XLSX and work orders: later |
 
@@ -210,6 +211,38 @@ shown in m² without a scale source; the UI says "relative size" instead.
 **Coverage.** Voxelize the cloud. A voxel is `inspected` if it is seen in at least one
 usable frame within a distance and viewing-angle threshold that makes defects of the
 target size visible. Everything else is `not_seen`.
+
+**Coverage regions (COV1, `pipeline/qarau_pipeline/coverage.py`).** The `coverage` step runs
+directly after `export`, on the sparse bundle. Every threshold is in `pipeline/config.yaml` →
+`coverage:`; none is in code.
+
+- Regions: a voxel grid of `voxel_size` (bundle units: COLMAP's arbitrary scale, after export's
+  gravity alignment) over the bundle's points; only occupied cells are regions, id `"i_j_k"` =
+  `floor(p / voxel_size)`.
+- A frame **sees** a point when the point is in its frustum (bundle pose, pinhole K from the
+  manifest, `near < depth < far`, projection inside the image; radial distortion ignored) and
+  the frame tracked it in COLMAP (matched there, so no wall in between).
+- A frame is **usable** when it is registered, kept, in no quality-report issue of a kind in
+  `unusable_issues` and its blur score is `>= min_frame_quality` (an image set has no score:
+  its frames count).
+- State: `finding` when a point of a finding (`findings/points.finding.u16`, the project stage)
+  is in the region; else `inspected_ok` when `>= min_frames` usable frames see one of its points
+  and it holds `>= min_points` points; else `not_seen`. `not_seen` is never folded into OK.
+- `<run>/coverage/regions.json` (written atomically: temp file + `os.replace`):
+
+  ```json
+  {"version": 1, "units": "bundle", "voxel_size": 1.0,
+   "thresholds": {"min_frames": 3, "min_frame_quality": 100.0, "min_points": 20,
+                  "near": 0.01, "far": null, "unusable_issues": ["blur", "too_fast", "low_texture"]},
+   "summary": {"inspected_ok": 196, "finding": 0, "not_seen": 289},
+   "regions": [{"id": "0_-1_0", "bounds": {"min": [0, -1, 0], "max": [1, 0, 1]},
+                "state": "inspected_ok", "frame_count": 87, "point_count": 1204,
+                "finding_ids": []}]}
+  ```
+
+- Not yet (COV1-b): the `CoverageRegion` table, the API route, a per-point coverage array in the
+  bundle, the report's not-seen section; `coverage/` is not a storage kind yet (a wiped cache
+  recomputes it). With `workflow.dense` on, coverage stays on the sparse map.
 
 **Registration (monitoring).** Localize new frames against the baseline COLMAP model
 (feature matching + PnP), reconstruct the new partial cloud in the baseline frame, then

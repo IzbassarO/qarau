@@ -1,7 +1,8 @@
 """The RQ job that runs an inspection's workflow steps and mirrors their state to Postgres.
 
-`run_inspection(run_id, from_step)` runs the pipeline steps in order, one subprocess per step
-(`python -m qarau_pipeline step <name> --run <dir> [--force]`, ADR 0022), so the backend
+`run_inspection(run_id, from_step)` runs the pipeline steps in order (S1, the pipeline's
+`product_steps`: probe -> frames -> sparse -> export -> coverage [-> dense]), one subprocess
+per step (`python -m qarau_pipeline step <name> --run <dir> [--force]`, ADR 0022), so the backend
 environment never imports pycolmap. After every transition it writes Run.status
 (queued | running | done | failed), current_step, progress (finished steps / total, 0-100), error
 and the `steps` list (one {name, status, started_at, finished_at, duration_s, error} per step),
