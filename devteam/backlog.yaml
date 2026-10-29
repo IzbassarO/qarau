@@ -1506,9 +1506,12 @@ tasks:
     Owner 2026-10-28: LaunchPad demo; a number the user cannot act on.
 
     '
-  status: in_progress
+  status: done
   owner: dev_app
   run: cont-20261029-094213-dev_app-3
+  branch: devteam/CONF-fix
+  pr: https://github.com/IzbassarO/qarau/pull/99
+  done_at: '2026-10-29'
 - id: UI-evidence-c
   area: app
   title: 'Evidence panel: phone layout, ru/kk/en, full e2e'
