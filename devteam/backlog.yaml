@@ -1928,9 +1928,11 @@ tasks:
     '
   writable:
   - data/runs
-  status: todo
+  status: in_progress
   depends_on:
   - COV1-b
+  owner: dev_pipeline
+  run: cont-20261029-152145-dev_pipeline-2
 - id: D2
   area: core
   title: 'Deploy staging: one VM, compose, HTTPS, backups'
