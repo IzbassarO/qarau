@@ -1471,13 +1471,15 @@ tasks:
     Owner 2026-10-27: part 2 of the UI-evidence split; starts from UI-evidence''s merged panel.
 
     '
-  status: in_progress
+  status: done
   depends_on:
   - UI-evidence
   - ME1
   owner: dev_app
   run: cont-20261029-094213-dev_app-2
   branch: devteam/UI-evidence-b
+  pr: https://github.com/IzbassarO/qarau/pull/98
+  done_at: '2026-10-29'
 - id: CONF-fix
   area: app
   title: No confidence number in the point info panel
