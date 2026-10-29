@@ -1409,12 +1409,12 @@ tasks:
     at 390x844; same functions, layout may differ).
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - RPT1
   - DS1
   owner: dev_app
-  run: cont-20261028-185246-dev_app-1
+  run: cont-20261029-094213-dev_app-1
   branch: devteam/UI-report
 - id: UI-evidence-b
   area: app
