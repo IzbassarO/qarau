@@ -108,7 +108,9 @@ then unattended (`run --continuous` overnight).
   the developer and no CPU work in its processes: long COLMAP, benchmark or e2e work is
   progress, CPU sampled every minute) and `max_round_min` (the longest round). A task may set
   its own in backlog.yaml, e.g. P3e `supervisor: {max_round_min: 180}` (2026-10-18: P3e was
-  killed at 60 min with its refresh done). Developer tokens are counted live: Claude Code runs
+  killed at 60 min with its refresh done). The tester's diff limit (120,000 characters per part,
+  `real.MAX_DIFF`) is overridden the same way: `tester: {max_diff: N}` (UI-report: 180,000,
+  owner 2026-10-29). Developer tokens are counted live: Claude Code runs
   with `--output-format stream-json` (usage per API message; a killed round's output tokens
   come from its session transcript in `~/.claude/projects`, the stream has only the count at
   each message's start), Codex through the `token_count` events of its session rollout file
