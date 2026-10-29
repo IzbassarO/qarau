@@ -344,8 +344,8 @@ def test_decision_and_audit_log_are_append_only(db_url: str, sql: str) -> None:
     assert count == 1
 
 
-AUDIT_ROW = ("INSERT INTO audit_log (id, user_id, created_at, route, object_type, action) "
-             "VALUES (1, 1, CURRENT_TIMESTAMP, 'POST /x', 'x', 'create')")  # fmt: skip
+AUDIT_ROW = ("INSERT INTO audit_log (user_id, created_at, route, object_type, action) "
+             "VALUES (1, CURRENT_TIMESTAMP, 'POST /x', 'x', 'create')")  # fmt: skip
 ANONYMOUS_AUDIT_ROW = (
     "INSERT INTO audit_log (user_id, created_at, route, object_type, action, detail) VALUES "
     "(NULL, CURRENT_TIMESTAMP, 'POST /api/auth/guest', 'event_code', 'event_code.use', "
