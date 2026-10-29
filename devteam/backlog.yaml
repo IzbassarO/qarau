@@ -1398,10 +1398,11 @@ tasks:
     Done when: Vitest for the summary and the three states with a mocked API; a Playwright e2e opens the
     page on
 
-    a mocked API and downloads a fixture PDF; i18n ru/kk/en; tester screenshots of the page in light and
-    dark,
+    a mocked API and downloads a fixture PDF; i18n ru/kk/en; tester screenshots of the page
 
-    ru/kk/en.
+    "/inspections/demo/report" in light and dark, ru/kk/en, at 1440x900
+
+    and 390x844.
 
     Reference: docs/design/screens/report-light.png (design system v8); match it, adjust only alignment
     and size; phone layout per DESIGN.md Responsive (reference docs/design/screens/evidence-phone-light.png

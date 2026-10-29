@@ -191,14 +191,19 @@ developers:
       # seeded (backend/app/seed.py: org "dev", users admin / engineer / viewer, and "Demo site": one
       # inspection on run notre-dame-p3e with one manual finding, 3 evidence frames) for every
       # screenshot session, on a free port ({api_port}); Vite proxies /api to it (QARAU_API_PROXY).
-      # Open dev mode (empty QARAU_API_TOKEN): the tester's login works with any password. Without a
-      # backend the pages showed "could not load sites" / "Status unavailable" (U2, 2026-10-23).
+      # Open dev mode (empty QARAU_API_TOKEN). Without a backend the pages showed "could not load
+      # sites" / "Status unavailable" (U2, 2026-10-23).
       api: >-
         cd backend && export QARAU_DATABASE_URL=sqlite:///{db} QARAU_RUNS_DIR={runs_dir}
         QARAU_ENV=dev QARAU_DEV_ADMIN_TOKEN=dev-admin QARAU_DEV_ENGINEER_TOKEN=dev-engineer
         QARAU_DEV_VIEWER_TOKEN=dev-viewer QARAU_API_TOKEN=""
         && uv run --quiet alembic upgrade head && uv run --quiet python -m app.seed
         && exec uv run --quiet uvicorn app.main:app --host 127.0.0.1 --port {api_port}
+      # The tester signs in as the seeded engineer (the password is the Bearer token: the api's
+      # QARAU_DEV_ENGINEER_TOKEN, a public dev seed value, not a secret), so role-dependent UI is shot
+      # as an engineer sees it. The .env test user matched no seeded user: /api/me 401, role error,
+      # no decision buttons (UI-evidence-b, 2026-10-28). Without `api` the .env test user is used.
+      login: {user: engineer, token: dev-engineer}
       serve: cd web && QARAU_RUNS_DIR={runs_dir} QARAU_API_PROXY=http://127.0.0.1:{api_port} pnpm exec vite --port 5198 --strictPort
       url: http://localhost:5198
       shoot: cd web && node {shoot} {url} {png} {size} 2500 {theme} {lang}

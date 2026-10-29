@@ -300,8 +300,11 @@ then unattended (`run --continuous` overnight).
   the task even if the judge passed. `dev-*.png` are the "before": pipeline
   tasks, the same routes on dev's cached gate benchmark; web tasks, the same routes built from a
   fresh checkout of dev. The tester signs in first (`devteam/shoot.mjs`, A1b login) with
-  `QARAU_TEST_USER` / `QARAU_TEST_PASSWORD` from `.env` (passed in the environment, never
-  printed; missing -> a warning, the page is shot as it is); `"/?signed-out"` shows the login
+  `QARAU_TEST_USER` / `QARAU_TEST_PASSWORD` (passed in the environment, never printed): against
+  the seeded API, its user from `screenshots.login` (dev_app: the seeded engineer, so decision
+  buttons and other role-dependent UI are shot as an engineer sees them; the `.env` user matched
+  no seeded user and `/api/me` answered 401, UI-evidence-b 2026-10-28); otherwise from `.env`
+  (missing -> a warning, the page is shot as it is); `"/?signed-out"` shows the login
   page itself. Plan check: a `/viewer/<run>` route shows the task's own output, i.e. a quick
   benchmark video, or for a task that writes runs a run not in `runs_before_task` (the runs
   dir at the task's start; the snapshot is kept until the task is done).
@@ -311,7 +314,7 @@ then unattended (`run --continuous` overnight).
   (`.state/api/<task>.sqlite`: `alembic upgrade head`, then `python -m app.seed` with org "dev"
   and users admin / engineer / viewer; no sites) on a free port, waits until `/api/runs`
   answers, then starts Vite with `QARAU_API_PROXY` pointing at it; `QARAU_API_TOKEN` is empty
-  (open dev mode), so the tester's login works with any password. Both servers are killed with
+  (open dev mode). Both servers are killed with
   the step. An API that fails to start is a named screenshot problem (the task fails), never a
   page shot without it. Pipeline tasks keep Vite's own `/api/runs` middleware.
 - Loop detection compares failing criteria by their number in the plan (the judge returns it),
