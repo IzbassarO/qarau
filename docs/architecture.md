@@ -398,6 +398,25 @@ shared read-only token); the row never feeds back into the PDF, so the same data
 report time always give the same hash. 404 for an unknown inspection, 422 for a missing or unknown
 `lang`, 401 without a valid token. Every report is version 1 until reports are issued (signed off).
 
+**Event organizations and guests (`backend/app/event.py`, DEMO1, ADR 0034).** For a public demo
+(LaunchPad, 2026-11-06) guests sign in with a short event code instead of a user account.
+`uv run python -m app.event create --name launchpad --expires 2026-11-06T23:59-05:00 --max-guests
+300 --runs <id>,<id>` is the only way to make an **event organization**: it checks that every run
+exists and is `done`, then in one transaction inserts the organization (default name "LaunchPad
+demo") with `is_event = true`, an `event_code` row (name, SHA-256 of the code, `expires_at` in
+UTC, `max_guests`) and one `event_code_run` row per shared run, and prints the code once
+(8 characters from `secrets`, alphabet without 0/O/1/I/L). Bad input exits 2 and writes nothing.
+Migration 0007 holds the rules in the database: `organization.is_event` is set only at INSERT
+(a trigger rejects any UPDATE that changes it; no API body or seed sets it), `event_code` and
+`guest` rows are refused outside an event organization, and `finding`, `decision` and `report` get
+a nullable `guest_id` (the guest's sandbox). The decision trigger is reworked: UPDATE is always
+refused; DELETE only for a decision whose `guest_id` is set and whose user belongs to that
+guest's event organization, so `app.event purge` can remove guest rows and nothing else.
+`audit_log` stays fully append-only everywhere: a code use is logged by a user that purge keeps.
+Part 2 adds the guest sign-in (401 for an unknown or expired code, rate limits per IP and per
+code, each use in the audit log), the `guest` role (view shared runs, mark, decide, get the PDF;
+no upload, processing or other organizations; another guest's rows are 404) and `purge`.
+
 ## Benchmark
 
 `python -m qarau_pipeline benchmark --data D --out O` runs every reference video in

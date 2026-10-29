@@ -2,7 +2,8 @@
 
 Portable types only (sa.JSON, non-native enums), so the same models run on Postgres and on the
 SQLite file the tests use. `decision` and `audit_log` are append-only: the migration adds
-triggers that reject UPDATE and DELETE.
+triggers that reject UPDATE and DELETE (since 0007 a guest's decision in an event organization
+may be deleted, for `app.event purge`; ADR 0034).
 """
 
 import enum
@@ -64,9 +65,13 @@ def enum_type(e: type[enum.StrEnum]) -> sa.Enum:
 
 
 class Organization(Base):
+    """`is_event` marks an organization made by `python -m app.event create` (guest access,
+    ADR 0034). Only that CLI sets it, at INSERT; a trigger (migration 0007) rejects any change."""
+
     __tablename__ = "organization"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(sa.String(200), unique=True)
+    is_event: Mapped[bool] = mapped_column(sa.Boolean, default=False, server_default=sa.false())
 
 
 class User(Base):
@@ -134,6 +139,7 @@ class Finding(Base):
     area_m2: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
     scale_source: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     points: Mapped[Any] = mapped_column(sa.JSON, default=list)  # bundle point indices
+    guest_id: Mapped[int | None] = mapped_column(sa.ForeignKey("guest.id"), nullable=True)
 
 
 class CoverageState(enum.StrEnum):
@@ -191,6 +197,7 @@ class Decision(Base):
     new_class: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     new_severity: Mapped[Severity | None] = mapped_column(enum_type(Severity), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=now)
+    guest_id: Mapped[int | None] = mapped_column(sa.ForeignKey("guest.id"), nullable=True)
 
 
 class ScaleReference(Base):
@@ -216,6 +223,46 @@ class Report(Base):
     report_number: Mapped[str] = mapped_column(sa.String(32))
     version: Mapped[int] = mapped_column(sa.Integer)
     created_by: Mapped[int | None] = mapped_column(sa.ForeignKey("user.id"), nullable=True)
+    guest_id: Mapped[int | None] = mapped_column(sa.ForeignKey("guest.id"), nullable=True)
+
+
+class EventCode(Base):
+    """A guest access code of an event organization (migration 0007). Only the SHA-256 of the
+    code is stored; the code itself is printed once by `python -m app.event create`."""
+
+    __tablename__ = "event_code"
+    __table_args__ = (sa.UniqueConstraint("id", "organization_id"),)  # target of guest's FK
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(sa.ForeignKey("organization.id"))
+    name: Mapped[str] = mapped_column(sa.String(64), unique=True)
+    code_sha256: Mapped[str] = mapped_column(sa.CHAR(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True))
+    max_guests: Mapped[int] = mapped_column(sa.Integer)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=now)
+
+
+class EventCodeRun(Base):
+    """A real processed run shared read-only with the guests of an event code."""
+
+    __tablename__ = "event_code_run"
+    event_code_id: Mapped[int] = mapped_column(sa.ForeignKey("event_code.id"), primary_key=True)
+    run_id: Mapped[str] = mapped_column(sa.ForeignKey("run.id"), primary_key=True)
+
+
+class Guest(Base):
+    """One guest's sandbox in an event organization: the findings, decisions and reports the
+    guest makes carry its id. The database refuses a guest outside an event organization."""
+
+    __tablename__ = "guest"
+    __table_args__ = (
+        sa.ForeignKeyConstraint(
+            ["event_code_id", "organization_id"], ["event_code.id", "event_code.organization_id"]
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(sa.ForeignKey("organization.id"))
+    event_code_id: Mapped[int] = mapped_column(sa.Integer)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=now)
 
 
 class AuditLog(Base):
