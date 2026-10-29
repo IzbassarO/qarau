@@ -336,6 +336,7 @@
   "decisions.verdict.reject": "Қабылданбады",
   "decisions.verdict.reclass": "Сыныбы өзгертілді",
   "decisions.comment": "Түсініктеме",
+  "decisions.commentPlaceholder": "Шешіміңізді түсіндіріңіз",
   "decisions.commentHint": "Қабылдамау және сыныбын өзгерту үшін міндетті.",
   "decisions.commentRequired": "Ақауды қабылдамау немесе сыныбын өзгерту алдында түсініктеме қосыңыз.",
   "decisions.class": "Жаңа сынып",

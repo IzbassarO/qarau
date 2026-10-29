@@ -336,6 +336,7 @@
   "decisions.verdict.reject": "Отклонено",
   "decisions.verdict.reclass": "Класс изменён",
   "decisions.comment": "Комментарий",
+  "decisions.commentPlaceholder": "Объясните своё решение",
   "decisions.commentHint": "Обязателен при отклонении и изменении класса.",
   "decisions.commentRequired": "Добавьте комментарий перед отклонением или изменением класса находки.",
   "decisions.class": "Новый класс",

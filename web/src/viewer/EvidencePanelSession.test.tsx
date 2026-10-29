@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../auth/AuthProvider';
-import { fetchSessionRole } from '../auth/auth';
+import { getMe, meOptions } from '../lib/me';
 import { setLang } from '../i18n';
 import type { Finding } from '../lib/findings';
 import fixture from '../test/fixtures/finding.json';
@@ -109,16 +109,18 @@ it('marks the log busy during a repeated /api/me read even when a role is cached
   );
   const client = mountPanel();
   const log = screen.getByRole('region', { name: 'Decision log' });
+  const panel = screen.getByRole('complementary', { name: 'Finding' });
   await waitFor(() => expect(log.getAttribute('aria-busy')).toBe('false'));
-  let refresh!: ReturnType<typeof fetchSessionRole>;
+  expect(panel.getAttribute('aria-busy')).toBe('false');
+  let refresh!: ReturnType<typeof getMe>;
   act(() => {
     refresh = client.fetchQuery({
-      queryKey: ['session-role'],
-      queryFn: ({ signal }) => fetchSessionRole(signal),
+      ...meOptions(),
       staleTime: 0,
     });
   });
   await waitFor(() => expect(log.getAttribute('aria-busy')).toBe('true'));
+  expect(panel.getAttribute('aria-busy')).toBe('true');
   expect(identityReads).toBe(2);
   expect(screen.getByRole('button', { name: 'Confirm' })).toBeTruthy();
   await act(async () => {
@@ -126,6 +128,7 @@ it('marks the log busy during a repeated /api/me read even when a role is cached
     await refresh;
   });
   await waitFor(() => expect(log.getAttribute('aria-busy')).toBe('false'));
+  expect(panel.getAttribute('aria-busy')).toBe('false');
 });
 
 it.each(['/api/me', '/api/findings/701/decisions'])(
@@ -147,8 +150,10 @@ it.each(['/api/me', '/api/findings/701/decisions'])(
     );
     mountPanel();
     const log = screen.getByRole('region', { name: 'Decision log' });
+    const panel = screen.getByRole('complementary', { name: 'Finding' });
     expect(log.getAttribute('aria-busy')).toBe('true');
     if (pendingPath === '/api/me') {
+      expect(panel.getAttribute('aria-busy')).toBe('true');
       await screen.findByText('No decisions yet');
       for (const name of ['Confirm', 'Reject', 'Reclass'])
         expect(screen.queryByRole('button', { name })).toBeNull();
@@ -159,6 +164,7 @@ it.each(['/api/me', '/api/findings/701/decisions'])(
     expect(log.getAttribute('aria-busy')).toBe('true');
     finish(Response.json(pendingPath === '/api/me' ? me : []));
     await waitFor(() => expect(log.getAttribute('aria-busy')).toBe('false'));
+    expect(panel.getAttribute('aria-busy')).toBe('false');
     expect(screen.getByRole('region', { name: 'Decision log' })).toBe(log);
     expect(screen.getByText('No decisions yet')).toBeTruthy();
     for (const name of ['Confirm', 'Reject', 'Reclass'])
@@ -188,6 +194,9 @@ it.each(['/api/me', '/api/findings/701/decisions'])(
     const log = screen.getByRole('region', { name: 'Decision log' });
     await screen.findByRole('alert');
     await waitFor(() => expect(log.getAttribute('aria-busy')).toBe('false'));
+    expect(screen.getByRole('complementary', { name: 'Finding' }).getAttribute('aria-busy')).toBe(
+      'false',
+    );
     expect(screen.getByRole('alert').textContent).toMatch(/[a-z]+ [a-z]+/i);
     expect(screen.queryByText('Loading decisions')).toBeNull();
     if (failedPath === '/api/me') {

@@ -3,18 +3,7 @@ export interface Credentials {
   password: string;
 }
 
-export type Role = 'viewer' | 'engineer' | 'admin';
-
-/** ME1 supplies the role explicitly; never infer permissions from a username/token. */
-export async function fetchSessionRole(signal?: AbortSignal): Promise<Role> {
-  const response = await fetch('/api/me', { signal, headers: authHeader() });
-  const body: unknown = await response.json();
-  if (response.ok && body && typeof body === 'object' && 'role' in body) {
-    if (body.role === 'viewer' || body.role === 'engineer' || body.role === 'admin')
-      return body.role;
-  }
-  throw new AuthError('connection');
-}
+export type { Role } from '../lib/me';
 
 export class AuthError extends Error {
   constructor(public code: 'required' | 'invalidCredentials' | 'connection' | 'storage') {

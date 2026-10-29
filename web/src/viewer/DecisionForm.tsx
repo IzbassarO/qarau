@@ -68,6 +68,7 @@ export function DecisionForm({ findingId }: { findingId: number }) {
         <textarea
           id={`${id}-comment`}
           className="qv-textarea"
+          placeholder={t('decisions.commentPlaceholder')}
           value={comment}
           maxLength={2000}
           disabled={mutation.isPending}

@@ -8,15 +8,8 @@ import {
   type ReactNode,
 } from 'react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
-import {
-  fetchSessionRole,
-  login,
-  logout,
-  sessionHeader,
-  subscribeToAuth,
-  type Credentials,
-  type Role,
-} from './auth';
+import { login, logout, sessionHeader, subscribeToAuth, type Credentials, type Role } from './auth';
+import { meOptions } from '../lib/me';
 
 interface AuthContextValue {
   signedIn: boolean;
@@ -32,7 +25,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const roleLoading = useIsFetching({ queryKey: ['session-role'] }) > 0;
+  const roleLoading = useIsFetching({ queryKey: meOptions().queryKey }) > 0;
   const header = useSyncExternalStore(subscribeToAuth, sessionHeader, () => null);
   const [identity, setIdentity] = useState<{
     session: string;
@@ -43,12 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadRole = useCallback(async () => {
     if (header === null) return;
     try {
-      const role = await queryClient.fetchQuery({
-        queryKey: ['session-role'],
-        queryFn: ({ signal }) => fetchSessionRole(signal),
-        retry: false,
-        staleTime: 30_000,
-      });
+      const { role } = await queryClient.fetchQuery(meOptions());
       if (sessionHeader() === header) setIdentity({ session: header, role, error: false });
     } catch {
       if (sessionHeader() === header) setIdentity({ session: header, role: null, error: true });

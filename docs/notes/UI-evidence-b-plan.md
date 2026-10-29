@@ -1,5 +1,23 @@
 # UI-evidence-b
 
+Continuation audit (2026-10-29): preserve the existing implementation and tests. Close the
+remaining public-client contract gaps with listDecisions and a shared lib/me.ts getMe /
+meOptions used by role resolution. Mark the evidence panel itself busy during identity
+resolution, and add the missing translated comment placeholder. Verify these additions
+with transport and pending/error tests, then run lint, typecheck, test and build. Existing
+MIT dependencies permit commercial use; no dependencies, API writes or servers are needed.
+
+Audit completed: listDecisions is the query's GET client; lib/me.ts exports getMe and
+meOptions, and AuthProvider resolves roles through that shared query. The existing role
+transport tests moved to me.test.ts with their assertions preserved and now check the
+full identity fixture. The evidence panel itself tracks initial and repeated role loading
+and clears aria-busy on success or failure; session tests assert both panel and log
+readiness. The comment placeholder has en/ru/kk keys. No layout or design values changed.
+Final pnpm lint, pnpm typecheck, pnpm test (48 files, 855 tests) and pnpm build pass;
+git diff --check passes. The existing bundle-size advisory remains. No real decision was
+posted, no server started, and no screenshot taken. Kerege owns e2e/screenshots; the runner
+credential mismatch documented below remains outside the permitted change scope.
+
 Add typed decision GET/POST calls using the session transport, an oldest-first append-only
 log, and engineer/admin actions below the evidence. Require a comment for reject/reclass,
 offer the API's class choices for reclass, and invalidate finding and decision queries after

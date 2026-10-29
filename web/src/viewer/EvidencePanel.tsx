@@ -17,7 +17,7 @@ import { DecisionForm } from './DecisionForm';
 
 function Decisions({ findingId }: { findingId: number }) {
   const { t } = useI18n();
-  const { role, roleLoading, roleError } = useAuth({ resolveRole: true });
+  const { role, roleLoading, roleError } = useAuth();
   const query = useQuery(decisionsOptions(findingId));
   return (
     <>
@@ -99,14 +99,18 @@ export function EvidencePanel({
   // Keep terminal states terminal even if a caller starts a background request.
   const [settled, setSettled] = useState(!loading);
   if (!settled && (!loading || error || findings !== undefined)) setSettled(true);
-  if (selection === null) return null;
   const finding =
     selection === 'first'
       ? findings?.[0]
       : findings?.find((finding) => String(finding.id) === selection);
+  const { role, roleLoading, roleError } = useAuth({ resolveRole: !!finding && !error });
+  if (selection === null) return null;
+  const busy =
+    (!settled && loading && !error && findings === undefined) ||
+    (!!finding && !error && (roleLoading || (role === null && !roleError)));
   const statusKey = finding ? (`evidence.status.${finding.status}` as Key) : null;
   return (
-    <aside className="qv-detail evidence-panel" aria-label={t('evidence.title')}>
+    <aside className="qv-detail evidence-panel" aria-label={t('evidence.title')} aria-busy={busy}>
       <div className="qv-detail__head evidence-head">
         <span className="qv-caption qv-muted">
           {t('evidence.title')}

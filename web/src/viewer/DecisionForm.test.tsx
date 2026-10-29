@@ -64,6 +64,9 @@ it.each(['Reject', 'Reclass'])(
 it('reject with Rust is paint posts that literal comment and the reject verdict', async () => {
   vi.mocked(api.postDecision).mockResolvedValue(decisions[2] as Decision);
   mount(<DecisionForm findingId={701} />);
+  expect(screen.getByPlaceholderText('Explain your decision')).toBe(
+    screen.getByLabelText('Comment'),
+  );
   fireEvent.change(screen.getByLabelText('Comment'), { target: { value: 'Rust is paint' } });
   fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
   await waitFor(() =>

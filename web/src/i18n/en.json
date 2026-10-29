@@ -336,6 +336,7 @@
   "decisions.verdict.reject": "Rejected",
   "decisions.verdict.reclass": "Reclassified",
   "decisions.comment": "Comment",
+  "decisions.commentPlaceholder": "Explain your decision",
   "decisions.commentHint": "Required for reject and reclass.",
   "decisions.commentRequired": "Add a comment before rejecting or reclassifying this finding.",
   "decisions.class": "New class",

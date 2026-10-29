@@ -36,7 +36,7 @@ export function decisionErrorKey(error: unknown): Key {
   return 'decisions.error.connection';
 }
 
-export async function getDecisions(findingId: number, signal?: AbortSignal): Promise<Decision[]> {
+export async function listDecisions(findingId: number, signal?: AbortSignal): Promise<Decision[]> {
   return (await readApi(`/api/findings/${findingId}/decisions`, signal)) as Decision[];
 }
 
@@ -89,7 +89,7 @@ export const findingKeys = {
 export const decisionsOptions = (id: number) =>
   queryOptions({
     queryKey: findingKeys.decisions(id),
-    queryFn: ({ signal }) => getDecisions(id, signal),
+    queryFn: ({ signal }) => listDecisions(id, signal),
     retry: false,
   });
 

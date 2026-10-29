@@ -12,7 +12,7 @@ let role: Role = 'viewer';
 vi.mock('../auth/AuthProvider', () => ({ useAuth: () => ({ role, roleError: false }) }));
 vi.mock('../lib/findings', async (original) => ({
   ...(await original<typeof import('../lib/findings')>()),
-  getDecisions: vi.fn().mockResolvedValue([]),
+  listDecisions: vi.fn().mockResolvedValue([]),
   decisionsOptions: (id: number) => ({ queryKey: ['decisions', id], queryFn: async () => [] }),
 }));
 
