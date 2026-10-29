@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { fetchReportPdf, fetchReportSummary, reportInspectionForRun } from './report';
 import fixture from '../test/fixtures/report-summary.json';
+import coverageFixture from '../test/fixtures/report-coverage.json';
 import { mockReportApi } from '../test/reportApi';
 
 afterEach(() => {
@@ -14,7 +15,7 @@ it('maps 200 to a PDF Blob and the exact hash from X-Report-SHA256, using the se
   const result = await fetchReportPdf(37, 'ru');
   expect(result.state).toBe('ready');
   if (result.state !== 'ready') throw new Error('Expected ready');
-  expect(result.sha256).toBe(fixture.hash);
+  expect(result.hash).toBe(fixture.hash);
   expect(result.blob).toBeInstanceOf(Blob);
   expect(result.blob.type).toBe('application/pdf');
   expect(await result.blob.text()).toBe(fixture.pdf);
@@ -88,6 +89,7 @@ it('loads literal summary fields and decision histories from the existing JSON e
     '/api/inspections/37',
     '/api/sites',
     '/api/inspections/37/findings',
+    '/api/inspections/37/coverage',
     '/api/findings/71/decisions',
     '/api/findings/72/decisions',
     '/api/findings/73/decisions',
@@ -102,6 +104,31 @@ it.each(['demo', 'notre-dame'])(
     expect(summary.inspectionId).toBe(37);
     expect(summary.object).toBe(fixture.sites[0].name);
     expect(fetch).toHaveBeenCalledWith('/api/inspections/37/runs', expect.anything());
+  },
+);
+
+it('returns the server coverage totals and region data unchanged', async () => {
+  const fetch = mockReportApi();
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (input) =>
+    String(input) === '/api/inspections/37/coverage'
+      ? Response.json(coverageFixture)
+      : original(input),
+  );
+  expect((await fetchReportSummary('37')).coverage).toEqual(coverageFixture);
+});
+
+it.each([403, 500])(
+  'preserves coverage HTTP %i errors rather than claiming it was not computed',
+  async (status) => {
+    const fetch = mockReportApi();
+    const original = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (input) =>
+      String(input) === '/api/inspections/37/coverage'
+        ? Response.json({ detail: 'Coverage data is unavailable' }, { status })
+        : original(input),
+    );
+    await expect(fetchReportSummary('37')).rejects.toThrow('Coverage data is unavailable');
   },
 );
 

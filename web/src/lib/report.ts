@@ -1,10 +1,12 @@
 import { apiErrorMessage, fetchApi } from './api';
 import type { Lang } from '../i18n';
 import type { Finding, FindingClass, Severity } from './findings';
+import { listInspectionFindings } from './findings';
+import { getInspectionCoverage, type InspectionCoverage } from './inspections';
 
 export type ReportPdf =
   | { state: 'generating' }
-  | { state: 'ready'; blob: Blob; sha256: string }
+  | { state: 'ready'; blob: Blob; hash: string }
   | { state: 'failed'; message: string };
 
 export interface ReportDecision {
@@ -28,8 +30,8 @@ export interface ReportSummary {
   object: string | null;
   date: string;
   findings: ReportFinding[];
-  /** RPT1 has no coverage JSON endpoint yet. Never estimate it in the client. */
-  coverage: string | null;
+  /** Server-supplied prose or COV1-b totals, never client-computed coverage. */
+  coverage: string | InspectionCoverage | null;
 }
 
 interface Inspection {
@@ -110,9 +112,10 @@ async function inspectionForReport(id: string, signal?: AbortSignal): Promise<In
 
 export async function fetchReportSummary(id: string, signal?: AbortSignal): Promise<ReportSummary> {
   const inspection = await inspectionForReport(id, signal);
-  const [sites, findings] = await Promise.all([
+  const [sites, findings, coverage] = await Promise.all([
     json<{ id: number; name: string }[]>('/api/sites', signal),
-    json<Finding[]>(`/api/inspections/${inspection.id}/findings`, signal),
+    listInspectionFindings(inspection.id, signal),
+    getInspectionCoverage(inspection.id, signal),
   ]);
   return {
     inspectionId: inspection.id,
@@ -124,7 +127,7 @@ export async function fetchReportSummary(id: string, signal?: AbortSignal): Prom
         decisions: await json<ReportDecision[]>(`/api/findings/${finding.id}/decisions`, signal),
       })),
     ),
-    coverage: null,
+    coverage,
   };
 }
 
@@ -140,10 +143,10 @@ export async function fetchReportPdf(
     );
     if (response.status === 202) return { state: 'generating' };
     if (!response.ok) throw new ReportApiError(await apiErrorMessage(response), response.status);
-    const sha256 = response.headers.get('X-Report-SHA256');
-    if (!sha256 || !response.headers.get('Content-Type')?.includes('application/pdf'))
+    const hash = response.headers.get('X-Report-SHA256');
+    if (!hash || !response.headers.get('Content-Type')?.includes('application/pdf'))
       return { state: 'failed', message: '' };
-    return { state: 'ready', blob: await response.blob(), sha256 };
+    return { state: 'ready', blob: await response.blob(), hash };
   } catch (error) {
     if (signal?.aborted || error instanceof ReportApiError) throw error;
     return { state: 'failed', message: '' };

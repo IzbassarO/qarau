@@ -3,6 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import { readDenseFixture } from '../src/fixtures/dense-bundle/readFixture';
 import fixture from '../src/test/fixtures/report-summary.json' with { type: 'json' };
+import coverageFixture from '../src/test/fixtures/report-coverage.json' with { type: 'json' };
 
 // Original, hand-authored one-page PDF. No third-party document content.
 const pdf = readFileSync(new URL('../src/test/fixtures/report.pdf', import.meta.url));
@@ -102,6 +103,35 @@ const locales = [
     ready: 'Есеп дайын.',
   },
 ] as const;
+
+test('demo report shows API coverage and downloads the fixture PDF', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('qarau.lang', 'en');
+    sessionStorage.setItem('qarau.auth.session', 'Bearer report-test-session');
+  });
+  await mockApi(page);
+  await page.route('**/api/inspections/37/coverage', (route) =>
+    route.fulfill({ json: coverageFixture }),
+  );
+  await page.goto('/inspections/demo/report');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Inspection report');
+  await expect(
+    page.getByText('Inspected and clear: 61.5 %. Findings: 23.1 %. Not seen: 15.4 %.'),
+  ).toBeVisible();
+  await expect(page.getByText('Areas not seen: north-wall-upper')).toBeVisible();
+  await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
+  await expect(page.getByTitle(hash, { exact: true })).toHaveText('5e317abc851b…fef9fb6c');
+  const link = page.getByRole('link', { name: 'Download PDF', exact: true });
+  await expect(link).toHaveAttribute('download', 'report-demo-en.pdf');
+  const downloadEvent = page.waitForEvent('download');
+  await link.click();
+  const download = await downloadEvent;
+  expect(download.suggestedFilename()).toBe('report-demo-en.pdf');
+  expect(await download.failure()).toBeNull();
+  expect((await stat((await download.path())!)).size).toBe(606);
+  expect(await readFile((await download.path())!)).toEqual(pdf);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
 
 for (const locale of locales) {
   for (const theme of ['light', 'dark'] as const) {

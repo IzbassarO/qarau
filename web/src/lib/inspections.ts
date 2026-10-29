@@ -3,7 +3,30 @@ import type { Source, Stats } from './bundle';
 import type { ProcessingRunPayload, ProcessingStagePayload } from './processing';
 import { authHeader } from '../auth/auth';
 import { listSites, type SiteOption } from './sites';
-import { ApiUnavailableError, readApi } from './api';
+import { ApiUnavailableError, apiErrorMessage, fetchApi, readApi } from './api';
+
+/** COV1-b returns coverage percentages; clients never infer them from findings. */
+export interface InspectionCoverage {
+  computed: boolean;
+  totals: Record<'inspected_ok' | 'finding' | 'not_seen', number>;
+  regions: {
+    id: string;
+    state: 'inspected_ok' | 'finding' | 'not_seen';
+    frame_count: number;
+    bounds: { min: number[]; max: number[] };
+  }[];
+}
+
+export async function getInspectionCoverage(
+  id: number,
+  signal?: AbortSignal,
+): Promise<InspectionCoverage | null> {
+  const response = await fetchApi(`/api/inspections/${id}/coverage`, signal);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(await apiErrorMessage(response));
+  const coverage = (await response.json()) as InspectionCoverage;
+  return coverage.computed ? coverage : null;
+}
 
 export type InspectionStatus = 'uploaded' | 'queued' | 'running' | 'done' | 'failed' | 'unknown';
 

@@ -2,7 +2,7 @@
 .inspections-list-row {
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.5fr) minmax(
       0,
-      1fr
+      var(--layout-sidebar)
     );
   padding-block: var(--space-2);
 }
@@ -40,6 +40,15 @@
 }
 .inspections-list-row > :last-child[role='columnheader'] {
   text-align: right;
+}
+
+@media (min-width: 768px) {
+  .inspections-list-action {
+    flex-wrap: nowrap;
+  }
+  .inspections-list-action .qv-btn {
+    white-space: nowrap;
+  }
 }
 
 @media (max-width: 767px) {

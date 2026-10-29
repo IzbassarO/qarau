@@ -8,6 +8,7 @@ import { setLang, type Lang } from '../i18n';
 import * as reportApi from '../lib/report';
 import { AppShell } from '../shell/AppShell';
 import fixture from '../test/fixtures/report-summary.json';
+import coverageFixture from '../test/fixtures/report-coverage.json';
 import { fixturePdf, mockReportApi } from '../test/reportApi';
 import { ReportPage } from './ReportPage';
 
@@ -147,6 +148,80 @@ it('shows coverage not computed for the fixture’s null coverage', async () => 
   mockReportApi();
   renderReport();
   expect(await screen.findByText('Coverage not computed')).toBeTruthy();
+});
+
+it.each([
+  ['en', 'Inspected and clear: 61.5 %. Findings: 23.1 %. Not seen: 15.4 %.'],
+  ['ru', 'Осмотрено без находок: 61.5 %. С находками: 23.1 %. Не осмотрено: 15.4 %.'],
+  ['kk', 'Ақаусыз тексерілген: 61.5 %. Ақаулар бар: 23.1 %. Қаралмаған: 15.4 %.'],
+] as const)('shows the coverage API totals and not-seen areas in %s', async (lang, line) => {
+  setLang(lang);
+  const fetch = mockReportApi();
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (input) =>
+    String(input) === '/api/inspections/37/coverage'
+      ? Response.json(coverageFixture)
+      : original(input),
+  );
+  renderReport();
+  expect(await screen.findByText(line)).toBeTruthy();
+  expect(screen.getByText(/north-wall-upper/)).toBeTruthy();
+  expect(screen.queryByText(/north-wall-lower/)).toBeNull();
+  expect(fetch).toHaveBeenCalledWith(
+    '/api/inspections/37/coverage',
+    expect.objectContaining({ headers: { Authorization: 'Bearer test-report-session' } }),
+  );
+});
+
+it('shows coverage not computed when the coverage API explicitly reports no regions', async () => {
+  const fetch = mockReportApi();
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (input) =>
+    String(input) === '/api/inspections/37/coverage'
+      ? Response.json({ computed: false, totals: {}, regions: [] })
+      : original(input),
+  );
+  renderReport();
+  expect(await screen.findByText('Coverage not computed')).toBeTruthy();
+  expect(screen.queryByText(/Inspected and clear/)).toBeNull();
+});
+
+it('renders one critical and one watch finding with decisions beside the API coverage line', async () => {
+  const fetch = mockReportApi();
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (input) => {
+    if (String(input) === '/api/inspections/37/coverage') return Response.json(coverageFixture);
+    if (String(input) === '/api/inspections/37/findings')
+      return Response.json([fixture.findings[0], fixture.findings[1]]);
+    return original(input);
+  });
+  renderReport();
+  await screen.findByText('Report is ready.');
+  expect(screen.getAllByText('Tank T-104, north wall')).toHaveLength(2);
+  expect(screen.getByText(/21 October 2026/)).toBeTruthy();
+  const critical = screen.getByRole('region', { name: 'Critical' });
+  expect(within(critical).getByText('Findings: 1')).toBeTruthy();
+  expect(within(critical).getByText('Confirmed')).toBeTruthy();
+  expect(within(critical).getByText('Alan Bekov, confirmed')).toBeTruthy();
+  const watch = screen.getByRole('region', { name: 'Watch' });
+  expect(within(watch).getByText('Findings: 1')).toBeTruthy();
+  expect(within(watch).getByText('Rejected')).toBeTruthy();
+  expect(within(watch).getByText('Dana Sadyk, rejected')).toBeTruthy();
+  expect(
+    screen.getByText('Inspected and clear: 61.5 %. Findings: 23.1 %. Not seen: 15.4 %.'),
+  ).toBeTruthy();
+});
+
+it('shows the literal reconstruction API failure and clears the busy region', async () => {
+  mockReportApi(() =>
+    Response.json({ detail: 'Report generation failed: no reconstruction' }, { status: 409 }),
+  );
+  renderReport();
+  expect(await screen.findByText('Report generation failed: no reconstruction')).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'PDF preview' }).getAttribute('aria-busy')).toBe(
+    'false',
+  );
+  expect(screen.queryByTitle('PDF preview')).toBeNull();
 });
 
 it('previews and downloads the same PDF Blob with the header hash and route filename', async () => {

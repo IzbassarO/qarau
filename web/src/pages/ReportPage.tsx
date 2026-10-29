@@ -81,8 +81,8 @@ export function ReportPage() {
           {state.state === 'ready' && (
             <span className="qv-caption qv-muted report-hash">
               {t('report.hash')}{' '}
-              <code className="qv-mono" title={state.sha256}>
-                {state.sha256.slice(0, 12)}…{state.sha256.slice(-8)}
+              <code className="qv-mono" title={state.hash}>
+                {state.hash.slice(0, 12)}…{state.hash.slice(-8)}
               </code>
             </span>
           )}
@@ -222,7 +222,29 @@ export function ReportPage() {
                 </section>
               ))}
               <h2>{t('report.coverage')}</h2>
-              <p>{data.coverage ?? t('report.coverageNotComputed')}</p>
+              {typeof data.coverage === 'string' ? (
+                <p>{data.coverage}</p>
+              ) : data.coverage?.computed ? (
+                <>
+                  <p>
+                    {t('report.coverageTotals')
+                      .replace('{inspected}', String(data.coverage.totals.inspected_ok))
+                      .replace('{finding}', String(data.coverage.totals.finding))
+                      .replace('{unseen}', String(data.coverage.totals.not_seen))}
+                  </p>
+                  {data.coverage.regions.some((region) => region.state === 'not_seen') && (
+                    <p>
+                      {t('report.notSeenRegions')}{' '}
+                      {data.coverage.regions
+                        .filter((region) => region.state === 'not_seen')
+                        .map((region) => region.id)
+                        .join(', ')}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p>{t('report.coverageNotComputed')}</p>
+              )}
             </>
           )}
         </article>

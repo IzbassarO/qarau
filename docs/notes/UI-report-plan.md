@@ -12,8 +12,8 @@ backend is read-only. No report editing, XLSX, email, new dependencies or models
 2. Load the summary from inspection, sites, findings and append-only decisions
    endpoints. Display object/site name, date, severity groups and counts, returned
    statuses/deciders and scale sources. Never replay decisions or compute coverage.
-   There is no coverage JSON endpoint yet, so show localized coverage-not-computed;
-   render a supplied coverage line verbatim when available.
+   Read COV1-b's coverage percentages and not-seen regions; show localized
+   coverage-not-computed for 404/computed=false. Render supplied prose verbatim.
 3. Register `/inspections/:id/report` behind `RequireAuth`. Keep language choice
    independent of UI language. Share one Blob URL between iframe and native download
    anchor; revoke it on replacement/unmount. Generating sets `aria-busy=true`; ready
@@ -91,3 +91,27 @@ passed after the readiness changes. No listening server was started.
 Screenshot evidence still must be supplied by the tester. The developer does not
 capture screenshots or modify protected tester routes/configuration. The prior
 size-gate correction consolidated historical notes; keep this note concise.
+
+## Continuation after merging dev
+
+The last tester packet passed functional checks and returned the task because its
+captures omitted the report route. Tester-owned screenshots remain outstanding.
+COV1-b is now merged: connect its coverage API, display the returned percentages
+and not-seen region identifiers without calculating coverage, and retain the
+not-computed message for 404 or computed=false. Add API-backed fixture tests for
+both paths and the required literal PDF failure. Reuse the findings client, keep
+desktop list actions aligned in one row, then rerun the required local gates and
+Playwright discovery. No new dependencies; installed licence metadata confirms
+React/React Router/Vitest MIT and Playwright Apache-2.0 (commercial use allowed).
+
+Continuation checks passed: lint, typecheck, 47 Vitest files / 896 tests, production
+build, and diff-check. Playwright discovers 30 report scenarios (298 overall);
+browser execution belongs to Kerege. No server or screenshot capture was started.
+ScaleReference source and decision user names are exposed by the existing API;
+there is no missing-field gap to flag for those summary values.
+
+Tester handoff: capture `/inspections/demo/report?theme=light&lang=ru`, varying
+theme over light/dark and lang over ru/kk/en at both 1440x900 and 390x844 (12
+captures). Authenticate first, wait for `.report-state[aria-busy="false"]` and a
+Blob iframe/download link, and capture the report route itself. The prior packet
+contains only list/viewer captures and cannot establish the report visual criterion.

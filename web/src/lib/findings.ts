@@ -40,7 +40,7 @@ export const findingKeys = {
   detail: (id: number) => ['findings', 'detail', id] as const,
 };
 
-async function listInspectionFindings(
+export async function listInspectionFindings(
   inspectionId: number,
   signal?: AbortSignal,
 ): Promise<Finding[]> {
