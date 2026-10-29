@@ -7,7 +7,10 @@ Newest first. Keep it short.
 - **Backlog:** COV-ui (app, after CONF-fix: coverage layer, legend, % totals, `coverage` step
   named), TEST-v0008 (core: the 0008 migration test on Postgres), DEMO-cov (core: the dev seed
   runs the real coverage step on notre-dame-p3e). Queue: dev_pipeline TEST-v0008, DEMO-cov, D2
-  (held); dev_app CONF-fix, COV-ui, UI-evidence-c, UI-mark, DEMO1-ui.
+  (held); dev_app UI-report, UI-evidence-c, UI-mark, DEMO1-ui, COV-ui last.
+- **UI-report:** pdf.js (pdfjs-dist, Apache-2.0) renders the PDF's first page into a canvas, no
+  iframe (headless Chromium has no PDF viewer). Its own tester diff limit `tester: {max_diff:
+  180000}` (new per-task override, default 120,000 unchanged).
 - **`make local LAN=1`** never runs open dev mode: an empty `QARAU_API_TOKEN` gets a generated
   one (`QARAU_LAN_API_TOKEN` in data/local/dev-logins.env); only dev logins and event codes get
   in. Without `LAN=1` nothing changes.

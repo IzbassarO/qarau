@@ -14,9 +14,9 @@ notes: 'Demo chain (owner, 2026-10-22). Product first, then metres: website + de
 
   Queue for the brain (todo tasks, file order): B1, U2, S1, DS1, D1, DEF1-api, UI-inspections, REV1-api,
 
-  UI-evidence, ME1, UI-report, UI-evidence-b, CONF-fix, COV-ui, UI-evidence-c, RPT1, COV1, COV1-b, UI-mark,
+  UI-evidence, ME1, UI-report, UI-evidence-b, CONF-fix, UI-evidence-c, RPT1, COV1, COV1-b, UI-mark,
 
-  DEMO1, TEST-v0008, DEMO-cov, D2, DEMO1-ui (owner 2026-10-28; COV-ui, TEST-v0008, DEMO-cov 2026-10-29, LaunchPad demo 2026-11-06; D2 held until the owner''s local
+  DEMO1, TEST-v0008, DEMO-cov, D2, DEMO1-ui, COV-ui (owner 2026-10-28; COV-ui last, TEST-v0008, DEMO-cov 2026-10-29, LaunchPad demo 2026-11-06; D2 held until the owner''s local
 
   review). Then LATER: status `later`, off the demo chain; the
 
@@ -1406,6 +1406,8 @@ tasks:
     Owner 2026-10-29: pdf.js canvas preview instead of the iframe (headless Chromium has no PDF viewer).
   licence: 'pdfjs-dist (Apache-2.0); its optional dependency @napi-rs/canvas (MIT) is Node-only, not
     in the browser bundle.'
+  tester:
+    max_diff: 180000
   status: blocked
   depends_on:
   - RPT1
@@ -1509,39 +1511,6 @@ tasks:
   branch: devteam/CONF-fix
   pr: https://github.com/IzbassarO/qarau/pull/99
   done_at: '2026-10-29'
-- id: COV-ui
-  area: app
-  title: Coverage layer in the viewer
-  goal: |
-    Today the viewer has no coverage layer and the status screen shows the `coverage` step as
-    "Unknown stage" (processing.unknownStage; web/src/lib/processing.ts has no `coverage` entry).
-    The API gives GET /api/inspections/{id}/coverage (viewer): regions, totals in % per state,
-    `computed`; the bundle manifest key `coverage` names the per-point array points.coverage.u8
-    (codes per state and `no_region`; {computed: false} and no array when not computed).
-
-    Build (web/ only): a "Coverage" toggle in the viewer that colours the points by the bundle's
-    per-point array with the v8 tokens (`ok` inspected_ok, `critical`/`watch` finding, `unseen`
-    not_seen; not_seen must never look like OK), a legend with the three states and the API's
-    totals in %, and "coverage not computed" in plain words when `computed` is false (no layer,
-    nothing guessed). The status screen names the `coverage` step in ru/kk/en. Data only from
-    the API and the bundle, no coverage in the client code or fixtures shipped to users.
-
-    Not in this task: computing coverage (COV1, DEMO-cov), the report's section (COV1-b), comparing
-    inspections (M4), dense-based coverage.
-
-    Done when: Vitest tests assert a fixture bundle's codes map to the three token colours and
-    not_seen never gets the `ok` colour; the legend shows fixture totals; computed=false shows the
-    plain message and no toggle state; the status screen renders the `coverage` step label (not
-    processing.unknownStage) in ru/kk/en; en.json, ru.json and kk.json have every new key with
-    non-identical ru/kk values; lint, tsc, Vitest and the Playwright e2e pass; tester screenshots
-    of /viewer/notre-dame-p3e with the layer on, light and dark, ru/kk/en, 1440x900 and 390x844.
-    Reference: docs/design/screens/viewer-light.png and docs/design/screens/states-light.png
-    (design system v8); match it, adjust only alignment and size.
-
-    Owner 2026-10-29: LaunchPad demo; the owner's `make local` walk (PR #97) found no layer.
-  status: todo
-  depends_on:
-  - CONF-fix
 - id: UI-evidence-c
   area: app
   title: 'Evidence panel: phone layout, ru/kk/en, full e2e'
@@ -2008,6 +1977,39 @@ tasks:
   status: todo
   depends_on:
   - DEMO1
+- id: COV-ui
+  area: app
+  title: Coverage layer in the viewer
+  goal: |
+    Today the viewer has no coverage layer and the status screen shows the `coverage` step as
+    "Unknown stage" (processing.unknownStage; web/src/lib/processing.ts has no `coverage` entry).
+    The API gives GET /api/inspections/{id}/coverage (viewer): regions, totals in % per state,
+    `computed`; the bundle manifest key `coverage` names the per-point array points.coverage.u8
+    (codes per state and `no_region`; {computed: false} and no array when not computed).
+
+    Build (web/ only): a "Coverage" toggle in the viewer that colours the points by the bundle's
+    per-point array with the v8 tokens (`ok` inspected_ok, `critical`/`watch` finding, `unseen`
+    not_seen; not_seen must never look like OK), a legend with the three states and the API's
+    totals in %, and "coverage not computed" in plain words when `computed` is false (no layer,
+    nothing guessed). The status screen names the `coverage` step in ru/kk/en. Data only from
+    the API and the bundle, no coverage in the client code or fixtures shipped to users.
+
+    Not in this task: computing coverage (COV1, DEMO-cov), the report's section (COV1-b), comparing
+    inspections (M4), dense-based coverage.
+
+    Done when: Vitest tests assert a fixture bundle's codes map to the three token colours and
+    not_seen never gets the `ok` colour; the legend shows fixture totals; computed=false shows the
+    plain message and no toggle state; the status screen renders the `coverage` step label (not
+    processing.unknownStage) in ru/kk/en; en.json, ru.json and kk.json have every new key with
+    non-identical ru/kk values; lint, tsc, Vitest and the Playwright e2e pass; tester screenshots
+    of /viewer/notre-dame-p3e with the layer on, light and dark, ru/kk/en, 1440x900 and 390x844.
+    Reference: docs/design/screens/viewer-light.png and docs/design/screens/states-light.png
+    (design system v8); match it, adjust only alignment and size.
+
+    Owner 2026-10-29: LaunchPad demo; the owner's `make local` walk (PR #97) found no layer.
+  status: todo
+  depends_on:
+  - CONF-fix
 - id: P5a-1
   area: core
   title: Metric scale from a measured distance, and gravity

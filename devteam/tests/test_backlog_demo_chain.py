@@ -16,8 +16,10 @@ from devteam.graph import outside_paths
 CHAIN = [
     "B1", "U2", "S1", "DS1", "D1", "DEF1-api", "UI-inspections", "REV1-api", "UI-evidence",
     # owner, 2026-10-28 (LaunchPad demo, 2026-11-06): one queue per developer, in this order
-    "ME1", "UI-report", "UI-evidence-b", "CONF-fix", "COV-ui", "UI-evidence-c", "RPT1", "COV1",
-    "COV1-b", "UI-mark", "DEMO1", "TEST-v0008", "DEMO-cov", "D2", "DEMO1-ui",
+    "ME1", "UI-report", "UI-evidence-b", "CONF-fix", "UI-evidence-c", "RPT1", "COV1", "COV1-b",
+    "UI-mark", "DEMO1", "TEST-v0008", "DEMO-cov", "D2", "DEMO1-ui",
+    # owner, 2026-10-29: the demo needs the report, marking and event-code sign-in first
+    "COV-ui",
 ]  # fmt: skip
 DEPS = {
     "B1": [],
