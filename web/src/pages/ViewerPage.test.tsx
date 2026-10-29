@@ -239,7 +239,8 @@ it('opens ?point=0 with the info tool, evidence panel and selected-point marker,
   const panel = screen.getByRole('region', { name: LANGS.en['pointInfo.title'] });
   expect(within(panel).getByText(`${bundle.position[0].toFixed(3)} model units`)).toBeTruthy();
   expect(within(panel).getAllByText(LANGS.en['pointInfo.needsScale'])).toHaveLength(2);
-  expect(within(panel).getByText(LANGS.en['pointInfo.needsConfidence'])).toBeTruthy();
+  expect(within(panel).queryByText(LANGS.en['pointInfo.needsConfidence'])).toBeNull();
+  expect(within(panel).queryByText(LANGS.en['pointInfo.confidence'])).toBeNull();
   expect(setPicked).toHaveBeenLastCalledWith(0);
   const engine = setPicked.mock.contexts.at(-1) as ViewerEngine;
   expect(engine.scene.getObjectByName('selected-point')!.visible).toBe(true);
