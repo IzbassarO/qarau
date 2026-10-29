@@ -1551,9 +1551,11 @@ tasks:
     Owner 2026-10-27: part 3 of the UI-evidence split; the whole-task criteria of the old plan land here.
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - UI-evidence-b
+  owner: dev_app
+  run: cont-20261029-094213-dev_app-4
 - id: RPT1
   area: core
   title: PDF inspection report
