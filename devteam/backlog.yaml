@@ -2167,9 +2167,11 @@ tasks:
     Owner 2026-10-29: LaunchPad demo; the owner''s `make local` walk (PR #97) found no layer.
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - CONF-fix
+  owner: dev_app
+  run: cont-20261029-184005-dev_app-1
 - id: P5a-1
   area: core
   title: Metric scale from a measured distance, and gravity
