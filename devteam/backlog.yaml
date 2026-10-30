@@ -1471,7 +1471,22 @@ tasks:
   - DS1
   continues: UI-report
   owner: dev_app
-  run: cont-20261030-001213-dev_app-1
+  run: cont-20261030-001213-dev_app-2
+  branch: devteam/UI-report-s1
+  analyst_hint: 'Shrink the diff by reverting everything outside the s1 scope instead of trimming notes.
+    With `git checkout <base> -- <path>` (or delete if new), drop: web/e2e/report.spec.ts, web/dev-report.ts,
+    web/dev-response-bytes.ts, web/vite-dev-runs.ts, web/src/test/devReport*.ts, web/src/test/devResponseBytes.test.ts,
+    web/src/lib/prepareInterfaceFonts.ts, web/src/main.tsx changes, web/src/auth/* changes, web/src/shell/*
+    changes (AppShell, InspectionRow, InspectionsStartPage, PresentationOverrides, inspections-list.css),
+    web/src/design/theme.ts, web/src/lib/findings.ts, web/src/lib/inspections*.ts, web/src/pages/ViewerPage*,
+    web/src/viewer/*, and docs/notes/ui-report-s1-plan.md. Keep only: ReportPage.tsx, report.css, lib/report.ts,
+    lib/pdfPreview.ts, lib/reportDate.ts with their tests, the ru/kk/en keys, the needed lines in lib/api.ts,
+    the report fixtures, and the report route in the router. Cut ReportPage.test.tsx from about 1000 lines
+    to focused tests: summary, page count shown, the three states (loading, ready, failed), and a render
+    error showing the failed state, using mocked API and mocked pdf.js. Settling the page for e2e and
+    sign-in/network-idle fixes belong to UI-report-s2, so do not touch them. Check the size with `git
+    diff <base> --stat -- . '':!*lock*''`; the total must be well under 120,000 characters before you
+    finish the round.'
 - id: UI-report-s2
   area: app
   title: 'Report page: settle reliably and pass e2e, lint, tsc'
