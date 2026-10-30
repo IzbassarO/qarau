@@ -5,6 +5,7 @@
 #          users, the demo site and its coverage)
 #          -> API (127.0.0.1:LOCAL_API_PORT) -> S1 worker (native rq, this Mac's CPU)
 #          -> web production build served by `vite preview` on LOCAL_WEB_PORT, /api proxied
+#             (restarted if it crashes)
 #   stop:  the three processes, then `docker compose down` (volumes kept)
 #
 # Settings come from .env.example, then .env (QARAU_LOCAL_ENV_FILE to use another file).
@@ -48,11 +49,13 @@ listening() { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t >/dev/null 2>&1; }
 alive() { [ -f "$STATE/$1.pid" ] && kill -0 "$(cat "$STATE/$1.pid")" 2>/dev/null; }
 
 # Each process gets its own process group (set -m), so stop kills uv/pnpm and their children.
+# stdin is /dev/null: a process reading the terminal (vite's "press h" prompt) dies with
+# EIO "read" once that terminal is closed.
 spawn() {
   local name=$1
   shift
   set -m
-  (cd "$ROOT" && exec "$@") >"$STATE/$name.log" 2>&1 &
+  (cd "$ROOT" && exec "$@") </dev/null >"$STATE/$name.log" 2>&1 &
   echo $! >"$STATE/$name.pid"
   set +m
 }
@@ -138,7 +141,8 @@ start() {
   # SimpleWorker: the job runs in the worker process itself (no fork, which macOS dislikes);
   # every pipeline step is still its own `qarau_pipeline step` child process.
   spawn worker sh -c "cd backend && exec uv run --no-sync rq worker --url $VALKEY_URL --worker-class rq.worker.SimpleWorker qarau"
-  spawn web sh -c "cd web && QARAU_API_PROXY=http://127.0.0.1:$API_PORT exec pnpm exec vite preview --host $host --port $WEB_PORT --strictPort"
+  # The web restarts on a crash; `make local-stop` kills the whole loop (its process group).
+  spawn web sh -c "cd web && while :; do QARAU_API_PROXY=http://127.0.0.1:$API_PORT pnpm exec vite preview --host $host --port $WEB_PORT --strictPort; echo \"web exited (\$?), restarting in 2 s\"; sleep 2; done"
 
   wait_for api 60 curl -fsS "http://127.0.0.1:$API_PORT/health"
   wait_for worker 60 grep -q "Listening on" "$STATE/worker.log"

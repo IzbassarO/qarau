@@ -74,7 +74,8 @@ is the whole interface.
 
 API (`backend/app/inspections.py`): `POST /api/inspections/{id}/runs` (engineer) queues the
 inspection's newest run (the one B1's upload created; body `{run_id?, force?}`, 409 while
-queued/running unless `force`, the escape after a crashed worker), `GET /api/inspections/{id}`
+queued/running unless `force`, the escape after a crashed worker; the web app calls it as soon as
+an upload completes, and offers "Start processing" only for a failed or stopped run), `GET /api/inspections/{id}`
 (viewer) returns the inspection with `run_id, progress, current_step, error, steps[]`, and
 `POST /api/inspections/{id}/runs/{run_id}/steps/{step}/rerun` (engineer, 404 for an unknown
 step) queues `from_step` with force for that step and the ones after it; earlier finished steps
