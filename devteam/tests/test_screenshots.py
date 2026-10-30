@@ -256,7 +256,28 @@ def test_variants_cover_every_locale_and_the_before_shots_only_the_first():
         ("390x844", "light", "en"),
     ]
     assert G.variants(sc, before=True) == G.variants(sc)[:4]
+    assert G.variants(sc, before=True, full=True) == G.variants(sc)[:4]
     assert G.variants({}) == [("1440x900", "", ""), ("390x844", "", "")]  # no locales: as before
+
+
+@pytest.mark.parametrize(
+    ("task", "n"), [({}, 16), ({"screenshots": {"matrix": "full"}}, 24)], ids=["default", "full"]
+)
+def test_a_task_may_ask_for_every_theme_in_every_locale(repo, tmp_path, task, n):
+    """DEMO1-ui (2026-10-30): two routes, light and dark x ru/kk/en x desktop and phone."""
+    devs = web_shots(tmp_path, "touch {png}")
+    devs["dev_app"]["screenshots"].update(
+        viewports=["1440x900", "390x844"], themes=["light", "dark"], locales=["ru", "kk", "en"]
+    )
+    team, _ = make(repo, developers=devs)
+    routes = ["/?signed-out", "/viewer/x"]
+    s = {"task": {"id": "T-002", **task}, "assignee": "dev_app", "worktree": str(repo),
+         "routes": routes}  # fmt: skip
+    shots, problems = G.screenshots(team, s, routes)
+    names = {Path(p).name for p in shots}
+    assert problems == [] and len(names) == n == G.expected_shots(team.cfg, s)
+    assert ("viewer-x-390x844-dark-en.png" in names) == (n == 24)
+    assert "signed-out-1440x900-light-kk.png" in names
 
 
 def test_dev_app_is_shot_in_ru_kk_and_en(repo, tmp_path):

@@ -1515,6 +1515,8 @@ tasks:
     '
   status: blocked
   added_by: analyst
+  e2e:
+    retries: 0
   split_from: UI-report
   depends_on:
   - UI-report-s1
@@ -2141,6 +2143,8 @@ tasks:
     Owner 2026-10-28: LaunchPad demo (2026-11-06).
 
     '
+  screenshots:
+    matrix: full
   status: blocked
   depends_on:
   - DEMO1

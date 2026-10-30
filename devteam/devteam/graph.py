@@ -152,6 +152,20 @@ def needs_routes(criteria: list, dev_cfg: dict):
     return (web and VISUAL.search(text)) or PAGE_PATH.search(text)
 
 
+RETRIES = re.compile(r"\bretries\s*[=:]\s*(\d+)", re.I)  # "pass with --retries=0"
+
+
+def e2e_retries(task: dict, cfg: dict) -> int | None:
+    """The --retries the e2e gate runs this task with: its own `e2e: {retries: N}` in the backlog,
+    else gates.e2e.retries; None without an e2e gate (UI-report-s2, 2026-10-30: its criteria asked
+    for --retries=0, the gate always ran --retries=1, sent back three times for nothing)."""
+    e = (cfg.get("gates") or {}).get("e2e")
+    if not e:
+        return None
+    own = (task.get("e2e") or {}).get("retries")
+    return e.get("retries", 1) if own is None else own
+
+
 def stages_of(p: dict) -> list[dict]:
     """The parts the brain planned inside one task (owner, 2026-10-23: fewer, bigger tasks; a goal
     with more than ~4 build items is built in 2-3 parts, each accepted by the tester before the
@@ -516,6 +530,14 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
             errors.append(
                 f"{tid}: the criteria drop {len(missing)} of the task's Owner additions; copy "
                 f"each word for word as its own criterion: {missing}"
+            )
+        runs = e2e_retries(by_id[tid], cfg) if tid in by_id else None
+        named = sorted({int(m[1]) for c in all_crit for m in RETRIES.finditer(str(c))} - {runs})
+        if runs is not None and named:
+            errors.append(
+                f"{tid}: the criteria name e2e retries {named}, but Kerege runs this task's e2e "
+                f"with --retries={runs}, so the tester can never see it. Name no retries value "
+                "(only the owner sets `e2e: {retries: N}` on a task in the backlog)"
             )
         for k, st in enumerate(stages):
             if (m := needs_routes(st["criteria"], devs.get(dev, {}))) and not st["routes"]:
@@ -2029,7 +2051,10 @@ def build_graph(team: Team, checkpointer):
         if not e or not any(p.startswith(tuple(e["when_paths"])) for p in paths):
             return []
         cmd = e["command"].format(
-            port=procs.free_port(), data=team.root / "data", runs_dir=team.runs_dir
+            port=procs.free_port(),
+            data=team.root / "data",
+            runs_dir=team.runs_dir,
+            retries=e2e_retries(cs["task"], cfg),
         )
         team.emit("tester", "e2e (Playwright) on the clean checkout", task=cs["task"]["id"])
         r = team.run_proc(cmd, cwd=clean, timeout=e["timeout_min"] * 60)

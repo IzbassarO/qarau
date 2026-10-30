@@ -254,21 +254,31 @@ def is_guest(route) -> bool:
     return not isinstance(route, str) and route.get("session") == "guest"
 
 
-def variants(sc: dict, before: bool = False) -> list[tuple[str, str, str]]:
+def variants(sc: dict, before: bool = False, full: bool = False) -> list[tuple[str, str, str]]:
     """(viewport, theme, locale) per screenshot of one route: screenshots.viewports x themes
     (light / dark; none set = the page's default) in the first of screenshots.locales, then
     every viewport in each other locale with the first theme: kk/en text breaks layouts, not
     themes, and every image counts against the tester's request limit (real.MAX_IMAGES).
+    `full` (a task's `screenshots: {matrix: full}`): every theme in every locale too (DEMO1-ui,
+    2026-10-30: its criteria asked for dark kk/en, 16 of 24 shots were taken).
     `before` (dev-* shots, for comparison): the first locale only."""
     vs, ts = sc.get("viewports") or VIEWPORTS, sc.get("themes") or [""]
     ls = sc.get("locales") or [""]
     out = [(v, t, ls[0]) for v in vs for t in ts]
-    return out if before else out + [(v, ts[0], lang) for lang in ls[1:] for v in vs]
+    if before:
+        return out
+    if full:
+        return [(v, t, lang) for lang in ls for v in vs for t in ts]
+    return out + [(v, ts[0], lang) for lang in ls[1:] for v in vs]
+
+
+def full_matrix(task: dict) -> bool:
+    return (task.get("screenshots") or {}).get("matrix") == "full"
 
 
 def expected_shots(cfg: dict, s) -> int:
     sc = cfg["developers"][s["assignee"]].get("screenshots") or {}
-    return len(s.get("routes") or []) * len(variants(sc))
+    return len(s.get("routes") or []) * len(variants(sc, full=full_matrix(s["task"])))
 
 
 def screenshots(
@@ -380,7 +390,7 @@ def screenshots(
             if not (m := EVENT_CODE.search(r["output"])):  # never printed: only on a failure
                 problems.append(f"guest event not created: {team.redact(r['output'][-300:])}")
             code = m[1] if r["ok"] and m else ""
-        vs = variants(sc, before)
+        vs = variants(sc, before, full_matrix(s["task"]))
         ready_s = team.cfg["gates"].get("screenshot_ready_timeout_s", 30)
         for route, (size, theme, lang) in itertools.product(routes, vs):
             if guest and is_guest(route) and not code:
