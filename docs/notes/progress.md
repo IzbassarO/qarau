@@ -6,8 +6,8 @@ Newest first. Keep it short.
 
 - **Processing starts by itself:** the web app calls `POST /api/inspections/{id}/runs` once the
   upload completes (the run had sat "uploaded" until queued by hand). "Start processing" is shown
-  only for a failed or stopped run. The status screen polls every 3 s until done/failed (it did;
-  it looked frozen because the web server was dead, below).
+  only for a failed or stopped run. The status screen polls every 3 s until done/failed (api.log
+  shows it did; the freeze matches the dead web server, below); a Vitest now locks this in.
 - **`make local`:** `vite preview` died with EIO "read" when its terminal closed (it read the TTY);
   every spawned process now gets stdin from /dev/null and the web restarts on a crash.
 - **Measured:** sparse 631 s on this Mac for the office video. Backlog from the walk (VIEW-*,
