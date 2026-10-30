@@ -55,3 +55,16 @@ export async function rerunInspectionStep(inspectionId: string, runId: string, s
   );
   if (!response.ok) throw new Error(String(response.status));
 }
+
+/** Queue the workflow for an uploaded run (S1). 409: already queued or running, not an error. */
+export async function startProcessing(inspectionId: string | number, runId?: string) {
+  try {
+    await requestApi(`/api/inspections/${encodeURIComponent(inspectionId)}/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(runId ? { run_id: runId } : {}),
+    });
+  } catch (error) {
+    if (!(error instanceof ApiError && error.status === 409)) throw error;
+  }
+}

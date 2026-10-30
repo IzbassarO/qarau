@@ -23,6 +23,7 @@ for (const theme of ['light', 'dark'] as const) {
       const offsets: number[] = [];
       let created = false;
       let uploaded = false;
+      let started = false;
       let processing = false;
       let stored = 0;
       let continueUpload!: () => void;
@@ -47,13 +48,15 @@ for (const theme of ['light', 'dark'] as const) {
             created = true;
             return route.fulfill({ status: 201, json: inspection });
           }
-          return route.fulfill({ json: created ? [inspection] : [] });
+          return route.fulfill({
+            json: created ? [{ ...inspection, status: started ? 'queued' : 'created' }] : [],
+          });
         }
         if (url.pathname === '/api/inspections/41')
           return route.fulfill({
             json: {
               ...inspection,
-              status: processing ? 'running' : 'created',
+              status: processing ? 'running' : started ? 'queued' : 'created',
               run_id: 'run-41',
               progress: processing ? 50 : 0,
               current_step: processing ? 'sparse' : null,
@@ -67,6 +70,15 @@ for (const theme of ['light', 'dark'] as const) {
                 : [],
             },
           });
+        if (url.pathname === '/api/inspections/41/runs' && request.method() === 'POST') {
+          expect(uploaded).toBe(true);
+          expect(request.postDataJSON()).toEqual({ run_id: 'run-41' });
+          started = true;
+          return route.fulfill({
+            status: 202,
+            json: { run_id: 'run-41', status: 'queued', job_id: 'job-41' },
+          });
+        }
         if (url.pathname === '/api/inspections/41/runs')
           return route.fulfill({
             json: [
@@ -145,10 +157,12 @@ for (const theme of ['light', 'dark'] as const) {
         .getByRole('navigation')
         .getByRole('link', { name: new RegExp(`${t['shell.inspection']} 41`) });
       await expect(entry).toBeVisible();
-      await expect(entry.getByText(t['status.uploaded'], { exact: true })).toBeVisible();
+      await expect(entry.getByText(t['status.queued'], { exact: true })).toBeVisible();
       await expect(entry).toHaveAttribute('aria-current', 'page');
       await closeNavigation(page);
       await expect(page.getByText(t['processing.uploadedWaiting'])).toBeVisible();
+      expect(started).toBe(true);
+      await expect(page.getByRole('button', { name: t['processing.start'] })).toHaveCount(0);
       await expect(page.getByRole('alert')).toHaveCount(0);
       expect(offsets).toEqual([0, 4_194_304]);
       expect(stored).toBe(5_242_880);

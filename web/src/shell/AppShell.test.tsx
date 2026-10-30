@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useParams } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LANGS, setLang, type Lang } from '../i18n';
@@ -219,6 +219,67 @@ it('renders processing stages from selected inspection detail, ahead of a stale 
   expect(screen.getByText('Processing', { selector: '.status-label' })).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
   expect(manifest).not.toHaveBeenCalled();
+});
+
+it('starts a stopped run and keeps polling the status through queued, running and a failed poll', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  let status = 'uploaded';
+  let failNextPoll = false;
+  const inspection = { id: 7, site_id: 1, status: 'created', created_at: '2026-10-23T12:00:00Z' };
+  const steps = (sparse: string) => [
+    { name: 'probe', status: 'done', duration_s: 1 },
+    { name: 'frames', status: 'done', duration_s: 4 },
+    { name: 'sparse', status: sparse },
+    { name: 'export', status: 'pending' },
+  ];
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === '/api/sites') return Response.json([{ id: 1, org_id: 1, name: 'North site' }]);
+    if (url === '/api/inspections') return Response.json([inspection]);
+    if (url === '/api/inspections/7/runs' && init?.method === 'POST') {
+      status = 'queued';
+      return Response.json({ run_id: 'run-7', status, job_id: 'j' }, { status: 202 });
+    }
+    if (url === '/api/inspections/7/runs') return Response.json([{ id: 'run-7', status }]);
+    if (url === '/api/inspections/7') {
+      if (failNextPoll) {
+        failNextPoll = false;
+        throw new TypeError('Failed to fetch');
+      }
+      return Response.json({
+        ...inspection,
+        status: status === 'uploaded' ? 'created' : status,
+        run_id: 'run-7',
+        steps: status === 'running' ? steps('running') : [],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  try {
+    renderRoute('/inspections/7');
+    fireEvent.click(await screen.findByRole('button', { name: 'Start processing' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Start processing' })).toBeNull(),
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/inspections/7/runs',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ run_id: 'run-7' }) }),
+    );
+    status = 'running';
+    failNextPoll = true;
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    const processing = await screen.findByRole('list', { name: 'Processing steps' });
+    await waitFor(() =>
+      expect(
+        within(processing)
+          .getAllByRole('listitem')
+          .map((row) => row.dataset.state),
+      ).toEqual(['done', 'done', 'running', 'pending']),
+    );
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('shows a server error and retries without substituting demo inspections', async () => {

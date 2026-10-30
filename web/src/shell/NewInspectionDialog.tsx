@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useI18n, type Key } from '../i18n';
 import { listSites, type SiteOption } from '../lib/sites';
-import { ApiUnavailableError } from '../lib/api';
+import { ApiUnavailableError, startProcessing } from '../lib/api';
 import {
   createInspection,
   uploadFile,
@@ -115,13 +115,16 @@ export function NewInspectionDialog({
         if (request.signal.aborted) return;
         inspectionId.current = inspection.id;
       }
-      await uploadFile(inspectionId.current, file, {
+      const { runId } = await uploadFile(inspectionId.current, file, {
         signal: request.signal,
         session: session.current,
         onProgress: (value) => {
           if (!request.signal.aborted) setProgress(value);
         },
       });
+      if (request.signal.aborted) return;
+      // Processing starts by itself; if this fails the status screen offers "Start processing".
+      await startProcessing(inspectionId.current, runId).catch(() => {});
       if (request.signal.aborted) return;
       onClose();
       onUploaded?.(inspectionId.current);
