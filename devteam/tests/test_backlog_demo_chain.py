@@ -20,9 +20,11 @@ CHAIN = [
     "DEMO1", "TEST-v0008", "DEMO-cov", "DEMO1-ui",
     # owner, 2026-10-29: the demo needs the report, marking and event-code sign-in first
     "COV-ui",
+    # owner, 2026-10-30, first walk with a real video: right after the LaunchPad screens
+    "VIEW-observer", "VIEW-fullscreen", "STATUS-ui", "VIEW-layout", "BRAND-ui",
     # owner, 2026-10-30: the full product; D2 becomes the permanent server, UI-mark LATER
-    "AUTH1-a", "AUTH1-b", "ORG1", "STOR1", "GPU1", "LAB1-a", "LAB1-b", "MARK-photo", "SEC1",
-    "SEC1-ci", "D2", "AUTH1-ui-a", "AUTH1-ui-b", "ORG1-ui", "LAB1-ui-a", "LAB1-ui-b",
+    "AUTH1-a", "AUTH1-b", "ORG1", "STOR1", "GPU1", "ORIENT1", "LAB1-a", "LAB1-b", "MARK-photo",
+    "SEC1", "SEC1-ci", "D2", "AUTH1-ui-a", "AUTH1-ui-b", "ORG1-ui", "LAB1-ui-a", "LAB1-ui-b",
     "UI-mark-photo", "DESIGN-skills",
 ]  # fmt: skip
 # done by a Claude Code session with the owner (.github/, devteam/), never planned by Kerege
@@ -71,6 +73,13 @@ DEPS = {
     "LAB1-ui-b": ["LAB1-b", "LAB1-ui-a"],
     "UI-mark-photo": ["MARK-photo", "LAB1-ui-b"],
     "DESIGN-skills": [],
+    # owner, 2026-10-30, first walk: one viewer chain, so two of them never edit it in parallel
+    "VIEW-observer": [],
+    "VIEW-fullscreen": ["VIEW-observer"],
+    "STATUS-ui": [],
+    "VIEW-layout": ["VIEW-fullscreen"],
+    "BRAND-ui": [],
+    "ORIENT1": [],
 }
 LATER = [
     "P5a-1", "P5a-2", "P7", "P4a-2b", "P4c", "A7a", "A7", "O1a", "O1", "P5b", "P6", "UX-kk",
