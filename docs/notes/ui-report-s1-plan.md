@@ -64,3 +64,32 @@ Verified after the fix: `pnpm lint`, `pnpm typecheck`, `pnpm test` (56 files,
 988 tests) and `pnpm build` pass. No servers or browser screenshots started.
 Playwright's cross-document network-event behavior still requires Kerege's rerun;
 the jsdom regressions verify the application lifecycle, not Chromium networking.
+
+## Second E2e return: the initial catalog is fetched twice
+
+Kerege now reports only `/api/runs` left in the tracked requests after navigation;
+font requests are no longer present. The pagehide cancellation did not remove
+the browser-level race. Login already downloads the complete run catalog, but
+discards it; the newly mounted sidebar requests the same catalog again after
+inspection CRUD proves unavailable. Avoid that redundant request.
+
+Keep the successful login catalog only in memory, scoped to that session/user,
+for a single initial catalog read and at most one normal polling interval (5 s).
+Discard it on logout, expiration or consumption. Aborted reads must not consume
+it. Reuse the normal run-shape validation; subsequent polling, retries and manual
+refreshes still fetch the server. Do not store the catalog in browser storage or
+change the API, auth headers, e2e files, existing assertions or polling interval.
+
+Reproduce the post-login duplicate under StrictMode with real AuthProvider and
+AppShell, and add fixture-backed checks for one-shot reuse, expiration, logout
+and an aborted reader. Run lint, typecheck, Vitest and build without a server.
+
+Confirmed regression: the real sign-in/AppShell flow under StrictMode made three
+`/api/runs` calls before reuse; the same test now observes exactly one login call
+and no duplicate on sidebar startup. Invalidating inspection queries then fetches
+the new catalog fixture from the server. Tests also cover expired, logged-out,
+different-session/user and aborted readers plus unchanged run-shape validation.
+
+Verified: `pnpm lint`, `pnpm typecheck`, `pnpm test` (56 files, 996 tests) and
+`pnpm build` pass. Existing assertions are unchanged; no e2e files were modified.
+No servers started. Chromium/Playwright execution remains Kerege's rerun.

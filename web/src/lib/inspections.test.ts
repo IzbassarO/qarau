@@ -14,9 +14,12 @@ import {
 import catalog from '../test/fixtures/run-catalog.json';
 import legacyCatalog from '../test/fixtures/legacy-export-catalog.json';
 import inspectionsFixture from '../test/fixtures/inspections.json';
+import { login, logout } from '../auth/auth';
 
 afterEach(() => {
+  logout();
   sessionStorage.clear();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -573,4 +576,78 @@ it('reports a catalog failure when an empty inspection table needs legacy export
   vi.stubGlobal('fetch', fetch);
   await expect(listInspections()).rejects.toThrow('503');
   expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/inspections', '/api/runs']);
+});
+
+describe('the initial authenticated run catalog', () => {
+  const credentials = { username: 'report-engineer', password: 'report-test-session' };
+
+  function mockCatalogs() {
+    const fetch = vi
+      .fn()
+      .mockImplementationOnce(async () => Response.json(legacyCatalog))
+      .mockImplementation(async () => Response.json(catalog));
+    vi.stubGlobal('fetch', fetch);
+    return fetch;
+  }
+
+  it('reuses the completed login body once and fetches fresh data on the next read', async () => {
+    const fetch = mockCatalogs();
+    await login(credentials);
+    expect(await fetchRuns()).toEqual(legacyCatalog);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(await fetchRuns()).toEqual(catalog);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenLastCalledWith('/api/runs', {
+      signal: undefined,
+      headers: { Authorization: 'Bearer report-test-session' },
+    });
+  });
+
+  it('leaves the initial catalog for the next reader if a StrictMode reader was aborted', async () => {
+    const fetch = mockCatalogs();
+    await login(credentials);
+    const request = new AbortController();
+    request.abort();
+    await expect(fetchRuns(request.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await fetchRuns()).toEqual(legacyCatalog);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('expires the initial catalog at the normal five-second polling interval', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-30T12:00:00Z'));
+    const fetch = mockCatalogs();
+    await login(credentials);
+    vi.setSystemTime(new Date('2026-10-30T12:00:05Z'));
+    expect(await fetchRuns()).toEqual(catalog);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('discards the catalog on logout without carrying authorization into the next read', async () => {
+    const fetch = mockCatalogs();
+    await login(credentials);
+    logout();
+    expect(await fetchRuns()).toEqual(catalog);
+    expect(fetch).toHaveBeenLastCalledWith('/api/runs', { signal: undefined, headers: {} });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['qarau.auth.session', 'Bearer another-test-session'],
+    ['qarau.auth.userId', 'another-engineer'],
+  ])('never reuses the initial catalog after %s changes', async (key, value) => {
+    const fetch = mockCatalogs();
+    await login(credentials);
+    sessionStorage.setItem(key, value);
+    expect(await fetchRuns()).toEqual(catalog);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('validates login catalog data with the same contract as a normal run read', async () => {
+    const fetch = vi.fn().mockResolvedValue(Response.json({ run_id: 'invalid-array-shape' }));
+    vi.stubGlobal('fetch', fetch);
+    await login(credentials);
+    await expect(fetchRuns()).rejects.toThrow('Invalid runs response');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
 });

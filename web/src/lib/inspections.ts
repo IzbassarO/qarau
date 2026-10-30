@@ -1,7 +1,7 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { Source, Stats } from './bundle';
 import type { ProcessingRunPayload, ProcessingStagePayload } from './processing';
-import { authHeader } from '../auth/auth';
+import { authHeader, takeLoginRunCatalog } from '../auth/auth';
 import { listSites, type SiteOption } from './sites';
 import { ApiUnavailableError, apiErrorMessage, fetchApi, readApi } from './api';
 
@@ -130,9 +130,15 @@ export function groupRunsIntoSites(runs: readonly RunSummary[]): Site[] {
 }
 
 export async function fetchRuns(signal?: AbortSignal): Promise<RunSummary[]> {
-  const response = await fetch('/api/runs', { signal, headers: authHeader() });
-  if (!response.ok) throw new Error(String(response.status));
-  const runs: unknown = await response.json();
+  // StrictMode can discard a reader before it reaches the legacy fallback.
+  // Do not let an already-aborted reader consume the completed login response.
+  signal?.throwIfAborted();
+  let runs = takeLoginRunCatalog();
+  if (runs === undefined) {
+    const response = await fetch('/api/runs', { signal, headers: authHeader() });
+    if (!response.ok) throw new Error(String(response.status));
+    runs = await response.json();
+  }
   if (
     !Array.isArray(runs) ||
     !runs.every((run) => run && typeof run.run_id === 'string' && run.run_id.length > 0)
