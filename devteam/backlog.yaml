@@ -1463,7 +1463,7 @@ tasks:
     page count shown, a render error shows the failed state); no <iframe> in the page; i18n ru/kk/en.
 
     '
-  status: todo
+  status: in_progress
   added_by: analyst
   split_from: UI-report
   depends_on:
@@ -1471,7 +1471,7 @@ tasks:
   - DS1
   continues: UI-report
   owner: dev_app
-  run: cont-20261030-001213-dev_app-1
+  run: cont-20261030-001213-dev_app-2
   branch: devteam/UI-report-s1
   analyst_hint: 'Shrink the diff by reverting everything outside the s1 scope instead of trimming notes.
     With `git checkout <base> -- <path>` (or delete if new), drop: web/e2e/report.spec.ts, web/dev-report.ts,
