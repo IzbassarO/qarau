@@ -9,13 +9,16 @@ gates = merge latest dev in, secret scan, benchmark, push, PR into dev, GitHub C
 import contextlib
 import fnmatch
 import hashlib
+import io
 import json
 import operator
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
+import tarfile
 import tempfile
 import threading
 import time
@@ -373,7 +376,7 @@ def route_errors(p: dict, task: dict, cfg: dict) -> list[str]:
     tid, errors = p.get("task_id"), []
     before = set(task.get("runs_before_task") or [])
     quick = task.get("quick_only") or cfg["gates"]["benchmark"]["quick_only"]
-    for route in p.get("routes") or []:
+    for route in map(G.route_path, p.get("routes") or []):
         if not (m := VIEWER_RUN.match(route)):
             continue
         run = m.group(1)
@@ -388,6 +391,27 @@ def route_errors(p: dict, task: dict, cfg: dict) -> list[str]:
                 f"{tid}: route {route} shows {run!r}, but this task's screenshots serve its quick "
                 f"benchmark output: {quick}"
             )
+    return errors
+
+
+def guest_route_errors(routes: list, task: dict, dev_cfg: dict, tid: str) -> list[str]:
+    """Guest routes (screenshots.guest): only with that config, on its shared run; a task tagged
+    `guest` with pages to see lists its guest screens as guest routes (DEMO1-ui, 2026-10-29: its
+    guest viewer was shot as the engineer, twice)."""
+    guest = (dev_cfg.get("screenshots") or {}).get("guest")
+    if not guest:
+        return []
+    errors = [
+        f"{tid}: guest route {r['path']} shows {m[1]!r}; a guest sees only the shared run "
+        f"{guest['run']!r}: /viewer/{guest['run']}"
+        for r in routes
+        if G.is_guest(r) and (m := VIEWER_RUN.match(r["path"])) and m[1] != guest["run"]
+    ]
+    if routes and "guest" in (task.get("tags") or []) and not any(map(G.is_guest, routes)):
+        errors.append(
+            f"{tid}: tagged guest but no route has session: guest; list each guest screen as "
+            '{"path": ..., "session": "guest"}'
+        )
     return errors
 
 
@@ -505,6 +529,7 @@ def validate_plan(plans: list[dict], todo: list[dict], cfg: dict) -> list[dict]:
             errors.append(f"{tid}: routes given but {dev} has no screenshots config")
         elif tid in by_id and dev in devs:
             errors += route_errors({**p, "routes": routes}, by_id[tid], cfg)
+            errors += guest_route_errors(routes, by_id[tid], devs[dev], tid)
     if errors:
         raise PlanError(errors, outside, too_big, sizes)
     out = []
@@ -565,7 +590,7 @@ class TaskState(TypedDict, total=False):
     assignee: str
     plan: str  # of the current part (stage_state)
     criteria: list[str]
-    routes: list[str]  # web pages to screenshot for the tester
+    routes: list  # web pages to screenshot for the tester: a path, or {path, session: guest}
     overview: str  # the brain's plan for the whole task
     stages: list[dict]  # the parts the brain planned inside the task (one when it planned none)
     stage: int  # the part being built
@@ -1238,7 +1263,7 @@ class Team:
                 text = edit(data, raw)
                 if text is None:
                     text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100)
-                if refused := self.backlog_check(text):
+                if refused := self.backlog_check(text, parent):
                     break
                 blob = self.git("hash-object", "-w", "--stdin", input=text).strip()
                 env = {"GIT_INDEX_FILE": str(self.home / "status.index")}
@@ -1285,15 +1310,26 @@ class Team:
             self.emit("brain", f"could not fast-forward the checkout: {err}; pull by hand")
         return pushed
 
-    def backlog_check(self, text: str) -> str:
+    def backlog_check(self, text: str, ref: str) -> str:
         """gates.backlog_check on the backlog a status commit would push (DEVTEAM_BACKLOG):
         the failing output, or "" (owner, 2026-10-18: 778e072 `backlog: A9-fix done (#41)`
-        turned dev CI red). Not run_proc: it is called under self._lock."""
+        turned dev CI red). {devteam} in the command: devteam/ of `ref` (the fetched dev the
+        backlog comes from), so its tests match its backlog; the main checkout's were older and
+        failed a status (2026-10-29 14:33). Not run_proc: it is called under self._lock."""
         cmd = self.cfg["gates"].get("backlog_check")
         if not cmd or self.fake:
             return ""
         path = self.home / "backlog-check.yaml"
         path.write_text(text, encoding="utf-8", errors="replace")
+        if "{devteam}" in cmd:
+            at = self.home / "backlog-dev"
+            shutil.rmtree(at, ignore_errors=True)
+            at.mkdir()
+            tar = subprocess.run(
+                ["git", "archive", ref, "devteam"], cwd=self.root, capture_output=True, check=True
+            ).stdout
+            tarfile.open(fileobj=io.BytesIO(tar)).extractall(at, filter="data")
+            cmd = cmd.format(devteam=shlex.quote(str(at / "devteam")))
         r = subprocess.run(
             cmd,
             shell=True,
@@ -1303,7 +1339,8 @@ class Team:
             text=True,
             timeout=600,
         )
-        return "" if r.returncode == 0 else self.redact((r.stdout + r.stderr)[-1500:])
+        out = self.redact((r.stdout + r.stderr)[-1500:]) or f"exit {r.returncode}, no output"
+        return "" if r.returncode == 0 else out  # a silent failure is a failure too
 
     def backlog_drift(self) -> list[str]:
         """Status fields that differ between the backlog file and the one on origin/dev."""
@@ -1956,7 +1993,15 @@ def build_graph(team: Team, checkpointer):
                 status="idle",
             )
         else:
-            team.emit("tester", "out of fix loops", task=tid, status="idle")
+            # the last fix was judged like every round (checks, screenshots, tester): this is the
+            # final verdict, said with its reason (UI-evidence-c, 2026-10-29: read as unjudged)
+            team.emit(
+                "tester",
+                f"out of fix loops: final verdict on round {s.get('rounds', 0)} (the fix after "
+                f"{max_fixes}/{max_fixes} send-backs): {verdict['feedback'].strip()[:300]}",
+                task=tid,
+                status="idle",
+            )
         out = {
             "verdict": verdict,
             "fixes": fixes,

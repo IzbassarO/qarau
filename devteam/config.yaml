@@ -80,7 +80,9 @@ gates:
     timeout_min: 30
   # Run on the backlog every status commit would push to dev, before it is pushed: a failure
   # keeps the status local and warns (778e072 `backlog: A9-fix done (#41)` turned dev CI red).
-  backlog_check: uv run --quiet pytest -q -m backlog -p no:cacheprovider tests
+  # {devteam}: devteam/ of that same fetched dev (its tests and code), not the main checkout's,
+  # which may be older (2026-10-29 14:33: a false failure). Without {devteam}: the checkout's tests.
+  backlog_check: PYTHONPATH={devteam} uv run --quiet pytest -q -m backlog -p no:cacheprovider {devteam}/tests
 daily_budget_usd: 15.0   # Anthropic API (brain, tester), over any 24 h
 
 # Providers (Kerege v3 K1, owner 2026-10-28). A role (models.*) or a developer names its
@@ -237,6 +239,17 @@ developers:
       # as an engineer sees it. The .env test user matched no seeded user: /api/me 401, role error,
       # no decision buttons (UI-evidence-b, 2026-10-28). Without `api` the .env test user is used.
       login: {user: engineer, token: dev-engineer}
+      # A plan route {path, session: guest} is shot as an event guest (DEMO1-ui, 2026-10-29: shot
+      # as the engineer, a guest's viewer was never seen): an event on the same {db} through the
+      # real app.event create, sharing the seeded run, expiring in 1 h ({expires}); its code signs
+      # in through the sign-in page and the event is purged after, also on failure. Remove this
+      # block: every route is shot as the engineer again.
+      guest:
+        run: notre-dame-p3e   # backend/app/seed.py DEMO_RUN: the only done run in the test database
+        create: >-
+          cd backend && QARAU_DATABASE_URL=sqlite:///{db} uv run --quiet python -m app.event create
+          --name {name} --org {name} --expires {expires} --max-guests 100 --runs {run}
+        purge: cd backend && QARAU_DATABASE_URL=sqlite:///{db} uv run --quiet python -m app.event purge --name {name}
       serve: cd web && QARAU_RUNS_DIR={runs_dir} QARAU_API_PROXY=http://127.0.0.1:{api_port} pnpm exec vite --port 5198 --strictPort
       url: http://localhost:5198
       shoot: cd web && node {shoot} {url} {png} {size} 2500 {theme} {lang}

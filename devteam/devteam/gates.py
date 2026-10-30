@@ -18,6 +18,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from devteam import procs
@@ -241,6 +242,16 @@ SHOOT = Path(__file__).with_name("shoot.mjs")  # {shoot}: signs in, then screens
 TEST_LOGIN = ("QARAU_TEST_USER", "QARAU_TEST_PASSWORD")  # devteam/.env: the tester's test user
 VIEWPORTS = ["1440x900", "390x844"]  # screenshots.viewports when not set: desktop and phone
 NOT_READY = re.compile(r"NOT READY after (\d+) s: (.*)")  # shoot.mjs: still busy, shot anyway
+EVENT_CODE = re.compile(r"^code: (\S+)$", re.M)  # `app.event create` prints the code once
+
+
+def route_path(route) -> str:
+    """A plan route: a page path (shot as the seeded engineer), or {path, session: guest}."""
+    return route if isinstance(route, str) else route["path"]
+
+
+def is_guest(route) -> bool:
+    return not isinstance(route, str) and route.get("session") == "guest"
 
 
 def variants(sc: dict, before: bool = False) -> list[tuple[str, str, str]]:
@@ -263,7 +274,7 @@ def expected_shots(cfg: dict, s) -> int:
 def screenshots(
     team,
     s,
-    routes: list[str],
+    routes: list,
     runs: Path | None = None,
     prefix: str = "",
     before: bool = False,
@@ -274,6 +285,13 @@ def screenshots(
     (paths, problems); a shot that fails is a problem, never silently dropped. `runs`: serve
     these runs instead of the developer's quick benchmark. `before`: dev-* shots (variants)."""
     sc = team.cfg["developers"][s["assignee"]].get("screenshots")
+    # Guest routes (screenshots.guest, with the seeded API): an event on this same {db} through
+    # the real `app.event create`, sharing the seeded run, 1 h; its code signs the guest in and the
+    # event is purged after, also on failure (DEMO1-ui, 2026-10-29: shot as the engineer, a
+    # guest's viewer was never seen). No screenshots.guest: every route as the engineer (as before).
+    guest = (sc or {}).get("api") and any(map(is_guest, routes)) and sc.get("guest")
+    if guest and before:  # dev-* shots: the guest screens are the task's own, nothing before
+        routes, guest = [r for r in routes if not is_guest(r)], None
     if not sc or not routes:
         return [], []
     out = team.home / "packets" / s["task"]["id"]
@@ -326,6 +344,7 @@ def screenshots(
         return f"{what} did not start: {sc[what]}"
 
     paths, problems = [], []
+    event, code = "", ""
     # Against the seeded API: its seeded user (screenshots.login), so role-dependent UI is shot as
     # that role sees it. The .env test user matches no seeded user: /api/me answered 401, the page
     # showed the role error and no decision buttons (UI-evidence-b, 2026-10-28).
@@ -352,9 +371,22 @@ def screenshots(
                 return [], [why]
         if why := up(start(sc["serve"]), sc["url"], "serve", 60):
             return [], [why]
+        if guest:
+            name = f"shoot-{guest['run']}"
+            expires = (datetime.now(UTC) + timedelta(hours=1)).isoformat(timespec="seconds")
+            g = dict(fmt, name=shlex.quote(name), run=shlex.quote(guest["run"]), expires=expires)
+            r = team.run_proc(guest["create"].format(**g), cwd=s["worktree"], timeout=300)
+            event = name if r["ok"] else ""
+            if not (m := EVENT_CODE.search(r["output"])):  # never printed: only on a failure
+                problems.append(f"guest event not created: {team.redact(r['output'][-300:])}")
+            code = m[1] if r["ok"] and m else ""
         vs = variants(sc, before)
         ready_s = team.cfg["gates"].get("screenshot_ready_timeout_s", 30)
         for route, (size, theme, lang) in itertools.product(routes, vs):
+            if guest and is_guest(route) and not code:
+                continue  # said once above; missing shots fail the round
+            who = {"QARAU_TEST_EVENT_CODE": code} if guest and is_guest(route) else login
+            route = route_path(route)
             name = prefix + (re.sub(r"[^A-Za-z0-9]+", "-", route).strip("-") or "root")
             if len(vs) > 1:
                 name += f"-{size}" + "".join(f"-{x}" for x in (theme, lang) if x)
@@ -371,7 +403,7 @@ def screenshots(
                 cwd=s["worktree"],
                 timeout=120 + ready_s,
                 # never on the command line, never printed
-                env={**os.environ, **login, "QARAU_SHOOT_READY_S": str(ready_s)},
+                env={**os.environ, **who, "QARAU_SHOOT_READY_S": str(ready_s)},
             )
             if r["ok"] and png.exists() and (busy := NOT_READY.search(r["output"])):
                 # the tester sees the file name as the image's label: a slow page is a fix for
@@ -389,6 +421,11 @@ def screenshots(
                 what = f"{route} ({' '.join(x for x in (size, theme, lang) if x)})"
                 problems.append(f"{what}: {team.redact(r['output'][-300:])}")
     finally:
+        if event:  # its guests and their sessions; the database itself is replaced next time
+            g = dict(fmt, name=shlex.quote(event))
+            r = team.run_proc(guest["purge"].format(**g), cwd=s["worktree"], timeout=300)
+            if not r["ok"]:
+                problems.append(f"guest event not purged: {team.redact(r['output'][-300:])}")
         for p in procs_:  # the servers and anything they started; the ports are free
             procs.reap(p.pid, marker)
             p.wait()
