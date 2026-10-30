@@ -1,0 +1,18 @@
+{
+  "computed": true,
+  "totals": { "inspected_ok": 61.5, "finding": 23.1, "not_seen": 15.4 },
+  "regions": [
+    {
+      "id": "north-wall-upper",
+      "state": "not_seen",
+      "frame_count": 0,
+      "bounds": { "min": [0, 0, 0], "max": [1, 1, 1] }
+    },
+    {
+      "id": "north-wall-lower",
+      "state": "inspected_ok",
+      "frame_count": 12,
+      "bounds": { "min": [0, 1, 0], "max": [1, 2, 1] }
+    }
+  ]
+}

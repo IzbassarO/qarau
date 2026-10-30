@@ -1,0 +1,121 @@
+{
+  "inspection": {
+    "id": 37,
+    "site_id": 9,
+    "mode": "quick_scan",
+    "status": "done",
+    "created_at": "2026-10-21T09:41:00Z"
+  },
+  "sites": [{ "id": 9, "org_id": 1, "name": "Tank T-104, north wall" }],
+  "runs": [
+    {
+      "id": "notre-dame-p3e",
+      "inspection_id": 37,
+      "run_dir": "notre-dame-p3e",
+      "status": "done",
+      "progress": 100
+    }
+  ],
+  "findings": [
+    {
+      "id": 71,
+      "inspection_id": 37,
+      "run_id": "notre-dame-p3e",
+      "class": "corrosion",
+      "severity": "critical",
+      "status": "confirmed",
+      "comment": "Course 3, 2.1 m from the north seam",
+      "area_units": 0.42,
+      "area_m2": 0.42,
+      "scale": "reference: Letter sheet, frame 18",
+      "point_indices": [0],
+      "points": [[0, 1, 2]],
+      "evidence": []
+    },
+    {
+      "id": 72,
+      "inspection_id": 37,
+      "run_id": "notre-dame-p3e",
+      "class": "coating",
+      "severity": "watch",
+      "status": "rejected",
+      "comment": "Shadow from the walkway",
+      "area_units": 0.27,
+      "area_m2": null,
+      "scale": "not set",
+      "point_indices": [1],
+      "points": [[1, 1, 2]],
+      "evidence": []
+    },
+    {
+      "id": 73,
+      "inspection_id": 37,
+      "run_id": "notre-dame-p3e",
+      "class": "crack",
+      "severity": "watch",
+      "status": "proposed",
+      "comment": "Course 5, 0.8 m from the east seam",
+      "area_units": 0.39,
+      "area_m2": null,
+      "scale": "not set",
+      "point_indices": [2],
+      "points": [[2, 1, 2]],
+      "evidence": []
+    }
+  ],
+  "decisions": {
+    "71": [
+      {
+        "id": 201,
+        "finding_id": 71,
+        "user_id": 8,
+        "user": "Dana Sadyk",
+        "verdict": "reject",
+        "comment": "Check another frame",
+        "new_class": null,
+        "new_severity": null,
+        "created_at": "2026-10-21T10:00:00Z"
+      },
+      {
+        "id": 202,
+        "finding_id": 71,
+        "user_id": 7,
+        "user": "Alan Bekov",
+        "verdict": "confirm",
+        "comment": null,
+        "new_class": null,
+        "new_severity": null,
+        "created_at": "2026-10-21T10:12:00Z"
+      }
+    ],
+    "72": [
+      {
+        "id": 203,
+        "finding_id": 72,
+        "user_id": 8,
+        "user": "Dana Sadyk",
+        "verdict": "reject",
+        "comment": "Shadow, not corrosion",
+        "new_class": null,
+        "new_severity": null,
+        "created_at": "2026-10-21T10:15:00Z"
+      }
+    ],
+    "73": []
+  },
+  "coverage": null,
+  "coverageLine": "The camera saw 36.2 m² of the 38.5 m² wall. Two areas were not seen.",
+  "pdf": "%PDF-1.4\n% Qarau test fixture\n%%EOF",
+  "hash": "bf98d56a3f72c5e19345b6fe682380d399174770df752e8031c9fa427263bc26",
+  "failure": { "detail": "Report source frames are unavailable." },
+  "notFound": { "detail": "inspection not found" },
+  "validation": {
+    "detail": [
+      {
+        "loc": ["path", "inspection_id"],
+        "msg": "Input should be a valid integer, unable to parse string as an integer",
+        "type": "int_parsing"
+      }
+    ]
+  }
+}

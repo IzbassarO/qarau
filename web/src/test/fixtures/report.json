@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/pdf",
+    "Content-Disposition": "inline; filename=\"QV-2026-0037-v1-en.pdf\"",
+    "X-Report-SHA256": "bf98d56a3f72c5e19345b6fe682380d399174770df752e8031c9fa427263bc26",
+    "X-Report-Generated-At": "2026-10-21T10:20:00+00:00"
+  },
+  "body": "%PDF-1.4\n% Qarau test fixture\n%%EOF"
+}

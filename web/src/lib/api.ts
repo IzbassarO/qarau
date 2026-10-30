@@ -16,11 +16,17 @@ export class ApiError extends Error {
 /** Older servers and the Vite run catalog do not implement inspection CRUD. */
 export class ApiUnavailableError extends ApiError {}
 
-export async function requestApi(path: string, options: RequestInit = {}): Promise<unknown> {
+export async function requestApi(
+  path: string,
+  options: RequestInit & { responseType?: 'response' } = {},
+): Promise<unknown> {
+  const { responseType, ...requestOptions } = options;
   const response = await fetch(path, {
-    ...options,
+    ...requestOptions,
     headers: { ...authHeader(), ...options.headers },
   });
+  // Reports need the PDF bytes and X-Report-SHA256 header, rather than JSON.
+  if (responseType === 'response') return response;
   if ([404, 405, 501].includes(response.status))
     throw new ApiUnavailableError(path, response.status);
   if (!response.ok) {
