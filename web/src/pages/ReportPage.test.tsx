@@ -9,6 +9,7 @@ import { setLang, type Lang } from '../i18n';
 import * as reportApi from '../lib/report';
 import { AppShell } from '../shell/AppShell';
 import fixture from '../test/fixtures/report-summary.json';
+import report from '../test/fixtures/report.json';
 import coverageFixture from '../test/fixtures/report-coverage.json';
 import { fixturePdf, mockReportApi } from '../test/reportApi';
 import { mockDevReportApi } from '../test/devReportApi';
@@ -156,6 +157,27 @@ it('renders the API summary', async () => {
   expect(screen.queryByText(/confidence/i)).toBeNull();
 });
 
+it('marks the report busy while the summary API is pending, then shows summary and canvas', async () => {
+  const pending = deferred<void>();
+  const fetch = mockReportApi();
+  const respond = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (input) => {
+    if (String(input) === '/api/inspections/37') await pending.promise;
+    return respond(input);
+  });
+  const view = renderReport();
+  expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
+  expect(screen.queryByText(fixture.findings[0].comment)).toBeNull();
+  expect(pdfJs.getDocument).not.toHaveBeenCalled();
+  await act(async () => pending.resolve());
+  expect(await screen.findByText('Report is ready.')).toBeTruthy();
+  expect(screen.getByText(fixture.findings[0].comment)).toBeTruthy();
+  expect(screen.getByText('1 of 3 pages')).toBeTruthy();
+  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
+  expect(previewCanvas().tagName).toBe('CANVAS');
+  expect(view.container.querySelector('iframe, embed, object')).toBeNull();
+});
+
 it('stays busy until the first page is painted', async () => {
   mockReportApi();
   vi.mocked(URL.createObjectURL).mockImplementationOnce(() => {
@@ -287,6 +309,10 @@ it('shares the PDF Blob and hash', async () => {
   const hash = screen.getByTitle(fixture.hash);
   expect(hash.textContent).toBe('bf98d56a3f72…7263bc26');
   expect(hash.getAttribute('title')).toBe(fixture.hash);
+  expect(hash.getAttribute('title')).toBe(
+    'bf98d56a3f72c5e19345b6fe682380d399174770df752e8031c9fa427263bc26',
+  );
+  expect(hash.getAttribute('title')).toBe(report.headers['X-Report-SHA256']);
   expect(hash.className).toBe('qv-mono');
   const createdBlob = vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob;
   expect(await createdBlob.text()).toBe(fixture.pdf);

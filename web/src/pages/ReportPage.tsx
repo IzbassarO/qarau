@@ -4,13 +4,10 @@ import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-q
 import { useI18n, type Lang } from '../i18n';
 import { fetchReportPdf, type ReportPdf } from '../lib/api';
 import { fetchReportSummary, type ReportSummary } from '../lib/report';
-import { getDocument, GlobalWorkerOptions, type RenderTask } from 'pdfjs-dist';
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { loadPdf, type PdfPreview } from '../lib/pdfPreview';
 import { formatReportDate } from '../lib/reportDate';
 import { Wordmark } from '../shell/ShellIdentity';
 import './report.css';
-
-GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export function ReportPage() {
   const { id = '' } = useParams();
@@ -135,46 +132,33 @@ function ReportContent({
   useEffect(() => {
     if (!blob || timedOut) return;
     let active = true;
-    let loading: ReturnType<typeof getDocument> | undefined;
-    let rendering: RenderTask | undefined;
-    let destroyed: Promise<void> | undefined;
-    function destroyDocument() {
-      if (!loading) return Promise.resolve();
-      return (destroyed ??= loading.destroy().catch(() => {}));
-    }
+    const controller = new AbortController();
+    let document: PdfPreview | undefined;
     async function paint() {
       try {
         const bytes = await blob!.arrayBuffer();
         if (!active) return;
-        loading = getDocument({ data: new Uint8Array(bytes) });
-        const document = await loading.promise;
+        document = await loadPdf(bytes, controller.signal);
         if (!active) return;
-        const page = await document.getPage(1);
-        if (!active || !canvas.current) return;
-        const target = canvas.current;
-        const viewport = page.getViewport({ scale: 1.5 });
-        target.width = Math.ceil(viewport.width);
-        target.height = Math.ceil(viewport.height);
-        rendering = page.render({ canvas: target, viewport });
-        await rendering.promise;
-        rendering = undefined;
+        if (!canvas.current) return;
+        await document.renderFirstPage(canvas.current);
         const pages = document.numPages;
         // Only page one is previewed. Close the document/worker before announcing
         // readiness so no PDF resources remain loading behind a painted canvas.
-        await destroyDocument();
+        await document.destroy();
         if (!active || !screen.current) return;
         await prepareReportFonts(screen.current);
         if (active) setPreview({ blob: blob!, pages });
       } catch {
-        await destroyDocument();
+        await document?.destroy();
         if (active) setPreview({ blob: blob!, failed: true });
       }
     }
     void paint();
     return () => {
       active = false;
-      rendering?.cancel();
-      void destroyDocument();
+      controller.abort();
+      void document?.destroy();
     };
   }, [blob, attempt, timedOut]);
 

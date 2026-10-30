@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { fetchReportPdf } from './api';
 import { fetchReportSummary, reportInspectionForRun } from './report';
 import fixture from '../test/fixtures/report-summary.json';
+import report from '../test/fixtures/report.json';
 import coverageFixture from '../test/fixtures/report-coverage.json';
 import { mockReportApi } from '../test/reportApi';
 
@@ -16,10 +17,11 @@ it('fetches authenticated PDF and header hash', async () => {
   const result = await fetchReportPdf(37, 'ru');
   expect(result.state).toBe('ready');
   if (result.state !== 'ready') throw new Error('Expected ready');
-  expect(result.hash).toBe(fixture.hash);
+  expect(result.hash).toBe('bf98d56a3f72c5e19345b6fe682380d399174770df752e8031c9fa427263bc26');
+  expect(result.hash).toBe(report.headers['X-Report-SHA256']);
   expect(result.blob).toBeInstanceOf(Blob);
   expect(result.blob.type).toBe('application/pdf');
-  expect(await result.blob.text()).toBe(fixture.pdf);
+  expect(await result.blob.text()).toBe(report.body);
   expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/inspections/37/report.pdf?lang=ru', {
     signal: undefined,
     headers: { Authorization: 'Bearer test-report-session' },

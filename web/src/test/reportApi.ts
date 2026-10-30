@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import fixture from './fixtures/report-summary.json';
+import report from './fixtures/report.json';
 import { reportJson } from './reportRoutes';
 
 /** Mock API routes, not summary assembly. */
@@ -19,7 +19,8 @@ export function mockReportApi(
 }
 
 export function fixturePdf() {
-  return new Response(fixture.pdf, {
-    headers: { 'Content-Type': 'application/pdf', 'X-Report-SHA256': fixture.hash },
+  return new Response(report.body, {
+    status: report.status,
+    headers: report.headers,
   });
 }
