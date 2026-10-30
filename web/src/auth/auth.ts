@@ -73,6 +73,13 @@ export async function login({ username, password }: Credentials): Promise<void> 
   }
   if (response.status === 401 || response.status === 403) throw new AuthError('invalidCredentials');
   if (response.status !== 200) throw new AuthError('connection');
+  // fetch resolves at headers. Finish its body before publishing the session;
+  // navigation out of the sign-in screen must not leave this request in flight.
+  try {
+    await response.arrayBuffer();
+  } catch {
+    throw new AuthError('connection');
+  }
   try {
     sessionStorage.setItem(USER_ID_KEY, username.trim());
     sessionStorage.setItem(SESSION_KEY, header);

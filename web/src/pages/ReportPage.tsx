@@ -6,6 +6,7 @@ import { fetchReportPdf, type ReportPdf } from '../lib/api';
 import { fetchReportSummary, type ReportSummary } from '../lib/report';
 import { loadPdf, type PdfPreview } from '../lib/pdfPreview';
 import { formatReportDate } from '../lib/reportDate';
+import { prepareInterfaceFonts } from '../lib/prepareInterfaceFonts';
 import { Wordmark } from '../shell/ShellIdentity';
 import './report.css';
 
@@ -147,7 +148,7 @@ function ReportContent({
         // readiness so no PDF resources remain loading behind a painted canvas.
         await document.destroy();
         if (!active || !screen.current) return;
-        await prepareReportFonts(screen.current);
+        await prepareInterfaceFonts(screen.current);
         if (active) setPreview({ blob: blob!, pages });
       } catch {
         await document?.destroy();
@@ -256,31 +257,6 @@ function ReportContent({
       </main>
     </div>
   );
-}
-
-/** Font files can start loading only when a new weight or script first appears. */
-async function prepareReportFonts(screen: HTMLElement) {
-  const fonts = screen.ownerDocument.fonts;
-  if (!fonts) return;
-  const style = getComputedStyle(screen);
-  // The language controls include Latin, Cyrillic and Kazakh text in every locale.
-  // Include all summary text so fonts for API object/decider names are loaded too.
-  const text = screen.textContent ?? '';
-  await Promise.all(
-    [
-      ['--font-sans', '--t-body-weight'],
-      ['--font-sans', '--t-label-weight'],
-      ['--font-sans', '--t-body-strong-weight'],
-      ['--font-display', '--t-heading-weight'],
-      ['--font-mono', '--t-mono-weight'],
-    ].map(([familyToken, weightToken]) => {
-      const family = style.getPropertyValue(familyToken).trim();
-      const weight = style.getPropertyValue(weightToken).trim();
-      return family && weight ? fonts.load(`${weight} 1em ${family}`, text) : Promise.resolve([]);
-    }),
-  );
-  // Read ready after the explicit loads, including their final layout/font fallback work.
-  await fonts.ready;
 }
 
 function Summary({ data }: { data: ReportSummary }) {

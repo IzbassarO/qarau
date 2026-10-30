@@ -49,6 +49,22 @@ function InspectionShell({ demo }: { demo: boolean }) {
   };
 
   useEffect(() => {
+    // Full document navigation does not unmount React. Explicitly abort the
+    // outgoing catalog reads before the browser discards this document.
+    const hide = () => void queryClient.cancelQueries({ queryKey: ['inspections'] });
+    const show = (event: PageTransitionEvent) => {
+      if (event.persisted)
+        void queryClient.refetchQueries({ queryKey: ['inspections'], type: 'active' });
+    };
+    window.addEventListener('pagehide', hide);
+    window.addEventListener('pageshow', show);
+    return () => {
+      window.removeEventListener('pagehide', hide);
+      window.removeEventListener('pageshow', show);
+    };
+  }, [queryClient]);
+
+  useEffect(() => {
     document.documentElement.lang = lang;
     document.title = t('shell.documentTitle');
   }, [lang, t]);

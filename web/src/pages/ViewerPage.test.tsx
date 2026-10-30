@@ -646,7 +646,10 @@ it.each<Lang>(['en', 'ru', 'kk'])(
 );
 
 it('loads and saves sensitivity for the signed-in identity without recreating the engine', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([])));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation(async () => Response.json([])),
+  );
   saveSensitivity('operator-a', 0.5);
   saveSensitivity('operator-b', 2.5);
   await login({ username: 'operator-a', password: 'test-viewer-credential' });

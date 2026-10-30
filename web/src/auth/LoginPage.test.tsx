@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LANGS, setLang, type Lang } from '../i18n';
 import { authHeader } from './auth';
@@ -7,6 +7,7 @@ import { AuthProvider } from './AuthProvider';
 import { LoginPage } from './LoginPage';
 
 const clients: QueryClient[] = [];
+const originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
 function renderLogin() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   clients.push(client);
@@ -29,6 +30,8 @@ beforeEach(() => {
   setLang('en');
 });
 afterEach(() => {
+  if (originalFonts) Object.defineProperty(document, 'fonts', originalFonts);
+  else Reflect.deleteProperty(document, 'fonts');
   clients.splice(0).forEach((client) => client.clear());
   sessionStorage.clear();
   vi.unstubAllGlobals();
@@ -108,4 +111,66 @@ it('offers a retry after a connection failure', async () => {
   expect((screen.getByRole('button', { name: 'Sign in' }) as HTMLButtonElement).disabled).toBe(
     false,
   );
+});
+
+it('finishes semibold font loading and layout before handing off to the signed-in screen', async () => {
+  let finishFont!: (faces: FontFace[]) => void;
+  let finishLayout!: () => void;
+  const semibold = new Promise<FontFace[]>((resolve) => (finishFont = resolve));
+  const ready = new Promise<void>((resolve) => (finishLayout = resolve));
+  const load = vi.fn((font: string) =>
+    font === "600 1em 'IBM Plex Sans', system-ui, sans-serif" ? semibold : Promise.resolve([]),
+  );
+  Object.defineProperty(document, 'fonts', {
+    configurable: true,
+    value: { load, ready },
+  });
+  const fetch = vi.fn().mockResolvedValue(Response.json([]));
+  vi.stubGlobal('fetch', fetch);
+  renderLogin();
+  const main = screen.getByRole('main');
+  main.style.setProperty('--font-sans', "'IBM Plex Sans', system-ui, sans-serif");
+  main.style.setProperty('--t-body-strong-weight', '600');
+  fillForm();
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  await waitFor(() =>
+    expect(load).toHaveBeenCalledWith(
+      "600 1em 'IBM Plex Sans', system-ui, sans-serif",
+      expect.stringContaining('Русский'),
+    ),
+  );
+  expect(load).toHaveBeenCalledWith(expect.any(String), expect.stringContaining('Қазақша'));
+  expect(fetch).not.toHaveBeenCalled();
+  expect(authHeader()).toEqual({});
+  expect(screen.getByRole('form').getAttribute('aria-busy')).toBe('true');
+  await act(async () => finishFont([]));
+  expect(fetch).not.toHaveBeenCalled();
+  expect((screen.getByRole('button', { name: 'Signing in…' }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  await act(async () => finishLayout());
+  await waitFor(() => expect(authHeader()).toEqual({ Authorization: 'Bearer test-api-value' }));
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('allows sign-in with fallback fonts when a font file fails to load', async () => {
+  Object.defineProperty(document, 'fonts', {
+    configurable: true,
+    value: {
+      load: vi.fn().mockRejectedValue(new Error('Font unavailable')),
+      ready: Promise.resolve(),
+    },
+  });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation(async () => Response.json([])),
+  );
+  renderLogin();
+  const main = screen.getByRole('main');
+  main.style.setProperty('--font-sans', "'IBM Plex Sans', system-ui, sans-serif");
+  main.style.setProperty('--t-body-strong-weight', '600');
+  fillForm();
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  await waitFor(() => expect(authHeader()).toEqual({ Authorization: 'Bearer test-api-value' }));
+  expect(screen.queryByRole('alert')).toBeNull();
 });
