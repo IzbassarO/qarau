@@ -2141,11 +2141,17 @@ tasks:
     Owner 2026-10-28: LaunchPad demo (2026-11-06).
 
     '
-  status: in_progress
+  status: blocked
   depends_on:
   - DEMO1
   owner: dev_app
   run: cont-20261030-001213-dev_app-4
+  branch: devteam/DEMO1-ui
+  blocked_reason: 'the tester sent it back twice in a row for the same reason, so no new round was started:
+    Criterion 5 is unmet only because the screenshot set is incomplete: dark kk/en are absent for signed-out
+    and viewer, at 1440x900 and 390x844 (16 of 24 images). Nothing in web/ can fix this. Per the developer''s
+    note, the capture matrix in devteam/devteam/gates.py (variants) must enumerate every locale × theme
+    × viewport. Once all 24 images exist, re-evaluate. Also, the viewer screenshots show a ban'
 - id: COV-ui
   area: app
   title: Coverage layer in the viewer
