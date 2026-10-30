@@ -25,8 +25,13 @@ notes: 'Demo chain (owner, 2026-10-22). Product first, then metres: website + de
 
   server, the owner deploys), AUTH1-ui-a, AUTH1-ui-b, ORG1-ui, LAB1-ui-a, LAB1-ui-b,
 
-  UI-mark-photo, DESIGN-skills (owner only); UI-mark is LATER. Then LATER: status `later`, off the demo
-  chain; the
+  UI-mark-photo, DESIGN-skills (owner only); UI-mark is LATER.
+
+  Owner 2026-10-30 (first walk): dev_app after COV-ui: VIEW-observer, VIEW-fullscreen,
+
+  STATUS-ui, VIEW-layout, BRAND-ui; dev_pipeline: ORIENT1 after GPU1.
+
+  Then LATER: status `later`, off the demo chain; the
 
   brain never plans it, dependencies never un-block it, `devteam resume` does not touch it. A task comes
 
@@ -2120,6 +2125,265 @@ tasks:
     light ru/kk/en shots exist). The visible coverage message pill appears in the shots, which is acceptable
     for the not-computed case, but the full matrix is required. Code and tests look right. Nothing needs
     to change in web/ unless the missing captures reveal a defect; the full 12-image set must be ca'
+- id: VIEW-observer
+  area: app
+  title: 'Observer like a game: pointer lock, crosshair, scene-sized speed'
+  goal: 'Today (web/src/viewer/engine.ts, observer.ts) Observer locks the pointer only after a click on
+
+    the canvas, has no crosshair, leaves Settings and "Frames and layers" open over the view, lets
+
+    the camera go half the bounding-box diagonal outside the bounds and takes its speed from the raw
+
+    bounding box. On the owner''s office run (sparse, 300 frames) one click moved the camera far
+
+    outside the cloud (far outliers inflating the box is the likely cause, not yet confirmed).
+
+
+    Build (web/ only):
+
+    1. Entering Observer locks and hides the pointer at once; a centred "+" crosshair (v8 tokens).
+
+    2. Esc releases the mouse and pauses (plain words: click to continue); a click locks again.
+
+    3. Settings and "Frames and layers" close when Observer starts and cannot stay open in it.
+
+    4. Speed and the movement limit scale with the scene''s bounding box taken robustly (e.g. 2nd-98th
+
+    percentile per axis), so far outliers do not scale them.
+
+    5. Observer starts inside the cloud (robust centre, eye height above the estimated ground).
+
+    6. Every new string in ru/kk/en.
+
+
+    Not in this task: full screen and its X (VIEW-fullscreen), the panel layout (VIEW-layout),
+
+    Walk mode (A8), levelling the scene (ORIENT1).
+
+
+    Done when: Vitest: entering Observer calls requestPointerLock; the crosshair shows in Observer;
+
+    an unlock (pointerlockchange) pauses and shows the hint; Settings and the panel are closed in
+
+    Observer; a fixture cloud plus a few far outliers gives the same speed and start as the cloud
+
+    alone and the start lies inside its extent; one second of W moves under 10% of that extent;
+
+    lint, tsc, Vitest and the Playwright e2e pass; tester screenshots of /viewer/notre-dame-p3e in
+
+    Observer, light and dark, ru/kk/en, 1440x900 and 390x844.
+
+
+    Owner 2026-10-30 (first walk, office video): pointer lock and "+" like Minecraft, Esc pauses,
+
+    panels hide, speed by the scene''s size, start inside the cloud.
+
+    '
+  status: todo
+- id: VIEW-fullscreen
+  area: app
+  title: Full-screen 3D map with an X to leave
+  goal: 'Today the 3D map (the inspection screen and /viewer/<run>) always sits inside the page; it
+
+    cannot take the whole browser tab.
+
+
+    Build (web/ only):
+
+    1. A "Full screen" button on the map (v8 icon button, localized label) makes the map fill the
+
+    browser tab like a game: the Fullscreen API on the viewer element; where it is missing (iPhone
+
+    Safari) a fixed full-viewport layer instead.
+
+    2. Orbit: an always-visible X at the top right leaves full screen.
+
+    3. Observer: Esc first releases the mouse (VIEW-observer), then the X is visible. The browser''s
+
+    own exit also works and the app follows it (fullscreenchange).
+
+    4. Leaving restores the page as it was, camera and mode kept; the canvas resizes both ways.
+
+    5. Every new string in ru/kk/en.
+
+
+    Not in this task: pointer lock and the crosshair (VIEW-observer), the panel layout
+
+    (VIEW-layout).
+
+
+    Done when: Vitest: the button calls requestFullscreen on the viewer element (the fallback layer
+
+    when the API is missing); the X shows in Orbit and in Observer only while the pointer is free;
+
+    fullscreenchange to none restores the layout with camera and mode kept; the renderer follows
+
+    the element''s size; a Playwright e2e enters full screen and leaves it with the X; lint, tsc,
+
+    Vitest and the e2e pass; tester screenshots of /viewer/notre-dame-p3e in full screen, light and
+
+    dark, ru/kk/en, 1440x900 and 390x844.
+
+
+    Owner 2026-10-30 (first walk): the map fills the tab like a game; Orbit: X always visible;
+
+    Observer: Esc releases the mouse, then the X.
+
+    '
+  status: todo
+  depends_on:
+  - VIEW-observer
+- id: STATUS-ui
+  area: app
+  title: Compact processing steps, live timer, log with times
+  goal: 'Today the status screen (web/src/shell/ProcessingSteps.tsx) lists every step as a full row with
+
+    its state and seconds, the same during and after the run, with no clock time; a step the web
+
+    has no label for shows "Unknown stage" and its raw id (web/src/lib/processing.ts stageLabel
+
+    knows probe, frames, sparse, export; not coverage or dense).
+
+
+    Build (web/ only):
+
+    1. Active run: the current step large, with a live timer (mm:ss, every second) and a smooth
+
+    transition to the next step (CSS, prefers-reduced-motion respected); finished steps collapsed
+
+    to one line each (name, duration).
+
+    2. Done run: the steps hide behind a "Log" toggle; each line has the step''s start date and time:
+
+    time only today, day/month and time from the next day on (Intl.DateTimeFormat, ru/kk/en).
+
+    3. A failed step stays open with its plain-language error, as today; never hidden in the log.
+
+    4. No raw step id is ever shown: probe, frames, sparse, export, coverage and dense have labels
+
+    in ru/kk/en (`coverage` is COV-ui''s; add it here only if dev does not have it yet); an id the
+
+    web does not know gets a generic label, its state still shown.
+
+    5. Polling every 3 s while queued or running stays.
+
+
+    Not in this task: the coverage layer (COV-ui), the page layout, step names in the pipeline.
+
+
+    Done when: Vitest: a running fixture shows one large current step whose timer advances with fake
+
+    timers and the finished steps one line each; a done fixture shows only the "Log" toggle and,
+
+    opened, today''s times as time only and an earlier day as day/month (fixed clock, ru/kk/en); a
+
+    failed fixture shows its error open; an unknown id never renders the raw id; lint, tsc, Vitest
+
+    and the Playwright e2e pass; tester screenshots of the demo inspection''s status (log closed and
+
+    open), light and dark, ru/kk/en, 1440x900 and 390x844.
+
+
+    Owner 2026-10-30 (first walk): compact steps, live timer, smooth transition, a log with date and
+
+    time after completion, unknown step names never shown.
+
+    '
+  status: todo
+- id: VIEW-layout
+  area: app
+  title: Video and 3D map together, the map stays large
+  goal: 'Today the "Frames and layers" panel (viewer.details, about 340 px on the right) takes its width
+
+    from the map: opening it shrinks the 3D view, so the video and the growing map are hard to watch
+
+    together on a laptop.
+
+
+    Build (web/ only):
+
+    1. Opening the panel does not shrink the map: the video frame is small (picture-in-picture over a
+
+    corner of the map, or a narrow column beside it), the map stays large; the owner wants the video
+
+    and the growing 3D map visible at the same time. This owner decision overrides the reference''s
+
+    fixed right column; colours and components stay v8.
+
+    2. The frame follows the timeline as today; the layer toggles stay reachable.
+
+    3. Phone (390x844): the map full width, the video small over it, the toggles in the drawer.
+
+
+    Not in this task: full screen (VIEW-fullscreen), Observer (VIEW-observer), new layers.
+
+
+    Done when: Playwright at 1440x900: with the panel open the canvas keeps at least 90% of its
+
+    width with the panel closed, and the video frame and the canvas are both visible and the frame
+
+    changes when the timeline moves; at 390x844 nothing overflows horizontally; Vitest covers the
+
+    toggle state; lint, tsc, Vitest and the e2e pass; tester screenshots of /viewer/notre-dame-p3e
+
+    with the panel open, light and dark, ru/kk/en, 1440x900 and 390x844. Reference:
+
+    docs/design/screens/viewer-light.png (design system v8); match its look.
+
+
+    Owner 2026-10-30 (first walk): the panel must not shrink the map; video small, map large, video
+
+    and the growing 3D map together.
+
+    '
+  status: todo
+  depends_on:
+  - VIEW-fullscreen
+- id: BRAND-ui
+  area: app
+  title: Tab title and favicon with the Qarau mark
+  goal: 'Today the browser tab shows a default icon (web/index.html links no favicon) and the title
+
+    "Qarau Vision — <page>" (shell.documentTitle, auth.documentTitle).
+
+
+    Build (web/ only):
+
+    1. Favicon: the Qarau mark, the dots-"Q" SVG of the Wordmark (web/src/shell/ShellIdentity.tsx)
+
+    in v8 colours: an SVG favicon, a 32 px PNG fallback and a 180 px apple-touch-icon, linked from
+
+    web/index.html; readable in light and dark browser themes. One drawing: the favicon is that
+
+    SVG, not a second one.
+
+    2. Title (owner''s choice): "<inspection> — Qarau Vision" on an inspection, its report and its
+
+    3D map (the inspection''s title as the shell shows it); "<page> — Qarau Vision" elsewhere
+
+    (sign-in, control centre); ru/kk/en, updated when the language changes.
+
+
+    Not in this task: a new logo (the design system''s mark as it is), desktop or mobile app icons.
+
+
+    Done when: Vitest: on /inspections/<id> document.title starts with that inspection''s title and
+
+    ends with "— Qarau Vision" in ru/kk/en; sign-in ends the same way; the build output has the SVG,
+
+    PNG and apple-touch files and index.html links them; a Playwright e2e reads document.title on an
+
+    inspection; lint, tsc, Vitest and the e2e pass; tester screenshots of sign-in and an inspection,
+
+    light and dark, ru/kk/en, 1440x900 and 390x844.
+
+
+    Owner 2026-10-30 (first walk): our logo in the tab, not the default "R"; title "<inspection> —
+
+    Qarau Vision".
+
+    '
+  status: todo
 - id: AUTH1-a
   area: core
   risk: high
@@ -2381,6 +2645,63 @@ tasks:
 
     '
   licence: Modal (paid service, the owner's account and token; no call by Kerege).
+  status: todo
+- id: ORIENT1
+  area: core
+  title: 'Auto-level the sparse model: floor down, scene upright'
+  goal: 'Today export (pipeline/qarau_pipeline/export.py estimate_up) takes "up" as the mean of the
+
+    cameras'' -y axes (the camera centres'' plane normal when that mean is weak), turns it to +Z and
+
+    stores world_from_colmap in the manifest. A phone held pitched down or up tilts that estimate:
+
+    the owner''s office run (data/runs/5ebcf73a6f1348d2b7e5bf7179065d7b of the main checkout, 300
+
+    frames, sparse 631 s) opened tilted, the floor not down.
+
+
+    Build (pipeline/, docs/):
+
+    1. Estimate up from evidence, best first: the phone''s gravity from the video''s metadata when
+
+    present (e.g. a CAMM or Apple motion track; never assumed), the dominant floor/ground plane
+
+    (RANSAC, normal near the cameras'' up), Manhattan alignment of the dominant planes (floor, walls);
+
+    today''s camera mean as the fallback.
+
+    2. Store it: world_from_colmap as today plus `up_source` (gravity | floor | manhattan | cameras)
+
+    and the angle to the camera-mean estimate, in the manifest and run.json; an ADR for the choice.
+
+    3. Only the rotation changes: points, poses and frames move together; nothing is added, removed
+
+    or invented; no clear plane and no gravity keeps today''s estimate with up_source `cameras`.
+
+
+    Not in this task: the viewer''s ground estimate, scale (P5), dense, registration (M4).
+
+
+    Done when: pytest on synthetic scenes: floor and walls with cameras pitched down 30° give the
+
+    floor normal within 2° of +Z (up_source floor or manhattan); a scene with no plane keeps the
+
+    camera estimate (up_source cameras); point and frame counts and check_projection are unchanged;
+
+    a fake gravity track wins when present; the office run and notre-dame-p3e re-exported from their
+
+    sparse into new runs (originals untouched) have the floor/ground normal within 5° of +Z (angles
+
+    in the PR); ruff, mypy, pytest pass; tester screenshots of both new runs in the viewer.
+
+
+    Owner 2026-10-30 (first walk): the scene opens upright with the floor down; test on the office
+
+    run and notre-dame-p3e; never invent geometry.
+
+    '
+  writable:
+  - data/runs
   status: todo
 - id: LAB1-a
   area: core
