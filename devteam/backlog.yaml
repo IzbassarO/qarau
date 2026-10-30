@@ -2013,11 +2013,14 @@ tasks:
     '
   writable:
   - data/runs
-  status: in_progress
+  status: done
   depends_on:
   - COV1-b
   owner: dev_pipeline
   run: cont-20261029-152145-dev_pipeline-2
+  branch: devteam/DEMO-cov
+  pr: https://github.com/IzbassarO/qarau/pull/102
+  done_at: '2026-10-29'
 - id: D2
   area: core
   title: 'Deploy staging: one VM, compose, HTTPS, backups'
