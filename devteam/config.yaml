@@ -72,8 +72,10 @@ gates:
     # Fixed --workers=3 --retries=1 (owner, 2026-10-27): with the default workers the phone WebGL
     # tests timed out at 180 s on a loaded Mac and one flake blocked a round (24/24 re-runs passed).
     # A test that fails, then passes on the retry, is FLAKY: not blocking, but listed in the packet,
-    # the PR and the daily report. A test that fails twice blocks as before.
-    command: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_E2E_PORT={port} QARAU_RUNS_DIR={runs_dir} pnpm exec playwright test --reporter=list --workers=3 --retries=1
+    # the PR and the daily report. A test that fails twice blocks as before. A task may set its own
+    # `e2e: {retries: 0}` in the backlog (UI-report-s2, 2026-10-30: "passes with --retries=0").
+    retries: 1
+    command: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_E2E_PORT={port} QARAU_RUNS_DIR={runs_dir} pnpm exec playwright test --reporter=list --workers=3 --retries={retries}
     # Measured 2026-10-26 on DS1 HEAD (208 tests, desktop + phone projects, 5 workers): 8.7 min
     # alone, 9.0 min in Kerege, so ~15 min at 3 workers, plus retries. 30 keeps a margin; a run
     # past it is reported to the developer as TIMEOUT with the counts, never as a test failure.

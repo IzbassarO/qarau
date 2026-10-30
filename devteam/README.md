@@ -241,6 +241,8 @@ then unattended (`run --continuous` overnight).
   fails, then passes on the retry, is flaky: it does not block, but it is listed in the packet
   (= PR body), in `.state/flaky.jsonl` and in the daily report. A test that fails twice blocks;
   the developer gets its error lines and the first 30 lines of its `error-context.md`.
+  A task may set `e2e: {retries: 0}` in the backlog (UI-report-s2); a plan whose criteria name
+  another retries value than the gate runs for that task is rejected.
 - Owner additions: every `- ` line under "Owner additions (<date>):" in a task's goal must be
   one of the plan's criteria, word for word (case and line breaks aside), or the plan is
   rejected and re-planned once.
@@ -327,7 +329,8 @@ then unattended (`run --continuous` overnight).
   `screenshots.viewports` (default 1440x900 and 390x844) and, for dev_app, in both
   `themes` (light, dark: emulated `prefers-color-scheme`) and `locales` (ru, kk, en: the app's
   `qarau.lang` set before any page script; every viewport x theme in ru, every viewport in the
-  first theme in kk and en; `dev-*` in ru only), as
+  first theme in kk and en; a task with `screenshots: {matrix: full}` every theme in every
+  locale (DEMO1-ui); `dev-*` in ru only), as
   `<route>-<viewport>[-<theme>][-<locale>].png` in `.state/packets/<task>/`, emptied at the
   start of each round. Screenshots over the API request limit (90 images, 24 MB; `dev-*` go
   first) are named to the tester as not attached, never silently cut; an image over 2000 px a

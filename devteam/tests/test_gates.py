@@ -804,7 +804,48 @@ E2E_RETRIED = """Running 3 tests using 3 workers
 
 def test_e2e_command_runs_three_workers_and_one_retry():
     cfg = yaml.safe_load((HERE / "config.yaml").read_text())["gates"]["e2e"]
-    assert "--workers=3 --retries=1" in cfg["command"]
+    assert "--workers=3 --retries={retries}" in cfg["command"] and cfg["retries"] == 1
+
+
+def set_t002(repo, **fields):
+    path = repo / "devteam" / "backlog.yaml"
+    data = yaml.safe_load(path.read_text())
+    next(t for t in data["tasks"] if t["id"] == "T-002").update(fields)
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    git(repo, "commit", "-qam", "T-002 fields")
+    git(repo, "push", "-q", remote_of(repo), "dev")
+
+
+@pytest.mark.usefixtures("fast_poll")
+@pytest.mark.parametrize(("own", "runs"), [(None, 1), (0, 0)], ids=["default", "task-sets-0"])
+def test_e2e_runs_the_retries_the_task_asks_for(repo, tmp_path, own, runs):
+    if own is not None:
+        set_t002(repo, e2e={"retries": own})
+    out = tmp_path / "retries.txt"
+    e2e_team(repo, tmp_path, command=f"echo --retries={{retries}} > {out}")
+    assert out.read_text().strip() == f"--retries={runs}"
+
+
+@pytest.mark.parametrize(
+    ("own", "criterion", "why"),
+    [
+        (None, "lint, tsc, Vitest and the e2e pass with --retries=0", r"retries \[0\]"),
+        (0, "lint, tsc, Vitest and the e2e pass with --retries=0", None),
+        (None, "the e2e passes with --retries=1", None),
+        (0, "the e2e passes with --retries=1", r"retries \[1\].*--retries=0"),
+        (None, "the diff adds no retries anywhere", None),
+    ],
+)
+def test_the_plan_may_name_only_the_retries_the_gate_runs(own, criterion, why):
+    todo = yaml.safe_load((HERE / "tests" / "backlog.yaml").read_text())["tasks"]
+    if own is not None:
+        todo = [{**t, "e2e": {"retries": own}} if t["id"] == "T-002" else t for t in todo]
+    plan = [{"task_id": "T-002", "assignee": "dev_app", "plan": "p", "criteria": [criterion]}]
+    if why:
+        with pytest.raises(ValueError, match=why):
+            GR.validate_plan(plan, todo, CFG)
+    else:
+        GR.validate_plan(plan, todo, CFG)
 
 
 def test_flaky_test_is_listed_not_counted_as_failed():
