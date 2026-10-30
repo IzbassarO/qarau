@@ -17,10 +17,16 @@ CHAIN = [
     "B1", "U2", "S1", "DS1", "D1", "DEF1-api", "UI-inspections", "REV1-api", "UI-evidence",
     # owner, 2026-10-28 (LaunchPad demo, 2026-11-06): one queue per developer, in this order
     "ME1", "UI-report", "UI-evidence-b", "CONF-fix", "UI-evidence-c", "RPT1", "COV1", "COV1-b",
-    "UI-mark", "DEMO1", "TEST-v0008", "DEMO-cov", "D2", "DEMO1-ui",
+    "DEMO1", "TEST-v0008", "DEMO-cov", "DEMO1-ui",
     # owner, 2026-10-29: the demo needs the report, marking and event-code sign-in first
     "COV-ui",
+    # owner, 2026-10-30: the full product; D2 becomes the permanent server, UI-mark LATER
+    "AUTH1-a", "AUTH1-b", "ORG1", "STOR1", "GPU1", "LAB1-a", "LAB1-b", "MARK-photo", "SEC1",
+    "SEC1-ci", "D2", "AUTH1-ui-a", "AUTH1-ui-b", "ORG1-ui", "LAB1-ui-a", "LAB1-ui-b",
+    "UI-mark-photo", "DESIGN-skills",
 ]  # fmt: skip
+# done by a Claude Code session with the owner (.github/, devteam/), never planned by Kerege
+OWNER_ONLY = {"SEC1-ci", "DESIGN-skills"}
 DEPS = {
     "B1": [],
     "U2": ["B1"],
@@ -37,7 +43,6 @@ DEPS = {
     "CONF-fix": [],
     "UI-evidence-c": ["UI-evidence-b"],
     "RPT1": ["REV1-api"],
-    "UI-mark": ["UI-evidence-c"],
     "UI-report": ["RPT1", "DS1"],
     "D2": ["S1", "U2"],
     "COV1": ["RPT1"],
@@ -48,11 +53,31 @@ DEPS = {
     "COV-ui": ["CONF-fix"],
     "TEST-v0008": [],
     "DEMO-cov": ["COV1-b"],
+    # owner, 2026-10-30: the full product
+    "AUTH1-a": [],
+    "AUTH1-b": ["AUTH1-a"],
+    "ORG1": ["AUTH1-b"],
+    "STOR1": [],
+    "GPU1": [],
+    "LAB1-a": ["STOR1"],
+    "LAB1-b": ["LAB1-a"],
+    "MARK-photo": [],
+    "SEC1": ["AUTH1-b"],
+    "SEC1-ci": [],
+    "AUTH1-ui-a": ["AUTH1-a"],
+    "AUTH1-ui-b": ["AUTH1-b", "AUTH1-ui-a"],
+    "ORG1-ui": ["ORG1", "AUTH1-ui-a"],
+    "LAB1-ui-a": ["LAB1-a"],
+    "LAB1-ui-b": ["LAB1-b", "LAB1-ui-a"],
+    "UI-mark-photo": ["MARK-photo", "LAB1-ui-b"],
+    "DESIGN-skills": [],
 }
 LATER = [
     "P5a-1", "P5a-2", "P7", "P4a-2b", "P4c", "A7a", "A7", "O1a", "O1", "P5b", "P6", "UX-kk",
     "UX-390", "A8", "ACC1",
+    "UI-mark",  # owner, 2026-10-30: marking on a frame first (UI-mark-photo)
 ]  # fmt: skip
+LATER_SINCE = {"UI-mark": "2026-10-30"}  # the others since 2026-10-22
 
 
 def developer_of(task: dict) -> str:
@@ -75,7 +100,7 @@ def test_demo_chain_dependencies_are_the_owners_and_never_point_off_the_chain():
     parked = set(LATER) | {"P5a"}  # LATER and dropped
     for tid in CHAIN:
         assert not set(by[tid].get("depends_on") or []) & parked, tid
-        assert not by[tid].get("owner_only"), tid  # Kerege plans all of them
+        assert bool(by[tid].get("owner_only")) == (tid in OWNER_ONLY), tid
     # Owner 2026-10-24: v8 landed and is the UI's source of truth; DS1 applies it and may not
     # write docs/design/ (owner-only, config gates.protected).
     assert "source of truth" in by["DS1"]["goal"] and "writable" not in by["DS1"]
@@ -85,7 +110,8 @@ def test_demo_chain_dependencies_are_the_owners_and_never_point_off_the_chain():
 def test_later_tasks_say_why_and_acc1_replaces_p7():
     by = {t["id"]: t for t in real_backlog()}
     for tid in LATER:
-        assert by[tid].get("blocked_reason", "").startswith("LATER (owner 2026-10-22)"), tid
+        since = LATER_SINCE.get(tid, "2026-10-22")
+        assert by[tid].get("blocked_reason", "").startswith(f"LATER (owner {since})"), tid
     assert by["ACC1"]["depends_on"] == ["P5a-2"] and "Replaces P7" in by["ACC1"]["goal"]
     assert by["A7"]["branch"] == "devteam/A7"  # earlier work is never lost
     # the splits of 2026-10-19/21 survive the move (from test_run2, test_supervisor; #65)
@@ -100,7 +126,7 @@ def test_later_tasks_say_why_and_acc1_replaces_p7():
 def test_every_chain_and_later_goal_stays_in_its_developers_folders():
     """A goal naming another developer's folder makes the brain split the task (A7, 2026-10-17)."""
     by = {t["id"]: t for t in real_backlog()}
-    for tid in CHAIN + LATER:
+    for tid in [t for t in CHAIN + LATER if t not in OWNER_ONLY]:
         t = by[tid]
         dev = developer_of(t)
         assert outside_paths([t["goal"]], dev, CFG, t) == [], (tid, dev)

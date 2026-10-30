@@ -19,7 +19,14 @@ notes: 'Demo chain (owner, 2026-10-22). Product first, then metres: website + de
   DEMO1, TEST-v0008, DEMO-cov, D2, DEMO1-ui, COV-ui (owner 2026-10-28; COV-ui last, TEST-v0008, DEMO-cov
   2026-10-29, LaunchPad demo 2026-11-06; D2 held until the owner''s local
 
-  review). Then LATER: status `later`, off the demo chain; the
+  review). Owner 2026-10-30: the full product, not only the demo: AUTH1-a, AUTH1-b, ORG1,
+
+  STOR1, GPU1, LAB1-a, LAB1-b, MARK-photo, SEC1, SEC1-ci (owner only), D2 (the permanent
+
+  server, the owner deploys), AUTH1-ui-a, AUTH1-ui-b, ORG1-ui, LAB1-ui-a, LAB1-ui-b,
+
+  UI-mark-photo, DESIGN-skills (owner only); UI-mark is LATER. Then LATER: status `later`, off the demo
+  chain; the
 
   brain never plans it, dependencies never un-block it, `devteam resume` does not touch it. A task comes
 
@@ -1848,49 +1855,6 @@ tasks:
   branch: devteam/COV1-b
   pr: https://github.com/IzbassarO/qarau/pull/95
   done_at: '2026-10-28'
-- id: UI-mark
-  area: app
-  title: Mark a region on the 3D map as a finding
-  goal: 'Today nothing in the viewer creates a finding. DEF1-api accepts POST /api/inspections/{id}/findings
-    with a
-
-    polygon in map coordinates; UI-evidence shows the result.
-
-
-    Build (web/ only): a "Mark finding" mode in the viewer: the engineer draws a polygon on the point
-    cloud
-
-    (click vertices on the surface by raycast onto points, double-click closes, Esc cancels, undo the
-    last
-
-    vertex), picks class and severity in a small form, optional comment -> POST finding -> the new finding
-
-    appears on the map (red/orange points) and the evidence panel opens on it. Viewers (role) do not see
-    the
-
-    mode. Mouse and trackpad both work; the polygon math lives in a pure module.
-
-    Not in this task: free-hand lasso, editing a region after creation, marking on 2D frames.
-
-    Done when: Vitest for the polygon module (closing, undo, minimum 3 vertices, degenerate polygons)
-    and the
-
-    form; a Playwright e2e draws 4 vertices on a fixture bundle with a mocked API and asserts the POST
-    body and
-
-    the finding on screen; i18n ru/kk/en; tester screenshots of the mode mid-drawing and after saving
-    (light and
-
-    dark, ru/kk/en).
-
-    Reference: docs/design/screens/viewer-light.png and docs/design/screens/finding-light.png (design
-    system v8); match it, adjust only alignment and size; phone layout per DESIGN.md Responsive (reference
-    docs/design/screens/evidence-phone-light.png at 390x844; same functions, layout may differ).
-
-    '
-  status: todo
-  depends_on:
-  - UI-evidence-c
 - id: DEMO1
   area: core
   risk: high
@@ -2047,69 +2011,6 @@ tasks:
   branch: devteam/DEMO-cov
   pr: https://github.com/IzbassarO/qarau/pull/102
   done_at: '2026-10-29'
-- id: D2
-  area: core
-  title: 'Deploy staging: one VM, compose, HTTPS, backups'
-  goal: 'Today infra/docker-compose.yml runs postgres + s3 (Versity) only, for dev; nothing is deployed
-    anywhere.
-
-    Owner (2026-10-22): product first, website + deploy before metres.
-
-
-    Build (infra/, docs/; Kerege spends nothing, the VM is the owner''s):
-
-    1. infra/docker-compose.staging.yml with api, worker (S1), web (static build behind a reverse proxy),
-
-    postgres, valkey, versity; .env.staging.example; Caddy (Apache-2.0) in front with automatic HTTPS
-    and the
-
-    app login (plus basic-auth while there is no public URL); no public sign-up.
-
-    2. infra/deploy.sh: run by the owner on a fresh Ubuntu VM (install docker + compose, pull, migrate,
-    start,
-
-    print the URL); idempotent. infra/backup.sh: nightly dump of Postgres and a dated copy of the S3 data,
-
-    keeps 14 days; infra/restore.sh restores one; both documented.
-
-    3. docs/notes/deploy-staging.md: steps, ports, where backups go, how to roll back, the estimated monthly
-
-    cost per component and which providers keep Kazakhstan data in Kazakhstan.
-
-    4. infra/smoke.sh: upload a sample video through the API, wait for the S1 workflow, GET the manifest;
-    exit
-
-    0 only when the map is served.
-
-    5. The event-code sign-in (DEMO1, DEMO1-ui) works behind the proxy: a guest with a code reaches
-
-    it with no other password. The VM is temporary (the LaunchPad demo, 2026-11-06): the docs say
-
-    how to take it down.
-
-
-    Not in this task: Kubernetes, GPU workers, SSO, monitoring stacks, a paid account of any kind.
-
-    Done when: everything above runs locally (Docker Compose on the dev machine, Caddy with internal TLS)
-    and
-
-    smoke.sh passes there; `docker compose config` validates; a backup + restore round-trip on a local
-    Postgres
-
-    passes in a test; the docs are complete. The VM itself is an owner-only step: the owner approves the
-
-    spending and runs deploy.sh and smoke.sh on the server; Kerege never creates an account or pays.
-
-    '
-  licence: Caddy (Apache-2.0), Docker Compose. No paid service is created by Kerege.
-  status: blocked
-  depends_on:
-  - S1
-  - U2
-  owner: dev_pipeline
-  run: cont-20261024-035848-dev_pipeline-2
-  branch: devteam/D2
-  blocked_reason: 'owner: deploy only after the local review'
 - id: DEMO1-ui
   area: app
   tags:
@@ -2219,6 +2120,903 @@ tasks:
     light ru/kk/en shots exist). The visible coverage message pill appears in the shots, which is acceptable
     for the not-computed case, but the full matrix is required. Code and tests look right. Nothing needs
     to change in web/ unless the missing captures reveal a defect; the full 12-image set must be ca'
+- id: AUTH1-a
+  area: core
+  risk: high
+  tags:
+  - auth
+  title: Email + password sign-in with server-side sessions
+  goal: 'Today a user signs in with a bearer token (scrypt per user, backend/app/auth.py `find_user`);
+
+    the web keeps it in sessionStorage. Real customers need accounts with passwords.
+
+
+    Build (backend/ only):
+
+    1. Migration v0009: `user` gets `email` (unique, stored lower-case), `password_hash`,
+
+    `must_change_password`, `failed_logins`, `locked_until`; new table `session` (SHA-256 of the
+
+    session id, user_id, csrf_sha256, created_at, expires_at, last_seen_at, ip).
+
+    2. argon2id password hashing (argon2-cffi), parameters in Settings.
+
+    3. POST /api/auth/login {email, password} sets an httpOnly, Secure, SameSite=Lax cookie
+
+    `qarau_session` and returns the CSRF token; POST /api/auth/logout deletes the session row;
+
+    GET /api/auth/options says which sign-ins this server offers (password, event code, dev token).
+
+    4. `require_role` accepts the session cookie; every unsafe method with a cookie needs a matching
+
+    `X-CSRF-Token` header (403 otherwise). Bearer user tokens and the shared `QARAU_API_TOKEN`
+
+    work only with QARAU_ENV=dev (the dev-token login); guest sessions stay as they are.
+
+    5. Every sign-in, failed sign-in and sign-out is an audit_log row (no password, no token).
+
+
+    Not in this task: lockout, reset by e-mail, first-login change (AUTH1-b), the web screens
+
+    (AUTH1-ui-a), SSO.
+
+
+    Done when: tests show a correct password gives a session cookie with httpOnly, Secure and SameSite=Lax;
+    a wrong password -> 401 with the same message as an unknown e-mail; a cookie POST without X-CSRF-Token
+    -> 403 and with it -> 2xx; a bearer user token -> 401 when QARAU_ENV is not dev and works with QARAU_ENV=dev;
+    logout makes the cookie useless; the event-code guest tests pass unchanged; ruff, mypy, pytest pass.
+
+
+    Owner 2026-10-30: full product, not only the LaunchPad demo; argon2id, server-side sessions,
+
+    dev-token login only under QARAU_ENV=dev; risk high (sign-in of a real system).
+
+    '
+  licence: argon2-cffi (MIT).
+  status: todo
+- id: AUTH1-b
+  area: core
+  risk: high
+  tags:
+  - auth
+  title: Lockout, rate limit, password reset by e-mail, first-login change
+  goal: 'Today (after AUTH1-a) a password sign-in exists, with no lockout, no reset and no forced change.
+
+
+    Build (backend/ only):
+
+    1. Lockout: 5 failed sign-ins in a row lock the account for 15 min (`locked_until`; numbers in
+
+    Settings); a per-IP rate limit on /api/auth/login through backend/app/ratelimit.py -> 429.
+
+    2. Reset: POST /api/auth/password-reset {email} always answers 202 (no account enumeration);
+
+    for a real active user it stores the SHA-256 of a one-time token (table `password_reset`,
+
+    migration v0010, expires after 1 h) and sends a link by e-mail; POST
+
+    /api/auth/password-reset/confirm {token, new_password} sets the password, uses the token up
+
+    and ends every session of that user.
+
+    3. E-mail through SMTP settings (QARAU_SMTP_*); with QARAU_ENV=dev and no SMTP the message is
+
+    written to the log with the token redacted, and a test mailer captures it; no paid service.
+
+    4. First login: while `must_change_password` is set, every route except POST
+
+    /api/auth/password, logout and GET /api/me answers 403 "password change required".
+
+    5. Each lockout, reset request and password change is an audit_log row.
+
+
+    Not in this task: the web screens (AUTH1-ui-b), admin-triggered reset (ORG1).
+
+
+    Done when: tests show the 6th wrong password within the window -> locked, even with the right password,
+    and unlocked after the time; the per-IP limit -> 429; a reset for an unknown e-mail -> 202 and no
+    mail; a used or 1 h old token -> 400; a confirmed reset ends the user''s other sessions; a user with
+    must_change_password gets 403 on GET /api/inspections until POST /api/auth/password succeeds; ruff,
+    mypy, pytest pass.
+
+
+    Owner 2026-10-30: lockout + per-IP rate limit, reset token 1 h, first-login change; risk high.
+
+    '
+  status: todo
+  depends_on:
+  - AUTH1-a
+- id: ORG1
+  area: core
+  risk: high
+  tags:
+  - auth
+  - admin
+  title: Admin manages the organization's users
+  goal: 'Today GET/POST /api/users (backend/app/crud.py) list every user of every organization and create
+
+    a user with a bearer token; nothing deactivates a user or resets a password.
+
+
+    Build (backend/ only):
+
+    1. An admin sees and manages only the users of their own organization: GET /api/users,
+
+    POST /api/users {name, email, role} (the new user gets must_change_password and a reset
+
+    e-mail, never a password in the response), PATCH /api/users/{id} {role | active}.
+
+    2. Deactivate (migration: `user.deactivated_at`): sign-in refused, every session ended at once;
+
+    reactivate clears it. An admin cannot deactivate or demote themself (409).
+
+    3. POST /api/users/{id}/password-reset: the AUTH1-b reset e-mail plus must_change_password.
+
+    4. No self-registration: no public route creates a user (a test walks every route).
+
+    5. Every change is an audit_log row with who, what and the old and new value (never a secret).
+
+
+    Not in this task: the web screen (ORG1-ui), creating organizations, SSO, invitations by link.
+
+
+    Done when: tests show an admin of org A gets 404 for a user of org B; a deactivated user''s open session
+    -> 401 on the next request and sign-in refused; self-deactivation -> 409; a viewer or engineer ->
+    403 on every /api/users route; each change writes an audit_log row with old and new value; no route
+    without a role creates a user; ruff, mypy, pytest pass.
+
+
+    Owner 2026-10-30: admins create users with a role, deactivate, reset; no self-registration;
+
+    audit_log for every change; risk high.
+
+    '
+  status: todo
+  depends_on:
+  - AUTH1-b
+- id: STOR1
+  area: core
+  risk: high
+  tags:
+  - storage
+  title: 'Production S3 layout: closed bucket, presigned downloads, abandoned uploads'
+  goal: 'Today backend/app/storage.py keys run files by `<org>/<site>/<inspection>` and can answer with
+
+    presigned URLs (QARAU_FILES_MODE=redirect, QARAU_SIGNED_URL_TTL_S=300); nothing closes the
+
+    bucket, and an upload left half-way (video_upload status `uploading`) stays forever.
+
+
+    Build (backend/, pipeline/, infra/, docs/):
+
+    1. The bucket is private: a bucket policy with no anonymous access, applied by an idempotent
+
+    `uv run python -m app.storage_setup` (also on API start with QARAU_ENV=prod); only the API''s
+
+    key reads or writes.
+
+    2. Production defaults: QARAU_FILES_MODE=redirect with a TTL of at most 300 s; every presigned
+
+    URL is for one object and GET only.
+
+    3. Per-organization prefixes stay `<org id>/...`; a test proves no API path builds a key of
+
+    another organization (CLI and benchmark runs keep `_local/`).
+
+    4. Abandoned uploads: an S3 lifecycle rule aborts incomplete multipart uploads after 1 day, and
+
+    a cleanup job deletes video_upload rows still `uploading` after 2 days with their partial file
+
+    (audit_log row each). Where versitygw lacks a feature, docs/notes/storage-prod.md says so and
+
+    the cleanup job covers it.
+
+
+    Not in this task: encryption keys management (KMS), cross-region copies, backups (D2).
+
+
+    Done when: a test against versitygw (or moto) shows an anonymous GET of an object -> 403 after setup;
+    a presigned URL expires after its TTL and refuses PUT; a key built for a run of org A never starts
+    with org B''s id; the cleanup job removes a 3-day-old `uploading` row and its file and keeps a fresh
+    one; setup run twice changes nothing the second time; ruff, mypy, pytest pass.
+
+
+    Owner 2026-10-30: bucket closed to the internet, API-only, short presigned downloads,
+
+    lifecycle for abandoned uploads, per-organization prefixes.
+
+    '
+  status: todo
+- id: GPU1
+  area: core
+  risk: medium
+  tags:
+  - modal
+  title: Dense on Modal after sparse, with a monthly cap and recompute
+  goal: 'Today the dense step runs only when pipeline/config.yaml `dense_remote.enabled` is true, with
+    a
+
+    daily GPU-hours budget in a JSON ledger under data/ (ADR 0016, 0019); nothing records what a
+
+    run cost.
+
+
+    Build (pipeline/, backend/, docs/; Kerege never calls Modal, tests use the fake provider):
+
+    1. With a Modal token configured, the workflow runs `dense` automatically after `sparse`
+
+    (product_steps), through ModalGpuProvider.
+
+    2. A monthly cap in config (`dense_remote.monthly_usd_cap: 30`, with `usd_per_gpu_hour` per GPU
+
+    type): a job that would go over is refused before start; the dense step ends `skipped` with
+
+    the plain text "Monthly GPU limit reached ($30): the map stays sparse until <date>" in the run''s
+
+    step list, never `failed`.
+
+    3. Cost per run: table `gpu_usage` (run_id, provider, gpu_type, seconds, usd, created_at),
+
+    migration; the month''s total comes from it, not from the JSON ledger.
+
+    4. "Recompute": POST /api/inspections/{id}/runs/{run_id}/steps/dense/rerun (engineer) uses the
+
+    same cap; an audit_log row each time.
+
+
+    Not in this task: other GPU providers, segmentation on GPU, the web wording (the status screen
+
+    shows the step''s text as it is).
+
+
+    Done when: tests with the fake provider show dense queued right after sparse; a job over the monthly
+    cap ends `skipped` with that text and no provider start; a finished job writes a gpu_usage row with
+    seconds and usd; the month''s total sums gpu_usage rows; recompute by an engineer -> 202 and by a
+    viewer -> 403; ruff, mypy, pytest pass.
+
+
+    Owner 2026-10-30: dense automatically through Modal, monthly cap $30 in config, engineer''s
+
+    recompute, cost per run recorded; Modal is the owner''s paid account.
+
+    '
+  licence: Modal (paid service, the owner's account and token; no call by Kerege).
+  status: todo
+- id: LAB1-a
+  area: core
+  risk: medium
+  tags:
+  - labelling
+  title: 'Training data: photos and run frames for labelling'
+  goal: 'Today findings belong to a run (finding.run_id) and observations point at a run frame
+
+    (observation.frame_id); there is nowhere to keep photos for training.
+
+
+    Build (backend/ only), admin only:
+
+    1. Migration: table `label_image` (id, org_id, source upload | run_frame, run_id, frame_id,
+
+    storage key, sha256, width, height, created_by, created_at); `finding.purpose` (inspection |
+
+    labelling, default inspection; a labelling finding has no run); `observation.label_image_id`
+
+    with a check that an observation has exactly one of frame_id or label_image_id.
+
+    2. POST /api/labels/images: a batch of JPEG/PNG photos (size and count limits in Settings,
+
+    duplicates by sha256 skipped), stored under the organization''s storage prefix.
+
+    3. POST /api/labels/images/from-run {run_id, frame_ids}: picks frames of a run of the same
+
+    organization.
+
+    4. GET /api/labels/images (paged) and GET /api/labels/stats: counts per defect type and severity.
+
+
+    Not in this task: the annotation itself and the COCO export (LAB1-b), the screens (LAB1-ui-a).
+
+
+    Done when: tests show a batch of 3 photos -> 3 label_image rows and one duplicate skipped; a non-image
+    or oversized file -> 422; frames of another organization''s run -> 404; an engineer -> 403 on every
+    /api/labels route; migration upgrade and downgrade on SQLite and Postgres; existing finding tests
+    pass unchanged; ruff, mypy, pytest pass.
+
+
+    Owner 2026-10-30: "Training data" for admins; one marking tool for engineers and for training;
+
+    automatic detection itself stays STOPPED until Kubernetes.
+
+    '
+  status: todo
+  depends_on:
+  - STOR1
+- id: LAB1-b
+  area: core
+  risk: medium
+  tags:
+  - labelling
+  title: 'Training data: annotations and COCO export'
+  goal: 'Today (after LAB1-a) label images exist with no annotations.
+
+
+    Build (backend/ only), admin only:
+
+    1. POST /api/labels/images/{id}/annotations {type, severity, comment, polygon | mask}: creates a
+
+    labelling finding (purpose labelling) and its observation on that image, with created_by and
+
+    created_at. Types are the existing finding classes corrosion, coating, crack, deformation
+
+    (coating = coating damage); polygon in pixels, a brush mask as a PNG of the image''s size
+
+    stored next to it.
+
+    2. Annotations are never edited in place: a correction is a new annotation that supersedes the
+
+    old one (both kept, like the decision log); DELETE answers 405.
+
+    3. GET /api/labels/images/{id}/annotations; GET /api/labels/stats counts only current ones.
+
+    4. GET /api/labels/export.coco.json: COCO (images, annotations with polygon or RLE
+
+    segmentation, categories, area, bbox) for the organization''s current annotations.
+
+
+    Not in this task: the screens (LAB1-ui-b), training a model.
+
+
+    Done when: tests show a polygon annotation and a mask annotation stored with who and when; a correction
+    keeps the old row and stats count the new one only; DELETE -> 405; the COCO export of a fixture set
+    loads with pycocotools (or a schema check) and has one category per type; another organization''s
+    image -> 404; ruff, mypy, pytest pass.
+
+
+    Owner 2026-10-30: polygon and brush, defect type, severity, comment; who/when; COCO export.
+
+    '
+  status: todo
+  depends_on:
+  - LAB1-a
+- id: MARK-photo
+  area: core
+  risk: medium
+  tags:
+  - marking
+  title: 'Mark a finding on a frame: outline to 3D points'
+  goal: 'Today POST /api/inspections/{id}/findings takes a polygon in map coordinates or point indices
+
+    (backend/app/findings.py, pipeline/qarau_pipeline/findings.py `select_points`, `evidence_for`).
+
+    An engineer looking at a photo cannot mark on it.
+
+
+    Build (backend/, pipeline/):
+
+    1. The same route accepts `frame_outline: {frame_id, polygon: [[u, v], ...]}` in frame pixels.
+
+    2. A pure function in pipeline/qarau_pipeline/findings.py selects the bundle points visible in
+
+    that frame (the existing frame-point links: sparse tracks, dense frame links of ADR 0017) whose
+
+    projection with the frame''s pose and intrinsics falls inside the outline.
+
+    3. The finding gets those points and area as today, an observation in that frame with the
+
+    outline, and evidence: the other frames that see at least N of the points (N in config), best
+
+    first as `evidence_for` does.
+
+    4. Fewer than 3 selected points -> 422 "the outline covers no mapped points" (no finding).
+
+
+    Not in this task: the web tool (UI-mark-photo), brush masks on run frames, 3D marking (UI-mark).
+
+
+    Done when: unit tests of the selection on a synthetic camera and points (inside, outside, behind the
+    camera, not visible in that frame); an API test on a fixture bundle creates a finding from an outline
+    and lists the other frames that see it; an empty outline -> 422; a guest marks only into its own sandbox
+    as today; ruff, mypy, pytest pass.
+
+
+    Owner 2026-10-30: engineers mark a finding on a frame; the backend maps the outline to the 3D
+
+    points visible in that frame and lists the other frames that see the region.
+
+    '
+  status: todo
+- id: SEC1
+  area: core
+  risk: high
+  tags:
+  - security
+  title: 'Security baseline: headers, safe errors, redacted logs, route inventory'
+  goal: 'Today the API sets no security headers, an unhandled error can reach the client as FastAPI''s
+
+    default, logs are not redacted, and "every route declares a role" is a convention only.
+
+
+    Build (backend/, pipeline/, docs/):
+
+    1. Middleware: Content-Security-Policy, Strict-Transport-Security, X-Content-Type-Options
+
+    nosniff, Referrer-Policy, frame-ancestors ''none'' on every API response; docs/notes/security.md
+
+    lists the same set for the web host (D2''s Caddy).
+
+    2. Error responses never carry a stack trace, SQL or a file path: one handler answers 500
+
+    {"detail": "internal error", "request_id"} and logs the details with that id.
+
+    3. A logging filter redacts bearer tokens, the session cookie, CSRF and reset tokens, event
+
+    codes and passwords in every log line.
+
+    4. A route inventory test walks app.routes and the OpenAPI schema: every route declares a role
+
+    through `require_role` or is on one explicit public list (health, sign-in, reset, guest code).
+
+    5. pip-audit (Apache-2.0) for backend/ and pipeline/, run with `uv run pip-audit`; each finding
+
+    fixed or put on an ignore list with a reason; the CI step is SEC1-ci (owner).
+
+
+    Not in this task: the CI file (SEC1-ci), penetration tests (K3 Red Team), a WAF.
+
+
+    Done when: a test asserts each header on a 200, a 404 and a 500; a route raising an exception and
+    one raising an SQL error both answer the generic 500 with no trace or SQL text; a caplog test shows
+    a token, a cookie and a password redacted; the inventory test fails on a route added without a role;
+    `uv run pip-audit` passes or every finding is listed; ruff, mypy, pytest pass.
+
+
+    Owner 2026-10-30: security baseline; SEC1 feeds K3 Red Team.
+
+    '
+  licence: pip-audit (Apache-2.0).
+  status: todo
+  depends_on:
+  - AUTH1-b
+- id: SEC1-ci
+  area: core
+  owner_only: true
+  risk: medium
+  tags:
+  - security
+  title: pip-audit and pnpm audit in CI (owner only, not Kerege)
+  goal: 'Owner-only task (2026-10-30): done interactively by a Claude Code session with the owner, never
+
+    planned or run by Kerege: .github/ is protected for every agent. No depends_on on purpose (a
+
+    blocked task with done dependencies goes back to todo); it starts after SEC1 is merged.
+
+
+    Today CI (.github/workflows/ci.yml) runs lint and tests only.
+
+
+    Build: a CI step running `uv run pip-audit` for backend and pipeline and `pnpm audit --prod
+
+    --audit-level high` for web; a finding fails the job unless it is on the ignore list SEC1 keeps,
+
+    with a reason.
+
+
+    Not in this task: anything SEC1 builds.
+
+
+    Done when: CI shows both audit steps green on the PR; a known vulnerable pin on a scratch branch makes
+    the job fail (shown once, not merged).
+
+
+    Owner 2026-10-30: pip-audit and pnpm audit in CI.
+
+    '
+  status: todo
+- id: D2
+  area: core
+  title: 'Permanent server: Hetzner VM, compose, HTTPS, backups'
+  goal: 'Today infra/docker-compose.yml runs postgres + s3 (versitygw) for dev only; nothing is deployed.
+
+    Earlier work on this branch aimed at a temporary demo VM; this goal replaces it (owner 2026-10-30).
+
+
+    Build (infra/, docs/; Kerege spends nothing and deploys nothing):
+
+    1. infra/docker-compose.prod.yml: api, worker, web (static build served by Caddy), postgres,
+
+    versitygw, valkey; only Caddy publishes ports (80, 443). infra/.env.prod.example lists every
+
+    setting; secrets live only in the server''s .env, never in git or in an image.
+
+    2. Caddy (Apache-2.0) with automatic HTTPS behind Cloudflare (proxied DNS; the docs say the TLS
+
+    mode and how the certificate is obtained), the SEC1 security headers on the web app.
+
+    3. Backups: nightly pg_dump plus a sync of the S3 data to a Hetzner Storage Box over SFTP (tool
+
+    and licence named in the PR), 14 daily and 8 weekly kept; infra/restore.sh restores a chosen
+
+    night into a fresh stack.
+
+    4. `make -C infra deploy` (infra/Makefile) from the owner''s Mac: build, copy over SSH, migrate,
+
+    restart, smoke check; idempotent. A root `make deploy` alias is a one-line owner step (the root
+
+    Makefile is outside dev_pipeline''s folders).
+
+    5. A status page at /status, static and served by Caddy, showing GET /health (api, worker,
+
+    database, storage); no third-party service.
+
+    6. docs/notes/deploy.md: first install on a fresh Hetzner VM, deploy, rollback to the previous
+
+    images, restore, monthly cost per component; it says the server is in the EU, so Kazakhstan
+
+    customer data needs an in-country server (CLAUDE.md).
+
+
+    Not in this task: Kubernetes, GPU workers on the server, SSO, a monitoring stack, any paid account.
+
+
+    Done when: `docker compose -f infra/docker-compose.prod.yml config` validates; the stack starts locally
+    with Caddy''s internal TLS and the smoke check passes; a test runs a backup, then a restore into a
+    fresh Postgres, and finds the same rows; gitleaks finds no secret in any committed file; a second
+    deploy against a local SSH target changes nothing; the docs are complete. The server itself is an
+    owner-only step: the owner pays for it and runs the deploy; Kerege never creates an account or pays.
+
+
+    Owner 2026-10-30: the permanent server, not temporary: Hetzner VM, Docker Compose, Caddy with
+
+    automatic HTTPS, Cloudflare in front, Storage Box backups with a tested restore, `make deploy`
+
+    from the owner''s Mac, a status page; the owner deploys, never Kerege.
+
+    '
+  licence: Caddy (Apache-2.0), Docker Compose. No paid service is created by Kerege.
+  status: blocked
+  depends_on:
+  - S1
+  - U2
+  owner: dev_pipeline
+  run: cont-20261024-035848-dev_pipeline-2
+  branch: devteam/D2
+  blocked_reason: 'owner: deploy only after the local review'
+- id: AUTH1-ui-a
+  area: app
+  risk: high
+  tags:
+  - auth
+  title: Sign-in with e-mail and password, first-login password change
+  goal: 'Today the sign-in page (web/src/auth/LoginPage.tsx, web/src/auth/auth.ts) takes a user name and
+
+    a token and keeps `Bearer <token>` in sessionStorage. After AUTH1-a the API signs in with
+
+    e-mail + password into an httpOnly cookie session with a CSRF token.
+
+
+    Build (web/ only):
+
+    1. Sign-in with e-mail and password (POST /api/auth/login); requests send the cookie
+
+    (credentials ''include'') and the X-CSRF-Token header on every unsafe method; no token in
+
+    sessionStorage or localStorage any more.
+
+    2. GET /api/auth/options decides what the page offers: the token field only when the API says
+
+    dev-token login is on; "I have an event code" exactly as today.
+
+    3. Sign-out (POST /api/auth/logout) in the shell''s identity menu.
+
+    4. First login: when the API answers "password change required", a change-password screen
+
+    (current, new, repeat; the API''s error text verbatim) before anything else.
+
+    5. Every new string in ru/kk/en; desktop and 390x844.
+
+
+    Not in this task: forgot/reset password (AUTH1-ui-b), user management (ORG1-ui).
+
+
+    Done when: Vitest shows the login posts e-mail and password and stores nothing in web storage; an
+    unsafe request carries X-CSRF-Token; the token field is hidden unless options say dev; the forced
+    change screen appears on the API''s 403; a Playwright e2e with a mocked API signs in, changes the
+    password and signs out; the event-code e2e passes unchanged; lint, tsc, Vitest and the e2e pass; tester
+    screenshots of sign-in and change-password, light and dark, ru/kk/en, desktop and 390x844.
+
+
+    Owner 2026-10-30: email + password sign-in, first-login change, ru/kk/en, phone; event-code
+
+    guest sign-in unchanged.
+
+    '
+  status: todo
+  depends_on:
+  - AUTH1-a
+- id: AUTH1-ui-b
+  area: app
+  risk: medium
+  tags:
+  - auth
+  title: Forgot and reset password screens
+  goal: 'Today (after AUTH1-b and AUTH1-ui-a) the API resets a password by e-mail; the web has no screen
+
+    for it.
+
+
+    Build (web/ only):
+
+    1. "Forgot password?" on the sign-in page -> e-mail field -> POST /api/auth/password-reset;
+
+    always the same "If the address is registered, we sent a link" message.
+
+    2. The link opens /reset?token=...: new password + repeat -> POST
+
+    /api/auth/password-reset/confirm; an expired or used token shows the API''s error verbatim and
+
+    a way back to "Forgot password?"; success goes to sign-in with a short notice.
+
+    3. The token is removed from the address bar after it is read and never stored.
+
+    4. A locked account (AUTH1-b) shows the API''s message verbatim.
+
+    5. Every new string in ru/kk/en; desktop and 390x844.
+
+
+    Not in this task: the API (AUTH1-b), the change-password screen (AUTH1-ui-a).
+
+
+    Done when: Vitest shows the request posts the e-mail and shows the same message for any answer; the
+    confirm posts token and password and the address bar loses the token; an expired token shows the API
+    text; a Playwright e2e with a mocked API goes forgot -> link -> new password -> sign-in; lint, tsc,
+    Vitest and the e2e pass; tester screenshots of forgot and reset, light and dark, ru/kk/en, desktop
+    and 390x844.
+
+
+    Owner 2026-10-30: reset by e-mail screens, ru/kk/en, phone.
+
+    '
+  status: todo
+  depends_on:
+  - AUTH1-b
+  - AUTH1-ui-a
+- id: ORG1-ui
+  area: app
+  risk: medium
+  tags:
+  - auth
+  - admin
+  title: Users screen for admins
+  goal: 'Today (after ORG1) the API lets an admin list, create, change, deactivate and reset users of
+
+    their organization; the web has no screen for it.
+
+
+    Build (web/ only), shown only to role admin (GET /api/me):
+
+    1. "Users" in the sidebar -> a table: name, e-mail, role, active, last change.
+
+    2. "New user": name, e-mail, role -> POST /api/users; the screen says a reset e-mail was sent
+
+    (no password is ever shown).
+
+    3. Per row: change role, deactivate / reactivate (with a confirm step in the page, not a
+
+    browser dialog), "Send password reset" -> the ORG1 routes; the API''s errors verbatim (409 on
+
+    self-deactivation).
+
+    4. Every new string in ru/kk/en; desktop and 390x844 (rows become cards on the phone).
+
+
+    Not in this task: the API (ORG1), the audit-log viewer, organizations.
+
+
+    Done when: Vitest shows a viewer and an engineer never see the Users entry; create posts name, e-mail
+    and role; deactivate asks in the page and then sends PATCH; the API''s 409 text is shown verbatim;
+    a Playwright e2e with a mocked API creates, deactivates and resets a user; lint, tsc, Vitest and the
+    e2e pass; tester screenshots of the list and the new-user form, light and dark, ru/kk/en, desktop
+    and 390x844.
+
+
+    Owner 2026-10-30: admin manages users; no self-registration.
+
+    '
+  status: todo
+  depends_on:
+  - ORG1
+  - AUTH1-ui-a
+- id: LAB1-ui-a
+  area: app
+  risk: medium
+  tags:
+  - labelling
+  title: 'Training data screen: upload photos, pick run frames, dataset counts'
+  goal: 'Today (after LAB1-a) the API keeps label images (GET/POST /api/labels/images, POST
+
+    /api/labels/images/from-run, GET /api/labels/stats); the web has no screen for it.
+
+
+    Build (web/ only), admin only:
+
+    1. "Training data" in the sidebar (admins only) -> the dataset screen: counts per defect type
+
+    and severity from GET /api/labels/stats, and a paged grid of images (labelled or not).
+
+    2. Upload: pick or drop many JPEG/PNG photos -> POST /api/labels/images with progress per file
+
+    and the API''s per-file result (stored, duplicate, refused with its reason).
+
+    3. From a run: choose an inspection''s run, see its frames, select several -> POST
+
+    /api/labels/images/from-run.
+
+    4. aria-busy while the grid loads; every new string in ru/kk/en; desktop and 390x844.
+
+
+    Not in this task: the annotation tool (LAB1-ui-b), the API.
+
+
+    Done when: Vitest shows a non-admin never sees the entry; three files post as one batch and each file''s
+    result is shown; frames selected from a run post their ids; counts render from the stats response;
+    a Playwright e2e with a mocked API uploads two photos and picks one frame; lint, tsc, Vitest and the
+    e2e pass; tester screenshots of the dataset screen and the upload in progress, light and dark, ru/kk/en,
+    desktop and 390x844.
+
+
+    Owner 2026-10-30: "Training data" for admins: upload photos (batch) or pick frames from a run;
+
+    dataset screen with counts per type.
+
+    '
+  status: todo
+  depends_on:
+  - LAB1-a
+- id: LAB1-ui-b
+  area: app
+  risk: medium
+  tags:
+  - labelling
+  - marking
+  title: 'Annotation tool: polygon and brush on a photo'
+  goal: 'Today (after LAB1-b) the API stores annotations (polygon or brush mask, type, severity,
+
+    comment); the web cannot draw them.
+
+
+    Build (web/ only):
+
+    1. One reusable annotation component (the same tool UI-mark-photo uses on run frames): the image
+
+    fitted to the screen, zoom and pan; polygon (click vertices, double-click or click the first
+
+    vertex closes, Esc cancels, undo last vertex) and brush (size slider, eraser); the geometry in
+
+    a pure module.
+
+    2. A form: defect type (corrosion, coating damage, crack, deformation), severity, comment ->
+
+    POST /api/labels/images/{id}/annotations (polygon in image pixels, or the brush as a PNG mask
+
+    of the image''s size).
+
+    3. Existing annotations drawn on open; "Correct" makes a new annotation (the old one stays).
+
+    4. "Export COCO" on the dataset screen downloads GET /api/labels/export.coco.json.
+
+    5. Mouse, trackpad and touch; every new string in ru/kk/en; desktop and 390x844.
+
+
+    Not in this task: marking on run frames for engineers (UI-mark-photo), the API.
+
+
+    Done when: Vitest for the geometry module (closing, undo, minimum 3 vertices, self-intersection refused,
+    brush mask size equals the image); the form posts type, severity, comment and geometry; a Playwright
+    e2e with a mocked API draws a 4-vertex polygon and a brush stroke and asserts both POST bodies; lint,
+    tsc, Vitest and the e2e pass; tester screenshots mid-polygon and after saving, light and dark, ru/kk/en,
+    desktop and 390x844.
+
+
+    Owner 2026-10-30: polygon and brush, defect type, severity, comment; one marking tool for
+
+    engineers and for training.
+
+    '
+  status: todo
+  depends_on:
+  - LAB1-b
+  - LAB1-ui-a
+- id: UI-mark-photo
+  area: app
+  risk: medium
+  tags:
+  - marking
+  title: Mark a finding on a frame in the evidence panel
+  goal: 'Today (after MARK-photo and LAB1-ui-b) the API turns an outline on a run frame into a finding
+
+    with its 3D points and other frames; the evidence panel (web/src/viewer/EvidencePanel.tsx)
+
+    only shows frames.
+
+
+    Build (web/ only):
+
+    1. "Mark on this photo" on a frame in the evidence panel (engineers; guests in their sandbox as
+
+    the API allows) opens the LAB1-ui-b annotation component in polygon mode on that frame.
+
+    2. Type, severity, comment -> POST /api/inspections/{id}/findings with `frame_outline`; the
+
+    API''s 422 ("covers no mapped points") shown verbatim.
+
+    3. On success the new finding appears on the map (its points coloured by severity) and the
+
+    evidence panel opens on it with the other frames the API listed.
+
+    4. Viewers do not see the action; every new string in ru/kk/en; desktop and 390x844.
+
+
+    Not in this task: 3D marking on the point cloud (UI-mark, LATER), brush on run frames, the API.
+
+
+    Done when: Vitest shows a viewer never sees the action and the POST body carries frame_id and the
+    polygon; the 422 text is shown verbatim; a Playwright e2e with a mocked API and a fixture bundle marks
+    a frame and sees the new finding with its other frames; lint, tsc, Vitest and the e2e pass; tester
+    screenshots mid-outline and after saving, light and dark, ru/kk/en, desktop and 390x844.
+
+
+    Owner 2026-10-30: engineers mark a finding on a frame with the LAB1-ui tool; UI-mark (3D marking)
+
+    becomes LATER.
+
+    '
+  status: todo
+  depends_on:
+  - MARK-photo
+  - LAB1-ui-b
+- id: DESIGN-skills
+  area: app
+  owner_only: true
+  risk: low
+  tags:
+  - design
+  title: Evaluate the impeccable design skill for dev_app (owner only, not Kerege)
+  goal: 'Owner-only task (2026-10-30): done interactively by a Claude Code session with the owner, never
+
+    planned or run by Kerege: it changes devteam/ and .claude/, which no developer may edit.
+
+
+    Today dev_app builds screens from docs/design/DESIGN.md and its reference screens with no
+
+    design skill.
+
+
+    Build:
+
+    1. Find the `impeccable` Claude Code skill''s source, licence and what it adds over DESIGN.md
+
+    (checks, prompts, tools); note whether dev_app''s tool (devteam/config.yaml developers.dev_app)
+
+    reads Claude Code skills at all.
+
+    2. Only if the licence allows commercial use: install it for dev_app worktrees under
+
+    .claude/skills (pinned version) and document it in devteam/README.md. Unclear licence: stop and
+
+    ask the owner. DESIGN.md stays the only visual source of truth.
+
+
+    Not in this task: changing DESIGN.md, the tester''s prompts.
+
+
+    Done when: devteam/README.md names the skill, version, licence and what it adds, or says why it was
+    not installed; `uv run devteam rehearse` passes.
+
+
+    Owner 2026-10-30: evaluate `impeccable` and install it for dev_app if the licence allows.
+
+    '
+  status: todo
 - id: P5a-1
   area: core
   title: Metric scale from a measured distance, and gravity
@@ -2534,3 +3332,48 @@ tasks:
   depends_on:
   - P5a-2
   blocked_reason: 'LATER (owner 2026-10-22): after P5a-2 and the owner''s tape-measure videos'
+- id: UI-mark
+  area: app
+  title: Mark a region on the 3D map as a finding
+  goal: 'Today nothing in the viewer creates a finding. DEF1-api accepts POST /api/inspections/{id}/findings
+    with a
+
+    polygon in map coordinates; UI-evidence shows the result.
+
+
+    Build (web/ only): a "Mark finding" mode in the viewer: the engineer draws a polygon on the point
+    cloud
+
+    (click vertices on the surface by raycast onto points, double-click closes, Esc cancels, undo the
+    last
+
+    vertex), picks class and severity in a small form, optional comment -> POST finding -> the new finding
+
+    appears on the map (red/orange points) and the evidence panel opens on it. Viewers (role) do not see
+    the
+
+    mode. Mouse and trackpad both work; the polygon math lives in a pure module.
+
+    Not in this task: free-hand lasso, editing a region after creation, marking on 2D frames.
+
+    Done when: Vitest for the polygon module (closing, undo, minimum 3 vertices, degenerate polygons)
+    and the
+
+    form; a Playwright e2e draws 4 vertices on a fixture bundle with a mocked API and asserts the POST
+    body and
+
+    the finding on screen; i18n ru/kk/en; tester screenshots of the mode mid-drawing and after saving
+    (light and
+
+    dark, ru/kk/en).
+
+    Reference: docs/design/screens/viewer-light.png and docs/design/screens/finding-light.png (design
+    system v8); match it, adjust only alignment and size; phone layout per DESIGN.md Responsive (reference
+    docs/design/screens/evidence-phone-light.png at 390x844; same functions, layout may differ).
+
+    '
+  status: later
+  depends_on:
+  - UI-evidence-c
+  blocked_reason: 'LATER (owner 2026-10-30): engineers mark findings on a frame first (UI-mark-photo);
+    3D marking on the point cloud waits. Keeps its id.'
