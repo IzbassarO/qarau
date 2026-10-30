@@ -162,10 +162,14 @@ def finding_labels(run: Path, n: int) -> np.ndarray:
 
 
 def run_coverage(
-    run_dir: Path, config: dict[str, Any], out_dir: Path | None = None
+    run_dir: Path,
+    config: dict[str, Any],
+    out_dir: Path | None = None,
+    finding_points: dict[int, list[int]] | None = None,
 ) -> dict[str, Any]:
     """Coverage of the run's bundle -> <out_dir or run>/coverage/regions.json; returns the state
-    counts and the region count."""
+    counts and the region count. `finding_points` (finding id -> bundle point indices: manual
+    findings of the API, app/seed.py) replaces the project step's findings/points.finding.u16."""
     s = settings(config)
     mpath = layout.manifest_path(run_dir)
     if not mpath.is_file():
@@ -177,9 +181,15 @@ def run_coverage(
         fx, fy, cx, cy = frames[f]["camera"]["K"]  # export's pinhole intrinsics
         K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], float)
         views[f] = View(K, cam.R, cam.t, cam.width, cam.height)
+    if finding_points is None:
+        labels = finding_labels(run_dir, len(b.positions))
+    else:
+        labels = np.zeros(len(b.positions), np.int64)
+        for fid, idx in finding_points.items():
+            labels[np.asarray(idx, np.int64)] = fid
     regions = classify_regions(
         b.positions, views, frame_quality(run_dir, frames, s["unusable_issues"]),
-        finding_labels(run_dir, len(b.positions)), s, (b.offsets, b.frame_ids),
+        labels, s, (b.offsets, b.frame_ids),
     )  # fmt: skip
     summary = {st: sum(r["state"] == st for r in regions)
                for st in ("inspected_ok", "finding", "not_seen")}  # fmt: skip

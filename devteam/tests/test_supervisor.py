@@ -804,6 +804,40 @@ def test_the_same_criterion_twice_blocks_whatever_the_wording(repo):
     assert t["status"] == "blocked" and "twice in a row" in t["blocked_reason"]
 
 
+class UIEvidenceC(Fast):
+    """UI-evidence-c, 2026-10-29: sent back for e2e, criterion 6, e2e again (3/3); the 4th
+    round's verdict is `last`."""
+
+    def __init__(self, last: bool):
+        super().__init__()
+        self.last, self.judged = last, []
+
+    def judge(self, team, s, checks):
+        n = s.get("rounds", 0)
+        self.judged.append((s["task"]["id"], n))
+        passed = n >= 4 and self.last
+        why = {1: "e2e fails", 2: "phone canvas", 3: "e2e fails", 4: "phone canvas, 4th"}[n]
+        crit = [{"criterion": why, "met": passed, "note": ""}]
+        return {"passed": passed, "feedback": "" if passed else why, "criteria": crit,
+                "summary": "", "how_to_try": ""}  # fmt: skip
+
+
+@pytest.mark.parametrize("last", [True, False], ids=["green-4th", "red-4th"])
+def test_the_fix_after_the_last_send_back_is_judged_and_is_the_final_verdict(repo, last):
+    agents = UIEvidenceC(last)
+    agents.plan = lambda team, todo, feedback=None, devs=None: [
+        p for p in FakeAgents.plan(agents, team, todo, feedback, devs) if p["task_id"] == "T-001"
+    ]
+    team, graph = make(repo, agents, max_fix_loops=3)
+    graph.invoke({}, {"configurable": {"thread_id": "r"}})
+    t = {t["id"]: t for t in team.load_backlog()}["T-001"]
+    assert agents.judged == [("T-001", n) for n in (1, 2, 3, 4)]  # each fix judged, no 5th round
+    if last:
+        assert t["status"] == "done"
+    else:
+        assert t["status"] == "blocked" and "phone canvas, 4th" in t["blocked_reason"]
+
+
 # --- 3. Owner additions reach the plan word for word ---------------------------------------------
 GOAL = """web/ only.
 

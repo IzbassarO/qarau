@@ -1433,13 +1433,98 @@ tasks:
     the browser bundle.
   tester:
     max_diff: 180000
-  status: in_progress
+  status: split
   depends_on:
   - RPT1
   - DS1
   owner: dev_app
   run: cont-20261029-152145-dev_app-1
   branch: devteam/UI-report
+  split_into:
+  - UI-report-s1
+  - UI-report-s2
+  - UI-report-s3
+- id: UI-report-s1
+  area: app
+  title: 'Report page: summary, states, pdf.js canvas, i18n'
+  goal: 'Today the report page code is on the branch. Build (web/ only): keep the report page with the
+    summary, language choice, pdf.js canvas preview of the first page, page count, Download PDF with hash,
+    and no <iframe>. Confirm the Vitest tests for the summary and the three states with mocked API and
+    mocked pdf.js, and the ru/kk/en keys, pass. Do not rework the e2e or screenshots here.
+
+
+    Split from UI-report by the Analyst (2026-10-29), piece 1 of 3: UI-report''s goal stays the spec.
+
+
+    Not in this task: what UI-report-s2, UI-report-s3 build.
+
+
+    Done when: Vitest for the summary and the three states with a mocked API and a mocked pdf.js (the
+    page count shown, a render error shows the failed state); no <iframe> in the page; i18n ru/kk/en.
+
+    '
+  status: todo
+  added_by: analyst
+  split_from: UI-report
+  depends_on:
+  - RPT1
+  - DS1
+  continues: UI-report
+- id: UI-report-s2
+  area: app
+  title: 'Report page: settle reliably and pass e2e, lint, tsc'
+  goal: 'Build (web/ only): make the report page reliably settle so the Playwright e2e passes without
+    retries. Today a font request (node_modules/.pnpm/@fontsource+ibm-plex-sans) can still be in flight
+    after the page is ready, and the ''default dev demo becomes network idle after sign-in'' scenarios
+    in web/e2e/report.spec.ts:378 fail on the first attempt. Find the cause, for example fonts loaded
+    lazily or late. Then fix it, for example by waiting for document.fonts.ready before clearing aria-busy,
+    or by importing the font CSS at app start. Then check that lint, tsc, Vitest and the e2e (opens the
+    page on a mocked API with a fixture PDF, waits for aria-busy to clear, asserts non-blank canvas pixels
+    and the page count, downloads the fixture PDF) pass with --retries=0.
+
+
+    Split from UI-report by the Analyst (2026-10-29), piece 2 of 3: UI-report''s goal stays the spec.
+
+
+    Not in this task: what UI-report-s1, UI-report-s3 build.
+
+
+    Done when: a Playwright e2e opens the page on a mocked API with a fixture PDF, waits for aria-busy
+    to clear, asserts the canvas has non-blank pixels and the page count, and downloads the fixture PDF;
+    lint, tsc, Vitest and the e2e pass.
+
+    '
+  status: todo
+  added_by: analyst
+  split_from: UI-report
+  depends_on:
+  - UI-report-s1
+- id: UI-report-s3
+  area: app
+  title: 'Report page: screenshots and design match'
+  goal: 'Build (web/ only): make the tester screenshots of /inspections/demo/report show the rendered
+    first page with no NOT-READY label, in light and dark, ru/kk/en, at 1440x900 and 390x844. Match docs/design/screens/report-light.png
+    (design system v8), adjusting only alignment and size. Phone layout follows DESIGN.md Responsive (reference
+    evidence-phone-light.png at 390x844), with the same functions and layout allowed to differ.
+
+
+    Split from UI-report by the Analyst (2026-10-29), piece 3 of 3: UI-report''s goal stays the spec.
+
+
+    Not in this task: what UI-report-s1, UI-report-s2 build.
+
+
+    Done when: tester screenshots of the page "/inspections/demo/report" show the rendered first page,
+    in light and dark, ru/kk/en, at 1440x900 and 390x844. Reference: docs/design/screens/report-light.png
+    (design system v8); match it, adjust only alignment and size; phone layout per DESIGN.md Responsive
+    (reference docs/design/screens/evidence-phone-light.png at 390x844; same functions, layout may differ).
+
+    '
+  status: todo
+  added_by: analyst
+  split_from: UI-report
+  depends_on:
+  - UI-report-s2
 - id: UI-evidence-b
   area: app
   title: Decision log and actions in the evidence panel
@@ -1875,7 +1960,8 @@ tasks:
     '
   status: in_progress
   owner: dev_pipeline
-  run: cont-20261029-152145-dev_pipeline-1
+  run: cont-20261030-001213-dev_pipeline-1
+  branch: devteam/TEST-v0008
 - id: DEMO-cov
   area: core
   title: Real coverage for the dev seed's demo inspection
@@ -1922,9 +2008,14 @@ tasks:
     '
   writable:
   - data/runs
-  status: todo
+  status: done
   depends_on:
   - COV1-b
+  owner: dev_pipeline
+  run: cont-20261029-152145-dev_pipeline-2
+  branch: devteam/DEMO-cov
+  pr: https://github.com/IzbassarO/qarau/pull/102
+  done_at: '2026-10-29'
 - id: D2
   area: core
   title: 'Deploy staging: one VM, compose, HTTPS, backups'
@@ -1990,6 +2081,8 @@ tasks:
   blocked_reason: 'owner: deploy only after the local review'
 - id: DEMO1-ui
   area: app
+  tags:
+  - guest
   title: Event code sign-in and guest mode in the web app
   goal: 'Today (after DEMO1) the API gives a guest session for an event code.
 
@@ -2074,9 +2167,17 @@ tasks:
     Owner 2026-10-29: LaunchPad demo; the owner''s `make local` walk (PR #97) found no layer.
 
     '
-  status: todo
+  status: blocked
   depends_on:
   - CONF-fix
+  owner: dev_app
+  run: cont-20261029-184005-dev_app-1
+  branch: devteam/COV-ui
+  blocked_reason: 'the tester sent it back twice in a row for the same reason, so no new round was started:
+    Criterion 7 is not proven. The screenshots lack dark kk and dark en at both sizes (the dark ru and
+    light ru/kk/en shots exist). The visible coverage message pill appears in the shots, which is acceptable
+    for the not-computed case, but the full matrix is required. Code and tests look right. Nothing needs
+    to change in web/ unless the missing captures reveal a defect; the full 12-image set must be ca'
 - id: P5a-1
   area: core
   title: Metric scale from a measured distance, and gravity

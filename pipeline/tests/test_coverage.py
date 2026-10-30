@@ -248,6 +248,18 @@ def test_regions_json_schema_on_a_synthetic_run(tmp_path: Path) -> None:
     assert (tmp_path / "elsewhere" / "coverage" / "regions.json").read_bytes() == before
 
 
+def test_manual_finding_points_replace_the_project_labels(tmp_path: Path) -> None:
+    write_run(tmp_path)
+    config = workflow.load_config()
+    out = tmp_path / "manual"
+    run_coverage(tmp_path, config, out, finding_points={7: [FINDING_POINT]})
+    regions = json.loads((out / "coverage" / "regions.json").read_text())["regions"]
+    assert regions[2] == {**EXPECTED_REGIONS[2], "finding_ids": [7]}
+    assert regions[:2] + regions[3:] == EXPECTED_REGIONS[:2] + EXPECTED_REGIONS[3:]
+    metrics = run_coverage(tmp_path, config, out, finding_points={})  # no findings: none marked
+    assert metrics == {"regions": 5, "inspected_ok": 2, "finding": 0, "not_seen": 3}
+
+
 def test_workflow_step_and_its_plain_failure(tmp_path: Path) -> None:
     step = Step("coverage", workflow.coverage)
     config = workflow.load_config()

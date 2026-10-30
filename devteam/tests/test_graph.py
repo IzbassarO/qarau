@@ -119,6 +119,7 @@ def test_backlog_check_passes_whatever_status_kerege_writes(tmp_path, status):
     path = tmp_path / "backlog.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False))
     cmd = yaml.safe_load((HERE / "config.yaml").read_text())["gates"]["backlog_check"]
+    cmd = cmd.format(devteam=HERE)  # dev's devteam/ in Kerege: this checkout here
     r = subprocess.run(
         cmd, shell=True, cwd=HERE, env={**os.environ, "DEVTEAM_BACKLOG": str(path)},
         capture_output=True, text=True,
@@ -155,6 +156,26 @@ def test_a_status_commit_that_fails_the_backlog_check_is_not_pushed(repo):
     assert task(team, "T-001")["status"] == "done"  # kept locally, shown as drift
     log = (team.home / "events.log").read_text()
     assert "`backlog: T-001 done` not pushed to dev" in log and "T-001 is done" in log
+
+
+@pytest.mark.usefixtures("fast_poll")
+def test_the_backlog_check_runs_the_fetched_devs_tests_not_the_checkouts(repo, tmp_path):
+    """2026-10-29 14:33: a PR merged into dev changed the backlog and its test; the main checkout
+    was still on the older test and refused a status that dev's own test passes."""
+    (repo / "devteam" / "check.sh").write_text("exit 1  # the old test\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "old test")
+    git(repo, "push", "-q", remote_of(repo), "dev")
+    other = tmp_path / "other"  # the merged PR, the main checkout not pulled
+    git(tmp_path, "clone", "-q", "-b", "dev", remote_of(repo), str(other))
+    (other / "devteam" / "check.sh").write_text("exit 0  # the new test\n")
+    git(other, "commit", "-qam", "new test")
+    git(other, "push", "-q", "origin", "dev")
+    for cmd, pushed in (("sh check.sh", False), ("sh {devteam}/check.sh", True)):
+        gates = {**copy.deepcopy(CFG["gates"]), "backlog_check": cmd}
+        team, _ = make(repo, fake=False, gates=gates)
+        team.update_task("T-002", status="done")
+        assert (team.push_status("T-002", "backlog: T-002 done") is not None) == pushed
 
 
 # --- 1. developer CLI: absolute path, checked before each round, one retry --------------------
