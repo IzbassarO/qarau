@@ -1,4 +1,5 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { Blob as NodeBlob } from 'node:buffer';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { fetchReportPdf, fetchReportSummary, reportInspectionForRun } from './report';
 import fixture from '../test/fixtures/report-summary.json';
 import report from '../test/fixtures/report.json';
@@ -36,6 +37,11 @@ function mockReportApi(
   return fetch;
 }
 
+beforeEach(() => {
+  // Use Node's Blob with Node's Response; jsdom's constructor is a separate realm.
+  vi.stubGlobal('Blob', NodeBlob);
+});
+
 afterEach(() => {
   sessionStorage.clear();
   vi.unstubAllGlobals();
@@ -50,6 +56,7 @@ it('fetches authenticated PDF and header hash', async () => {
   expect(result.hash).toBe('bf98d56a3f72c5e19345b6fe682380d399174770df752e8031c9fa427263bc26');
   expect(result.hash).toBe(report.headers['X-Report-SHA256']);
   expect(result.blob).toBeInstanceOf(Blob);
+  expect(result.blob.size).toBe(35);
   expect(result.blob.type).toBe('application/pdf');
   expect(await result.blob.text()).toBe(report.body);
   expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/inspections/37/report.pdf?lang=ru', {
