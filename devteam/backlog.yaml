@@ -1513,13 +1513,19 @@ tasks:
     lint, tsc, Vitest and the e2e pass.
 
     '
-  status: in_progress
+  status: blocked
   added_by: analyst
   split_from: UI-report
   depends_on:
   - UI-report-s1
   owner: dev_app
   run: cont-20261030-001213-dev_app-3
+  branch: devteam/UI-report-s2
+  blocked_reason: 'the tester sent it back twice in a row for the same reason, so no new round was started:
+    Criterion 2 is not proven. The checks ran Playwright with --retries=1, not --retries=0, and the report.spec.ts
+    results (including ''default dev demo becomes network idle after sign-in'') are not shown. The developer
+    also states that no browser run was done. Make sure the e2e for report.spec.ts can pass with --retries=0
+    and that the check output shows it. In addition, the new test in web/src/test/pla'
 - id: UI-report-s3
   area: app
   title: 'Report page: screenshots and design match'
