@@ -6,8 +6,10 @@ import copy
 import sqlite3
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import yaml
 from conftest import CFG, HERE, git, remote_of
 from langgraph.checkpoint.sqlite import SqliteSaver
 
@@ -437,17 +439,36 @@ def test_briefs_say_what_each_developer_may_write_in_docs():
     assert SC.folder("docs/notes/*.md") == "docs/notes/" and SC.folder("web/") == "web/"
 
 
-# --- 7. the frontend-design skill: pinned, licensed, protected, seen by Codex -------------------
-def test_frontend_design_skill_is_pinned_licensed_and_visible_to_codex():
-    skill = ROOT / ".claude" / "skills" / "frontend-design"
-    assert (skill / "SKILL.md").read_text().startswith("---\nname: frontend-design\n")
-    assert "Apache License" in (skill / "LICENSE.txt").read_text()
-    link = ROOT / ".agents" / "skills" / "frontend-design"  # where codex-cli reads skills
-    assert link.is_symlink() and link.resolve() == skill.resolve()
-    readme = (ROOT / ".claude" / "skills" / "README.md").read_text()
-    assert "dbd4588f9e1033efb41dad4bef2f7947c8993d44" in readme and "Apache-2.0" in readme
+# --- 7. skills: pinned, licensed, protected, seen by Codex and Kimi, named per role -------------
+def configured_skills() -> set[str]:
+    execs = [*CFG["developers"].values(), *CFG["models"].values()]
+    return {n for e in execs for n in e.get("skills") or []}
+
+
+def test_every_configured_skill_is_vendored_licensed_and_visible_to_codex():
+    table = (ROOT / ".claude" / "skills" / "SKILLS.md").read_text()
+    assert {"impeccable", "webapp-testing", "test-driven-development"} <= configured_skills()
+    for name in configured_skills():
+        skill = ROOT / ".claude" / "skills" / name
+        assert (skill / "SKILL.md").read_text().startswith(f"---\nname: {name}\n")
+        assert list(skill.glob("LICENSE*")), name
+        link = ROOT / ".agents" / "skills" / name  # where codex-cli and kimi-code read skills
+        assert link.is_symlink() and link.resolve() == skill.resolve()
+        assert f"| {name} |" in table
+    assert not (ROOT / ".claude" / "skills" / "impeccable" / "scripts").exists()  # downloads
     assert "DESIGN.md" in (ROOT / "AGENTS.md").read_text()
     assert (ROOT / "docs" / "design" / "DESIGN.md").exists()
+
+
+def test_skills_are_named_per_role_and_off_with_one_switch():
+    team = SimpleNamespace(cfg=copy.deepcopy(CFG))
+    app = CFG["developers"]["dev_app"]
+    core = yaml.safe_load((HERE / "config.yaml").read_text())["developers"]["dev_core"]
+    assert ".claude/skills/impeccable/SKILL.md" in R.skills_rule(team, app)
+    assert R.skills(team, core) == CFG["developers"]["dev_pipeline"]["skills"]  # the anchor
+    assert '<skill name="webapp-testing">' in R.tester_skills(team)
+    team.cfg["skills"]["enabled"] = False
+    assert R.skills_rule(team, app) == "" and R.tester_skills(team) == ""
 
 
 def test_skills_are_protected_and_never_downloaded_by_agents():

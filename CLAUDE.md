@@ -157,6 +157,14 @@ readers need it, and the tester's screenshots wait for it (up to 30 s). A page s
 is shot anyway and labelled `NOT-READY`: a developer fix (make it ready sooner, or clear
 `aria-busy` when it is), not a tester's problem.
 
+## Skills
+
+Pinned in `.claude/skills/` (table, sources and licences: `.claude/skills/SKILLS.md`; Codex and
+Kimi read them through `.agents/skills/`). Use them by folder: `web/` impeccable,
+frontend-design, theme-factory (DESIGN.md wins over all three); `pipeline/`, `backend/`,
+`infra/` test-driven-development and receiving-code-review; Playwright checks of `web/`
+webapp-testing. Only the owner adds or updates a skill.
+
 ## How we work: you own the engineering
 
 This is a startup building a SaaS product, not a pet project. The owner (Izbassar) sets
