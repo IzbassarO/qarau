@@ -1,10 +1,40 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { fetchReportPdf } from './api';
-import { fetchReportSummary, reportInspectionForRun } from './report';
+import { fetchReportPdf, fetchReportSummary, reportInspectionForRun } from './report';
 import fixture from '../test/fixtures/report-summary.json';
 import report from '../test/fixtures/report.json';
 import coverageFixture from '../test/fixtures/report-coverage.json';
-import { mockReportApi } from '../test/reportApi';
+
+function mockReportApi(
+  pdf: () => Response | Promise<Response> = () =>
+    new Response(report.body, { status: report.status, headers: report.headers }),
+  overrides: Record<string, () => Response> = {},
+) {
+  const routes: Record<string, unknown> = {
+    '/api/inspections/37': fixture.inspection,
+    '/api/inspections': [fixture.inspection],
+    '/api/inspections/37/runs': fixture.runs,
+    '/api/sites': fixture.sites,
+    '/api/inspections/37/findings': fixture.findings,
+    ...Object.fromEntries(
+      Object.entries(fixture.decisions).map(([id, data]) => [
+        `/api/findings/${id}/decisions`,
+        data,
+      ]),
+    ),
+  };
+  const fetch = vi.fn(async (input: string | URL | Request) => {
+    const path = String(input);
+    if (path in overrides) return overrides[path]();
+    if (path.startsWith('/api/inspections/37/report.pdf?lang=')) return pdf();
+    if (path === '/api/inspections/demo' || path === '/api/inspections/notre-dame')
+      return Response.json(fixture.validation, { status: 422 });
+    return path in routes
+      ? Response.json(routes[path])
+      : Response.json(fixture.notFound, { status: 404 });
+  });
+  vi.stubGlobal('fetch', fetch);
+  return fetch;
+}
 
 afterEach(() => {
   sessionStorage.clear();
@@ -87,7 +117,6 @@ it('assembles summary from API routes', async () => {
   expect(summary.findings[2].decisions).toEqual([]);
   expect(fetch.mock.calls.map(([path]) => path)).toEqual([
     '/api/inspections/37',
-    '/api/inspections/37/runs',
     '/api/sites',
     '/api/inspections/37/findings',
     '/api/inspections/37/coverage',
@@ -102,7 +131,7 @@ it.each(['demo', 'notre-dame'])('resolves report alias %s', async (id) => {
   const summary = await fetchReportSummary(id);
   expect(summary.inspectionId).toBe(37);
   expect(summary.object).toBe(fixture.sites[0].name);
-  expect(fetch).toHaveBeenCalledWith('/api/inspections/37/runs', expect.anything());
+  expect(fetch).toHaveBeenCalledWith('/api/inspections/37', expect.anything());
 });
 
 it('preserves API coverage', async () => {
@@ -147,7 +176,7 @@ it('handles unassociated viewers', async () => {
 
 it('preserves unknown-inspection errors', async () => {
   mockReportApi();
-  await expect(fetchReportSummary('unknown')).rejects.toThrow(fixture.notFound.detail);
+  await expect(fetchReportSummary('unknown')).rejects.toMatchObject({ status: 404 });
 });
 
 it('preserves authorization/server errors', async () => {

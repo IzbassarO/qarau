@@ -12,7 +12,6 @@ import { ViewerEngine } from '../viewer/engine';
 import type { Axis } from '../viewer/gizmo';
 import { saveSensitivity } from '../viewer/settings';
 import { ViewerPage } from './ViewerPage';
-import { mockReportApi } from '../test/reportApi';
 
 const { renderScene } = vi.hoisted(() => ({ renderScene: vi.fn() }));
 
@@ -101,32 +100,6 @@ function renderViewer(runId: string, query = '') {
 function renderDemo() {
   return renderViewer('demo');
 }
-
-it.each(['notre-dame', 'notre-dame-p3e'])(
-  'links viewer %s to the API inspection report even without findings',
-  async (runId) => {
-    const fetch = mockReportApi();
-    const original = fetch.getMockImplementation()!;
-    fetch.mockImplementation(async (input) =>
-      String(input) === '/api/inspections/37/findings' ? Response.json([]) : original(input),
-    );
-    const bundle = { ...createDemo('en').bundle, runId };
-    vi.spyOn(bundleApi, 'loadManifest').mockResolvedValue(bundle.manifest);
-    vi.spyOn(bundleApi, 'loadBundle').mockResolvedValue(bundle);
-    const view = renderViewer(runId);
-    expect((await screen.findByRole('link', { name: 'Report' })).getAttribute('href')).toBe(
-      '/inspections/37/report',
-    );
-    view.unmount();
-  },
-);
-
-it('links /viewer/demo to the seeded demo report route', () => {
-  renderDemo();
-  expect(screen.getByRole('link', { name: 'Report' }).getAttribute('href')).toBe(
-    '/inspections/demo/report',
-  );
-});
 
 it.each([
   ['missing', 'The findings file listed in the bundle is missing. Re-run the projection stage.'],
@@ -646,10 +619,7 @@ it.each<Lang>(['en', 'ru', 'kk'])(
 );
 
 it('loads and saves sensitivity for the signed-in identity without recreating the engine', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockImplementation(async () => Response.json([])),
-  );
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([])));
   saveSensitivity('operator-a', 0.5);
   saveSensitivity('operator-b', 2.5);
   await login({ username: 'operator-a', password: 'test-viewer-credential' });

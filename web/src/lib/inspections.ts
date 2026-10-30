@@ -1,34 +1,9 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { Source, Stats } from './bundle';
 import type { ProcessingRunPayload, ProcessingStagePayload } from './processing';
-import { authHeader, takeLoginRunCatalog } from '../auth/auth';
+import { authHeader } from '../auth/auth';
 import { listSites, type SiteOption } from './sites';
-import { ApiUnavailableError, apiErrorMessage, fetchApi, readApi } from './api';
-
-/** COV1-b returns coverage percentages; clients never infer them from findings. */
-export interface InspectionCoverage {
-  computed: boolean;
-  totals: Record<'inspected_ok' | 'finding' | 'not_seen', number>;
-  regions: {
-    id: string;
-    state: 'inspected_ok' | 'finding' | 'not_seen';
-    frame_count: number;
-    bounds: { min: number[]; max: number[] };
-  }[];
-}
-
-export async function getInspectionCoverage(
-  id: number,
-  signal?: AbortSignal,
-): Promise<InspectionCoverage | null> {
-  const response = await fetchApi(`/api/inspections/${id}/coverage`, signal);
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(await apiErrorMessage(response));
-  const body = await response.text();
-  if (!body.trim()) return null;
-  const coverage = JSON.parse(body) as InspectionCoverage | null;
-  return coverage?.computed && coverage.totals && coverage.regions?.length ? coverage : null;
-}
+import { ApiUnavailableError, readApi } from './api';
 
 export type InspectionStatus = 'uploaded' | 'queued' | 'running' | 'done' | 'failed' | 'unknown';
 
@@ -130,15 +105,9 @@ export function groupRunsIntoSites(runs: readonly RunSummary[]): Site[] {
 }
 
 export async function fetchRuns(signal?: AbortSignal): Promise<RunSummary[]> {
-  // StrictMode can discard a reader before it reaches the legacy fallback.
-  // Do not let an already-aborted reader consume the completed login response.
-  signal?.throwIfAborted();
-  let runs = takeLoginRunCatalog();
-  if (runs === undefined) {
-    const response = await fetch('/api/runs', { signal, headers: authHeader() });
-    if (!response.ok) throw new Error(String(response.status));
-    runs = await response.json();
-  }
+  const response = await fetch('/api/runs', { signal, headers: authHeader() });
+  if (!response.ok) throw new Error(String(response.status));
+  const runs: unknown = await response.json();
   if (
     !Array.isArray(runs) ||
     !runs.every((run) => run && typeof run.run_id === 'string' && run.run_id.length > 0)

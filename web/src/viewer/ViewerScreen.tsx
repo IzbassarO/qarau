@@ -94,7 +94,6 @@ export function ViewerScreen({
   invalidPoint = false,
   initialMode = 'orbit',
   apiFindings,
-  inspectionId,
   selectedFindingId = null,
   onFindingSelect,
 }: {
@@ -104,7 +103,6 @@ export function ViewerScreen({
   invalidPoint?: boolean;
   initialMode?: 'orbit' | 'observer';
   apiFindings?: readonly ApiFinding[];
-  inspectionId?: number;
   selectedFindingId?: number | null;
   onFindingSelect?: (id: number | null) => void;
 }) {
@@ -402,14 +400,6 @@ export function ViewerScreen({
             <span className="qv-mono qv-muted viewer-run-id">{bundle.runId}</span>
             <span className="qv-caption">{t('nav.viewer')}</span>
           </div>
-          {(inspectionId !== undefined || bundle.runId === 'demo') && (
-            <Link
-              className="qv-btn qv-btn--secondary viewer-report-link"
-              to={`/inspections/${inspectionId ?? 'demo'}/report`}
-            >
-              {t('report.link')}
-            </Link>
-          )}
           <LangSwitch />
         </header>
       )}

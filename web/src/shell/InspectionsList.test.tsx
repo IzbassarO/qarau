@@ -1,7 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router';
 import { setLang, type Lang } from '../i18n';
 import { useInspections } from '../lib/inspections';
 import fixture from '../test/fixtures/inspections.json';
@@ -37,9 +36,7 @@ function renderList(items = fixture.inspections.slice(0, 5), lang: Lang = 'en') 
   }
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <ListFromApi {...actions} />
-      </MemoryRouter>
+      <ListFromApi {...actions} />
     </QueryClientProvider>,
   );
   return { ...actions, fetch };
@@ -78,26 +75,6 @@ it('shows an em dash for missing findings and preserves known positive and zero 
   expect(
     within(screen.getByRole('row', { name: /Pipe rack PR-5, bays 12 to 14/ })).getByText('0'),
   ).toBeTruthy();
-});
-
-it('links a done inspection to its report and offers no report for processing inspections', async () => {
-  renderList();
-  const done = await screen.findByRole('row', { name: /Separator V-301, shell/ });
-  expect(within(done).getByRole('link', { name: 'Report' }).getAttribute('href')).toBe(
-    '/inspections/4/report',
-  );
-  for (const name of [
-    'Pipe rack PR-2, bay 7',
-    'Tank T-104, north wall',
-    'Tank T-112, roof',
-    'Pipe rack PR-5, bays 12 to 14',
-  ]) {
-    expect(
-      within(screen.getByRole('row', { name: new RegExp(name) })).queryByRole('link', {
-        name: 'Report',
-      }),
-    ).toBeNull();
-  }
 });
 
 it('renders the empty state from an empty API without requesting legacy runs', async () => {

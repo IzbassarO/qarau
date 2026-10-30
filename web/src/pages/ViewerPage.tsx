@@ -7,7 +7,6 @@ import { BundleError, FarLayerError, loadBundle, loadManifest, type Bundle } fro
 import { ViewerScreen } from '../viewer/ViewerScreen';
 import { EvidencePanel } from '../viewer/EvidencePanel';
 import { findingsForRunOptions } from '../lib/findings';
-import { reportInspectionForRun } from '../lib/report';
 
 type State =
   | { s: 'loading'; p: number }
@@ -20,13 +19,6 @@ export function ViewerPage() {
   const [st, setSt] = useState<State>({ s: 'loading', p: 0 });
   const [search, setSearch] = useSearchParams();
   const findings = useQuery({ ...findingsForRunOptions(runId), enabled: runId !== 'demo' });
-  const reportInspection = useQuery({
-    queryKey: ['report-inspection', runId],
-    queryFn: ({ signal }) => reportInspectionForRun(runId, signal),
-    enabled: runId !== 'demo',
-    retry: false,
-    refetchOnWindowFocus: false,
-  });
   const selection = search.get('finding');
   const selectedFindingId =
     selection === 'first'
@@ -80,7 +72,6 @@ export function ViewerPage() {
       <ViewerScreen
         key={`${runId}:${search.get('point')}:${search.get('mode')}`}
         bundle={bundle}
-        inspectionId={findings.data?.[0]?.inspection_id ?? reportInspection.data ?? undefined}
         apiFindings={findings.data ?? []}
         selectedFindingId={selectedFindingId}
         onFindingSelect={selectFinding}

@@ -14,8 +14,6 @@ export class AuthError extends Error {
 const SESSION_KEY = 'qarau.auth.session';
 const USER_ID_KEY = 'qarau.auth.userId';
 const subscribers = new Set<() => void>();
-let loginRunCatalog:
-  { session: string; userId: string; receivedAt: number; data: unknown } | undefined;
 
 export function sessionHeader(): string | null {
   try {
@@ -48,21 +46,7 @@ export function authHeader(): Record<string, string> {
   return header ? { Authorization: header } : {};
 }
 
-/** Reuse the completed login read once; later catalog reads must reach the API. */
-export function takeLoginRunCatalog(): unknown {
-  const initial = loginRunCatalog;
-  loginRunCatalog = undefined;
-  if (
-    initial?.session === sessionHeader() &&
-    initial?.userId === sessionUserId() &&
-    Date.now() - initial.receivedAt < 5000
-  )
-    return initial.data;
-  return undefined;
-}
-
 export function logout(): void {
-  loginRunCatalog = undefined;
   sessionStorage.removeItem(SESSION_KEY);
   sessionStorage.removeItem(USER_ID_KEY);
   subscribers.forEach((callback) => callback());
@@ -89,19 +73,6 @@ export async function login({ username, password }: Credentials): Promise<void> 
   }
   if (response.status === 401 || response.status === 403) throw new AuthError('invalidCredentials');
   if (response.status !== 200) throw new AuthError('connection');
-  // fetch resolves at headers. Finish its body before publishing the session;
-  // navigation out of the sign-in screen must not leave this request in flight.
-  let catalog: unknown;
-  try {
-    const body = await response.text();
-    try {
-      catalog = JSON.parse(body);
-    } catch {
-      // Authentication remains status-based; a non-JSON body cannot seed a catalog.
-    }
-  } catch {
-    throw new AuthError('connection');
-  }
   try {
     sessionStorage.setItem(USER_ID_KEY, username.trim());
     sessionStorage.setItem(SESSION_KEY, header);
@@ -110,11 +81,5 @@ export async function login({ username, password }: Credentials): Promise<void> 
     sessionStorage.removeItem(SESSION_KEY);
     throw new AuthError('storage');
   }
-  loginRunCatalog = {
-    session: header,
-    userId: username.trim(),
-    receivedAt: Date.now(),
-    data: catalog,
-  };
   subscribers.forEach((callback) => callback());
 }

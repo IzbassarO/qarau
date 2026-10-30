@@ -1,13 +1,11 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useI18n, type Key } from '../i18n';
 import { LanguageSwitch, Wordmark } from '../shell/ShellIdentity';
 import { AuthError } from './auth';
 import { useAuth } from './AuthProvider';
-import { prepareInterfaceFonts } from '../lib/prepareInterfaceFonts';
 import '../shell/shell.css';
 
 export function LoginPage() {
-  const screen = useRef<HTMLElement>(null);
   const { t, lang } = useI18n();
   const { signIn } = useAuth();
   const [username, setUsername] = useState('');
@@ -26,13 +24,6 @@ export function LoginPage() {
     setError(null);
     setPending(true);
     try {
-      // Finish shared fonts before mounting the signed-in shell, so an immediate
-      // document navigation does not interrupt its first semibold font requests.
-      if (screen.current?.ownerDocument.fonts)
-        await prepareInterfaceFonts(
-          screen.current,
-          (['ru', 'kk', 'en'] as const).map((locale) => t(`report.language.${locale}`)).join(' '),
-        ).catch(() => {});
       await signIn({ username, password });
     } catch (cause) {
       setError(cause instanceof AuthError ? `auth.${cause.code}` : 'auth.connection');
@@ -43,7 +34,7 @@ export function LoginPage() {
   };
 
   return (
-    <main ref={screen} className="qv login-page">
+    <main className="qv login-page">
       <section className="qv-hero login-hero" aria-labelledby="login-hero-title">
         <Wordmark hero />
         <div className="login-hero-copy">
@@ -64,7 +55,6 @@ export function LoginPage() {
             className="qv-form login-form"
             onSubmit={(event) => void submit(event)}
             aria-label={t('auth.title')}
-            aria-busy={pending}
           >
             <div className="qv-field">
               <label htmlFor="login-username">{t('auth.username')}</label>

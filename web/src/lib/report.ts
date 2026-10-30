@@ -1,7 +1,6 @@
-import { ApiError, ReportApiError, apiErrorMessage, fetchApi } from './api';
+import { ApiError, ApiUnavailableError, readApi, requestApi } from './api';
+import type { Lang } from '../i18n';
 import type { Finding } from './findings';
-import { listInspectionFindings } from './findings';
-import { getInspection, getInspectionCoverage, type InspectionCoverage } from './inspections';
 
 export interface ReportDecision {
   id: number;
@@ -29,9 +28,13 @@ interface Inspection {
 }
 
 async function json<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetchApi(path, signal);
-  if (!response.ok) throw new ReportApiError(await apiErrorMessage(response), response.status);
-  return response.json() as Promise<T>;
+  try {
+    return (await readApi(path, signal)) as T;
+  } catch (error) {
+    if (error instanceof ApiError)
+      throw new ReportApiError(error.detail ?? error.message, error.status ?? 0);
+    throw error;
+  }
 }
 
 /** Resolve the API inspection associated with a viewer run. */
@@ -63,13 +66,7 @@ export async function reportInspectionForRun(runId: string, signal?: AbortSignal
 
 async function inspectionForReport(id: string, signal?: AbortSignal): Promise<Inspection> {
   try {
-    try {
-      return await getInspection(id, signal);
-    } catch (error) {
-      if (error instanceof ApiError)
-        throw new ReportApiError(error.detail ?? error.message, error.status ?? 0);
-      throw error;
-    }
+    return await json<Inspection>(`/api/inspections/${encodeURIComponent(id)}`, signal);
   } catch (error) {
     if (
       !(error instanceof ReportApiError) ||
@@ -83,7 +80,7 @@ async function inspectionForReport(id: string, signal?: AbortSignal): Promise<In
       signal,
     );
     if (inspectionId === null) throw error;
-    return getInspection(String(inspectionId), signal);
+    return json<Inspection>(`/api/inspections/${inspectionId}`, signal);
   }
 }
 
@@ -91,7 +88,7 @@ export async function fetchReportSummary(id: string, signal?: AbortSignal): Prom
   const inspection = await inspectionForReport(id, signal);
   const [sites, findings, coverage] = await Promise.all([
     json<{ id: number; name: string }[]>('/api/sites', signal),
-    listInspectionFindings(inspection.id, signal),
+    json<Finding[]>(`/api/inspections/${inspection.id}/findings`, signal),
     getInspectionCoverage(inspection.id, signal),
   ]);
   return {
@@ -106,4 +103,79 @@ export async function fetchReportSummary(id: string, signal?: AbortSignal): Prom
     ),
     coverage,
   };
+}
+
+/** COV1-b percentages are supplied by the API, never inferred from findings. */
+export interface InspectionCoverage {
+  computed: boolean;
+  totals: Record<'inspected_ok' | 'finding' | 'not_seen', number>;
+  regions: { id: string; state: 'inspected_ok' | 'finding' | 'not_seen' }[];
+}
+
+async function getInspectionCoverage(id: number, signal?: AbortSignal) {
+  const response = (await requestApi(`/api/inspections/${id}/coverage`, {
+    signal,
+    responseType: 'response',
+  })) as Response;
+  if (response.status === 404 || response.status === 204) return null;
+  if (!response.ok) throw new ReportApiError(await apiErrorMessage(response), response.status);
+  const body = await response.text();
+  if (!body.trim()) return null;
+  const coverage = JSON.parse(body) as InspectionCoverage | null;
+  return coverage?.computed && coverage.totals && coverage.regions?.length ? coverage : null;
+}
+
+export type ReportPdf =
+  | { state: 'generating' }
+  | { state: 'ready'; blob: Blob; hash: string }
+  | { state: 'failed'; message: string };
+
+export class ReportApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+async function apiErrorMessage(response: Response): Promise<string> {
+  const body = await response.text();
+  if (!body.trim() || response.headers.get('Content-Type')?.includes('text/html')) return '';
+  try {
+    const payload = JSON.parse(body) as { detail?: unknown };
+    if (typeof payload?.detail === 'string') return payload.detail;
+    if (Array.isArray(payload?.detail))
+      return payload.detail
+        .map((item: { msg?: unknown }) => (typeof item?.msg === 'string' ? item.msg : ''))
+        .filter(Boolean)
+        .join('\n');
+  } catch {
+    return body;
+  }
+  return '';
+}
+
+/** RPT1 returns application/pdf with the body hash in X-Report-SHA256. */
+export async function fetchReportPdf(
+  id: string | number,
+  lang: Lang,
+  signal?: AbortSignal,
+): Promise<ReportPdf> {
+  try {
+    const response = (await requestApi(
+      `/api/inspections/${encodeURIComponent(id)}/report.pdf?lang=${lang}`,
+      { signal, responseType: 'response' },
+    )) as Response;
+    if (response.status === 202) return { state: 'generating' };
+    if (!response.ok) throw new ReportApiError(await apiErrorMessage(response), response.status);
+    const hash = response.headers.get('X-Report-SHA256');
+    if (!hash || !response.headers.get('Content-Type')?.includes('application/pdf'))
+      return { state: 'failed', message: '' };
+    return { state: 'ready', blob: await response.blob(), hash };
+  } catch (error) {
+    if (signal?.aborted || error instanceof ReportApiError || error instanceof ApiUnavailableError)
+      throw error;
+    return { state: 'failed', message: '' };
+  }
 }

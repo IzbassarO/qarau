@@ -93,7 +93,7 @@ export const decisionsOptions = (id: number) =>
     retry: false,
   });
 
-export async function listInspectionFindings(
+async function listInspectionFindings(
   inspectionId: number,
   signal?: AbortSignal,
 ): Promise<Finding[]> {

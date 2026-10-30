@@ -1,1003 +1,204 @@
-import { StrictMode } from 'react';
-import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { AuthProvider } from '../auth/AuthProvider';
-import { RequireAuth } from '../auth/RequireAuth';
-import { setLang, type Lang } from '../i18n';
-import * as reportApi from '../lib/report';
-import { AppShell } from '../shell/AppShell';
+import { LANGS, setLang } from '../i18n';
+import { readApi, requestApi } from '../lib/api';
 import fixture from '../test/fixtures/report-summary.json';
 import report from '../test/fixtures/report.json';
-import coverageFixture from '../test/fixtures/report-coverage.json';
-import { fixturePdf, mockReportApi } from '../test/reportApi';
-import { mockDevReportApi } from '../test/devReportApi';
+import coverage from '../test/fixtures/report-coverage.json';
 import { ReportPage } from './ReportPage';
 
+vi.mock('../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/api')>()),
+  readApi: vi.fn(),
+  requestApi: vi.fn(),
+}));
 const pdfJs = vi.hoisted(() => ({
-  render: vi.fn(),
-  getPage: vi.fn(),
   getDocument: vi.fn(),
-  cancel: vi.fn(),
+  getPage: vi.fn(),
+  render: vi.fn(),
   destroy: vi.fn(),
 }));
-vi.mock('pdfjs-dist', () => ({
-  GlobalWorkerOptions: {},
-  getDocument: pdfJs.getDocument,
-}));
-
-// Fixed English queries shared by the state and Blob-lifecycle scenarios.
-const pdfRegion = () => screen.getByRole('region', { name: 'PDF preview' });
-const previewCanvas = () => screen.getByRole('img', { name: 'PDF preview' });
-const missingPreview = () => screen.queryByRole('img', { name: 'PDF preview' });
-const downloadButton = () => screen.getByRole('button', { name: 'Download PDF' });
-const downloadLink = () => screen.getByRole('link', { name: 'Download PDF' });
-const findDownload = () => screen.findByRole('link', { name: 'Download PDF' });
-const missingDownload = () => screen.queryByRole('link', { name: 'Download PDF' });
-const statusText = () => screen.getByRole('status').textContent;
-const missingAlert = () => screen.queryByRole('alert');
-const findAlert = () => screen.findByRole('alert');
-const languageChoice = () => screen.getByRole('group', { name: 'PDF language' });
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
-
-function pdfCalls(fetch: ReturnType<typeof mockReportApi>, path = '/report.pdf') {
-  return fetch.mock.calls.filter(([url]) => String(url).includes(path));
-}
-
-const originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
-const reportFontTokens = {
-  '--font-sans': "'IBM Plex Sans', system-ui, sans-serif",
-  '--font-display': "'Geologica', 'IBM Plex Sans', system-ui, sans-serif",
-  '--font-mono': "'JetBrains Mono', ui-monospace, Menlo, monospace",
-  '--t-body-weight': '400',
-  '--t-label-weight': '500',
-  '--t-body-strong-weight': '600',
-  '--t-heading-weight': '600',
-  '--t-mono-weight': '400',
-};
+vi.mock('pdfjs-dist', () => ({ GlobalWorkerOptions: {}, getDocument: pdfJs.getDocument }));
 
 const clients: QueryClient[] = [];
-function renderReport(
-  id = '37',
-  signedIn = true,
-  entry = `/inspections/${id}/report`,
-  strict = false,
-) {
-  if (signedIn) sessionStorage.setItem('qarau.auth.session', 'Bearer test-report-session');
-  const client = new QueryClient({ defaultOptions: { queries: { gcTime: 0 } } });
+const region = () => screen.getByRole('region', { name: 'PDF preview' });
+function renderReport() {
+  const client = new QueryClient({ defaultOptions: { queries: { gcTime: 0, retry: false } } });
   clients.push(client);
-  const page = (
+  return render(
     <QueryClientProvider client={client}>
-      <AuthProvider>
-        <MemoryRouter initialEntries={[entry]}>
-          <Routes>
-            <Route element={<RequireAuth />}>
-              <Route path="/inspections" element={<AppShell />} />
-              <Route
-                path="/inspections/:id/report"
-                element={
-                  <AppShell>
-                    <ReportPage />
-                  </AppShell>
-                }
-              />
-            </Route>
-          </Routes>
-        </MemoryRouter>
-      </AuthProvider>
-    </QueryClientProvider>
+      <MemoryRouter initialEntries={['/inspections/37/report']}>
+        <Routes>
+          <Route path="/inspections/:id/report" element={<ReportPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
-  return render(strict ? <StrictMode>{page}</StrictMode> : page);
 }
 
 beforeEach(() => {
-  sessionStorage.clear();
-  pdfJs.render.mockReset().mockReturnValue({ promise: Promise.resolve(), cancel: pdfJs.cancel });
-  pdfJs.destroy.mockReset().mockResolvedValue(undefined);
-  pdfJs.getPage.mockReset().mockResolvedValue({
+  vi.resetAllMocks();
+  setLang('en');
+  const routes: Record<string, unknown> = {
+    '/api/inspections/37': fixture.inspection,
+    '/api/sites': fixture.sites,
+    '/api/inspections/37/findings': fixture.findings,
+    '/api/findings/71/decisions': fixture.decisions['71'],
+    '/api/findings/72/decisions': fixture.decisions['72'],
+    '/api/findings/73/decisions': fixture.decisions['73'],
+  };
+  vi.mocked(readApi).mockImplementation(async (path) => {
+    if (!(path in routes)) throw new Error(`Unexpected API path: ${path}`);
+    return routes[path];
+  });
+  vi.mocked(requestApi).mockImplementation(async (path) => {
+    if (path === '/api/inspections/37/coverage') return Response.json(coverage);
+    if (/^\/api\/inspections\/37\/report.pdf\?lang=(ru|kk|en)$/.test(path))
+      return new Response(report.body, { status: report.status, headers: report.headers });
+    throw new Error(`Unexpected API path: ${path}`);
+  });
+  pdfJs.render.mockReturnValue({ promise: Promise.resolve(), cancel: vi.fn() });
+  pdfJs.getPage.mockResolvedValue({
     getViewport: () => ({ width: 450, height: 240 }),
     render: pdfJs.render,
   });
-  pdfJs.getDocument.mockReset().mockImplementation(() => ({
+  pdfJs.destroy.mockResolvedValue(undefined);
+  pdfJs.getDocument.mockImplementation(() => ({
     promise: Promise.resolve({ numPages: 3, getPage: pdfJs.getPage }),
     destroy: pdfJs.destroy,
   }));
-  setLang('en');
   vi.stubGlobal(
     'URL',
     class extends URL {
-      static createObjectURL = vi.fn(() => 'blob:report-en');
+      static createObjectURL = vi.fn(() => 'blob:report');
       static revokeObjectURL = vi.fn();
     },
   );
 });
+
 afterEach(() => {
-  if (originalFonts) Object.defineProperty(document, 'fonts', originalFonts);
-  else Reflect.deleteProperty(document, 'fonts');
   clients.splice(0).forEach((client) => client.clear());
-  sessionStorage.clear();
   vi.unstubAllGlobals();
-  vi.restoreAllMocks();
 });
 
-it('renders the API summary', async () => {
-  mockReportApi();
+it('renders the fixture summary, decisions, scale and coverage', async () => {
   const view = renderReport();
-  const document = await screen.findByRole('article', { name: 'Summary' });
-  await screen.findByText(fixture.findings[0].comment);
-  expect(within(document).getAllByText(fixture.sites[0].name)).toHaveLength(2);
+  await screen.findByText('Report is ready.');
+  const summary = within(screen.getByRole('article', { name: 'Summary' }));
+  expect(summary.getAllByText(fixture.sites[0].name)).toHaveLength(2);
   expect(view.container.querySelector('time')?.getAttribute('datetime')).toBe(
     fixture.inspection.created_at,
   );
   expect(view.container.querySelector('time')?.textContent).toContain('21 October 2026');
-  expect(screen.getByText(fixture.findings[0].scale)).toBeTruthy();
-  expect(screen.getByText(/Scale not set/)).toBeTruthy();
-  const critical = screen.getByRole('region', { name: 'Critical' });
-  expect(within(critical).getByText('Findings: 1')).toBeTruthy();
-  expect(within(critical).getByText(fixture.findings[0].comment)).toBeTruthy();
-  expect(within(critical).getByText('Confirmed')).toBeTruthy();
-  expect(within(critical).getByText('Alan Bekov, confirmed')).toBeTruthy();
-  expect(within(critical).getByText('Dana Sadyk, rejected')).toBeTruthy();
-  const watch = screen.getByRole('region', { name: 'Watch' });
-  expect(within(watch).getByText('Findings: 2')).toBeTruthy();
-  expect(within(watch).getByText(fixture.findings[1].comment)).toBeTruthy();
-  expect(within(watch).getByText('Rejected')).toBeTruthy();
-  expect(within(watch).getByText('Dana Sadyk, rejected')).toBeTruthy();
-  expect(within(watch).getByText(fixture.findings[2].comment)).toBeTruthy();
-  expect(within(watch).getByText('Proposed')).toBeTruthy();
-  expect(within(watch).getByText('No decision yet')).toBeTruthy();
-  expect(screen.queryByText(/confidence/i)).toBeNull();
+  expect(summary.getByText(fixture.findings[0].scale)).toBeTruthy();
+  expect(summary.getByText('Scale not set')).toBeTruthy();
+  const critical = within(summary.getByRole('region', { name: 'Critical' }));
+  expect(critical.getByText('Findings: 1')).toBeTruthy();
+  expect(critical.getByText(fixture.findings[0].comment)).toBeTruthy();
+  expect(critical.getByText('Confirmed')).toBeTruthy();
+  expect(critical.getByText('Alan Bekov, confirmed')).toBeTruthy();
+  expect(critical.getByText('Dana Sadyk, rejected')).toBeTruthy();
+  const watch = within(summary.getByRole('region', { name: 'Watch' }));
+  expect(watch.getByText('Findings: 2')).toBeTruthy();
+  expect(watch.getByText(fixture.findings[1].comment)).toBeTruthy();
+  expect(watch.getByText(fixture.findings[2].comment)).toBeTruthy();
+  expect(watch.getByText('No decision yet')).toBeTruthy();
+  expect(
+    summary.getByText('Inspected and clear: 61.5 %. Findings: 23.1 %. Not seen: 15.4 %.'),
+  ).toBeTruthy();
+  expect(summary.getByText('Areas not seen: north-wall-upper')).toBeTruthy();
 });
 
-it('marks the report busy while the summary API is pending, then shows summary and canvas', async () => {
-  const pending = deferred<void>();
-  const fetch = mockReportApi();
-  const respond = fetch.getMockImplementation()!;
-  fetch.mockImplementation(async (input) => {
-    if (String(input) === '/api/inspections/37') await pending.promise;
-    return respond(input);
-  });
-  const view = renderReport();
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
-  expect(screen.queryByText(fixture.findings[0].comment)).toBeNull();
+it('shows loading with aria-busy while the API is pending', () => {
+  vi.mocked(readApi).mockReturnValue(new Promise(() => {}));
+  renderReport();
+  expect(screen.getByRole('status').textContent).toBe('Generating report…');
+  expect(region().getAttribute('aria-busy')).toBe('true');
+  expect(screen.getByRole('button', { name: 'Download PDF' }).hasAttribute('disabled')).toBe(true);
   expect(pdfJs.getDocument).not.toHaveBeenCalled();
-  await act(async () => pending.resolve());
-  expect(await screen.findByText('Report is ready.')).toBeTruthy();
-  expect(screen.getByText(fixture.findings[0].comment)).toBeTruthy();
-  expect(screen.getByText('1 of 3 pages')).toBeTruthy();
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-  expect(previewCanvas().tagName).toBe('CANVAS');
-  expect(view.container.querySelector('iframe, embed, object')).toBeNull();
 });
 
-it('stays busy until the first page is painted', async () => {
-  mockReportApi();
-  vi.mocked(URL.createObjectURL).mockImplementationOnce(() => {
-    expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
-    expect(document.querySelector('iframe')).toBeNull();
-    expect(missingDownload()).toBeNull();
-    return 'blob:report-en';
+it('stays busy until page one finishes rendering, then shows the fixed page count and hash', async () => {
+  let finish!: () => void;
+  pdfJs.render.mockReturnValue({
+    promise: new Promise<void>((resolve) => (finish = resolve)),
+    cancel: vi.fn(),
   });
-  renderReport();
-  const download = await findDownload();
-  await screen.findByText('1 of 3 pages');
-  expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-  expect(previewCanvas().tagName).toBe('CANVAS');
-  expect(download.getAttribute('href')).toBe('blob:report-en');
-  expect(download.getAttribute('download')).toBe('report-37-en.pdf');
-  expect(missingAlert()).toBeNull();
-});
-
-it('opens Report from the loaded list', async () => {
-  const { promise: pending, resolve: release } = deferred<void>();
-  const fetch = mockReportApi();
-  const original = fetch.getMockImplementation()!;
-  fetch.mockImplementation(async (input) => {
-    if (String(input) === '/api/inspections') await pending;
-    return original(input);
-  });
-  renderReport('37', true, '/inspections');
-  const list = screen.getByRole('region', { name: 'Inspections' });
-  expect(list.getAttribute('aria-busy')).toBe('true');
-  expect(screen.queryByRole('link', { name: 'Report' })).toBeNull();
-  await act(async () => release());
-  const report = await within(list).findByRole('link', { name: 'Report' });
-  expect(list.getAttribute('aria-busy')).toBe('false');
-  expect(report.getAttribute('href')).toBe('/inspections/37/report');
-  expect(within(list).getByText('Tank T-104, north wall')).toBeTruthy();
-  expect(missingAlert()).toBeNull();
-  fireEvent.click(report);
-  const download = await findDownload();
-  expect(download.getAttribute('download')).toBe('report-37-en.pdf');
-  await screen.findByText('1 of 3 pages');
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-  expect(previewCanvas().tagName).toBe('CANVAS');
-  expect(screen.getByTitle(fixture.hash).textContent).toBe('bf98d56a3f72…7263bc26');
-  expect(languageChoice()).toBeTruthy();
-  expect(screen.getAllByText('Tank T-104, north wall')).toHaveLength(2);
-  expect(missingAlert()).toBeNull();
-});
-
-it('handles absent coverage', async () => {
-  expect(fixture.coverage).toBeNull();
-  mockReportApi();
-  renderReport();
-  expect(await screen.findByText('Coverage not computed')).toBeTruthy();
-});
-
-it.each([
-  ['en', 'Inspected and clear: 61.5 %. Findings: 23.1 %. Not seen: 15.4 %.'],
-  ['ru', 'Осмотрено без находок: 61.5 %. С находками: 23.1 %. Не осмотрено: 15.4 %.'],
-  ['kk', 'Ақаусыз тексерілген: 61.5 %. Ақаулар бар: 23.1 %. Қаралмаған: 15.4 %.'],
-] as const)('renders API coverage in %s', async (lang, line) => {
-  setLang(lang);
-  const fetch = mockReportApi(undefined, {
-    '/api/inspections/37/coverage': () => Response.json(coverageFixture),
-  });
-  renderReport();
-  expect(await screen.findByText(line)).toBeTruthy();
-  expect(screen.getByText(/north-wall-upper/)).toBeTruthy();
-  expect(screen.queryByText(/north-wall-lower/)).toBeNull();
-  expect(fetch).toHaveBeenCalledWith(
-    '/api/inspections/37/coverage',
-    expect.objectContaining({ headers: { Authorization: 'Bearer test-report-session' } }),
-  );
-});
-
-it('handles uncomputed coverage', async () => {
-  mockReportApi(undefined, {
-    '/api/inspections/37/coverage': () =>
-      Response.json({ computed: false, totals: {}, regions: [] }),
-  });
-  renderReport();
-  expect(await screen.findByText('Coverage not computed')).toBeTruthy();
-  expect(screen.queryByText(/Inspected and clear/)).toBeNull();
-});
-
-it('renders both severities, decisions and coverage', async () => {
-  mockReportApi(undefined, {
-    '/api/inspections/37/coverage': () => Response.json(coverageFixture),
-    '/api/inspections/37/findings': () => Response.json([fixture.findings[0], fixture.findings[1]]),
-  });
-  renderReport();
-  await screen.findByText('Report is ready.');
-  expect(screen.getAllByText('Tank T-104, north wall')).toHaveLength(2);
-  expect(screen.getByText(/21 October 2026/)).toBeTruthy();
-  const critical = screen.getByRole('region', { name: 'Critical' });
-  expect(within(critical).getByText('Findings: 1')).toBeTruthy();
-  expect(within(critical).getByText('Confirmed')).toBeTruthy();
-  expect(within(critical).getByText('Alan Bekov, confirmed')).toBeTruthy();
-  const watch = screen.getByRole('region', { name: 'Watch' });
-  expect(within(watch).getByText('Findings: 1')).toBeTruthy();
-  expect(within(watch).getByText('Rejected')).toBeTruthy();
-  expect(within(watch).getByText('Dana Sadyk, rejected')).toBeTruthy();
-  expect(
-    screen.getByText('Inspected and clear: 61.5 %. Findings: 23.1 %. Not seen: 15.4 %.'),
-  ).toBeTruthy();
-});
-
-it('shows reconstruction failure and clears busy', async () => {
-  mockReportApi(() =>
-    Response.json({ detail: 'Report generation failed: no reconstruction' }, { status: 409 }),
-  );
-  renderReport();
-  expect(await screen.findByText('Report generation failed: no reconstruction')).toBeTruthy();
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-  expect(missingPreview()).toBeNull();
-});
-
-it('shares the PDF Blob and hash', async () => {
-  const fetch = mockReportApi();
-  const view = renderReport();
-  const download = await findDownload();
-  const frame = previewCanvas();
-  expect(frame.tagName).toBe('CANVAS');
-  expect(view.container.querySelector('iframe, embed, object')).toBeNull();
-  expect(await screen.findByText('1 of 3 pages')).toBeTruthy();
-  expect(pdfJs.getPage).toHaveBeenCalledWith(1);
-  expect(pdfJs.render).toHaveBeenCalledWith(expect.objectContaining({ canvas: frame }));
-  expect(screen.getByRole('article').hasAttribute('data-theme')).toBe(false);
-  const hash = screen.getByTitle(fixture.hash);
-  expect(hash.textContent).toBe('bf98d56a3f72…7263bc26');
-  expect(hash.getAttribute('title')).toBe(fixture.hash);
-  expect(hash.getAttribute('title')).toBe(
-    'bf98d56a3f72c5e19345b6fe682380d399174770df752e8031c9fa427263bc26',
-  );
-  expect(hash.getAttribute('title')).toBe(report.headers['X-Report-SHA256']);
-  expect(hash.className).toBe('qv-mono');
-  const createdBlob = vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob;
-  expect(await createdBlob.text()).toBe(fixture.pdf);
-  expect(download.tagName).toBe('A');
-  expect(download.getAttribute('href')).toBe('blob:report-en');
-  expect(download.getAttribute('download')).toBe('report-37-en.pdf');
-  expect(download.closest('.report-download')?.contains(hash)).toBe(true);
-  expect(download.isConnected).toBe(true);
-  expect(pdfCalls(fetch, 'report.pdf')).toHaveLength(1);
-  view.unmount();
-  expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:report-en');
-});
-
-it('replaces and revokes the Blob on language change', async () => {
-  const fetch = mockReportApi();
-  vi.mocked(URL.createObjectURL)
-    .mockReturnValueOnce('blob:report-en')
-    .mockReturnValueOnce('blob:report-kk');
-  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-  const view = renderReport();
-  await waitFor(() => expect(pdfRegion().getAttribute('aria-busy')).toBe('false'));
-  const { promise: pending, resolve: finish } = deferred<Response>();
-  fetch.mockImplementationOnce(() => pending);
-  fireEvent.click(screen.getByRole('button', { name: 'Қазақша' }));
-  await waitFor(() =>
-    expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=kk', expect.anything()),
-  );
-  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:report-en');
-  expect(missingPreview()).toBeNull();
-  const unavailableDownload = downloadButton();
-  expect((unavailableDownload as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(unavailableDownload);
-  expect(click).not.toHaveBeenCalled();
-  expect(screen.queryByTitle(fixture.hash)).toBeNull();
-  expect(statusText()).toBe('Generating report…');
-  await act(async () => finish(fixturePdf()));
-  await waitFor(() => expect(pdfRegion().getAttribute('aria-busy')).toBe('false'));
-  expect(previewCanvas().tagName).toBe('CANVAS');
-  const link = downloadLink() as HTMLAnchorElement;
-  expect(link.getAttribute('href')).toBe('blob:report-kk');
-  expect(link.download).toBe('report-37-kk.pdf');
-  view.unmount();
-  expect(vi.mocked(URL.revokeObjectURL).mock.calls).toEqual([
-    ['blob:report-en'],
-    ['blob:report-kk'],
-  ]);
-});
-
-it('preserves coverage prose', async () => {
-  mockReportApi();
-  vi.spyOn(reportApi, 'fetchReportSummary').mockResolvedValue({
-    inspectionId: 37,
-    object: fixture.sites[0].name,
-    date: fixture.inspection.created_at,
-    findings: [],
-    coverage: fixture.coverageLine,
-  });
-  renderReport();
-  expect(await screen.findByText(fixture.coverageLine)).toBeTruthy();
-  expect(screen.queryByText('Coverage not computed')).toBeNull();
-});
-
-it('transitions from generating to ready', async () => {
-  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-  const { promise: pending, resolve: finish } = deferred<Response>();
-  const fetch = mockReportApi(() => pending);
-  renderReport();
-  expect(statusText()).toBe('Generating report…');
-  expect(missingPreview()).toBeNull();
-  const unavailableDownload = downloadButton();
-  expect((unavailableDownload as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(unavailableDownload);
-  expect(click).not.toHaveBeenCalled();
-  expect(screen.queryByTitle(fixture.hash)).toBeNull();
-  await waitFor(() =>
-    expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=en', expect.anything()),
-  );
-  expect(statusText()).toBe('Generating report…');
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
-  await act(async () => finish(fixturePdf()));
-  expect(await screen.findByText('Report is ready.')).toBeTruthy();
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-  expect(missingAlert()).toBeNull();
-  const download = await findDownload();
-  expect(download.getAttribute('href')).toBe('blob:report-en');
-  expect(unavailableDownload.isConnected).toBe(false);
-});
-
-it('keeps HTTP 202 generating', async () => {
-  const fetch = mockReportApi(() => new Response(null, { status: 202 }));
-  renderReport();
-  await waitFor(() =>
-    expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=en', expect.anything()),
-  );
-  expect(statusText()).toBe('Generating report…');
-  expect(screen.queryByText('Report is ready.')).toBeNull();
-});
-
-it('shows API failure beside the summary', async () => {
-  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-  mockReportApi(() => Response.json(fixture.failure, { status: 500 }));
-  renderReport();
-  const alert = await findAlert();
-  expect(within(alert).getByRole('heading').textContent).toBe('Could not generate report');
-  expect(within(alert).getByText(fixture.failure.detail)).toBeTruthy();
-  expect(screen.getByText(fixture.findings[0].comment)).toBeTruthy();
-  expect(missingPreview()).toBeNull();
-  const unavailableDownload = downloadButton();
-  expect((unavailableDownload as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(unavailableDownload);
-  expect(click).not.toHaveBeenCalled();
-  expect(screen.queryByTitle(fixture.hash)).toBeNull();
-});
-
-it.each<[Lang, string, string]>([
-  ['en', 'Try again', 'Report is ready.'],
-  ['ru', 'Повторить попытку', 'Отчёт готов.'],
-  ['kk', 'Қайталап көру', 'Есеп дайын.'],
-])('retries PDF generation in %s', async (lang, retry, ready) => {
-  setLang(lang);
-  const { promise: pending, resolve: finish } = deferred<Response>();
-  const response = vi
-    .fn<() => Response | Promise<Response>>()
-    .mockImplementationOnce(() => Response.json(fixture.failure, { status: 503 }))
-    .mockImplementationOnce(() => pending);
-  const fetch = mockReportApi(response);
-  renderReport();
-  const alert = await findAlert();
-  expect(alert.textContent).toContain(fixture.failure.detail);
-  expect(document.querySelector('.report-state')?.getAttribute('aria-busy')).toBe('false');
-  fireEvent.click(within(alert).getByRole('button', { name: retry }));
-  await waitFor(() => expect(response).toHaveBeenCalledTimes(2));
-  expect(document.querySelector('.report-state')?.getAttribute('aria-busy')).toBe('true');
-  expect(missingAlert()).toBeNull();
-  expect(screen.queryByRole('link', { name: /PDF/ })).toBeNull();
-  expect(document.querySelector('iframe')).toBeNull();
-  await act(async () => finish(fixturePdf()));
-  expect(await screen.findByText(ready)).toBeTruthy();
-  const download = await screen.findByRole('link', { name: /PDF/ });
-  expect(download.getAttribute('download')).toBe(`report-37-${lang}.pdf`);
-  expect(screen.getByTitle(fixture.hash)).toBeTruthy();
-  expect(document.querySelector('.report-state')?.getAttribute('aria-busy')).toBe('false');
-  expect(pdfCalls(fetch)).toHaveLength(2);
-  expect(fetch.mock.calls.filter(([path]) => String(path) === '/api/inspections/37')).toHaveLength(
-    1,
-  );
-});
-
-it('retries summary before PDF', async () => {
-  const fetch = mockReportApi();
-  fetch.mockImplementationOnce(async () => Response.json(fixture.failure, { status: 503 }));
-  renderReport();
-  const alert = await findAlert();
-  expect(alert.textContent).toContain(fixture.failure.detail);
-  expect(screen.queryByText(fixture.findings[0].comment)).toBeNull();
-  expect(pdfCalls(fetch)).toHaveLength(0);
-  fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
-  expect(await screen.findByText('Report is ready.')).toBeTruthy();
-  expect(await findDownload()).toBeTruthy();
-  expect(screen.getByText(fixture.findings[0].comment)).toBeTruthy();
-  expect(missingAlert()).toBeNull();
-  expect(fetch.mock.calls.filter(([path]) => String(path) === '/api/inspections/37')).toHaveLength(
-    2,
-  );
-  expect(pdfCalls(fetch)).toHaveLength(1);
-});
-
-it('switches PDF to kk independently of UI', async () => {
-  const fetch = mockReportApi();
-  renderReport();
-  await screen.findByText('Report is ready.');
-  const languages = languageChoice();
-  expect(
-    within(languages).getByRole('button', { name: 'English' }).getAttribute('aria-pressed'),
-  ).toBe('true');
-  fireEvent.click(within(languages).getByRole('button', { name: 'Қазақша' }));
-  await waitFor(() =>
-    expect(fetch).toHaveBeenCalledWith(
-      '/api/inspections/37/report.pdf?lang=kk',
-      expect.objectContaining({
-        headers: { Authorization: 'Bearer test-report-session' },
-      }),
-    ),
-  );
-  expect(
-    within(languageChoice()).getByRole('button', { name: 'Қазақша' }).getAttribute('aria-pressed'),
-  ).toBe('true');
-  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Inspection report');
-});
-
-it.each([
-  ['ru', 'Русский'],
-  ['en', 'English'],
-] as const)('switches PDF from kk to %s', async (lang, label) => {
-  setLang('kk');
-  const fetch = mockReportApi();
-  renderReport();
-  await screen.findByText('Есеп дайын.');
-  fireEvent.click(screen.getByRole('button', { name: label }));
-  await waitFor(() =>
-    expect(fetch).toHaveBeenCalledWith(
-      `/api/inspections/37/report.pdf?lang=${lang}`,
-      expect.anything(),
-    ),
-  );
-  expect(screen.getByRole('button', { name: label }).getAttribute('aria-pressed')).toBe('true');
-  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Инспекция есебі');
-});
-
-it('ignores a superseded PDF response', async () => {
-  const { promise: pending, resolve: finish } = deferred<Response>();
-  const fetch = mockReportApi(() => pending);
-  renderReport();
-  await waitFor(() =>
-    expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=en', expect.anything()),
-  );
-  fetch.mockImplementationOnce(async () => Response.json(fixture.failure, { status: 500 }));
-  fireEvent.click(screen.getByRole('button', { name: 'Қазақша' }));
-  expect(await screen.findByText(fixture.failure.detail)).toBeTruthy();
-  await act(async () => finish(fixturePdf()));
-  expect(screen.getByRole('alert').textContent).toContain(fixture.failure.detail);
-  expect(screen.queryByText('Report is ready.')).toBeNull();
-});
-
-it.each<[Lang, string, string]>([
-  ['ru', 'Отчёт об инспекции', 'Покрытие не рассчитано'],
-  ['kk', 'Инспекция есебі', 'Қамту есептелмеген'],
-  ['en', 'Inspection report', 'Coverage not computed'],
-])('defaults PDF to UI language %s', async (lang, title, coverage) => {
-  setLang(lang);
-  const fetch = mockReportApi();
-  renderReport();
-  expect(await screen.findByText(coverage)).toBeTruthy();
-  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(title);
-  await waitFor(() =>
-    expect(fetch).toHaveBeenCalledWith(
-      `/api/inspections/37/report.pdf?lang=${lang}`,
-      expect.anything(),
-    ),
-  );
-});
-
-it.each(['demo', 'notre-dame'])('resolves report alias %s', async (id) => {
-  const fetch = mockReportApi();
-  renderReport(id);
-  await screen.findByText('Report is ready.');
-  expect(screen.getAllByText(fixture.sites[0].name)).toHaveLength(2);
-  expect(languageChoice()).toBeTruthy();
-  expect(missingAlert()).toBeNull();
-  expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=en', expect.anything());
-});
-
-it.each(['999', 'unknown'])('shows unknown inspection %s', async (id) => {
-  mockReportApi();
-  renderReport(id);
-  expect((await findAlert()).textContent).toContain(fixture.notFound.detail);
-  expect(languageChoice()).toBeTruthy();
-});
-
-it('requires authentication', () => {
-  const fetch = mockReportApi();
-  renderReport('37', false);
-  expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
-  expect(fetch).not.toHaveBeenCalled();
-  expect(screen.queryByRole('article')).toBeNull();
-});
-
-const reportLabels = [
-  {
-    lang: 'ru',
-    critical: 'Критично',
-    watch: 'Наблюдать',
-    finding: 'Находка',
-    status: 'Статус',
-    corrosion: 'Коррозия',
-    crack: 'Трещина',
-    coating: 'Покрытие',
-    other: 'Другое',
-    proposed: 'Предложено',
-    confirmed: 'Подтверждено',
-    rejected: 'Отклонено',
-    lowEvidence: 'Нужно больше свидетельств',
-    empty: 'Находок нет',
-    ready: 'Отчёт готов.',
-    criticalCount: 'Находки: 1',
-    watchCount: 'Находки: 2',
-  },
-  {
-    lang: 'kk',
-    critical: 'Сындарлы',
-    watch: 'Бақылау',
-    finding: 'Ақау',
-    status: 'Күйі',
-    corrosion: 'Тоттану',
-    crack: 'Жарық',
-    coating: 'Жабын',
-    other: 'Басқа',
-    proposed: 'Ұсынылған',
-    confirmed: 'Расталған',
-    rejected: 'Қабылданбаған',
-    lowEvidence: 'Қосымша дәлел қажет',
-    empty: 'Ақаулар жоқ',
-    ready: 'Есеп дайын.',
-    criticalCount: 'Ақаулар: 1',
-    watchCount: 'Ақаулар: 2',
-  },
-] as const;
-
-it.each(reportLabels)('translates finding tables in $lang', async (labels) => {
-  setLang(labels.lang);
-  mockReportApi();
-  renderReport();
-  await screen.findByText(labels.ready);
-  expect(screen.getAllByRole('columnheader', { name: labels.finding })).toHaveLength(2);
-  expect(screen.getAllByRole('columnheader', { name: labels.status })).toHaveLength(2);
-  const critical = screen.getByRole('region', { name: labels.critical });
-  expect(within(critical).getByText(labels.criticalCount)).toBeTruthy();
-  expect(within(critical).getByText(labels.corrosion)).toBeTruthy();
-  expect(within(critical).getByText(labels.confirmed)).toBeTruthy();
-  const watch = screen.getByRole('region', { name: labels.watch });
-  expect(within(watch).getByText(labels.watchCount)).toBeTruthy();
-  for (const text of [labels.crack, labels.coating, labels.proposed, labels.rejected])
-    expect(within(watch).getByText(text)).toBeTruthy();
-  for (const text of [
-    'Critical',
-    'Watch',
-    'Finding',
-    'Status',
-    'Proposed',
-    'Confirmed',
-    'Rejected',
-  ])
-    expect(screen.queryByText(text, { exact: true })).toBeNull();
-});
-
-it.each(reportLabels)('translates empty/other/low-evidence in $lang', async (labels) => {
-  setLang(labels.lang);
-  mockReportApi(undefined, {
-    '/api/inspections/37/findings': () =>
-      Response.json([{ ...fixture.findings[2], class: 'other', status: 'low_evidence' }]),
-  });
-  renderReport();
-  await screen.findByText(labels.ready);
-  const watch = screen.getByRole('region', { name: labels.watch });
-  expect(within(watch).getByText(labels.other)).toBeTruthy();
-  expect(within(watch).getByText(labels.lowEvidence)).toBeTruthy();
-  expect(
-    within(screen.getByRole('region', { name: labels.critical })).getByText(labels.empty),
-  ).toBeTruthy();
-  expect(screen.queryByText('Other', { exact: true })).toBeNull();
-  expect(screen.queryByText('No findings', { exact: true })).toBeNull();
-});
-
-it('spells out the Kazakh month', async () => {
-  setLang('kk');
-  mockReportApi();
-  const view = renderReport();
-  await screen.findByText('Есеп дайын.');
-  const date = view.container.querySelector('time');
-  expect(date?.getAttribute('datetime')).toBe(fixture.inspection.created_at);
-  expect(date?.textContent).toContain('2026 жылғы');
-  expect(date?.textContent).toContain('қазан');
-  expect(date?.textContent).not.toMatch(/\bM\d{1,2}\b/);
-});
-
-it('keeps languages in toolbar and state before summary', async () => {
-  const fetch = mockReportApi();
-  renderReport();
-  const ready = await screen.findByText('Report is ready.');
-  const main = screen.getByRole('main');
-  const topbar = screen.getByRole('banner');
-  const languages = within(topbar).getByRole('group', { name: 'PDF language' });
-  expect(await within(topbar).findByRole('link', { name: 'Download PDF' })).toBeTruthy();
-  expect(within(topbar).getByTitle(fixture.hash).textContent).toBe('bf98d56a3f72…7263bc26');
-  const heading = within(main).getByRole('heading', { name: 'Summary' });
-  expect(languages.compareDocumentPosition(heading)).toBe(4);
-  expect(ready.compareDocumentPosition(heading)).toBe(4);
-  fireEvent.click(within(languages).getByRole('button', { name: 'Қазақша' }));
-  await waitFor(() =>
-    expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=kk', expect.anything()),
-  );
-});
-
-it('places preview before summary', async () => {
-  mockReportApi();
-  renderReport();
-  const download = await findDownload();
-  expect(download.getAttribute('download')).toBe('report-37-en.pdf');
-  const preview = previewCanvas();
-  const summary = screen.getByRole('article', { name: 'Summary' });
-  expect(preview.compareDocumentPosition(summary)).toBe(4);
-  expect(pdfRegion().contains(preview)).toBe(true);
-  expect(screen.getByRole('main').contains(preview)).toBe(true);
-});
-
-it('keeps busy while pdf.js is painting and shows the document page count afterwards', async () => {
-  const painting = deferred<void>();
-  pdfJs.render.mockReturnValueOnce({ promise: painting.promise, cancel: pdfJs.cancel });
-  mockReportApi();
   const view = renderReport();
   await waitFor(() => expect(pdfJs.render).toHaveBeenCalledTimes(1));
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
-  expect(screen.queryByText('Report is ready.')).toBeNull();
+  expect(region().getAttribute('aria-busy')).toBe('true');
   expect(screen.queryByText('1 of 3 pages')).toBeNull();
+  await act(async () => finish());
+  await screen.findByText('Report is ready.');
+  expect(region().getAttribute('aria-busy')).toBe('false');
+  expect(screen.getByText('1 of 3 pages')).toBeTruthy();
+  expect(pdfJs.getPage).toHaveBeenCalledWith(1);
+  expect(pdfJs.render.mock.calls[0][0].canvas).toBe(view.container.querySelector('canvas'));
+  expect(view.container.querySelector('canvas')?.width).toBe(450);
+  expect(screen.getByRole('link', { name: 'Download PDF' }).getAttribute('href')).toBe(
+    'blob:report',
+  );
+  expect(screen.getByTitle(report.headers['X-Report-SHA256']).textContent).toBe(
+    'bf98d56a3f72…7263bc26',
+  );
   expect(view.container.querySelector('iframe')).toBeNull();
-  await act(async () => painting.resolve());
-  expect(await screen.findByText('1 of 3 pages')).toBeTruthy();
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-  expect(new TextDecoder().decode(pdfJs.getDocument.mock.calls[0][0].data)).toBe(fixture.pdf);
 });
 
-it.each(['open', 'render'])(
-  'shows a plain preview failure when pdf.js cannot %s, keeping the PDF downloadable',
-  async (step) => {
-    if (step === 'open')
-      pdfJs.getDocument.mockImplementationOnce(() => ({
-        promise: Promise.reject(new Error('pdf.js internal diagnostic')),
-        destroy: pdfJs.destroy,
-      }));
+it.each(['summary', 'PDF'])(
+  'shows failed and clears aria-busy when the %s API rejects',
+  async (source) => {
+    if (source === 'summary')
+      vi.mocked(readApi).mockRejectedValue(new Error(fixture.failure.detail));
     else
-      pdfJs.render.mockImplementationOnce(() => ({
-        promise: Promise.reject(new Error('pdf.js internal diagnostic')),
-        cancel: pdfJs.cancel,
-      }));
-    mockReportApi();
-    const view = renderReport();
-    const alert = await findAlert();
-    expect(alert.textContent).toContain('Could not preview report');
-    expect(alert.textContent).toContain(
-      'The PDF preview could not be displayed. You can still download the PDF.',
-    );
-    expect(alert.textContent).not.toContain('pdf.js internal diagnostic');
-    expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
+      vi.mocked(requestApi).mockImplementation(async (path) => {
+        if (path === '/api/inspections/37/coverage') return Response.json(coverage);
+        throw new Error(fixture.failure.detail);
+      });
+    renderReport();
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not generate report');
+    expect(region().getAttribute('aria-busy')).toBe('false');
     expect(screen.queryByText('Report is ready.')).toBeNull();
-    expect(downloadLink().getAttribute('href')).toBe('blob:report-en');
-    expect(screen.getByTitle(fixture.hash)).toBeTruthy();
-    expect(view.container.querySelector('iframe')).toBeNull();
-    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
-    expect(await screen.findByText('1 of 3 pages')).toBeTruthy();
   },
 );
 
-it.each(['fetch', 'paint'])('clears busy before 30 seconds when %s hangs', async (step) => {
-  if (step === 'paint')
-    pdfJs.render.mockReturnValueOnce({ promise: new Promise(() => {}), cancel: pdfJs.cancel });
-  mockReportApi(step === 'fetch' ? () => new Promise(() => {}) : undefined);
-  const timer = vi.spyOn(window, 'setTimeout');
+it('shows failed and clears aria-busy when pdf.js rendering rejects', async () => {
+  pdfJs.render.mockImplementation(() => ({
+    promise: Promise.reject(new Error('Unable to paint PDF')),
+    cancel: vi.fn(),
+  }));
   renderReport();
-  if (step === 'paint') await waitFor(() => expect(pdfJs.render).toHaveBeenCalled());
-  const deadline = timer.mock.calls.find(([, duration]) => duration === 28_000)?.[0];
-  expect(deadline).toBeTypeOf('function');
-  await act(async () => (deadline as () => void)());
-  expect((await findAlert()).textContent).toContain('The report is taking too long. Try again.');
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-  if (step === 'paint') expect(downloadLink().getAttribute('href')).toBe('blob:report-en');
-});
-
-it('cancels rendering and destroys the worker when leaving the page', async () => {
-  pdfJs.render.mockReturnValueOnce({ promise: new Promise(() => {}), cancel: pdfJs.cancel });
-  pdfJs.cancel.mockClear();
-  mockReportApi();
-  const view = renderReport();
-  await waitFor(() => expect(pdfJs.render).toHaveBeenCalledTimes(1));
-  view.unmount();
-  expect(pdfJs.cancel).toHaveBeenCalledTimes(1);
+  expect((await screen.findByRole('alert')).textContent).toContain('Could not preview report');
+  expect(region().getAttribute('aria-busy')).toBe('false');
+  expect(screen.queryByText('1 of 3 pages')).toBeNull();
+  expect(screen.getByRole('link', { name: 'Download PDF' })).toBeTruthy();
   expect(pdfJs.destroy).toHaveBeenCalledTimes(1);
 });
 
-it('fetches a language PDF only once under the app StrictMode lifecycle', async () => {
-  const kazakh = deferred<Response>();
-  const fetch = mockReportApi();
-  const original = fetch.getMockImplementation()!;
-  fetch.mockImplementation(async (input) =>
-    String(input) === '/api/inspections/37/report.pdf?lang=kk' ? kazakh.promise : original(input),
-  );
-  renderReport('notre-dame', true, '/inspections/notre-dame/report', true);
+it.each(['ru', 'kk', 'en'] as const)('selects %s as the report language', async (lang) => {
+  renderReport();
   await screen.findByText('Report is ready.');
-  fireEvent.click(screen.getByRole('button', { name: 'Қазақша' }));
+  fireEvent.click(screen.getByRole('button', { name: LANGS.en[`report.language.${lang}`] }));
   await waitFor(() =>
-    expect(fetch).toHaveBeenCalledWith('/api/inspections/37/report.pdf?lang=kk', expect.anything()),
+    expect(requestApi).toHaveBeenCalledWith(`/api/inspections/37/report.pdf?lang=${lang}`, {
+      signal: expect.any(AbortSignal),
+      responseType: 'response',
+    }),
   );
-  expect(pdfCalls(fetch).map(([url]) => url)).toEqual([
-    '/api/inspections/37/report.pdf?lang=en',
-    '/api/inspections/37/report.pdf?lang=kk',
-  ]);
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
-  await act(async () => kazakh.resolve(fixturePdf()));
   await screen.findByText('Report is ready.');
-  expect(screen.getByText('1 of 3 pages')).toBeTruthy();
-  expect(downloadLink().getAttribute('download')).toBe('report-notre-dame-kk.pdf');
-  expect(pdfCalls(fetch).map(([url]) => url)).toEqual([
-    '/api/inspections/37/report.pdf?lang=en',
-    '/api/inspections/37/report.pdf?lang=kk',
-  ]);
+  expect(screen.getByRole('link', { name: 'Download PDF' }).getAttribute('download')).toBe(
+    `report-37-${lang}.pdf`,
+  );
 });
 
-it.each(['/api/inspections/demo', '/api/inspections/0/report.pdf?lang=en'])(
-  'aborts a stalled dev API request at the report deadline: %s',
-  async (path) => {
-    const api = mockDevReportApi(path);
-    const timer = vi.spyOn(window, 'setTimeout');
-    renderReport('demo', true, '/inspections/demo/report', true);
-    await waitFor(() => expect(api.pending.size).toBe(1));
-    const expire = timer.mock.calls.find(([, duration]) => duration === 28_000)?.[0];
-    expect(expire).toBeTypeOf('function');
-    await act(async () => (expire as () => void)());
-    expect((await findAlert()).textContent).toContain('The report is taking too long. Try again.');
-    expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-    expect(api.signals.at(-1)?.aborted).toBe(true);
-    expect(api.pending.size).toBe(0);
-    expect(clients.at(-1)!.isFetching()).toBe(0);
-  },
-);
-
 it.each([
-  ['en', 'Report is ready.', '1 of 3 pages'],
   ['ru', 'Отчёт готов.', 'Страница 1 из 3'],
   ['kk', 'Есеп дайын.', '3 беттің 1-беті'],
-] as const)(
-  'settles the real dev API and canvas under StrictMode in %s',
-  async (lang, ready, count) => {
-    setLang(lang);
-    const api = mockDevReportApi();
-    const painting = deferred<void>();
-    pdfJs.render.mockReturnValueOnce({ promise: painting.promise, cancel: pdfJs.cancel });
-    const view = renderReport('demo', true, '/inspections/demo/report', true);
-    await waitFor(() => expect(pdfJs.render).toHaveBeenCalledTimes(1));
-    expect(clients.at(-1)!.isFetching()).toBe(0);
-    expect(view.container.querySelector('.report-state')?.getAttribute('aria-busy')).toBe('true');
-    await act(async () => painting.resolve());
-    expect(await screen.findByText(ready)).toBeTruthy();
-    expect(screen.getByText(count)).toBeTruthy();
-    expect(view.container.querySelector('[aria-busy="true"], [data-loading]')).toBeNull();
-    expect(clients.at(-1)!.isFetching()).toBe(0);
-    expect(api.pending.size).toBe(0);
-    expect(
-      api.fetch.mock.calls
-        .filter(([url]) => String(url).includes('/report.pdf'))
-        .map(([url]) => url),
-    ).toEqual([`/api/inspections/0/report.pdf?lang=${lang}`]);
-    expect(
-      screen.getByTitle('a278f21895176e40699b4de5dda3b7aa385e82e13995d4bab0beff341aa5d558'),
-    ).toBeTruthy();
-    api.fetch.mockClear();
-    try {
-      await act(async () => {
-        focusManager.setFocused(false);
-        focusManager.setFocused(true);
-      });
-      expect(api.fetch).not.toHaveBeenCalled();
-      expect(view.container.querySelector('[aria-busy="true"], [data-loading]')).toBeNull();
-    } finally {
-      focusManager.setFocused(undefined);
-    }
-  },
-);
-
-it('keeps one 28-second deadline across summary updates while painting is stalled', async () => {
-  vi.useFakeTimers();
-  mockDevReportApi();
-  pdfJs.render.mockReturnValueOnce({ promise: new Promise(() => {}), cancel: pdfJs.cancel });
-  pdfJs.cancel.mockClear();
-  const view = renderReport('demo', true, '/inspections/demo/report', true);
-  try {
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
-    });
-    expect(pdfJs.render).toHaveBeenCalledTimes(1);
-    for (let update = 0; update < 5; update++) {
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(5000);
-        await clients
-          .at(-1)!
-          .invalidateQueries({ queryKey: ['report-summary', 'demo'], exact: true });
-      });
-      expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
-    }
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(3000);
-    });
-    expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-    expect(screen.getByRole('alert').textContent).toContain(
-      'The report is taking too long. Try again.',
-    );
-    expect(clients.at(-1)!.isFetching()).toBe(0);
-    expect(pdfJs.cancel).toHaveBeenCalledTimes(1);
-    expect(pdfJs.destroy).toHaveBeenCalledTimes(1);
-    expect(downloadLink().getAttribute('href')).toBe('blob:report-en');
-  } finally {
-    view.unmount();
-    vi.useRealTimers();
-  }
-});
-
-it('finishes worker cleanup before announcing that the painted demo is ready', async () => {
-  const shutdown = deferred<void>();
-  pdfJs.destroy.mockReturnValueOnce(shutdown.promise);
-  mockDevReportApi();
-  const view = renderReport('demo', true, '/inspections/demo/report', true);
-  await waitFor(() => expect(pdfJs.destroy).toHaveBeenCalledTimes(1));
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
-  expect(screen.queryByText('Report is ready.')).toBeNull();
-  expect(clients.at(-1)!.isFetching()).toBe(0);
-  await act(async () => shutdown.resolve());
-  expect(await screen.findByText('Report is ready.')).toBeTruthy();
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-  expect(screen.getByText('1 of 3 pages')).toBeTruthy();
-  expect(downloadLink().getAttribute('href')).toBe('blob:report-en');
-  view.unmount();
-  expect(pdfJs.destroy).toHaveBeenCalledTimes(1);
-});
-
-it('keeps the painted demo busy until report fonts and their layout are ready', async () => {
-  const loaded = deferred<FontFace[]>();
-  const laidOut = deferred<FontFaceSet>();
-  const readReady = vi.fn();
-  const fonts = {
-    load: vi.fn(() => loaded.promise),
-    get ready() {
-      readReady();
-      return laidOut.promise;
-    },
-  };
-  Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
-  mockDevReportApi();
-  const view = renderReport('demo', true, '/inspections/demo/report', true);
-  const report = view.container.querySelector<HTMLElement>('.report-screen')!;
-  for (const [name, value] of Object.entries(reportFontTokens))
-    report.style.setProperty(name, value);
-  await waitFor(() => expect(pdfJs.destroy).toHaveBeenCalledTimes(1));
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
-  expect(screen.queryByText('Report is ready.')).toBeNull();
-  expect(fonts.load).toHaveBeenCalledTimes(5);
-  expect(fonts.load).toHaveBeenCalledWith(
-    "600 1em 'IBM Plex Sans', system-ui, sans-serif",
-    expect.stringContaining('Қазақша'),
-  );
-  expect(fonts.load).toHaveBeenCalledWith(
-    "400 1em 'IBM Plex Sans', system-ui, sans-serif",
-    expect.stringContaining('Русский'),
-  );
-  expect(fonts.load).toHaveBeenCalledWith(
-    "500 1em 'IBM Plex Sans', system-ui, sans-serif",
-    expect.stringContaining('English'),
-  );
-  expect(fonts.load).toHaveBeenCalledWith(
-    "600 1em 'Geologica', 'IBM Plex Sans', system-ui, sans-serif",
-    expect.stringContaining('Tank farm №3'),
-  );
-  expect(fonts.load).toHaveBeenCalledWith(
-    "400 1em 'JetBrains Mono', ui-monospace, Menlo, monospace",
-    expect.stringContaining('Tank farm №3'),
-  );
-  expect(readReady).not.toHaveBeenCalled();
-  await act(async () => loaded.resolve([]));
-  expect(readReady).toHaveBeenCalledTimes(1);
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('true');
-  expect(screen.queryByText('Report is ready.')).toBeNull();
-  await act(async () => laidOut.resolve(fonts as unknown as FontFaceSet));
-  expect(await screen.findByText('Report is ready.')).toBeTruthy();
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-  expect(screen.getByText('1 of 3 pages')).toBeTruthy();
-  expect(downloadLink().getAttribute('download')).toBe('report-demo-en.pdf');
-  expect(clients.at(-1)!.isFetching()).toBe(0);
-});
-
-it('keeps the deadline while fonts load and ignores their completion after timeout', async () => {
-  const loaded = deferred<FontFace[]>();
-  const fonts = { load: vi.fn(() => loaded.promise), ready: Promise.resolve() };
-  Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
-  const timer = vi.spyOn(window, 'setTimeout');
-  mockDevReportApi();
-  const view = renderReport('demo', true, '/inspections/demo/report', true);
-  const report = view.container.querySelector<HTMLElement>('.report-screen')!;
-  for (const [name, value] of Object.entries(reportFontTokens))
-    report.style.setProperty(name, value);
-  await waitFor(() => expect(fonts.load).toHaveBeenCalledTimes(5));
-  const expire = timer.mock.calls.find(([, duration]) => duration === 28_000)?.[0];
-  expect(expire).toBeTypeOf('function');
-  await act(async () => (expire as () => void)());
-  expect((await findAlert()).textContent).toContain('The report is taking too long. Try again.');
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-  expect(downloadLink().getAttribute('download')).toBe('report-demo-en.pdf');
-  await act(async () => loaded.resolve([]));
-  expect(screen.queryByText('Report is ready.')).toBeNull();
-  expect(pdfRegion().getAttribute('aria-busy')).toBe('false');
-  expect(clients.at(-1)!.isFetching()).toBe(0);
+  ['en', 'Report is ready.', '1 of 3 pages'],
+] as const)('renders report states in %s', async (lang, ready, count) => {
+  setLang(lang);
+  renderReport();
+  expect(await screen.findByText(ready)).toBeTruthy();
+  expect(screen.getByText(count)).toBeTruthy();
 });

@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useI18n, type Lang } from '../i18n';
-import { fetchReportPdf, type ReportPdf } from '../lib/api';
-import { fetchReportSummary, type ReportSummary } from '../lib/report';
+import {
+  fetchReportPdf,
+  fetchReportSummary,
+  type ReportPdf,
+  type ReportSummary,
+} from '../lib/report';
 import { loadPdf, type PdfPreview } from '../lib/pdfPreview';
 import { formatReportDate } from '../lib/reportDate';
-import { prepareInterfaceFonts } from '../lib/prepareInterfaceFonts';
 import { Wordmark } from '../shell/ShellIdentity';
 import './report.css';
 
@@ -31,7 +34,6 @@ export function ReportPage() {
   const onTimeout = useCallback(() => {
     setTimedOutRequest(requestKey);
     // Disabling a query stops polling but does not abort an existing fetch.
-    // Cancel both stages so readiness includes network idle, even on a stalled API.
     void queryClient.cancelQueries({ queryKey: ['report-summary', id], exact: true });
     const data = queryClient.getQueryData<ReportSummary>(['report-summary', id]);
     if (data)
@@ -90,7 +92,6 @@ function ReportContent({
   onLanguage: (lang: Lang) => void;
 }) {
   const { t } = useI18n();
-  const screen = useRef<HTMLDivElement>(null);
   const [attempt, setAttempt] = useState(0);
   const state: ReportPdf = summary.isError
     ? { state: 'failed', message: summary.error.message }
@@ -144,12 +145,8 @@ function ReportContent({
         if (!canvas.current) return;
         await document.renderFirstPage(canvas.current);
         const pages = document.numPages;
-        // Only page one is previewed. Close the document/worker before announcing
-        // readiness so no PDF resources remain loading behind a painted canvas.
-        await document.destroy();
-        if (!active || !screen.current) return;
-        await prepareInterfaceFonts(screen.current);
         if (active) setPreview({ blob: blob!, pages });
+        await document.destroy();
       } catch {
         await document?.destroy();
         if (active) setPreview({ blob: blob!, failed: true });
@@ -173,9 +170,9 @@ function ReportContent({
   }
 
   return (
-    <div ref={screen} className="qv-screen report-screen">
+    <div className="qv qv-screen report-screen">
       <header className="qv-topbar report-topbar">
-        <Link className="qv-btn qv-btn--quiet" to="/inspections">
+        <Link className="qv-btn qv-btn--quiet" to="/">
           {t('shell.emptyTitle')}
         </Link>
         <span className="qv-topbar__title">{t('report.title')}</span>

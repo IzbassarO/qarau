@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useI18n } from '../i18n';
@@ -12,12 +12,7 @@ import { NewInspectionDialog } from './NewInspectionDialog';
 import { Wordmark } from './ShellIdentity';
 import './shell.css';
 
-export function AppShell({ demo = false, children }: { demo?: boolean; children?: ReactNode }) {
-  // Reports use v8's full-width screen scaffold rather than the inspection sidebar.
-  return children ? <div className="qv">{children}</div> : <InspectionShell demo={demo} />;
-}
-
-function InspectionShell({ demo }: { demo: boolean }) {
+export function AppShell({ demo = false }: { demo?: boolean }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -47,22 +42,6 @@ function InspectionShell({ demo }: { demo: boolean }) {
       setSearchParams(next, { replace: true });
     }
   };
-
-  useEffect(() => {
-    // Full document navigation does not unmount React. Explicitly abort the
-    // outgoing catalog reads before the browser discards this document.
-    const hide = () => void queryClient.cancelQueries({ queryKey: ['inspections'] });
-    const show = (event: PageTransitionEvent) => {
-      if (event.persisted)
-        void queryClient.refetchQueries({ queryKey: ['inspections'], type: 'active' });
-    };
-    window.addEventListener('pagehide', hide);
-    window.addEventListener('pageshow', show);
-    return () => {
-      window.removeEventListener('pagehide', hide);
-      window.removeEventListener('pageshow', show);
-    };
-  }, [queryClient]);
 
   useEffect(() => {
     document.documentElement.lang = lang;

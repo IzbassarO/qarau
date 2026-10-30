@@ -608,10 +608,6 @@
     flex: 1;
     min-width: 0;
   }
-  .viewer-header .viewer-report-link {
-    flex: none;
-    min-height: calc(var(--space-8) + var(--space-3));
-  }
   .viewer-header .viewer-run-id {
     flex-basis: 100%;
     order: 2;

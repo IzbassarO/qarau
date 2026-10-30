@@ -1,6 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { StrictMode } from 'react';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useParams } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LANGS, setLang, type Lang } from '../i18n';
@@ -26,11 +25,11 @@ function MapDestination() {
 }
 
 const clients: QueryClient[] = [];
-function renderRoute(route = '/', signedIn = true, strict = false) {
+function renderRoute(route = '/', signedIn = true) {
   if (signedIn) sessionStorage.setItem('qarau.auth.session', 'Bearer test-api-value');
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   clients.push(client);
-  const page = (
+  return render(
     <QueryClientProvider client={client}>
       <AuthProvider>
         <MemoryRouter initialEntries={[route]}>
@@ -44,9 +43,8 @@ function renderRoute(route = '/', signedIn = true, strict = false) {
           </Routes>
         </MemoryRouter>
       </AuthProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
-  return render(strict ? <StrictMode>{page}</StrictMode> : page);
 }
 
 beforeEach(() => {
@@ -74,71 +72,6 @@ it('collapses navigation from its header and restores it with the topbar control
   );
   fireEvent.keyDown(document, { key: 'Escape' });
   expect(nav.closest('.qv-app')?.className).toBe('qv qv-app app-shell sidebar-collapsed');
-});
-
-it('aborts the outgoing catalog on document navigation and reloads it on bfcache restoration', async () => {
-  let catalogSignal: AbortSignal | undefined;
-  const fetch = vi.fn(async (url: string, options?: RequestInit) => {
-    if (url !== '/api/runs') return Response.json([]);
-    catalogSignal = options?.signal ?? undefined;
-    return new Promise<Response>((_resolve, reject) => {
-      const abort = () => reject(new DOMException('Navigation', 'AbortError'));
-      if (catalogSignal?.aborted) abort();
-      else catalogSignal?.addEventListener('abort', abort, { once: true });
-    });
-  });
-  vi.stubGlobal('fetch', fetch);
-  const view = renderRoute('/');
-  await waitFor(() => expect(catalogSignal).toBeDefined());
-  expect(catalogSignal!.aborted).toBe(false);
-  await act(async () => window.dispatchEvent(new Event('pagehide')));
-  expect(catalogSignal!.aborted).toBe(true);
-  expect(clients.at(-1)!.isFetching()).toBe(0);
-
-  fetch.mockImplementation(async () => Response.json([]));
-  fetch.mockClear();
-  const restored = new Event('pageshow');
-  Object.defineProperty(restored, 'persisted', { value: true });
-  await act(async () => window.dispatchEvent(restored));
-  await waitFor(() => expect(clients.at(-1)!.isFetching()).toBe(0));
-  expect(fetch.mock.calls.map(([url]) => url)).toEqual([
-    '/api/inspections',
-    '/api/inspections',
-    '/api/runs',
-  ]);
-  expect(screen.getByRole('region', { name: 'Inspections' }).getAttribute('aria-busy')).toBe(
-    'false',
-  );
-  view.unmount();
-  fetch.mockClear();
-  window.dispatchEvent(restored);
-  expect(fetch).not.toHaveBeenCalled();
-});
-
-it('reuses the authenticated catalog after sign-in under StrictMode, then refreshes it from the server', async () => {
-  const fetch = vi.fn(async (url: string) =>
-    Response.json(url === '/api/runs' ? legacyCatalog : []),
-  );
-  vi.stubGlobal('fetch', fetch);
-  renderRoute('/', false, true);
-  fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'report-engineer' } });
-  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'report-test-session' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-  const sidebar = screen.findByRole('link', { name: /walkdown-2026-10-23/ });
-  expect(await sidebar).toBeTruthy();
-  await waitFor(() => expect(clients.at(-1)!.isFetching()).toBe(0));
-  expect(screen.queryByLabelText('Password')).toBeNull();
-  expect(fetch.mock.calls.filter(([url]) => url === '/api/runs')).toHaveLength(1);
-  expect(screen.queryByRole('alert')).toBeNull();
-
-  fetch.mockClear();
-  fetch.mockImplementation(async (url: string) =>
-    Response.json(url === '/api/runs' ? catalog : []),
-  );
-  await act(async () => clients.at(-1)!.invalidateQueries({ queryKey: ['inspections'] }));
-  expect(await screen.findByRole('link', { name: /Walkdown upload/ })).toBeTruthy();
-  expect(fetch.mock.calls.filter(([url]) => url === '/api/runs')).toHaveLength(1);
-  expect(screen.queryByRole('link', { name: /walkdown-2026-10-23/ })).toBeNull();
 });
 
 it('renders the inspection list at / with New inspection above its rows and opens progress', async () => {

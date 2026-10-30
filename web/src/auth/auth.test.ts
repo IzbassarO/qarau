@@ -56,45 +56,6 @@ it.each([401, 403])(
   },
 );
 
-it('does not publish a session until the authentication response body is complete', async () => {
-  let finish!: () => void;
-  const response = new Response(
-    new ReadableStream({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode('['));
-        finish = () => {
-          controller.enqueue(new TextEncoder().encode(']'));
-          controller.close();
-        };
-      },
-    }),
-  );
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
-  const request = login(credentials);
-  try {
-    await Promise.resolve();
-    expect(sessionHeader()).toBeNull();
-    expect(response.bodyUsed).toBe(true);
-  } finally {
-    finish();
-    await request;
-  }
-  expect(sessionHeader()).toBe('Bearer test-api-value');
-});
-
-it('rejects an interrupted authentication body without publishing a session', async () => {
-  const response = new Response(
-    new ReadableStream({
-      start(controller) {
-        controller.error(new TypeError('Connection closed'));
-      },
-    }),
-  );
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
-  await expect(login(credentials)).rejects.toMatchObject({ code: 'connection' });
-  expect(sessionHeader()).toBeNull();
-});
-
 it.each([204, 500])('rejects an unexpected HTTP %i without saving credentials', async (status) => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status })));
   await expect(login(credentials)).rejects.toMatchObject({ code: 'connection' });
@@ -140,10 +101,7 @@ it('reports unavailable session storage instead of signing in', async () => {
 });
 
 it('uses the validated session username as a preference id, never the Bearer credential', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockImplementation(async () => Response.json([])),
-  );
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([])));
   await login({ ...credentials, username: '  operator-a  ' });
   expect(sessionUserId()).toBe('operator-a');
   await login({ ...credentials, username: 'operator-b' });
