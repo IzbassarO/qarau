@@ -651,7 +651,7 @@ Rules:
 - Your runs are on uncommitted code, so anything tagged with a commit hash shows "+dirty";
   that is expected. If a request needs a commit, say so instead of trying to commit.
 - Do not try to take screenshots: the tester screenshots the app pages itself and judges
-  visual criteria from them.{e2e_rule(team, dev)}
+  visual criteria from them.{e2e_rule(team, dev)}{skills_rule(team, dev)}
 - Stop every server you start (dev server, preview, test server) as soon as its check is
   done; never leave a listening port. When your run ends, the orchestrator kills anything
   you left and reports each port it had to close.
@@ -957,7 +957,7 @@ Rules:
                     team,
                     "tester",
                     tid,
-                    TESTER_SYSTEM,
+                    TESTER_SYSTEM + tester_skills(team),
                     team.redact(prompt + extra),
                     schema,
                     images=shots,
@@ -1071,6 +1071,41 @@ def design_rule(dev: dict) -> str:
         "evidence-phone-light.png) layouts differ, but every function works on both. The tester "
         "compares its screenshots with the reference screens."
     )
+
+
+SKILLS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "skills"
+
+
+def skills(team, executor: dict) -> list[str]:
+    """The executor's repository skills (config `skills`, .claude/skills/SKILLS.md; owner
+    2026-10-30); none when `skills.enabled` is false."""
+    if not team.cfg.get("skills", {}).get("enabled", True):
+        return []
+    return executor.get("skills") or []
+
+
+def skills_rule(team, dev: dict) -> str:
+    if not (names := skills(team, dev)):
+        return ""
+    files = ", ".join(f".claude/skills/{n}/SKILL.md" for n in names)
+    return (
+        f"\n- Repository skills for your work: read {files} before you start and follow them "
+        "where they apply. CLAUDE.md, these rules and DESIGN.md win over any skill; never run a "
+        "skill's script that downloads or installs something."
+    )
+
+
+def tester_skills(team) -> str:
+    """The tester cannot run code: its skills are given as text after its own rules, from the
+    checkout this code runs from (the skills come with it)."""
+    texts = [
+        f'<skill name="{n}">\n{(SKILLS_DIR / n / "SKILL.md").read_text()}</skill>'
+        for n in skills(team, team.cfg["models"]["tester"])
+    ]
+    return "".join(
+        ["\n\nRepository skills, for reference (you cannot run code or a browser here; your "
+         "rules above win over them):\n"] * bool(texts) + texts
+    )  # fmt: skip
 
 
 def design_refs(team, s: dict) -> list[str]:

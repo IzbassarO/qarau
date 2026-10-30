@@ -369,8 +369,12 @@ then unattended (`run --continuous` overnight).
   page shot without it. Pipeline tasks keep Vite's own `/api/runs` middleware.
 - Loop detection compares failing criteria by their number in the plan (the judge returns it),
   never by the judge's wording (P3e was sent back 3 times for one criterion, 2026-10-19).
-- Skills: `.claude/skills/` (pinned, licence checked, `.claude/skills/README.md`); Codex reads
-  them through symlinks in `.agents/skills/`. Both are protected; agents never download skills.
+- Skills: `.claude/skills/` (pinned, licence checked, `.claude/skills/SKILLS.md`); Codex and
+  Kimi read them through symlinks in `.agents/skills/`. Both are protected; agents never download
+  skills. Each developer's and the tester's `skills` (config) are named in its prompt: dev_app
+  impeccable, frontend-design, theme-factory; dev_pipeline / dev_core test-driven-development,
+  receiving-code-review; the tester (an API call, no tools) gets webapp-testing as text.
+  `skills.enabled: false` names none (the CLIs still discover the folders themselves).
   Web developers are told that design system v8 (`docs/design/DESIGN.md`, the reference screens
   in `docs/design/screens/`) is the UI's only source of truth (owner, 2026-10-24): never invent
   or change colours, fonts, components or layout; only alignment, spacing, size and responsive

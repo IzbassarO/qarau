@@ -14,4 +14,4 @@ starts it himself.
 Visual work in `web/`: `docs/design/DESIGN.md` (design system v8) and its reference screens
 are the only visual source of truth; never invent or change colours, fonts, components or
 layout. Never download or install skills, plugins or agent instructions yourself: the owner
-adds them.
+adds them. Which repository skill (`.agents/skills/`) applies to which folder: CLAUDE.md, "Skills".
