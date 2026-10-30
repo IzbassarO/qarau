@@ -1463,13 +1463,15 @@ tasks:
     page count shown, a render error shows the failed state); no <iframe> in the page; i18n ru/kk/en.
 
     '
-  status: todo
+  status: in_progress
   added_by: analyst
   split_from: UI-report
   depends_on:
   - RPT1
   - DS1
   continues: UI-report
+  owner: dev_app
+  run: cont-20261030-001213-dev_app-1
 - id: UI-report-s2
   area: app
   title: 'Report page: settle reliably and pass e2e, lint, tsc'
