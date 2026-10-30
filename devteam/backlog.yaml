@@ -2141,9 +2141,11 @@ tasks:
     Owner 2026-10-28: LaunchPad demo (2026-11-06).
 
     '
-  status: todo
+  status: in_progress
   depends_on:
   - DEMO1
+  owner: dev_app
+  run: cont-20261030-001213-dev_app-4
 - id: COV-ui
   area: app
   title: Coverage layer in the viewer
