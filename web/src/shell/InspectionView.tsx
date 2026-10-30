@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { startProcessing } from '../lib/api';
 import { useI18n, type Key } from '../i18n';
 import { BundleError, FarLayerError, loadBundle, loadManifest, type Bundle } from '../lib/bundle';
 import {
@@ -48,6 +49,12 @@ export function InspectionView({
     retry: false,
     staleTime: 60_000,
   });
+  // Upload starts processing itself; a stopped (still uploaded) or failed run can be queued again.
+  const canStart = !!currentDetail && ['uploaded', 'failed'].includes(status);
+  const start = useMutation({
+    mutationFn: () => startProcessing(inspection.id, runId),
+    onSuccess: () => detail.refetch(),
+  });
   const bundle = demoBundle ?? query.data;
   const source = inspection.source ?? bundle?.manifest.source.name;
   const steps = processingSteps(
@@ -95,7 +102,15 @@ export function InspectionView({
           </button>
         </div>
       )}
-      <ProcessingSteps steps={steps} uploaded={status === 'uploaded'} />
+      <ProcessingSteps steps={steps} uploaded={status === 'uploaded' || status === 'queued'} />
+      {canStart && (
+        <div className="qv-notice processing-start">
+          {start.isError && <p role="alert">{t('processing.startError')}</p>}
+          <button className="qv-btn" disabled={start.isPending} onClick={() => start.mutate()}>
+            {t('processing.start')}
+          </button>
+        </div>
+      )}
       <section aria-labelledby="inspection-map-title" className="qv-card inspection-map-section">
         <div className="qv-card__head section-heading">
           <h2 className="qv-heading" id="inspection-map-title">

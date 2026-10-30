@@ -275,6 +275,8 @@
   "status.done": "Completed",
   "processing.uploadedWaiting": "Video uploaded, waiting for processing.",
   "processing.mapWaiting": "The 3D map will be available after processing.",
+  "processing.start": "Start processing",
+  "processing.startError": "Could not start processing. Check your connection and try again.",
   "inspection.detailError": "Could not load inspection progress. Check your connection and try again.",
   "upload.sitesUnavailable": "Site selection is unavailable",
   "upload.catalogOnly": "You can view existing inspections here. To upload a video, use a workspace with site management and uploads enabled.",

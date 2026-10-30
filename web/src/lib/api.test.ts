@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { ApiUnavailableError, readApi, rerunInspectionStep } from './api';
+import { ApiUnavailableError, readApi, rerunInspectionStep, startProcessing } from './api';
 import { listSites } from './sites';
 
 afterEach(() => {
@@ -76,4 +76,21 @@ it('posts a step rerun to S1 with encoded identifiers and the session header', a
 it.each([401, 403, 404, 409, 503])('preserves a failed rerun response (%i)', async (status) => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status })));
   await expect(rerunInspectionStep('7', 'run-7', 'frames')).rejects.toThrow(String(status));
+});
+
+it('queues the uploaded run and treats an already queued run as started', async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ run_id: 'run-7', status: 'queued' }, { status: 202 }))
+    .mockResolvedValueOnce(Response.json({ detail: 'run is already queued' }, { status: 409 }))
+    .mockResolvedValueOnce(Response.json({ detail: 'forbidden' }, { status: 403 }));
+  vi.stubGlobal('fetch', fetch);
+  await startProcessing(7, 'run-7');
+  expect(fetch).toHaveBeenCalledWith(
+    '/api/inspections/7/runs',
+    expect.objectContaining({ method: 'POST', body: JSON.stringify({ run_id: 'run-7' }) }),
+  );
+  await expect(startProcessing(7, 'run-7')).resolves.toBeUndefined();
+  await expect(startProcessing(7)).rejects.toThrow('403');
+  expect(fetch.mock.calls[2][1].body).toBe('{}');
 });

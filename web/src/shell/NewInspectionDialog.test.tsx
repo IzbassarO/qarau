@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LANGS, setLang, type Lang } from '../i18n';
+import * as api from '../lib/api';
 import * as upload from '../lib/upload';
 import { NewInspectionDialog } from './NewInspectionDialog';
 
@@ -92,6 +93,24 @@ it('creates the inspection for the selected API site', async () => {
     { siteId: 2, filename: 'survey.mp4', size: 5, contentType: 'video/mp4' },
     expect.any(AbortSignal),
   );
+});
+
+it('starts processing for the uploaded run before selecting the inspection', async () => {
+  const start = vi.spyOn(api, 'startProcessing').mockResolvedValue();
+  const onUploaded = vi.fn(() => expect(start).toHaveBeenCalledExactlyOnceWith(7, 'run-1'));
+  render(<NewInspectionDialog onClose={() => {}} onUploaded={onUploaded} />);
+  await chooseVideo();
+  await waitFor(() => expect(onUploaded).toHaveBeenCalledWith(7));
+});
+
+it('still selects the uploaded inspection when starting processing fails', async () => {
+  vi.spyOn(api, 'startProcessing').mockRejectedValue(
+    new api.ApiError('/api/inspections/7/runs', 403),
+  );
+  const onUploaded = vi.fn();
+  render(<NewInspectionDialog onClose={() => {}} onUploaded={onUploaded} />);
+  await chooseVideo();
+  await waitFor(() => expect(onUploaded).toHaveBeenCalledWith(7));
 });
 
 it('rejects a non-video file with a visible translated message', () => {
