@@ -1463,7 +1463,7 @@ tasks:
     page count shown, a render error shows the failed state); no <iframe> in the page; i18n ru/kk/en.
 
     '
-  status: in_progress
+  status: done
   added_by: analyst
   split_from: UI-report
   depends_on:
@@ -1487,6 +1487,8 @@ tasks:
     sign-in/network-idle fixes belong to UI-report-s2, so do not touch them. Check the size with `git
     diff <base> --stat -- . '':!*lock*''`; the total must be well under 120,000 characters before you
     finish the round.'
+  pr: https://github.com/IzbassarO/qarau/pull/104
+  done_at: '2026-10-30'
 - id: UI-report-s2
   area: app
   title: 'Report page: settle reliably and pass e2e, lint, tsc'
