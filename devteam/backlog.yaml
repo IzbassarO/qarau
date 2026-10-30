@@ -1463,7 +1463,7 @@ tasks:
     page count shown, a render error shows the failed state); no <iframe> in the page; i18n ru/kk/en.
 
     '
-  status: in_progress
+  status: blocked
   added_by: analyst
   split_from: UI-report
   depends_on:
@@ -1472,6 +1472,11 @@ tasks:
   continues: UI-report
   owner: dev_app
   run: cont-20261030-001213-dev_app-1
+  branch: devteam/UI-report-s1
+  blocked_reason: 'the tester sent it back twice in a row for the same reason, so no new round was started:
+    This part''s diff is too large to review: 184,760 characters without lockfiles and generated files,
+    over the limit of 120,000. Keep the change within the plan of this part: drop unrelated edits, reformatting
+    and generated or copied files.'
 - id: UI-report-s2
   area: app
   title: 'Report page: settle reliably and pass e2e, lint, tsc'
