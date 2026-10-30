@@ -22,9 +22,9 @@ class FakeAgents:
                 for d, c in team.cfg["developers"].items()
                 if t.get("area") in c["areas"] and d in allowed
             ]
-            if not devs_ or devs_[0] in busy:
+            dev = next((d for d in devs_ if d not in busy), None)  # dev_pipeline, then dev_core
+            if dev is None:
                 continue
-            dev = devs_[0]
             busy.add(dev)
             out.append(
                 {

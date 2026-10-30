@@ -71,7 +71,10 @@ then unattended (`run --continuous` overnight).
   fake remote only (2026-10-22: `release-YYYY-MM-DD.2` landed in the shared `refs/tags`).
 - Continuous mode (`run --continuous`, limits in `config.yaml` → `continuous`): one loop per
   developer. When a developer's task ends (merged or blocked), the brain plans the next task
-  for that developer only; the others keep working. Stops when no developer can take a task
+  for that developer only; the others keep working. At most `max_developers_at_once` (2)
+  developers work at once: a free one waits for a slot before it plans. Two developers of one
+  area (dev_pipeline, dev_core) may plan the same task at once: the claim re-reads the backlog
+  under a lock, and the one that lost plans again. Stops when no developer can take a task
   (nothing plannable, or paused after 2 blocked in a row, see below); the API budget
   (`daily_budget_usd`, counted over the last 24 h, not reset at midnight) is reached (a
   reservation left open over 2 h, e.g. by a killed run, is marked `stale` on the next
@@ -285,8 +288,13 @@ then unattended (`run --continuous` overnight).
   listening`). Output goes to files, so a background server can't hold the step open until
   its timeout. Screenshots refuse to run when the URL already answers before Kerege starts its
   own dev server (a stale server), and stop the server afterwards.
-- Developers, in parallel: `dev_pipeline` = Claude Code (`claude -p`, subscription token in
-  `.env`), `dev_app` = Kimi Code CLI with Codex as its fallback (below). Codex: `codex exec`,
+- Developers, in parallel: `dev_pipeline` and `dev_core` = Claude Code (`claude -p`), `dev_app`
+  = Kimi Code CLI with Codex as its fallback (below). A claude_code developer's `command`
+  (default `claude`) names a login in `config.yaml` → `claude_commands`: its OAuth token key in
+  `.env` and, when set, its `CLAUDE_CONFIG_DIR` (owner 2026-10-30: `dev_pipeline` on `claude`,
+  the personal account, `CLAUDE_CODE_OAUTH_TOKEN`; `dev_core` on `claude-su`, the university
+  account, `CLAUDE_CODE_OAUTH_TOKEN_SU` from `claude-su setup-token`, `~/.claude-su`). The
+  daily report's subscription table names the login with the model and totals each one apart. Codex: `codex exec`,
   your saved ChatGPT login (`codex login` once; no API key is ever passed), no network in its
   sandbox: `setup` installs first.
 - Providers (Kerege v3 K1, owner 2026-10-28; `config.yaml` → `providers`, ADR 0033): every role

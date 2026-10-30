@@ -222,6 +222,32 @@ def bench_repo(repo, score):
     return bench
 
 
+def test_two_tasks_benchmarking_one_commit_take_turns_and_measure_it_once(repo, tmp_path):
+    """dev_pipeline and dev_core (2026-10-30) both measured the dev baseline at once: the first
+    one's cleanup removed bench-wt/<sha> under the second, which crashed."""
+    gates = bench_repo(repo, "90")
+    calls = tmp_path / "calls"
+    gates["benchmark"]["command"] = f"echo x >> {calls}; sleep 1; python3 pipeline/bench.py {{out}}"
+    team, _ = make(repo, Dev(), gates=gates)
+    sha = git(repo, "rev-parse", "HEAD").strip()
+    got, errors = [], []
+
+    def measure():
+        try:
+            got.append(G.benchmark(team, sha))
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=measure) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert [r["videos"]["room"]["registered_pct"] for r in got] == [90.0, 90.0]
+    assert calls.read_text().count("x") == 1  # the second read the first one's cache
+
+
 def test_benchmark_regression_sends_back(repo):
     gates = bench_repo(repo, "90")
     team, graph = make(

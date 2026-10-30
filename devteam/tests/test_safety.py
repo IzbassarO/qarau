@@ -668,7 +668,7 @@ def test_old_cost_db_is_migrated_once_even_by_racing_threads(tmp_path):
         t.join()
     assert errors == []
     cols = [r[1] for r in costs._db(tmp_path).execute("pragma table_info(usage)")]
-    assert cols[-5:] == ["state", "secs", "cache_read", "cache_write", "provider"]
+    assert cols[-6:] == ["state", "secs", "cache_read", "cache_write", "provider", "command"]
 
 
 # --- 5. stale cost reservations ---------------------------------------------------------------

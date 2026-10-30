@@ -35,6 +35,7 @@ COLORS = {
     "architect": "blue",
     "analyst": "bright_magenta",
     "dev_pipeline": "cyan",
+    "dev_core": "bright_cyan",
     "dev_app": "green",
     "tester": "yellow",
     "reviewer": "bold white",
@@ -288,9 +289,12 @@ def rehearse(cmd: list[str] | None = None) -> int:
             and not t.get("owner_only")
             and set(t.get("depends_on") or []) <= done
         ]
-        firsts = (next((t["id"] for t in ready if t.get("area") in d["areas"]), None)
-                  for d in team.cfg["developers"].values())  # fmt: skip
-        return [tid for tid in firsts if tid]
+        picked: list[str] = []  # one task per developer, so dev_core gets its own core task
+        for d in team.cfg["developers"].values():
+            mine = [t["id"] for t in ready if t.get("area") in d["areas"]]
+            if tid := next((x for x in mine if x not in picked), None):
+                picked.append(tid)
+        return picked
 
     pick = plannable()
     if not pick:  # every open task waits on a blocked one (2026-10-23: S1, DEF1-api and U2

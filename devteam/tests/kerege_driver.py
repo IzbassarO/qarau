@@ -8,7 +8,7 @@ import os
 import signal
 from pathlib import Path
 
-from conftest import CFG
+from conftest import CFG, REAL_DEVELOPERS
 
 from devteam import cli
 from devteam.agents import FakeAgents
@@ -23,7 +23,9 @@ class Fast(FakeAgents):
 repo = Path(os.environ["KEREGE_REPO"])
 cli.ROOT = repo
 # a real --fake run: its own fake remote in .state/fake, seeded from the repo's dev and main
-cli.make_team = lambda fake: Team(repo, copy.deepcopy(CFG), {}, Fast(), fake=True)
+# the real developers, dev_core (claude-su) included: rehearse runs both Claude logins
+cfg = {**CFG, "developers": REAL_DEVELOPERS}
+cli.make_team = lambda fake: Team(repo, copy.deepcopy(cfg), {}, Fast(), fake=True)
 counter = repo.parent / "crashes"  # runs crashed so far
 show, seen = cli.show_event, []
 

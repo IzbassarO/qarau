@@ -91,6 +91,7 @@ def _db(home: Path) -> sqlite3.Connection:
         ("cache_read", "int default 0"),
         ("cache_write", "int default 0"),
         ("provider", "text"),
+        ("command", "text"),  # the Claude login of a claude_code round (claude / claude-su)
     ):
         if col not in cols:
             try:
@@ -216,11 +217,12 @@ def record(
     billed: bool,
     secs: float = 0,
     provider: str = "",
+    command: str = "",
 ):
     with _db(home) as db:
         db.execute(
             "insert into usage (day, ts, agent, model, task, tokens_in, tokens_out, usd, billed, "
-            "state, secs, provider) values (?,?,?,?,?,?,?,?,?,'settled',?,?)",
+            "state, secs, provider, command) values (?,?,?,?,?,?,?,?,?,'settled',?,?,?)",
             (
                 _today(),
                 time.strftime("%H:%M:%S"),
@@ -233,6 +235,7 @@ def record(
                 int(billed),
                 secs,
                 provider,
+                command,
             ),
         )
 
@@ -334,13 +337,14 @@ def cache_hits(tokens_in, cache_read) -> str:
 
 
 def subscription_rows(home: Path, day: str) -> list[tuple]:
-    """Developer runs on subscriptions, per task: (task, agent, model, runs, secs, in, out, usd)."""
+    """Developer runs on subscriptions, per task: (task, agent, model, runs, secs, in, out, usd,
+    command); command is the Claude login of a claude_code row, else ""."""
     db = _db(home)
     try:
         return db.execute(
             """select task, agent, model, count(*), sum(secs), sum(tokens_in), sum(tokens_out),
-            sum(usd) from usage where day = ? and not billed
-            group by task, agent, model order by sum(secs) desc""",
+            sum(usd), coalesce(command, '') from usage where day = ? and not billed
+            group by task, agent, model, command order by sum(secs) desc""",
             (day,),
         ).fetchall()
     finally:

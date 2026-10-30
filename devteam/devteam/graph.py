@@ -39,7 +39,7 @@ from devteam import supervise as SV
 from devteam.costs import BudgetExceeded, SubscriptionLimit
 from devteam.supervise import TaskHalted
 
-AGENTS = ["brain", "architect", "analyst", "dev_pipeline", "dev_app", "tester"]
+AGENTS = ["brain", "architect", "analyst", "dev_pipeline", "dev_core", "dev_app", "tester"]
 GIT_NET_COMMANDS = {"fetch", "push", "ls-remote", "pull"}
 GIT_NET_WAITS = (10, 30, 90)  # seconds before each retry of a git network command
 GIT_NET_ERROR = re.compile(
@@ -620,6 +620,7 @@ class TeamState(TypedDict, total=False):
     developers: list[str]  # plan only for these (continuous mode: the one that is free)
     assignments: list[dict]
     splits: list[dict]  # {task_id, split}: tasks the brain says need splitting first
+    lost: list[str]  # planned, but another developer's round claimed them first
     results: Annotated[list, operator.add]
 
 
@@ -649,6 +650,9 @@ class Team:
         # Parallel tasks share one repo: `worktree add -b` writes .git/config, fetch locks refs.
         # Orchestrator git calls are short, so they simply take turns.
         self._git_lock = threading.Lock()
+        # Developers of one area plan at once (continuous; dev_pipeline and dev_core): a claim
+        # re-reads the backlog under this lock, so one task never goes to both (ADR 0014).
+        self._claim_lock = threading.Lock()
         self._procs: set[subprocess.Popen] = set()
         self._ctx = threading.local()  # .task: the task whose node runs in this thread
         self._status_commit = None  # the only commit push_status may push straight to dev
@@ -2362,8 +2366,11 @@ def build_graph(team: Team, checkpointer):
         areas = {a for d in devs.values() for a in d["areas"]}  # other developers' tasks wait
         todo = [t for t in todo if t.get("area") in areas]
         if AN.enabled(team, "architect"):  # the next task of each developer (backlog order)
+            briefed: set[str] = set()  # two developers of one area: each its own next task
             for d in devs.values():
-                if t := next((t for t in todo if t.get("area") in d["areas"]), None):
+                nxt = (t for t in todo if t.get("area") in d["areas"] and t["id"] not in briefed)
+                if t := next(nxt, None):
+                    briefed.add(t["id"])
                     if (text := AR.brief(team, t)) is None:  # it waits on a new prerequisite
                         todo.remove(t)
                     elif text:
@@ -2418,8 +2425,22 @@ def build_graph(team: Team, checkpointer):
             team.push_status(sp["task_id"], f"backlog: {sp['task_id']} blocked (needs a split)")
             team.emit("brain", reason, task=sp["task_id"], to="reviewer")
             AN.on_blocked(team, sp["task_id"])
-        for a in s["assignments"]:
-            team.update_task(a["task"]["id"], status="in_progress", owner=a["assignee"], run=run)
+        with team._claim_lock:
+            now = {t["id"]: t for t in team.load_backlog()}
+            kept = [  # still open, or already this run's (a resumed claim)
+                a
+                for a in s["assignments"]
+                if (t := now[a["task"]["id"]])["status"] == "todo"
+                or (t["status"] == "in_progress" and t.get("run") == run)
+            ]
+            for a in kept:
+                team.update_task(
+                    a["task"]["id"], status="in_progress", owner=a["assignee"], run=run
+                )
+        lost = [a["task"]["id"] for a in s["assignments"] if a not in kept]
+        if lost:
+            team.emit("brain", f"claimed by another developer meanwhile, planning again: {lost}")
+        for a in kept:
             # on dev too: a claim kept only in the main checkout left backlog.yaml modified there
             team.push_status(a["task"]["id"], f"backlog: {a['task']['id']} in_progress")
             stages = a.get("stages") or []
@@ -2431,7 +2452,7 @@ def build_graph(team: Team, checkpointer):
                 task=a["task"]["id"],
                 to=a["assignee"],
             )
-        return {}
+        return {"assignments": kept, "lost": lost}
 
     def fan_out(s: TeamState):
         return [Send("task", a) for a in s["assignments"]] or END

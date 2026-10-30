@@ -161,6 +161,7 @@ ROOMS = {
     "architect": "Lead",
     "analyst": "Lead",
     "dev_pipeline": "Core",
+    "dev_core": "Core",
     "dev_app": "App",
     "tester": "Testing",
 }
@@ -169,6 +170,7 @@ ROLE = {
     "architect": "context brief before planning",
     "analyst": "diagnoses blocked tasks, re-plans",
     "dev_pipeline": "pipeline, backend, infra",
+    "dev_core": "pipeline, backend, infra (second login)",
     "dev_app": "web app",
     "tester": "checks, judge, gates",
 }
@@ -391,7 +393,7 @@ def collect(team: Team, gh: GhCache, now: float | None = None) -> dict:
         run = {"state": "not running", "reason": "no run today", "secs": None}
     now_panel = now_rows(events, office, team.cfg.get("roles") or {}, started)
     task_tokens: dict[str, int] = {}
-    for t, _a, _m, _n, _secs, ti, to, _usd in sub_rows:
+    for t, _a, _m, _n, _secs, ti, to, _usd, _cmd in sub_rows:
         task_tokens[t] = task_tokens.get(t, 0) + (ti or 0) + (to or 0)
     return {
         "now": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
