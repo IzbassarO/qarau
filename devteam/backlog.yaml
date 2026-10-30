@@ -1513,11 +1513,13 @@ tasks:
     lint, tsc, Vitest and the e2e pass.
 
     '
-  status: todo
+  status: in_progress
   added_by: analyst
   split_from: UI-report
   depends_on:
   - UI-report-s1
+  owner: dev_app
+  run: cont-20261030-001213-dev_app-3
 - id: UI-report-s3
   area: app
   title: 'Report page: screenshots and design match'
