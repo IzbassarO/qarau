@@ -1958,9 +1958,9 @@ tasks:
     Owner 2026-10-29: found in the owner''s `make local` walk (PR #97).
 
     '
-  status: todo
+  status: in_progress
   owner: dev_pipeline
-  run: cont-20261029-152145-dev_pipeline-1
+  run: cont-20261030-001213-dev_pipeline-1
   branch: devteam/TEST-v0008
 - id: DEMO-cov
   area: core
