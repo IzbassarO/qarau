@@ -34,6 +34,8 @@ class Continuous:
         self.max_s = c.get("max_hours", 10) * 3600
         self.max_tasks = c.get("max_tasks", 8)
         self.max_wait_s = c.get("limit_wait_max_hours", 5) * 3600
+        # owner 2026-10-30: at most 2 coding agents at once, also with a third developer
+        self.max_busy = c.get("max_developers_at_once") or len(team.cfg["developers"])
         self.team, self.graph, self.clock = team, graph, clock
         for name, d in team.cfg["developers"].items():  # devteam edits itself only by hand
             if any(p.startswith("devteam") for p in d["owns"]):
@@ -156,6 +158,13 @@ class Continuous:
         thread, n = self.resume.get(dev), 0
         while True:
             with self.cond:
+                self.cond.wait_for(  # a free slot (max_developers_at_once) before a round
+                    lambda: (
+                        len(self.busy) < self.max_busy
+                        or self.team.stopping.is_set()
+                        or (self.draining and not thread)  # noqa: B023 (called right here)
+                    )
+                )
                 if self.team.stopping.is_set():
                     return
                 inp = None
@@ -217,6 +226,8 @@ class Continuous:
                 else:
                     self.started -= 1
                     self.cond.notify_all()  # a waiting developer may now see nobody busy
+                    if vals.get("lost"):
+                        continue  # another developer claimed its task first: plan again
                     if self.ended != ended_before:
                         continue  # something ended while the brain looked: look again
                     if not self.busy:

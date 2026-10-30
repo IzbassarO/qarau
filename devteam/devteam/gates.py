@@ -97,18 +97,36 @@ def cached_benchmark(team, sha: str) -> dict | None:
     return None if any(gated(bcfg, n) for n in res.get("errors", {})) else res
 
 
+_SHA_LOCKS: dict[str, threading.RLock] = {}
+_SHA_LOCKS_GUARD = threading.Lock()
+
+
+def sha_lock(sha: str) -> threading.RLock:
+    """One benchmark of a commit at a time: two core tasks (dev_pipeline, dev_core) measure the
+    same dev baseline at once; they shared bench-wt/<sha> and the first one's cleanup removed
+    it under the second (2026-10-30). The second waits, then reads the first one's cache."""
+    with _SHA_LOCKS_GUARD:
+        return _SHA_LOCKS.setdefault(sha, threading.RLock())
+
+
 def benchmark(team, sha: str) -> dict | None:
     """Full benchmark results for commit `sha`, cached per pipeline tree (see
     cached_benchmark). Videos that failed are in results["errors"] (the command exits 1 then,
     but the others still count). None only if the command wrote no results at all."""
-    if (res := cached_benchmark(team, sha)) is not None:
-        return res
-    return run_benchmark(team, sha, team.home / "bench" / bench_key(team, sha))
+    with sha_lock(sha):
+        if (res := cached_benchmark(team, sha)) is not None:
+            return res
+        return run_benchmark(team, sha, team.home / "bench" / bench_key(team, sha))
 
 
 def run_benchmark(team, sha: str, out: Path, only: list[str] | None = None) -> dict | None:
     """Measures `sha` into `out` (only these videos, if given) in a throwaway detached worktree,
     so nothing it writes can end up in a task branch."""
+    with sha_lock(sha):
+        return _run_benchmark(team, sha, out, only)
+
+
+def _run_benchmark(team, sha: str, out: Path, only: list[str] | None) -> dict | None:
     bcfg = team.cfg["gates"]["benchmark"]
     out.mkdir(parents=True, exist_ok=True)
     for old in ("results.json", NOT_FINAL):  # a run that writes nothing must not read as old

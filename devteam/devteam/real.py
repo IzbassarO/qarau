@@ -597,6 +597,7 @@ class RealAgents:
                 billed=False,
                 secs=time.monotonic() - t0,
                 provider=prov,
+                command=dev.get("command", "claude") if prov == "claude_code" else "",
             )
         if halted:
             raise halted
@@ -667,9 +668,18 @@ Rules:
             and not k.startswith("CLAUDE_CODE_")
             and not paid_service_key(k)
         }
-        if not team.secrets.get("CLAUDE_CODE_OAUTH_TOKEN"):
-            raise RuntimeError("CLAUDE_CODE_OAUTH_TOKEN is missing in devteam/.env")
-        env["CLAUDE_CODE_OAUTH_TOKEN"] = team.secrets["CLAUDE_CODE_OAUTH_TOKEN"]
+        # which Claude login (config claude_commands; owner 2026-10-30: claude / claude-su)
+        command = dev.get("command", "claude")
+        login = team.cfg.get("claude_commands", {}).get(command)
+        if login is None:
+            raise RuntimeError(f"command {command!r} is not in config.yaml claude_commands")
+        if not team.secrets.get(login["token"]):
+            raise RuntimeError(
+                f"{login['token']} is missing in devteam/.env (`{command} setup-token` makes it)"
+            )
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = team.secrets[login["token"]]
+        if login.get("config_dir"):
+            env["CLAUDE_CONFIG_DIR"] = os.path.expanduser(login["config_dir"])
         env["QARAU_RUNS_DIR"] = str(team.runs_dir)
         cmd = [
             self.tool(team, "claude"),

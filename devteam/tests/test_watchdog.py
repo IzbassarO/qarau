@@ -49,7 +49,8 @@ def test_orchestrator_crash_is_recorded_notified_and_resumed_once(team, monkeypa
     crash(monkeypatch, "raise")
     code = W.supervise(team, ["run", "--fake"], cmd=DRIVER, wait_s=0)
     assert code == W.FINISHED
-    assert statuses(team) == {"T-001": "done", "T-002": "done", "T-003": "todo"}
+    # the driver runs the real config: dev_core (claude-su) takes T-003 beside dev_pipeline
+    assert statuses(team) == {"T-001": "done", "T-002": "done", "T-003": "done"}
     info = json.loads((team.home / "last_crash.json").read_text())
     assert info["error"] == "RuntimeError: injected orchestrator bug"
     assert info["where"].startswith("kerege_driver.py:")  # the line that raised, for the owner
@@ -60,7 +61,9 @@ def test_orchestrator_crash_is_recorded_notified_and_resumed_once(team, monkeypa
         f"crashed: RuntimeError: injected orchestrator bug at {info['where']}. "
         "Resuming in 0 s. | Kerege (fake)"
     )
-    assert lines[-1] == "run finished: 2 done (T-001, T-002), 0 blocked, API $0.00 | Kerege (fake)"
+    assert lines[-1] == (
+        "run finished: 3 done (T-001, T-002, T-003), 0 blocked, API $0.00 | Kerege (fake)"
+    )
     log = (team.home / "notifications.log").read_text()
     assert "email skipped: DEVTEAM_NOTIFY_EMAIL not set in devteam/.env" in log
     assert not (team.home / "watchdog.pid").exists() and not (team.home / "run.pid").exists()
@@ -188,8 +191,9 @@ def test_rehearse_runs_the_first_todo_task_of_each_developer(repo, monkeypatch):
     monkeypatch.setenv("KEREGE_REPO", str(repo))
     out = subprocess.run([*DRIVER, "rehearse"], capture_output=True, text=True, timeout=600)
     assert out.returncode == 0, out.stdout[-2000:] + out.stderr[-2000:]
-    assert "`devteam run --fake --only T-001,T-002` on a fresh fake state" in out.stdout
-    assert "rehearse: PASS" in out.stdout and "T-001 done, T-002 done" in out.stdout
+    # one task per developer: dev_core (claude-su) gets T-003, dev_pipeline (claude) T-001
+    assert "`devteam run --fake --only T-001,T-002,T-003` on a fresh fake state" in out.stdout
+    assert "rehearse: PASS" in out.stdout and "T-001 done, T-002 done, T-003 done" in out.stdout
     assert not git(repo, "tag", "-l")  # no fake release tag in the (shared) repo
 
 
@@ -208,8 +212,9 @@ def test_rehearse_uses_the_fixture_backlog_when_nothing_is_plannable(repo, monke
     out = subprocess.run([*DRIVER, "rehearse"], capture_output=True, text=True, timeout=600)
     assert out.returncode == 0, out.stdout[-2000:] + out.stderr[-2000:]
     assert "nothing plannable in devteam/backlog.yaml; using" in out.stdout
-    assert "`devteam run --fake --only T-001,T-002` on a fresh fake state" in out.stdout
-    assert "rehearse: PASS" in out.stdout and "T-001 done, T-002 done" in out.stdout
+    # one task per developer: dev_core (claude-su) gets T-003, dev_pipeline (claude) T-001
+    assert "`devteam run --fake --only T-001,T-002,T-003` on a fresh fake state" in out.stdout
+    assert "rehearse: PASS" in out.stdout and "T-001 done, T-002 done, T-003 done" in out.stdout
     assert yaml.safe_load(path.read_text()) == data  # the real backlog is not touched
 
 

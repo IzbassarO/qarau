@@ -111,6 +111,9 @@ continuous:
   max_hours: 10              # then a clean stop (current steps finish, the next run resumes)
   max_tasks: 8               # tasks taken per run; then no new ones, running ones finish
   limit_wait_max_hours: 5    # subscription limit: wait for the reset, at most this long
+  # Developer rounds at once (owner 2026-10-30: at most 2 coding agents, also with dev_core): a
+  # free developer waits for a slot before it plans.
+  max_developers_at_once: 2
 
 # Supervisor (owner, 2026-10-17): per task, so one task going wrong never burns the plan or
 # stops the others (A7 used 42.6 M tokens while blocked, P2b 17 M). Tokens = subscription tokens
@@ -176,9 +179,18 @@ models:
     price_out: 10.0
     price_cache_read: 0.2
 
+# Claude Code logins on this Mac (owner 2026-10-30): a claude_code developer's `command` (default
+# claude). Each runs the `claude` CLI with that login's OAuth token from devteam/.env (made once with
+# `<command> setup-token`) and, when set, its CLAUDE_CONFIG_DIR, as the shell alias does.
+# claude-su is the owner's university account, approved for Qarau; claude the personal one.
+claude_commands:
+  claude: {token: CLAUDE_CODE_OAUTH_TOKEN}
+  claude-su: {token: CLAUDE_CODE_OAUTH_TOKEN_SU, config_dir: ~/.claude-su}
+
 developers:
-  dev_pipeline:
-    provider: claude_code  # Claude Code headless, your subscription (CLAUDE_CODE_OAUTH_TOKEN)
+  dev_pipeline: &core_developer
+    provider: claude_code  # Claude Code headless, your subscription (claude_commands)
+    command: claude
     model: claude-opus-5-5 # owner 2026-10-24: the subscription's Fable weekly limit is used up
     areas: [core]          # backlog tasks with this area may go to this developer
     owns: [pipeline/, backend/, infra/, docs/]   # enforced on the diff (scope gate)
@@ -262,3 +274,12 @@ developers:
     checks:
       - cd web && pnpm lint && pnpm typecheck
       - cd web && pnpm test && pnpm build
+  # A second core developer on the other Claude login (owner 2026-10-30): two core tasks run in
+  # parallel when the backlog has them. Same areas and folders; its own screenshot port.
+  dev_core:
+    <<: *core_developer
+    command: claude-su
+    screenshots:
+      serve: cd web && pnpm install --frozen-lockfile --prefer-offline >/dev/null && QARAU_RUNS_DIR={runs} pnpm exec vite --port 5196 --strictPort
+      url: http://localhost:5196
+      shoot: cd web && node {shoot} {url} {png} {size} 4000

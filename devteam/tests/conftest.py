@@ -16,6 +16,10 @@ CFG = yaml.safe_load((HERE / "config.yaml").read_text())
 CFG["gates"]["benchmark"]["command"] = EMPTY_BENCH  # tests that need numbers set their own
 CFG["gates"]["e2e"]["command"] = "echo e2e on port {port}"  # never a real Playwright run
 CFG["gates"]["backlog_check"] = ""  # tests that need it set their own
+# The flow tests model two developers (dev_pipeline, dev_app); dev_core, the second core
+# developer on claude-su (owner 2026-10-30), is tested where named, with REAL_DEVELOPERS.
+REAL_DEVELOPERS = copy.deepcopy(CFG["developers"])
+del CFG["developers"]["dev_core"]
 
 
 def real_backlog() -> list[dict]:

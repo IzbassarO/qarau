@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from conftest import CFG, HERE, git, remote_of, team_for
+from conftest import CFG, HERE, REAL_DEVELOPERS, git, remote_of, team_for
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from devteam import cli, costs, procs
@@ -35,6 +35,7 @@ from devteam.graph import (
     validate_plan,
 )
 from devteam.real import RealAgents, added_note, llm_call, parse_codex
+from devteam.report import write_report
 from devteam.supervise import TaskHalted
 
 STREAM = (HERE / "tests" / "claude-stream.jsonl").read_text()  # real claude 2.1.302 output
@@ -1144,6 +1145,46 @@ def test_claude_developer_passes_the_configured_model(repo, tmp_path, monkeypatc
         assert args[i + 1] == "claude-opus-5-5"
     (row,) = costs.subscription_rows(team.home, costs._today())
     assert row[2] == ("claude-opus-5-5" if model else "claude-code (subscription)")
+
+
+CLAUDE_ENV = """#!/bin/sh
+echo "$CLAUDE_CODE_OAUTH_TOKEN ${{CLAUDE_CONFIG_DIR:-none}}" >> {env}
+cat > /dev/null
+cat {out}
+"""
+
+
+def test_each_core_developer_runs_on_its_own_claude_login(repo, tmp_path, monkeypatch):
+    """Owner 2026-10-30: dev_pipeline on `claude`, dev_core on `claude-su` (the alias
+    CLAUDE_CONFIG_DIR=~/.claude-su claude) with its own token; tokens summed per login."""
+    bindir, env, out = tmp_path / "bin", tmp_path / "env", tmp_path / "stream.jsonl"
+    bindir.mkdir()
+    result = {"type": "result", "subtype": "success", "is_error": False, "result": "DONE",
+              "session_id": "s", "total_cost_usd": 0,
+              "usage": {"input_tokens": 100, "output_tokens": 7}}  # fmt: skip
+    out.write_text(json.dumps(result) + "\n")
+    (bindir / "claude").write_text(CLAUDE_ENV.format(env=env, out=out))
+    (bindir / "claude").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+    team = team_for(repo, developers=copy.deepcopy(REAL_DEVELOPERS))
+    team.secrets = {"CLAUDE_CODE_OAUTH_TOKEN": "tok-personal"}
+    s = {"task": {"id": "T-001", "title": "t", "goal": "g"}, "plan": "p", "criteria": ["c"],
+         "worktree": str(repo)}  # fmt: skip
+    with pytest.raises(RuntimeError, match="CLAUDE_CODE_OAUTH_TOKEN_SU is missing"):
+        RealAgents().develop(team, {**s, "assignee": "dev_core"})  # never the personal token
+    assert not env.exists()
+    team.secrets["CLAUDE_CODE_OAUTH_TOKEN_SU"] = "tok-university"
+    RealAgents().develop(team, {**s, "assignee": "dev_pipeline"})
+    RealAgents().develop(team, {**s, "task": {**s["task"], "id": "T-003"}, "assignee": "dev_core"})
+    assert env.read_text().splitlines() == [
+        "tok-personal none",
+        f"tok-university {Path('~/.claude-su').expanduser()}",
+    ]
+    report = write_report(team).read_text()
+    assert "| T-001 | dev_pipeline | claude-opus-5-5 (claude) | 1 |" in report
+    assert "| T-003 | dev_core | claude-opus-5-5 (claude-su) | 1 |" in report
+    assert "| **total** | | claude-opus-5-5 (claude) | 1 | 0 | 100 | 7 | — |" in report
+    assert "| **total** | | claude-opus-5-5 (claude-su) | 1 | 0 | 100 | 7 | — |" in report
 
 
 def test_a_v8_reference_screen_in_criteria_is_read_only_not_outside():

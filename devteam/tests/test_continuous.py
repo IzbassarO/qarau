@@ -4,10 +4,11 @@ import copy
 import json
 import os
 import sqlite3
+import threading
 import time
 
 import pytest
-from conftest import CFG, git, remote_of
+from conftest import CFG, REAL_DEVELOPERS, git, remote_of
 from langgraph.checkpoint.sqlite import SqliteSaver
 from test_supervisor import CODEX_FAILED
 
@@ -51,6 +52,63 @@ def test_each_developer_gets_its_next_task_until_nothing_is_left(repo):
     assert "| T-003 | dev_pipeline | done | fake://pr/" in text
     assert "Stopped because: **no plannable task left for any developer**" in text
     assert not C.Continuous(team, graph).pending()  # nothing left to resume
+
+
+class Together(Fast):
+    """Fake rounds that wait for a second one to run beside them (up to 10 s), then keep going a
+    moment: a third developer starting meanwhile would be counted in `most`. `meet`: the first
+    plan of these developers returns only when all of them have planned."""
+
+    def __init__(self, meet=()):
+        self.cond, self.now, self.most = threading.Condition(), 0, 0
+        self.meet = threading.Barrier(len(meet)) if meet else None
+        self.planned: set[str] = set()
+
+    def plan(self, team, todo, feedback=None, devs=None):
+        out = super().plan(team, todo, feedback, devs)
+        first = devs and devs[0] not in self.planned
+        self.planned |= set(devs or [])
+        if self.meet and first:
+            self.meet.wait(10)
+        return out
+
+    def develop(self, team, s):
+        with self.cond:
+            self.now += 1
+            self.most = max(self.most, self.now)
+            self.cond.notify_all()
+            self.cond.wait_for(lambda: self.now >= 2, 10)
+        time.sleep(1)
+        try:
+            return super().develop(team, s)
+        finally:
+            with self.cond:
+                self.now -= 1
+
+
+def test_three_developers_with_at_most_two_at_once(repo):
+    """Owner 2026-10-30: dev_core on claude-su next to dev_pipeline and dev_app; at most 2
+    coding agents at once (continuous.max_developers_at_once)."""
+    agents = Together()
+    team, graph = make(repo, agents, developers=copy.deepcopy(REAL_DEVELOPERS))
+    assert list(team.cfg["developers"]) == ["dev_pipeline", "dev_app", "dev_core"]
+    s = C.Continuous(team, graph).run()
+    assert statuses(team) == {"T-001": "done", "T-002": "done", "T-003": "done"}
+    assert sorted(r["id"] for r in s["tasks"]) == ["T-001", "T-002", "T-003"]  # each once
+    assert agents.most == 2
+
+
+def test_two_developers_of_one_area_never_take_the_same_task(repo):
+    """Both core developers plan T-001 at the same moment: one claims it, the other plans again
+    and takes T-003 (ADR 0014: two developers now share an area)."""
+    devs = {d: copy.deepcopy(REAL_DEVELOPERS[d]) for d in ("dev_pipeline", "dev_core")}
+    team, graph = make(repo, Together(meet=devs), developers=devs)
+    s = C.Continuous(team, graph).run()
+    assert statuses(team) == {"T-001": "done", "T-002": "todo", "T-003": "done"}
+    assert sorted(r["id"] for r in s["tasks"]) == ["T-001", "T-003"]
+    assert {r["dev"] for r in s["tasks"]} == {"dev_pipeline", "dev_core"}
+    log = (team.home / "events.log").read_text()
+    assert "claimed by another developer meanwhile, planning again: [''T-001'']" in log
 
 
 def test_max_tasks_stops_taking_new_tasks(repo):

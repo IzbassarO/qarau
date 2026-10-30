@@ -176,7 +176,12 @@ def write_report(team, day: str | None = None) -> Path:
         "| Task | Developer | Tool | Rounds | Minutes | Tokens in | Tokens out | ≈ API $ |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
-    sub = costs.subscription_rows(team.home, day)
+    # Tool: the model, and for Claude Code the login it ran on; totals per tool, so each Claude
+    # login's subscription tokens are summed apart (owner 2026-10-30: claude / claude-su)
+    sub = [
+        (*r[:2], f"{r[2]} ({r[8]})" if r[8] else r[2], *r[3:8])
+        for r in costs.subscription_rows(team.home, day)
+    ]
     lines += [
         f"| {t} | {a} | {m} | {n} | {secs / 60:.0f} | {ti:,} | {to:,} | "
         + (f"{usd:.2f}" if usd else "—")
