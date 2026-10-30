@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # `make local` / `make local-stop`: the whole app on this Mac for a real run (docs/DEMO.md).
 #
-#   start: compose (postgres, valkey, s3) -> alembic upgrade head -> dev seed (QARAU_ENV=dev)
+#   start: compose (postgres, valkey, s3) -> alembic upgrade head -> dev seed (QARAU_ENV=dev:
+#          users, the demo site and its coverage)
 #          -> API (127.0.0.1:LOCAL_API_PORT) -> S1 worker (native rq, this Mac's CPU)
 #          -> web production build served by `vite preview` on LOCAL_WEB_PORT, /api proxied
 #   stop:  the three processes, then `docker compose down` (volumes kept)

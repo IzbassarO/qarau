@@ -189,6 +189,16 @@ def llm_call(
     return json.loads(next(b.text for b in r.content if b.type == "text"))
 
 
+# Appended to BRAIN_SYSTEM when a developer has screenshots.guest (config); off: plain routes only.
+GUEST_ROUTES = """
+Guest screens (an event guest signed in with an event code: banner, hidden upload, shared runs):
+a route is then {"path": "/viewer/<run>", "session": "guest"} and the tester signs in as a guest
+of a short-lived event that shares one real run, named in <guest_run>; a guest's /viewer route
+shows that run, never another. A plain route string is shot as the seeded engineer, as before.
+A task tagged `guest` lists every guest screen its criteria name as a guest route (the plan is
+rejected otherwise); its sign-in page stays the plain "/?signed-out".
+"""
+
 BRAIN_SYSTEM = """You are the brain (tech lead) of Qarau's dev team. The owner does not review
 code: automated gates (local checks, an LLM tester, GitHub CI, benchmark, secret scan) decide
 whether work merges. So your plan and acceptance criteria are the spec the gates enforce.
@@ -406,8 +416,29 @@ class RealAgents:
                 f"<benchmark_policy>\n{quick_policy(team)}\n</benchmark_policy>",
             ]
         )
+        guest = next(
+            (sc["guest"] for d in devs.values() if (sc := d.get("screenshots") or {}).get("guest")),
+            None,
+        )
+        route: dict = {"type": "string"}
+        if guest:
+            route = {
+                "anyOf": [
+                    route,
+                    {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "session": {"type": "string", "enum": ["guest"]},
+                        },
+                        "required": ["path", "session"],
+                        "additionalProperties": False,
+                    },
+                ]
+            }
         prompt = "\n\n".join(
-            [
+            ([f"<guest_run>{guest['run']}</guest_run>"] if guest else [])
+            + [
                 "<developers>\n"
                 + yaml.safe_dump(
                     {n: {"areas": d["areas"], "owns": d["owns"]} for n, d in devs.items()}
@@ -448,7 +479,7 @@ class RealAgents:
                                     "additionalProperties": False,
                                 },
                             },
-                            "routes": {"type": "array", "items": {"type": "string"}},
+                            "routes": {"type": "array", "items": route},
                             "parts": {
                                 "type": "array",
                                 "items": {
@@ -460,7 +491,7 @@ class RealAgents:
                                             "type": "array",
                                             "items": {"type": "string"},
                                         },
-                                        "routes": {"type": "array", "items": {"type": "string"}},
+                                        "routes": {"type": "array", "items": route},
                                     },
                                     "required": ["title", "plan", "acceptance_criteria", "routes"],
                                     "additionalProperties": False,
@@ -501,7 +532,7 @@ class RealAgents:
             team,
             "brain",
             ",".join(t["id"] for t in todo),
-            BRAIN_SYSTEM,
+            BRAIN_SYSTEM + (GUEST_ROUTES if guest else ""),
             prompt,
             schema,
             max_tokens=32000,

@@ -341,7 +341,10 @@ then unattended (`run --continuous` overnight).
   buttons and other role-dependent UI are shot as an engineer sees them; the `.env` user matched
   no seeded user and `/api/me` answered 401, UI-evidence-b 2026-10-28); otherwise from `.env`
   (missing -> a warning, the page is shot as it is); `"/?signed-out"` shows the login
-  page itself. Plan check: a `/viewer/<run>` route shows the task's own output, i.e. a quick
+  page itself. A route `{path, session: guest}` (with `screenshots.guest`) is shot as an event
+  guest: `app.event create` on the same test database (the seeded run, 1 h), its code signs in
+  through the sign-in page (`QARAU_TEST_EVENT_CODE`), `app.event purge` after, also on failure; a
+  task tagged `guest` must list its guest screens that way (DEMO1-ui, 2026-10-29). Plan check: a `/viewer/<run>` route shows the task's own output, i.e. a quick
   benchmark video, or for a task that writes runs a run not in `runs_before_task` (the runs
   dir at the task's start; the snapshot is kept until the task is done).
   Web pages are shot against the real API (owner, 2026-10-23: U2's tester saw "could not load
@@ -395,7 +398,9 @@ then unattended (`run --continuous` overnight).
   `backlog`-marked tests on the backlog it would push (`DEVTEAM_BACKLOG`). If they fail, nothing
   is pushed, the status stays local (shown as drift) and a warning names the failing test
   (2026-10-18: `backlog: A9-fix done (#41)` turned dev CI red). Backlog tests check structure
-  and order, never a status Kerege writes.
+  and order, never a status Kerege writes. `{devteam}` in the command is devteam/ of that same
+  fetched dev, so its tests match its backlog (2026-10-29 14:33: the main checkout's older test
+  refused a status).
 - `devteam run` refuses to start while the backlog's status fields differ from `origin/dev`
   (it prints them; after a crash use `devteam resume`). The brain skips any task whose
   `devteam/<id>` branch is already merged into `dev`.
