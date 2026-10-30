@@ -2172,11 +2172,17 @@ tasks:
     Owner 2026-10-29: LaunchPad demo; the owner''s `make local` walk (PR #97) found no layer.
 
     '
-  status: in_progress
+  status: blocked
   depends_on:
   - CONF-fix
   owner: dev_app
   run: cont-20261029-184005-dev_app-1
+  branch: devteam/COV-ui
+  blocked_reason: 'the tester sent it back twice in a row for the same reason, so no new round was started:
+    Criterion 7 is not proven. The screenshots lack dark kk and dark en at both sizes (the dark ru and
+    light ru/kk/en shots exist). The visible coverage message pill appears in the shots, which is acceptable
+    for the not-computed case, but the full matrix is required. Code and tests look right. Nothing needs
+    to change in web/ unless the missing captures reveal a defect; the full 12-image set must be ca'
 - id: P5a-1
   area: core
   title: Metric scale from a measured distance, and gravity
